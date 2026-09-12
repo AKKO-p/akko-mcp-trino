@@ -10,6 +10,8 @@ _ENV_KEYS = [
     "MCP_JWKS_URL", "MCP_OIDC_ISSUER", "MCP_OIDC_AUDIENCE",
     "MCP_TRANSPORT", "MCP_PORT", "MCP_AUTH_REQUIRED", "MCP_RESOURCE_URL", "MCP_AGENT_KEYS",
     "MCP_RATE_LIMIT_USER", "MCP_RATE_LIMIT_AGENT", "MCP_RATE_LIMIT_WINDOW_SECONDS",
+    "MCP_INTROSPECTION_URL", "MCP_INTROSPECTION_CLIENT_ID", "MCP_INTROSPECTION_CLIENT_SECRET",
+    "MCP_INTROSPECTION_TTL_SECONDS",
 ]
 
 
@@ -107,3 +109,18 @@ def test_rate_limit_env(monkeypatch):
 def test_rate_limit_defaults_off():
     c = Config.from_env()
     assert (c.rate_limit_user, c.rate_limit_agent, c.rate_limit_window_seconds) == (0, 0, 60)
+
+
+def test_introspection_env(monkeypatch):
+    monkeypatch.setenv("MCP_INTROSPECTION_URL", "https://idp/introspect")
+    monkeypatch.setenv("MCP_INTROSPECTION_CLIENT_ID", "mcp")
+    monkeypatch.setenv("MCP_INTROSPECTION_CLIENT_SECRET", "s")
+    monkeypatch.setenv("MCP_INTROSPECTION_TTL_SECONDS", "10")
+    c = Config.from_env()
+    assert (c.introspection_url, c.introspection_client_id, c.introspection_client_secret,
+            c.introspection_ttl_seconds) == ("https://idp/introspect", "mcp", "s", 10)
+
+
+def test_introspection_defaults_off():
+    c = Config.from_env()
+    assert c.introspection_url == "" and c.introspection_ttl_seconds == 30

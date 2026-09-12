@@ -19,6 +19,7 @@ from .config import Config
 from .discovery import ProtectedResource
 from .middleware import AuthIdentityMiddleware
 from .ratelimit import RateLimiter
+from .revocation import IntrospectionCheck
 
 _TRANSPORTS = ("sse", "streamable-http")
 
@@ -54,6 +55,12 @@ def build_asgi_app(config: Config, mcp: Any, *, auth_provider: Any) -> Any:
         "MCP_RATE_LIMIT_AGENT": str(config.rate_limit_agent),
         "MCP_RATE_LIMIT_WINDOW_SECONDS": str(config.rate_limit_window_seconds),
     })
+    revocation = IntrospectionCheck.from_env({
+        "MCP_INTROSPECTION_URL": config.introspection_url,
+        "MCP_INTROSPECTION_CLIENT_ID": config.introspection_client_id,
+        "MCP_INTROSPECTION_CLIENT_SECRET": config.introspection_client_secret,
+        "MCP_INTROSPECTION_TTL_SECONDS": str(config.introspection_ttl_seconds),
+    })
     app.add_middleware(
         AuthIdentityMiddleware,
         auth_provider=auth_provider,
@@ -61,5 +68,6 @@ def build_asgi_app(config: Config, mcp: Any, *, auth_provider: Any) -> Any:
         agents=agents,
         discovery=discovery,
         limiter=limiter,
+        revocation=revocation,
     )
     return app

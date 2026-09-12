@@ -111,3 +111,17 @@ def test_rate_limiter_is_wired_from_config():
     layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
     lim = layer.kwargs["limiter"]
     assert lim.enabled and (lim.user.limit, lim.agent.limit, lim.user.seconds) == (5, 50, 30)
+
+
+def test_revocation_check_is_wired_from_config():
+    cfg = Config(**{**_config("sse").__dict__, "introspection_url": "https://idp/introspect",
+                    "introspection_client_id": "mcp", "introspection_client_secret": "s"})
+    app = build_asgi_app(cfg, _FakeMCP(), auth_provider=object())
+    layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
+    assert layer.kwargs["revocation"] is not None
+
+
+def test_revocation_check_is_absent_when_not_configured():
+    app = build_asgi_app(_config("sse"), _FakeMCP(), auth_provider=object())
+    layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
+    assert layer.kwargs["revocation"] is None

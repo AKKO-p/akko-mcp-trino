@@ -16,7 +16,10 @@ Two more concerns live here because they are part of the same door:
   every 401 carries `WWW-Authenticate` pointing at it, so an MCP host knows
   where to authenticate instead of seeing a bare refusal;
 * quotas per user and per agent product, checked after authentication and
-  refused with 429 and `Retry-After` — see `core.ratelimit`.
+  refused with 429 and `Retry-After` — see `core.ratelimit`;
+* optional revocation through RFC 7662 introspection, refused with 401
+  `revoked`, failing closed with 503 when the issuer cannot answer — see
+  `core.revocation`.
 
 Every request gets a request id — honoured from `X-Request-Id` when the edge
 sent one, generated otherwise — echoed on the response and exposed to the
@@ -39,6 +42,8 @@ from .agents import AGENT_KEY_HEADER, AgentRegistry, reset_current_agent, set_cu
 from .discovery import WELL_KNOWN_PATH, ProtectedResource
 from .identity import reset_current_principal, set_current_principal
 from .ratelimit import RateLimiter
+from .revocation import IntrospectionCheck, IntrospectionError
+from .auth import extract_bearer_token
 
 
 class AuthIdentityMiddleware:
@@ -51,6 +56,7 @@ class AuthIdentityMiddleware:
         agents: AgentRegistry | None = None,
         discovery: ProtectedResource | None = None,
         limiter: RateLimiter | None = None,
+        revocation: IntrospectionCheck | None = None,
     ):
         self.app = app
         self._auth = auth_provider
@@ -58,6 +64,7 @@ class AuthIdentityMiddleware:
         self._agents = agents if agents is not None and agents.enabled else None
         self._discovery = discovery if discovery is not None and discovery.resource else None
         self._limiter = limiter if limiter is not None and limiter.enabled else None
+        self._revocation = revocation
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
@@ -91,6 +98,22 @@ class AuthIdentityMiddleware:
         if self._require and principal is None:
             await self._refuse("unauthenticated", scope, receive, send)
             return
+
+        # Revocation: the issuer may have disabled a token that still verifies.
+        if self._revocation is not None and principal is not None:
+            try:
+                active = self._revocation.is_active(
+                    extract_bearer_token(headers) or "", token_id=principal.token_id
+                )
+            except IntrospectionError:
+                headers_out = {"X-Reason": "introspection_unavailable"}
+                await JSONResponse(
+                    {"error": "introspection_unavailable"}, status_code=503, headers=headers_out
+                )(scope, receive, send)
+                return
+            if not active:
+                await self._refuse("revoked", scope, receive, send)
+                return
 
         # Quotas count authenticated requests only: a refused token must not
         # consume a slot that belongs to the person it impersonates.

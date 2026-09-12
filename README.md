@@ -128,6 +128,9 @@ Everything is environment-driven; nothing is hardcoded.
 | `MCP_AGENT_KEYS` | `name:key,name:key` — registered agent products; empty disables the check | — (check off) |
 | `MCP_RATE_LIMIT_USER`, `MCP_RATE_LIMIT_AGENT` | requests per window per user subject and per agent product; `0` disables | `0`, `0` |
 | `MCP_RATE_LIMIT_WINDOW_SECONDS` | the sliding window | `60` |
+| `MCP_INTROSPECTION_URL` | RFC 7662 endpoint; enables the revocation check | — (check off) |
+| `MCP_INTROSPECTION_CLIENT_ID`, `MCP_INTROSPECTION_CLIENT_SECRET` | client credentials the issuer expects | — (required with the URL) |
+| `MCP_INTROSPECTION_TTL_SECONDS` | how long a verdict is cached by `jti` | `30` |
 
 Auth enabled without a JWKS URL refuses to start. That is on purpose: an
 authentication layer that cannot verify anything must not pretend to. A
@@ -175,6 +178,16 @@ to the person it names. A request over either limit gets `429` with
 window. The counters live in the process: with several replicas the quota is
 per replica, and the README says so rather than pretend a shared store exists.
 
+## Revocation before expiry
+
+A signature and an `exp` prove a token *was* valid. With
+`MCP_INTROSPECTION_URL` set, the guard asks the issuer (RFC 7662) and refuses
+a token whose `active` is false with `401` and `X-Reason: revoked`. The
+verdict is cached by `jti` for `MCP_INTROSPECTION_TTL_SECONDS`; a token
+without `jti` is asked about every time. An issuer that cannot answer makes
+the guard fail closed with `503` and `X-Reason: introspection_unavailable`,
+because "unknown" is not "still valid".
+
 ## Audit join
 
 Every response carries `X-Request-Id` — the one the edge sent, or one the
@@ -192,7 +205,7 @@ id. A product that wants the join over HTTP passes its own sink to
 
 ## Guarantees the tests hold
 
-152 tests, 100 % coverage, and a lint that fails the build if the core ever
+168 tests, 100 % coverage, and a lint that fails the build if the core ever
 imports a product-specific module. The guard that matters most is on the
 transport: **the identity middleware is mounted on whichever transport is
 served**, and a test asserts it for both. It once lived on a branch the default
@@ -206,7 +219,10 @@ impossible.
 2. ~~RFC 9728 protected-resource metadata and `401` with `resource_metadata`.~~ Done.
 3. ~~Rate limits per user and per agent.~~ Done (per process).
 4. ~~Request-id audit join — tool, subject, agent, token id, never the raw token.~~ Done.
-5. Optional token-state check for revocation before expiry.
+5. ~~Optional token-state check for revocation before expiry.~~ Done (RFC 7662).
+
+All five are in. Next is the proof against real engines: Trino 483, ODP, and a
+Cloudera 7.1.9 with Ranger 2.4 — two accounts, two answers, journal attached.
 
 ## Status
 

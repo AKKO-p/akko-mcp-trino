@@ -36,6 +36,11 @@ class Config:
     rate_limit_user: int = 0
     rate_limit_agent: int = 0
     rate_limit_window_seconds: int = 60
+    # RFC 7662 introspection for revocation before expiry; empty URL disables.
+    introspection_url: str = ""
+    introspection_client_id: str = ""
+    introspection_client_secret: str = ""
+    introspection_ttl_seconds: int = 30
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
@@ -60,4 +65,8 @@ class Config:
             rate_limit_user=int(os.environ.get("MCP_RATE_LIMIT_USER", "0")),
             rate_limit_agent=int(os.environ.get("MCP_RATE_LIMIT_AGENT", "0")),
             rate_limit_window_seconds=int(os.environ.get("MCP_RATE_LIMIT_WINDOW_SECONDS", "60")),
+            introspection_url=os.environ.get("MCP_INTROSPECTION_URL", ""),
+            introspection_client_id=os.environ.get("MCP_INTROSPECTION_CLIENT_ID", ""),
+            introspection_client_secret=os.environ.get("MCP_INTROSPECTION_CLIENT_SECRET", ""),
+            introspection_ttl_seconds=int(os.environ.get("MCP_INTROSPECTION_TTL_SECONDS", "30")),
         )
