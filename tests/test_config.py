@@ -8,7 +8,7 @@ _ENV_KEYS = [
     "TRINO_MAX_ROWS", "TRINO_READ_ONLY", "MCP_AUTH_ENABLED",
     "MCP_SERVER_NAME", "MCP_HEALTH_PORT",
     "MCP_JWKS_URL", "MCP_OIDC_ISSUER", "MCP_OIDC_AUDIENCE",
-    "MCP_TRANSPORT", "MCP_PORT", "MCP_AUTH_REQUIRED",
+    "MCP_TRANSPORT", "MCP_PORT", "MCP_AUTH_REQUIRED", "MCP_RESOURCE_URL", "MCP_AGENT_KEYS",
 ]
 
 
@@ -80,3 +80,16 @@ def test_read_only_flag_parsing(monkeypatch):
 def test_server_name_env_wins(monkeypatch):
     monkeypatch.setenv("MCP_SERVER_NAME", "custom")
     assert Config.from_env(server_name="akko-trino").server_name == "custom"
+
+
+def test_resource_url_and_agent_keys_env(monkeypatch):
+    monkeypatch.setenv("MCP_RESOURCE_URL", "https://mcp.example.com/")
+    monkeypatch.setenv("MCP_AGENT_KEYS", "cursor:k1")
+    c = Config.from_env()
+    assert c.resource_url == "https://mcp.example.com", "trailing slash would double in the metadata URL"
+    assert c.agent_keys == "cursor:k1"
+
+
+def test_resource_url_and_agent_keys_default_off():
+    c = Config.from_env()
+    assert c.resource_url == "" and c.agent_keys == ""

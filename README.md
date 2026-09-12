@@ -124,13 +124,49 @@ Everything is environment-driven; nothing is hardcoded.
 | `MCP_OIDC_ISSUER`, `MCP_OIDC_AUDIENCE` | claims to enforce | — |
 | `MCP_TRANSPORT` | `sse` or `streamable-http` | `sse` |
 | `MCP_PORT`, `MCP_HEALTH_PORT` | listening ports | `3000`, `3001` |
+| `MCP_RESOURCE_URL` | public URL of this server, as MCP hosts see it; enables RFC 9728 discovery | — (discovery off) |
+| `MCP_AGENT_KEYS` | `name:key,name:key` — registered agent products; empty disables the check | — (check off) |
 
 Auth enabled without a JWKS URL refuses to start. That is on purpose: an
-authentication layer that cannot verify anything must not pretend to.
+authentication layer that cannot verify anything must not pretend to. A
+malformed `MCP_AGENT_KEYS` entry refuses to start for the same reason.
+
+## Two principals on every request
+
+A Cursor or Claude workspace key is not a user, and must never become a
+Trino user. When `MCP_AGENT_KEYS` is set, every request must carry both:
+
+| Principal | Header | Says | Enforced by |
+| --- | --- | --- | --- |
+| End user | `Authorization: Bearer <JWT>` | for whom the query runs | JWKS here, then OPA or Ranger in Trino |
+| Agent product | `X-Agent-Key: <key>` | which product is calling | the registry here, for quotas and audit |
+
+A missing or unknown key is refused before the user token is looked at. The
+agent name is available to tools through `core.agents.current_agent()` and is
+cleared after the request, like the Principal.
+
+## How an MCP host finds the login
+
+With `MCP_RESOURCE_URL` set, the server publishes RFC 9728 metadata without a
+token, and every `401` says where to go:
+
+```bash
+curl -s https://mcp.example.com/.well-known/oauth-protected-resource
+# {"resource":"https://mcp.example.com","authorization_servers":["https://idp/realms/data"],"bearer_methods_supported":["header"]}
+
+curl -si https://mcp.example.com/sse | grep -i -e www-auth -e x-reason
+# WWW-Authenticate: Bearer realm="trino", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"
+# X-Reason: unauthenticated
+```
+
+`authorization_servers` is empty unless `MCP_OIDC_ISSUER` is set; the server
+never guesses an identity provider. Every refusal carries `X-Reason`
+(`unauthenticated`, `agent_key_missing`, `agent_key_unknown`) and never the
+token.
 
 ## Guarantees the tests hold
 
-104 tests, 100 % coverage, and a lint that fails the build if the core ever
+122 tests, 100 % coverage, and a lint that fails the build if the core ever
 imports a product-specific module. The guard that matters most is on the
 transport: **the identity middleware is mounted on whichever transport is
 served**, and a test asserts it for both. It once lived on a branch the default
@@ -140,10 +176,10 @@ impossible.
 
 ## Roadmap, in the blueprint's terms
 
-1. Dual identity: `X-Agent-Key` for the agent product, distinct from the user.
-2. RFC 9728 protected-resource metadata and `401` with `resource_metadata`.
+1. ~~Dual identity: `X-Agent-Key` for the agent product, distinct from the user.~~ Done.
+2. ~~RFC 9728 protected-resource metadata and `401` with `resource_metadata`.~~ Done.
 3. Rate limits per user and per agent.
-4. Request-id audit join — tool, subject, token id, never the raw token.
+4. Request-id audit join — tool, subject, agent, token id, never the raw token.
 5. Optional token-state check for revocation before expiry.
 
 ## Status

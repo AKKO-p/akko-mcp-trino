@@ -83,3 +83,22 @@ def test_entrypoint_imports_without_side_effects():
 
     module = importlib.import_module("core.__main__")
     assert callable(module.main)
+
+
+def test_agent_registry_and_discovery_are_wired_from_config():
+    """The served app enforces X-Agent-Key and serves RFC 9728 when configured."""
+    cfg = Config(**{**_config("sse").__dict__, "auth_required": True,
+                    "resource_url": "https://mcp.example.com",
+                    "agent_keys": "cursor:k1", "oidc_issuer": "https://idp"})
+    app = build_asgi_app(cfg, _FakeMCP(), auth_provider=object())
+    layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
+    assert layer.kwargs["agents"].resolve("k1") == "cursor"
+    assert layer.kwargs["discovery"].document()["resource"] == "https://mcp.example.com"
+
+
+def test_malformed_agent_keys_refuse_to_start():
+    import pytest
+
+    cfg = Config(**{**_config("sse").__dict__, "agent_keys": "no-colon"})
+    with pytest.raises(ValueError):
+        build_asgi_app(cfg, _FakeMCP(), auth_provider=None)

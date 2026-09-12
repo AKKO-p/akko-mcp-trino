@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from .agents import AgentRegistry
 from .config import Config
+from .discovery import ProtectedResource
 from .middleware import AuthIdentityMiddleware
 
 _TRANSPORTS = ("sse", "streamable-http")
@@ -41,7 +43,16 @@ def build_asgi_app(config: Config, mcp: Any, *, auth_provider: Any) -> Any:
         raise ValueError(
             f"unsupported MCP_TRANSPORT {config.transport!r}; expected one of {_TRANSPORTS}"
         )
+    # Both are built from the same Config the transport came from: a registry
+    # or a discovery document that could not start is refused here, not at
+    # the first request.
+    agents = AgentRegistry.from_env({"MCP_AGENT_KEYS": config.agent_keys})
+    discovery = ProtectedResource.from_config(config)
     app.add_middleware(
-        AuthIdentityMiddleware, auth_provider=auth_provider, require_auth=config.auth_required
+        AuthIdentityMiddleware,
+        auth_provider=auth_provider,
+        require_auth=config.auth_required,
+        agents=agents,
+        discovery=discovery,
     )
     return app

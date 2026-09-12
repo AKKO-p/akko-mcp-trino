@@ -26,6 +26,12 @@ class Config:
     transport: str
     mcp_port: int
     auth_required: bool
+    # Public URL of this server as MCP hosts see it (RFC 9728 `resource`).
+    # Empty disables discovery: the 401 then carries no `WWW-Authenticate`.
+    resource_url: str = ""
+    # `name:key` pairs naming the agent products allowed to call. Empty
+    # disables the check, as in the CDP Agent Gateway blueprint.
+    agent_keys: str = ""
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
@@ -45,4 +51,6 @@ class Config:
             transport=os.environ.get("MCP_TRANSPORT", "sse"),
             mcp_port=int(os.environ.get("MCP_PORT", "3000")),
             auth_required=os.environ.get("MCP_AUTH_REQUIRED", "false").lower() == "true",
+            resource_url=os.environ.get("MCP_RESOURCE_URL", "").rstrip("/"),
+            agent_keys=os.environ.get("MCP_AGENT_KEYS", ""),
         )
