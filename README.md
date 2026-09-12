@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-199%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-205%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -54,7 +54,13 @@ to.
 - **Standard discovery.** RFC 9728 metadata and `WWW-Authenticate` on every `401`, so hosts know where to log in.
 - **Quotas, revocation, audit.** Per-user and per-agent limits, optional RFC 7662 introspection, one JSON audit line per call keyed by `X-Request-Id` — never the token.
 - **Any OIDC provider, any MCP host, any model.** Keycloak, Entra ID, Okta… Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1 400 lines, 199 tests at 100 % coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and four live proofs (functional, adversarial, agent-driven, stdio) on a real cluster.
+- **Small and proven.** 1 400 lines, 205 tests at 100 % line and branch coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and four live proofs (functional, adversarial, agent-driven, stdio) on a real cluster.
+
+## Documentation
+
+- **Guide, prerequisites, configuration, examples, proofs:** [akko-ai.com/docs/akko-mcp-trino](https://akko-ai.com/docs/akko-mcp-trino/) (also [in English](https://akko-ai.com/en/docs/akko-mcp-trino/)) and [akko-ai.com/docs/exemples](https://akko-ai.com/docs/exemples/).
+- **Why we built it, and what the proofs taught us:** [the AKKO blog](https://akko-ai.com/blog/) — start with [Your AI agents see exactly what the user is allowed to see](https://akko-ai.com/en/blog/ai-agents-governed-access-trino/).
+- **Reference, in this repository:** this README, [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md).
 
 ## Contents
 
@@ -166,7 +172,8 @@ export MCP_OIDC_AUDIENCE=data-platform
 python -m akko_mcp_trino
 ```
 
-You should see:
+Before serving, `akko-mcp-trino --check` prints the effective configuration
+(never a secret) and exits with 2 if something would refuse to start. Then:
 
 ```
 INFO:__main__:serving transport=streamable-http port=3000 auth=True strict=True
@@ -480,14 +487,19 @@ and `mcp_trino_query_duration_seconds`.
 
 ```bash
 pip install -e ".[dev]"
-ruff check akko_mcp_trino tests && ruff format akko_mcp_trino tests
+ruff check akko_mcp_trino tests examples && ruff format akko_mcp_trino tests examples
+ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every public name documented
+mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
+pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 199 tests; coverage below 100 % fails the run
+pytest                        # 205 tests; line or branch coverage below 100 % fails the run
 python -m build && twine check dist/*
+akko-mcp-trino --check        # effective configuration, no secrets, exit 2 if it would not start
 ```
 
 CI runs the same steps on Python 3.12 and 3.13, then builds the container
-image. A `v*` tag publishes the package to PyPI (trusted publishing) and the
+image; CodeQL scans every push and Dependabot opens weekly update pull
+requests for pip, Actions and the base image. A `v*` tag publishes the package to PyPI (trusted publishing) and the
 image to GHCR — see [release.yml](.github/workflows/release.yml).
 
 Every module in `akko_mcp_trino/` has one responsibility and its own test file:

@@ -16,11 +16,17 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
-      - name: lint (ruff)
-        run: ruff check akko_mcp_trino tests && ruff format --check akko_mcp_trino tests
+      - name: lint and format (ruff)
+        run: ruff check akko_mcp_trino tests examples && ruff format --check akko_mcp_trino tests examples
+      - name: every public name is documented (ruff D)
+        run: ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107
+      - name: types (mypy)
+        run: mypy akko_mcp_trino
+      - name: known vulnerabilities in dependencies (pip-audit)
+        run: pip install --upgrade pip && pip-audit
       - name: product-neutral guard
         run: bash lint-vendor-neutral.sh
-      - name: tests (100 % coverage required)
+      - name: tests (100 % line and branch coverage required)
         run: python -m pytest -q
       - name: package builds and is valid
         run: python -m build && twine check dist/*

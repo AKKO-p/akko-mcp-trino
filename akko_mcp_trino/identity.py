@@ -20,14 +20,17 @@ _current_principal: contextvars.ContextVar[Optional[Principal]] = contextvars.Co
 
 
 def set_current_principal(principal: Optional[Principal]) -> contextvars.Token:
+    """Bind the Principal to the current request; returns the token for reset."""
     return _current_principal.set(principal)
 
 
 def reset_current_principal(token: contextvars.Token) -> None:
+    """Clear the Principal bound by ``set_current_principal``."""
     _current_principal.reset(token)
 
 
 def current_principal() -> Optional[Principal]:
+    """The Principal of the current request, or None."""
     return _current_principal.get()
 
 

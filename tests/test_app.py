@@ -221,3 +221,62 @@ def test_build_asgi_app_refuses_stdio():
 
     with pytest.raises(ValueError):
         build_asgi_app(_config("stdio"), _FakeMCP(), auth_provider=None)
+
+
+# ---- command line: --version and --check must not start a server
+
+
+def test_cli_version_prints_and_exits(capsys):
+    import pytest
+
+    from akko_mcp_trino.__main__ import parse_args
+
+    with pytest.raises(SystemExit) as e:
+        parse_args(["--version"])
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    from akko_mcp_trino import __version__
+
+    assert __version__ in out
+
+
+def test_cli_check_reports_effective_config_without_secrets(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+
+    monkeypatch.setenv("TRINO_HOST", "trino.example")
+    monkeypatch.setenv("MCP_AUTH_ENABLED", "true")
+    monkeypatch.setenv("MCP_JWKS_URL", "https://idp/certs")
+    monkeypatch.setenv("MCP_INTROSPECTION_CLIENT_SECRET", "s3cret")
+    monkeypatch.setenv("MCP_USER_TOKEN", "tok-secret")
+    monkeypatch.setenv("MCP_AGENT_KEYS", "cursor:k-secret")
+    from akko_mcp_trino.config import Config
+
+    code = check_config(Config.from_env())
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "trino.example" in out and "https://idp/certs" in out
+    for secret in ("s3cret", "tok-secret", "k-secret"):
+        assert secret not in out, "a secret leaked into --check output"
+    assert "agent products: 1" in out
+
+
+def test_cli_check_fails_on_an_invalid_configuration(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("MCP_AUTH_ENABLED", "true")
+    monkeypatch.delenv("MCP_JWKS_URL", raising=False)
+    assert check_config(Config.from_env()) == 2
+    assert "MCP_JWKS_URL" in capsys.readouterr().out
+
+
+def test_cli_check_reports_malformed_agent_keys_and_introspection(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("MCP_AGENT_KEYS", "no-colon")
+    monkeypatch.setenv("MCP_INTROSPECTION_URL", "https://idp/introspect")
+    monkeypatch.delenv("MCP_INTROSPECTION_CLIENT_ID", raising=False)
+    assert check_config(Config.from_env()) == 2
+    out = capsys.readouterr().out
+    assert "MCP_AGENT_KEYS" in out and "MCP_INTROSPECTION" in out

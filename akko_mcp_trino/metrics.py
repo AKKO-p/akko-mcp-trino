@@ -16,7 +16,10 @@ from prometheus_client import (
 
 
 class Metrics:
+    """Query counters and latency histogram on an isolated registry."""
+
     def __init__(self, registry: CollectorRegistry | None = None) -> None:
+        """Create the collectors on ``registry``, or on a fresh one."""
         self.registry = registry or CollectorRegistry()
         self.queries = Counter(
             "mcp_trino_queries_total", "Trino queries executed", registry=self.registry

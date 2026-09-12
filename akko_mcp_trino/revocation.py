@@ -31,6 +31,8 @@ def _default_post(url: str, *, data: dict, auth: tuple[str, str], timeout: float
 
 
 class IntrospectionCheck:
+    """Asks the issuer (RFC 7662) whether a token is still active; verdicts cached by ``jti``."""
+
     def __init__(
         self,
         url: str,
@@ -42,6 +44,9 @@ class IntrospectionCheck:
         post: Callable[..., dict] = _default_post,
         clock: Callable[[], float] = time.monotonic,
     ):
+        """Introspect at ``url`` with client credentials; ``post`` and ``clock`` are injectable for
+        tests.
+        """
         self._url = url
         self._auth = (client_id, client_secret)
         self._ttl = ttl_seconds
@@ -53,6 +58,9 @@ class IntrospectionCheck:
 
     @staticmethod
     def from_env(env: Mapping[str, str]) -> Optional["IntrospectionCheck"]:
+        """Build from ``MCP_INTROSPECTION_*``; None when no URL is set; raises when credentials are
+        missing.
+        """
         url = env.get("MCP_INTROSPECTION_URL", "").strip()
         if not url:
             return None
@@ -68,6 +76,9 @@ class IntrospectionCheck:
         )
 
     def is_active(self, token: str, *, token_id: str) -> bool:
+        """True if the issuer says the token is active; raises IntrospectionError when it cannot
+        answer.
+        """
         now = self._clock()
         if token_id:
             with self._lock:

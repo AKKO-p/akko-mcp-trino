@@ -17,6 +17,7 @@ class TrinoClient:
     `metrics`, when given, records queries, errors and latency."""
 
     def __init__(self, config: Config, metrics: Any = None) -> None:
+        """Keep ``config`` and an optional ``metrics``; nothing connects until ``query``."""
         self._config = config
         self._metrics = metrics
 
@@ -37,6 +38,9 @@ class TrinoClient:
         return {"columns": columns, "rows": [list(r) for r in rows], "row_count": len(rows)}
 
     def query(self, sql: str, user: Optional[str] = None, params: Any = None) -> dict:
+        """Run ``sql`` as ``user`` (or the configured user); columns, rows capped at max_rows,
+        row_count.
+        """
         if self._metrics is None:
             return self._run(sql, user, params)
         self._metrics.queries.inc()

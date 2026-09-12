@@ -12,6 +12,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Config:
+    """Every setting the server reads, with neutral defaults; built from the environment by
+    ``from_env``.
+    """
+
     trino_host: str
     trino_port: int
     trino_user: str
@@ -49,6 +53,7 @@ class Config:
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
+        """Read every setting from the environment."""
         return Config(
             trino_host=os.environ.get("TRINO_HOST", "localhost"),
             trino_port=int(os.environ.get("TRINO_PORT", "8080")),

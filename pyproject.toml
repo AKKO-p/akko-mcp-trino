@@ -43,7 +43,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest==9.1.1", "pytest-cov==7.1.0"]
-dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "build==1.2.2", "twine==6.1.0"]
+dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "mypy==2.3.1", "pip-audit==2.10.1", "build==1.2.2", "twine==6.1.0"]
 
 [project.scripts]
 akko-mcp-trino = "akko_mcp_trino.__main__:main"
@@ -68,3 +68,14 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# The package documents every public name; tests and examples need not.
+"akko_mcp_trino/**" = []
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.mypy]
+ignore_missing_imports = true
+strict_optional = true

@@ -26,19 +26,24 @@ _current_request_id: ContextVar[str | None] = ContextVar("mcp_current_request_id
 
 
 def current_request_id() -> str | None:
+    """The request id of the current request, or None outside a request."""
     return _current_request_id.get()
 
 
 def set_current_request_id(request_id: str | None) -> Token:
+    """Bind a request id to the current request; returns the token for reset."""
     return _current_request_id.set(request_id)
 
 
 def reset_current_request_id(token: Token) -> None:
+    """Clear the request id bound by ``set_current_request_id``."""
     _current_request_id.reset(token)
 
 
 @dataclass(frozen=True)
 class AuditEvent:
+    """One tool call: who, through which product, did what, with which outcome."""
+
     request_id: str
     tool: str
     subject: str
@@ -48,25 +53,37 @@ class AuditEvent:
     error: str = ""
 
     def as_dict(self) -> dict:
+        """The event as a plain dict, ready for JSON."""
         return asdict(self)
 
 
 class AuditSink(Protocol):
+    """The contract an audit destination fulfils: ``record`` one event."""
+
     def record(self, event: AuditEvent) -> None:  # pragma: no cover - protocol
+        """Record one event."""
         ...
 
 
 class InMemoryAudit:
+    """Keeps events in a list; for tests and for products that expose the join."""
+
     def __init__(self) -> None:
+        """Start with no events."""
         self.events: list[AuditEvent] = []
 
     def record(self, event: AuditEvent) -> None:
+        """Append the event."""
         self.events.append(event)
 
 
 class LoggingAudit:
+    """Writes one JSON line per event to a logger (``mcp.audit`` by default)."""
+
     def __init__(self, logger: logging.Logger | None = None) -> None:
+        """Use ``logger``, or the ``mcp.audit`` logger."""
         self._log = logger or logging.getLogger("mcp.audit")
 
     def record(self, event: AuditEvent) -> None:
+        """Log the event as one compact JSON line."""
         self._log.info(json.dumps(event.as_dict(), separators=(",", ":")))

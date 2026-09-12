@@ -29,6 +29,7 @@ class AuthProvider(Protocol):
     """The authentication contract: inspect the request headers, return a Principal or None."""
 
     def verify(self, headers: dict) -> Optional[Principal]:  # pragma: no cover - protocole
+        """Return the verified Principal for these request headers, or None."""
         ...
 
 
@@ -105,6 +106,7 @@ class UnverifiedJwtAuth:
     Never selected by `build_auth`; use `JwksJwtAuth` anywhere that matters."""
 
     def verify(self, headers: dict) -> Optional[Principal]:
+        """Decode the bearer without verifying it (development only)."""
         claims = decode_jwt_unsafe(extract_bearer_token(headers) or "")
         if not claims:
             return None
@@ -121,6 +123,9 @@ class JwksJwtAuth:
     def __init__(
         self, jwks_url: str, issuer: str, audience: str, *, jwks_client=None, algorithms=None
     ):
+        """Verify tokens against ``jwks_url`` for ``issuer`` and ``audience``; ``jwks_client`` is
+        injectable for tests.
+        """
         self._issuer = issuer
         self._audience = audience
         self._algorithms = algorithms or ["RS256"]
@@ -132,6 +137,7 @@ class JwksJwtAuth:
             self._client = PyJWKClient(jwks_url)
 
     def verify(self, headers: dict) -> Optional[Principal]:
+        """Verify the bearer's signature, issuer, audience and expiry; None if absent or invalid."""
         token = extract_bearer_token(headers)
         if not token:
             return None

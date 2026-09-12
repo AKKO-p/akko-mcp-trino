@@ -1,0 +1,26 @@
+name: Bug report
+description: Something does not behave as documented.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes: { label: akko-mcp-trino version, placeholder: "pip show akko-mcp-trino" }
+    validations: { required: true }
+  - type: input
+    id: trino
+    attributes: { label: Trino version and policy engine, placeholder: "483, OPA" }
+    validations: { required: true }
+  - type: dropdown
+    id: transport
+    attributes: { label: Transport, options: [streamable-http, sse, stdio] }
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes: { label: What happened, description: "Include the X-Reason header and the request id when a request was refused. Never paste a token." }
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes: { label: What you expected }
+  - type: textarea
+    id: config
+    attributes: { label: Effective configuration, description: "Output of `akko-mcp-trino --check` (it prints no secret).", render: text }

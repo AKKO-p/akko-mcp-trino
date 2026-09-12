@@ -24,6 +24,7 @@ class SlidingWindow:
     """At most ``limit`` events per key in the last ``seconds``."""
 
     def __init__(self, *, limit: int, seconds: int, clock: Callable[[], float] = time.monotonic):
+        """Allow ``limit`` events per ``seconds``; ``clock`` is injectable for tests."""
         self.limit = limit
         self.seconds = seconds
         self._clock = clock
@@ -49,6 +50,7 @@ class SlidingWindow:
             return True, 0
 
     def record(self, key: str) -> None:
+        """Count one event for ``key`` now."""
         if self.limit <= 0:
             return
         now = self._clock()
@@ -64,15 +66,21 @@ class SlidingWindow:
 
 @dataclass(frozen=True)
 class RateLimiter:
+    """One window per user subject and one per agent product."""
+
     user: SlidingWindow = field(default_factory=lambda: SlidingWindow(limit=0, seconds=60))
     agent: SlidingWindow = field(default_factory=lambda: SlidingWindow(limit=0, seconds=60))
 
     @property
     def enabled(self) -> bool:
+        """True when at least one window has a limit."""
         return self.user.limit > 0 or self.agent.limit > 0
 
     @staticmethod
     def from_env(env: Mapping[str, str]) -> "RateLimiter":
+        """Build from ``MCP_RATE_LIMIT_USER``, ``MCP_RATE_LIMIT_AGENT`` and
+        ``MCP_RATE_LIMIT_WINDOW_SECONDS``.
+        """
         seconds = int(env.get("MCP_RATE_LIMIT_WINDOW_SECONDS", "60"))
         return RateLimiter(
             user=SlidingWindow(limit=int(env.get("MCP_RATE_LIMIT_USER", "0")), seconds=seconds),

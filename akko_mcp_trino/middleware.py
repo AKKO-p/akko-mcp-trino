@@ -48,6 +48,10 @@ from .revocation import IntrospectionCheck, IntrospectionError
 
 
 class AuthIdentityMiddleware:
+    """The guard: agent key, user token, revocation, quotas, discovery and request id, on every HTTP
+    request.
+    """
+
     def __init__(
         self,
         app,
@@ -59,6 +63,7 @@ class AuthIdentityMiddleware:
         limiter: RateLimiter | None = None,
         revocation: IntrospectionCheck | None = None,
     ):
+        """Mount on ``app``; each guard is optional, off when its argument is None or disabled."""
         self.app = app
         self._auth = auth_provider
         self._require = require_auth
@@ -68,6 +73,7 @@ class AuthIdentityMiddleware:
         self._revocation = revocation
 
     async def __call__(self, scope, receive, send):
+        """Handle one ASGI request: serve discovery, bind the request id, then run the guards."""
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
             return

@@ -18,6 +18,10 @@ from .trino_client import TrinoClient
 
 
 def build_health_app(client: TrinoClient, metrics: Any = None) -> Starlette:
+    """The health app: ``/health`` never touches Trino, ``/ready`` runs a bounded ``SELECT 1``,
+    ``/metrics`` when metrics are given.
+    """
+
     async def health(_request):
         return JSONResponse({"status": "ok"})
 

@@ -20,16 +20,20 @@ REALM = "trino"
 
 @dataclass(frozen=True)
 class ProtectedResource:
+    """What RFC 9728 needs to say about this server: its URL and its issuer."""
+
     resource: str
     issuer: str
 
     @staticmethod
     def from_config(config: Config) -> "ProtectedResource":
+        """Build from ``MCP_RESOURCE_URL`` and ``MCP_OIDC_ISSUER``."""
         return ProtectedResource(
             resource=config.resource_url.rstrip("/"), issuer=config.oidc_issuer
         )
 
     def document(self) -> dict:
+        """The protected-resource metadata document."""
         return {
             "resource": self.resource,
             "authorization_servers": [self.issuer] if self.issuer else [],
@@ -37,4 +41,5 @@ class ProtectedResource:
         }
 
     def www_authenticate(self) -> str:
+        """The ``WWW-Authenticate`` value a 401 carries."""
         return f'Bearer realm="{REALM}", resource_metadata="{self.resource}{WELL_KNOWN_PATH}"'

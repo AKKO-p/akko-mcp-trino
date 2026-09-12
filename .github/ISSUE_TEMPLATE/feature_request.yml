@@ -1,0 +1,18 @@
+name: Feature request
+description: A tool, a guard, a host, an engine you need.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes: { label: What you are trying to do, description: "Who is the user, which host, which engine." }
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes: { label: What you propose }
+  - type: checkboxes
+    id: principle
+    attributes:
+      label: Ground rule
+      options:
+        - label: This does not ask the server to decide access itself (the engine decides; the server carries identity).
+          required: true

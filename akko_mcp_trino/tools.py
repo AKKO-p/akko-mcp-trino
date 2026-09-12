@@ -86,6 +86,7 @@ def _plain(value: Any) -> Any:
 
 
 def dumps(obj: Any) -> str:
+    """JSON for a tool result, with Trino's non-JSON types rendered by ``_plain``."""
     return json.dumps(obj, default=_plain)
 
 

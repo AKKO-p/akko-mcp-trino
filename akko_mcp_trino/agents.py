@@ -29,10 +29,12 @@ def current_agent() -> str | None:
 
 
 def set_current_agent(name: str | None) -> Token:
+    """Bind the agent product name to the current request; returns the token for reset."""
     return _current_agent.set(name)
 
 
 def reset_current_agent(token: Token) -> None:
+    """Clear the agent product bound by ``set_current_agent``."""
     _current_agent.reset(token)
 
 
@@ -44,6 +46,7 @@ class AgentRegistry:
 
     @property
     def enabled(self) -> bool:
+        """True when at least one agent product is registered."""
         return bool(self._by_key)
 
     @staticmethod
