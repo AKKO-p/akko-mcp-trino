@@ -32,6 +32,10 @@ class Config:
     # `name:key` pairs naming the agent products allowed to call. Empty
     # disables the check, as in the CDP Agent Gateway blueprint.
     agent_keys: str = ""
+    # Requests per window per user subject and per agent product; 0 disables.
+    rate_limit_user: int = 0
+    rate_limit_agent: int = 0
+    rate_limit_window_seconds: int = 60
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
@@ -53,4 +57,7 @@ class Config:
             auth_required=os.environ.get("MCP_AUTH_REQUIRED", "false").lower() == "true",
             resource_url=os.environ.get("MCP_RESOURCE_URL", "").rstrip("/"),
             agent_keys=os.environ.get("MCP_AGENT_KEYS", ""),
+            rate_limit_user=int(os.environ.get("MCP_RATE_LIMIT_USER", "0")),
+            rate_limit_agent=int(os.environ.get("MCP_RATE_LIMIT_AGENT", "0")),
+            rate_limit_window_seconds=int(os.environ.get("MCP_RATE_LIMIT_WINDOW_SECONDS", "60")),
         )

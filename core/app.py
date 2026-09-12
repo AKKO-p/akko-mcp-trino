@@ -18,6 +18,7 @@ from .agents import AgentRegistry
 from .config import Config
 from .discovery import ProtectedResource
 from .middleware import AuthIdentityMiddleware
+from .ratelimit import RateLimiter
 
 _TRANSPORTS = ("sse", "streamable-http")
 
@@ -48,11 +49,17 @@ def build_asgi_app(config: Config, mcp: Any, *, auth_provider: Any) -> Any:
     # the first request.
     agents = AgentRegistry.from_env({"MCP_AGENT_KEYS": config.agent_keys})
     discovery = ProtectedResource.from_config(config)
+    limiter = RateLimiter.from_env({
+        "MCP_RATE_LIMIT_USER": str(config.rate_limit_user),
+        "MCP_RATE_LIMIT_AGENT": str(config.rate_limit_agent),
+        "MCP_RATE_LIMIT_WINDOW_SECONDS": str(config.rate_limit_window_seconds),
+    })
     app.add_middleware(
         AuthIdentityMiddleware,
         auth_provider=auth_provider,
         require_auth=config.auth_required,
         agents=agents,
         discovery=discovery,
+        limiter=limiter,
     )
     return app

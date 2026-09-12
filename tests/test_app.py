@@ -102,3 +102,12 @@ def test_malformed_agent_keys_refuse_to_start():
     cfg = Config(**{**_config("sse").__dict__, "agent_keys": "no-colon"})
     with pytest.raises(ValueError):
         build_asgi_app(cfg, _FakeMCP(), auth_provider=None)
+
+
+def test_rate_limiter_is_wired_from_config():
+    cfg = Config(**{**_config("sse").__dict__, "rate_limit_user": 5, "rate_limit_agent": 50,
+                    "rate_limit_window_seconds": 30})
+    app = build_asgi_app(cfg, _FakeMCP(), auth_provider=object())
+    layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
+    lim = layer.kwargs["limiter"]
+    assert lim.enabled and (lim.user.limit, lim.agent.limit, lim.user.seconds) == (5, 50, 30)

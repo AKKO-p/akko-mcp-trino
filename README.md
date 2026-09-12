@@ -126,6 +126,8 @@ Everything is environment-driven; nothing is hardcoded.
 | `MCP_PORT`, `MCP_HEALTH_PORT` | listening ports | `3000`, `3001` |
 | `MCP_RESOURCE_URL` | public URL of this server, as MCP hosts see it; enables RFC 9728 discovery | — (discovery off) |
 | `MCP_AGENT_KEYS` | `name:key,name:key` — registered agent products; empty disables the check | — (check off) |
+| `MCP_RATE_LIMIT_USER`, `MCP_RATE_LIMIT_AGENT` | requests per window per user subject and per agent product; `0` disables | `0`, `0` |
+| `MCP_RATE_LIMIT_WINDOW_SECONDS` | the sliding window | `60` |
 
 Auth enabled without a JWKS URL refuses to start. That is on purpose: an
 authentication layer that cannot verify anything must not pretend to. A
@@ -164,6 +166,15 @@ never guesses an identity provider. Every refusal carries `X-Reason`
 (`unauthenticated`, `agent_key_missing`, `agent_key_unknown`) and never the
 token.
 
+## Quotas
+
+Two sliding windows, one per user subject and one per agent product, checked
+after authentication so a refused token never consumes a slot that belongs
+to the person it names. A request over either limit gets `429` with
+`Retry-After` and `X-Reason: rate_limited`, and consumes nothing in either
+window. The counters live in the process: with several replicas the quota is
+per replica, and the README says so rather than pretend a shared store exists.
+
 ## Audit join
 
 Every response carries `X-Request-Id` — the one the edge sent, or one the
@@ -181,7 +192,7 @@ id. A product that wants the join over HTTP passes its own sink to
 
 ## Guarantees the tests hold
 
-139 tests, 100 % coverage, and a lint that fails the build if the core ever
+152 tests, 100 % coverage, and a lint that fails the build if the core ever
 imports a product-specific module. The guard that matters most is on the
 transport: **the identity middleware is mounted on whichever transport is
 served**, and a test asserts it for both. It once lived on a branch the default
@@ -193,7 +204,7 @@ impossible.
 
 1. ~~Dual identity: `X-Agent-Key` for the agent product, distinct from the user.~~ Done.
 2. ~~RFC 9728 protected-resource metadata and `401` with `resource_metadata`.~~ Done.
-3. Rate limits per user and per agent.
+3. ~~Rate limits per user and per agent.~~ Done (per process).
 4. ~~Request-id audit join — tool, subject, agent, token id, never the raw token.~~ Done.
 5. Optional token-state check for revocation before expiry.
 

@@ -14,7 +14,9 @@ Two more concerns live here because they are part of the same door:
   is even looked at — the agent is never a Trino user;
 * RFC 9728 discovery: the metadata document is served without a token, and
   every 401 carries `WWW-Authenticate` pointing at it, so an MCP host knows
-  where to authenticate instead of seeing a bare refusal.
+  where to authenticate instead of seeing a bare refusal;
+* quotas per user and per agent product, checked after authentication and
+  refused with 429 and `Retry-After` — see `core.ratelimit`.
 
 Every request gets a request id — honoured from `X-Request-Id` when the edge
 sent one, generated otherwise — echoed on the response and exposed to the
@@ -36,6 +38,7 @@ from .audit import REQUEST_ID_HEADER, reset_current_request_id, set_current_requ
 from .agents import AGENT_KEY_HEADER, AgentRegistry, reset_current_agent, set_current_agent
 from .discovery import WELL_KNOWN_PATH, ProtectedResource
 from .identity import reset_current_principal, set_current_principal
+from .ratelimit import RateLimiter
 
 
 class AuthIdentityMiddleware:
@@ -47,12 +50,14 @@ class AuthIdentityMiddleware:
         require_auth: bool = False,
         agents: AgentRegistry | None = None,
         discovery: ProtectedResource | None = None,
+        limiter: RateLimiter | None = None,
     ):
         self.app = app
         self._auth = auth_provider
         self._require = require_auth
         self._agents = agents if agents is not None and agents.enabled else None
         self._discovery = discovery if discovery is not None and discovery.resource else None
+        self._limiter = limiter if limiter is not None and limiter.enabled else None
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http":
@@ -86,6 +91,19 @@ class AuthIdentityMiddleware:
         if self._require and principal is None:
             await self._refuse("unauthenticated", scope, receive, send)
             return
+
+        # Quotas count authenticated requests only: a refused token must not
+        # consume a slot that belongs to the person it impersonates.
+        if self._limiter is not None:
+            allowed, retry_after = self._limiter.check(
+                subject=principal.subject if principal else None, agent=agent
+            )
+            if not allowed:
+                headers = {"X-Reason": "rate_limited", "Retry-After": str(retry_after)}
+                await JSONResponse({"error": "rate_limited"}, status_code=429, headers=headers)(
+                    scope, receive, send
+                )
+                return
 
         token = set_current_principal(principal)
         agent_token = set_current_agent(agent)

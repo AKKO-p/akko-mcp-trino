@@ -9,6 +9,7 @@ _ENV_KEYS = [
     "MCP_SERVER_NAME", "MCP_HEALTH_PORT",
     "MCP_JWKS_URL", "MCP_OIDC_ISSUER", "MCP_OIDC_AUDIENCE",
     "MCP_TRANSPORT", "MCP_PORT", "MCP_AUTH_REQUIRED", "MCP_RESOURCE_URL", "MCP_AGENT_KEYS",
+    "MCP_RATE_LIMIT_USER", "MCP_RATE_LIMIT_AGENT", "MCP_RATE_LIMIT_WINDOW_SECONDS",
 ]
 
 
@@ -93,3 +94,16 @@ def test_resource_url_and_agent_keys_env(monkeypatch):
 def test_resource_url_and_agent_keys_default_off():
     c = Config.from_env()
     assert c.resource_url == "" and c.agent_keys == ""
+
+
+def test_rate_limit_env(monkeypatch):
+    monkeypatch.setenv("MCP_RATE_LIMIT_USER", "10")
+    monkeypatch.setenv("MCP_RATE_LIMIT_AGENT", "100")
+    monkeypatch.setenv("MCP_RATE_LIMIT_WINDOW_SECONDS", "30")
+    c = Config.from_env()
+    assert (c.rate_limit_user, c.rate_limit_agent, c.rate_limit_window_seconds) == (10, 100, 30)
+
+
+def test_rate_limit_defaults_off():
+    c = Config.from_env()
+    assert (c.rate_limit_user, c.rate_limit_agent, c.rate_limit_window_seconds) == (0, 0, 60)
