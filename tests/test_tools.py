@@ -59,7 +59,7 @@ def test_tool_annotations_are_classes_not_strings():
             )
 
 
-def test_exactly_the_eight_tools_are_registered():
+def test_exactly_the_nine_tools_are_registered():
     mcp, _ = _registered()
     assert set(mcp.tools) == {
         "list_catalogs",
@@ -69,6 +69,7 @@ def test_exactly_the_eight_tools_are_registered():
         "search_columns",
         "profile_table",
         "explain_query",
+        "explain_table",
         "execute_query",
     }
 
@@ -468,3 +469,98 @@ def test_every_tool_declares_mcp_annotations_read_only_and_non_destructive():
         assert ann.openWorldHint is False, name
         assert ann.title, name
     assert mcp.annotations["list_catalogs"].idempotentHint is True
+
+
+# ---- 0.3: context providers enrich describe_table and power explain_table
+
+
+class _Ctx:
+    def __init__(self):
+        from akko_mcp_trino.context import ColumnContext, Join, TableContext
+
+        self.t = TableContext(
+            description="One row per customer",
+            owner="Customer data team",
+            tier="gold",
+            grain=["customer_id"],
+            joins=[Join(["customer_id"], "core_postgres.clients.accounts", ["customer_id"])],
+            tags=["pii"],
+        )
+        self.c = {"email": ColumnContext(description="Contact address", classification=["PII"])}
+
+    def table(self, cat, sch, tbl):
+        return self.t if tbl == "customers" else None
+
+    def column(self, cat, sch, tbl, col):
+        return self.c.get(col)
+
+
+def _registered_with_context(**client_kw):
+    mcp = FakeMCP()
+    client = FakeClient(**client_kw)
+    register_query_tools(mcp, client, context=_Ctx())
+    return mcp, client
+
+
+def test_describe_table_carries_the_table_and_column_context():
+    rows = [["customer_id", "bigint", "", ""], ["email", "varchar", "", ""]]
+    mcp, _ = _registered_with_context(
+        result={"columns": ["Column", "Type", "Extra", "Comment"], "rows": rows, "row_count": 2}
+    )
+    out = json.loads(mcp.tools["describe_table"]("core_postgres", "clients", "customers"))
+    assert out["table"]["owner"] == "Customer data team" and out["table"]["grain"] == [
+        "customer_id"
+    ]
+    assert out["table"]["joins"][0]["target"] == "core_postgres.clients.accounts"
+    assert out["column_context"] == {
+        "email": {"description": "Contact address", "classification": ["PII"]}
+    }
+
+
+def test_describe_table_without_context_keeps_the_0_2_shape():
+    mcp, _ = _registered(
+        result={
+            "columns": ["Column", "Type", "Extra", "Comment"],
+            "rows": [["a", "int", "", ""]],
+            "row_count": 1,
+        }
+    )
+    out = json.loads(mcp.tools["describe_table"]("c", "s", "t"))
+    assert "table" not in out and "column_context" not in out
+
+
+def test_explain_table_answers_from_context_and_says_when_nothing_is_known():
+    mcp, _ = _registered_with_context()
+    out = json.loads(mcp.tools["explain_table"]("core_postgres", "clients", "customers"))
+    assert out["grain"] == ["customer_id"] and out["tier"] == "gold" and out["tags"] == ["pii"]
+    nothing = json.loads(mcp.tools["explain_table"]("core_postgres", "clients", "orders"))
+    assert nothing == {"known": False}
+
+
+def test_explain_table_validates_identifiers():
+    mcp, _ = _registered_with_context()
+    assert "Invalid table" in json.loads(mcp.tools["explain_table"]("c", "s", "x;y"))["error"]
+
+
+def test_context_provider_failures_never_break_describe_table():
+    class _Broken:
+        def table(self, *a):
+            raise RuntimeError("catalogue down")
+
+        def column(self, *a):
+            raise RuntimeError("catalogue down")
+
+    mcp = FakeMCP()
+    register_query_tools(
+        mcp,
+        FakeClient(
+            result={
+                "columns": ["Column", "Type", "Extra", "Comment"],
+                "rows": [["a", "int", "", ""]],
+                "row_count": 1,
+            }
+        ),
+        context=_Broken(),
+    )
+    out = json.loads(mcp.tools["describe_table"]("c", "s", "t"))
+    assert out["rows"] == [["a", "int", "", ""]] and "error" not in out

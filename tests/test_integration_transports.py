@@ -166,6 +166,7 @@ def test_each_http_transport_lists_the_eight_tools(served):
             "search_columns",
             "profile_table",
             "explain_query",
+            "explain_table",
             "execute_query",
         ]
     )

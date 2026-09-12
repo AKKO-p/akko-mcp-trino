@@ -60,6 +60,11 @@ class Config:
     trino_verify: str = "true"  # true, false, or a path to a CA bundle
     trino_request_timeout: float = 30.0
     trino_identity_mode: str = "impersonate"
+    # Context providers, comma-separated in priority order: trino-comments, file
+    # (with MCP_CONTEXT_FILE), none. A product plugs its own catalogue in code.
+    context_providers: str = ""
+    context_file: str = ""
+    context_ttl_seconds: float = 60.0
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
@@ -95,4 +100,7 @@ class Config:
             trino_verify=os.environ.get("TRINO_VERIFY", "true"),
             trino_request_timeout=float(os.environ.get("TRINO_REQUEST_TIMEOUT_SECONDS", "30")),
             trino_identity_mode=os.environ.get("TRINO_IDENTITY_MODE", "impersonate").lower(),
+            context_providers=os.environ.get("MCP_CONTEXT_PROVIDERS", ""),
+            context_file=os.environ.get("MCP_CONTEXT_FILE", ""),
+            context_ttl_seconds=float(os.environ.get("MCP_CONTEXT_TTL_SECONDS", "60")),
         )

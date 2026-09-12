@@ -21,6 +21,7 @@ from mcp.types import ToolAnnotations
 
 from .agents import current_agent
 from .audit import AuditEvent, current_request_id
+from .context import NoContext
 from .identity import current_bearer, current_principal, current_subject
 from .sql_guard import is_read_only_sql, normalize_sql, safe_sql_string, validate_identifier
 from .trino_client import TrinoClient
@@ -97,11 +98,20 @@ def _error(exc: Exception) -> str:
 
 
 def register_query_tools(
-    mcp, client: TrinoClient, *, read_only: bool = True, audit: Any = None
+    mcp,
+    client: TrinoClient,
+    *,
+    read_only: bool = True,
+    audit: Any = None,
+    context: Any = None,
 ) -> None:
     """Register the Trino tools on the FastMCP instance `mcp`.
 
-    `audit`, when given, receives one AuditEvent per call (see `akko_mcp_trino.audit`)."""
+    `audit`, when given, receives one AuditEvent per call (see `akko_mcp_trino.audit`).
+    `context`, when given, is a ContextProvider (see `akko_mcp_trino.context`) that
+    enriches `describe_table` and answers `explain_table`; a provider that fails
+    never breaks a tool, the agent simply gets Trino alone."""
+    context = context if context is not None else NoContext()
 
     def tool(title: str, governed: bool = False, idempotent: bool = True):
         # MCP tool annotations: every tool here only reads, none is destructive,
@@ -177,15 +187,31 @@ def register_query_tools(
 
         Args: catalog, schema, table as bare names; sample_rows (0 to 20) adds
         that many rows of data. Returns JSON {"columns": [...], "rows": [...]}
-        where each row is [name, type, extra, comment], plus {"sample": {...}}
-        when sample_rows > 0.
+        where each row is [name, type, extra, comment]; plus "table" (description,
+        owner, tier, grain, joins, tags) and "column_context" (description,
+        classification such as PII, known values) when the platform's catalogue
+        knows the table; plus {"sample": {...}} when sample_rows > 0.
         """
         try:
             cat = validate_identifier(catalog, "catalog")
             sch = validate_identifier(schema, "schema")
             tbl = validate_identifier(table, "table")
             described = run(f"DESCRIBE {cat}.{sch}.{tbl}")
-            out = {"columns": described["columns"], "rows": described["rows"]}
+            out: dict[str, Any] = {"columns": described["columns"], "rows": described["rows"]}
+            try:
+                table_ctx = context.table(cat, sch, tbl)
+                if table_ctx is not None:
+                    out["table"] = table_ctx.as_dict()
+                column_ctx = {}
+                for row in described["rows"]:
+                    col = str(row[0])
+                    c = context.column(cat, sch, tbl, col)
+                    if c is not None:
+                        column_ctx[col] = c.as_dict()
+                if column_ctx:
+                    out["column_context"] = column_ctx
+            except Exception:  # noqa: BLE001 - a catalogue down must not hide the columns
+                pass
             n = max(0, min(int(sample_rows), MAX_SAMPLE_ROWS))
             if n:
                 out["sample"] = run(f"SELECT * FROM {cat}.{sch}.{tbl} LIMIT {n}")
@@ -244,6 +270,25 @@ def register_query_tools(
             sch = validate_identifier(schema, "schema")
             tbl = validate_identifier(table, "table")
             return dumps(run(f"SHOW STATS FOR {cat}.{sch}.{tbl}"))
+        except Exception as e:  # noqa: BLE001
+            return _error(e)
+
+    @tool("Explain table")
+    def explain_table(catalog: str, schema: str, table: str) -> str:
+        """What a table means, beyond its columns: description, owner, tier
+        (how trustworthy it is), grain (what makes a row unique), joins (which
+        columns lead to which table) and tags. Comes from the platform's
+        catalogue or from a context file, when one is configured.
+
+        Args: catalog, schema, table as bare names. Returns JSON with the known
+        fields, or {"known": false} when nothing is known about this table.
+        """
+        try:
+            cat = validate_identifier(catalog, "catalog")
+            sch = validate_identifier(schema, "schema")
+            tbl = validate_identifier(table, "table")
+            known = context.table(cat, sch, tbl)
+            return dumps(known.as_dict() if known is not None else {"known": False})
         except Exception as e:  # noqa: BLE001
             return _error(e)
 

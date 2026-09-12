@@ -280,3 +280,13 @@ def test_cli_check_reports_malformed_agent_keys_and_introspection(monkeypatch, c
     assert check_config(Config.from_env()) == 2
     out = capsys.readouterr().out
     assert "MCP_AGENT_KEYS" in out and "MCP_INTROSPECTION" in out
+
+
+def test_cli_check_reports_a_missing_context_file(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("MCP_CONTEXT_PROVIDERS", "file")
+    monkeypatch.setenv("MCP_CONTEXT_FILE", "/nowhere/ctx.json")
+    assert check_config(Config.from_env()) == 2
+    assert "ctx.json" in capsys.readouterr().out

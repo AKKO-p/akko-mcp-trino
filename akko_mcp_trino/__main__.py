@@ -19,6 +19,7 @@ import argparse
 import logging
 import sys
 import threading
+from typing import Any
 
 import uvicorn
 
@@ -28,7 +29,9 @@ from .app import build_asgi_app, run_stdio
 from .audit import LoggingAudit
 from .auth import build_auth
 from .config import Config
+from .context import build_context
 from .health import build_health_app
+from .identity import current_bearer, current_subject
 from .metrics import Metrics
 from .ratelimit import RateLimiter
 from .revocation import IntrospectionCheck
@@ -64,6 +67,8 @@ def check_config(config: Config) -> int:
         f"per {config.rate_limit_window_seconds}s",
         f"introspection: {config.introspection_url or 'off'}",
         f"user token (stdio): {'set' if config.user_token else '-'}",
+        f"trino identity mode: {config.trino_identity_mode} over {config.trino_http_scheme}",
+        f"context providers: {config.context_providers or 'none'}",
     ]
     problems: list[str] = []
     try:
@@ -86,6 +91,16 @@ def check_config(config: Config) -> int:
     except ValueError as exc:
         problems.append(str(exc))
     RateLimiter.from_env({"MCP_RATE_LIMIT_USER": str(config.rate_limit_user)})
+    try:
+        build_context(
+            {
+                "MCP_CONTEXT_PROVIDERS": config.context_providers,
+                "MCP_CONTEXT_FILE": config.context_file,
+            },
+            lambda sql: {"rows": []},
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        problems.append(str(exc))
     print("\n".join(lines))
     for problem in problems:
         print(f"PROBLEM: {problem}")
@@ -102,7 +117,19 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
 
     config = Config.from_env()
     metrics = Metrics()
-    mcp, client = build_server(config, metrics=metrics, audit=LoggingAudit())
+    # The context providers query Trino through the same governed client the
+    # tools use; the client exists once build_server has run, hence the holder.
+    holder: dict[str, Any] = {}
+    context = build_context(
+        {
+            "MCP_CONTEXT_PROVIDERS": config.context_providers,
+            "MCP_CONTEXT_FILE": config.context_file,
+            "MCP_CONTEXT_TTL_SECONDS": str(config.context_ttl_seconds),
+        },
+        lambda sql: holder["client"].query(sql, user=current_subject(), bearer=current_bearer()),
+    )
+    mcp, client = build_server(config, metrics=metrics, audit=LoggingAudit(), context=context)
+    holder["client"] = client
     auth_provider = build_auth(config)
 
     if config.transport == "stdio":

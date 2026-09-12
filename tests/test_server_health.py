@@ -38,6 +38,7 @@ def test_build_server_returns_mcp_and_client():
         "search_columns",
         "profile_table",
         "explain_query",
+        "explain_table",
         "execute_query",
     }
     assert isinstance(client, TrinoClient)
@@ -54,7 +55,7 @@ def test_build_server_applies_extra_registrars():
     mcp, _ = build_server(
         _CFG, extra_tool_registrars=[registrar], mcp_factory=lambda name: FakeMCP()
     )
-    assert len(mcp.tools) == 9
+    assert len(mcp.tools) == 10
     assert "outil_maison" in mcp.tools
 
 
@@ -86,3 +87,17 @@ def test_ready_503_when_trino_down():
     r = TestClient(app).get("/ready")
     assert r.status_code == 503
     assert r.json()["status"] == "error" and "connection refused" in r.json()["detail"]
+
+
+def test_build_server_accepts_an_external_context_provider():
+    """A product plugs its catalogue through `context=`; the package imports none."""
+
+    class _Ctx:
+        def table(self, *a):
+            return None
+
+        def column(self, *a):
+            return None
+
+    mcp, _ = build_server(_CFG, mcp_factory=lambda name: FakeMCP(), context=_Ctx())
+    assert "explain_table" in mcp.tools

@@ -180,3 +180,15 @@ def test_trino_connection_defaults():
         c.trino_request_timeout,
         c.trino_identity_mode,
     ) == ("http", "", "true", 30.0, "impersonate")
+
+
+def test_context_env(monkeypatch):
+    monkeypatch.setenv("MCP_CONTEXT_PROVIDERS", "file,trino-comments")
+    monkeypatch.setenv("MCP_CONTEXT_FILE", "/ctx.json")
+    monkeypatch.setenv("MCP_CONTEXT_TTL_SECONDS", "5")
+    c = Config.from_env()
+    assert (c.context_providers, c.context_file, c.context_ttl_seconds) == (
+        "file,trino-comments",
+        "/ctx.json",
+        5.0,
+    )
