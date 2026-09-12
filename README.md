@@ -54,7 +54,7 @@ to.
 - **Standard discovery.** RFC 9728 metadata and `WWW-Authenticate` on every `401`, so hosts know where to log in.
 - **Quotas, revocation, audit.** Per-user and per-agent limits, optional RFC 7662 introspection, one JSON audit line per call keyed by `X-Request-Id` — never the token.
 - **Any OIDC provider, any MCP host, any model.** Keycloak, Entra ID, Okta… Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1 400 lines, 205 tests at 100 % line and branch coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and four live proofs (functional, adversarial, agent-driven, stdio) on a real cluster.
+- **Small and proven.** 1 400 lines, 205 tests at 100 % line and branch coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and five live proofs (functional, adversarial, agent-driven, stdio, a real host) on a real cluster.
 
 ## Documentation
 
