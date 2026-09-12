@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-205%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-230%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -48,13 +48,13 @@ to.
 
 ## Highlights
 
-- **Identity, end to end.** Verified JWT (JWKS, issuer, audience, expiry) → `X-Trino-User`. No impersonation without a verified identity.
+- **Identity, end to end.** Verified JWT (JWKS, issuer, audience, expiry) → `X-Trino-User`, or the same JWT forwarded to Trino's own authenticator (`TRINO_IDENTITY_MODE=jwt`). No impersonation without a verified identity, no service credential in `jwt` mode.
 - **Read-only by construction.** SQL is parsed into an AST and refused if a write appears anywhere in the tree, CTEs and subqueries included.
 - **Two principals.** `X-Agent-Key` names the calling product (Cursor, Claude, your own agent) for quotas and audit; it is never a user.
 - **Standard discovery.** RFC 9728 metadata and `WWW-Authenticate` on every `401`, so hosts know where to log in.
 - **Quotas, revocation, audit.** Per-user and per-agent limits, optional RFC 7662 introspection, one JSON audit line per call keyed by `X-Request-Id` — never the token.
 - **Any OIDC provider, any MCP host, any model.** Keycloak, Entra ID, Okta… Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1 400 lines, 205 tests at 100 % line and branch coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and five live proofs (functional, adversarial, agent-driven, stdio, a real host) on a real cluster.
+- **Small and proven.** 1 700 lines, 230 tests at 100 % line and branch coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and six live proofs (functional, adversarial, agent-driven, stdio, a real host, JWT passthrough on public https) on a real cluster.
 
 ## Documentation
 
@@ -115,7 +115,7 @@ answers. That is the whole point.
 | | Supported | Tested |
 |---|---|---|
 | Python | 3.12, 3.13 | 3.12, 3.13 (CI) |
-| Trino | 351 and later (the `X-Trino-User` protocol header) | 483, behind OPA |
+| Trino | 351 and later (the `X-Trino-User` protocol header); http or https; password, or JWT passthrough | 483 behind OPA, in-cluster http with impersonation and public https with JWT passthrough |
 | Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA with row filters and column masks |
 | Identity providers | any OIDC provider publishing a JWKS | Keycloak 26 |
 | MCP | protocol 2025-06-18 via the official `mcp` SDK 1.30; transports `streamable-http`, `sse` and `stdio` | all three, official SDK client, in CI |
@@ -128,7 +128,7 @@ answers. That is the whole point.
 |---|---|---|
 | Python 3.12 or later | runtime | `pip` and a virtual environment |
 | A reachable Trino coordinator | the engine | HTTP or HTTPS, any recent version (tested on 483) |
-| Trino configured to trust `X-Trino-User` from this server | identity forwarding | the server connects as `TRINO_USER` and sets `X-Trino-User` to the caller; `TRINO_USER` must be allowed to impersonate in your access control (`impersonation` rules in file-based access control, or the equivalent in OPA / Ranger) |
+| Trino configured for one of the two identity modes | identity forwarding | `impersonate`: `TRINO_USER` allowed to impersonate in your access control (`impersonation` rules, or the equivalent in OPA / Ranger); `jwt`: Trino's `OAUTH2`/`JWT` authenticator pointed at your identity provider |
 | A policy engine deciding for Trino | the governance | OPA (`opa.policy.uri`), Ranger, or Trino file-based rules. Without one, every user reads everything |
 | An OIDC provider with a JWKS endpoint | identity | Keycloak, Entra ID, Okta, Dex… Tokens must carry `iss`, `aud`, `exp`, and a subject (`preferred_username` or `sub`) |
 | An MCP host that can send a bearer header | the client | Cursor, Claude Desktop, VS Code, or any client built on the `mcp` SDK |
@@ -371,6 +371,21 @@ Everything is read from the environment. Nothing is hardcoded.
 | `TRINO_CATALOG` | default catalog | `system` |
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
 | `TRINO_MAX_ROWS` | result cap | `100` |
+| `TRINO_HTTP_SCHEME` | `http` or `https` | `http` |
+| `TRINO_PASSWORD` | password of `TRINO_USER` (Basic auth); refused over plain http | — |
+| `TRINO_VERIFY` | TLS verification: `true`, `false`, or a path to a CA bundle | `true` |
+| `TRINO_REQUEST_TIMEOUT_SECONDS` | per-request timeout on the Trino client | `30` |
+| `TRINO_IDENTITY_MODE` | `impersonate` (connect as `TRINO_USER`, set `X-Trino-User` to the caller) or `jwt` (send the caller's verified bearer to Trino; needs https, no service password) | `impersonate` |
+
+### Two ways to reach Trino as the user
+
+| Mode | How | What Trino needs | When |
+|---|---|---|---|
+| `impersonate` (default) | the server authenticates as `TRINO_USER` (Basic over https when `TRINO_PASSWORD` is set) and sets `X-Trino-User` to the verified caller | an impersonation rule allowing `TRINO_USER` → users (file-based access control, OPA or Ranger) | Trino authenticates with passwords, certificates or Kerberos |
+| `jwt` | the caller's own bearer, already verified by the guard, is sent to Trino as its JWT; the server holds no credential at all | the `OAUTH2` or `JWT` authenticator pointed at the same issuer | Trino already trusts your identity provider — the cleanest setup, proven live on a Trino behind Keycloak |
+
+Both fail closed: a password never travels over plain http, and the `jwt` mode
+never falls back to the service account when a request has no bearer.
 
 ### Identity
 
@@ -428,7 +443,7 @@ curl -s https://mcp.example.com/.well-known/oauth-protected-resource
 # {"resource":"https://mcp.example.com","authorization_servers":["https://idp.example.com/realms/data"],"bearer_methods_supported":["header"]}
 
 curl -si https://mcp.example.com/mcp | grep -i -e www-auth -e x-reason
-# WWW-Authenticate: Bearer realm="trino", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"
+# WWW-Authenticate: Bearer realm="trino-mcp", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"
 # X-Reason: unauthenticated
 ```
 
@@ -493,7 +508,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 205 tests; line or branch coverage below 100 % fails the run
+pytest                        # 230 tests; line or branch coverage below 100 % fails the run
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets, exit 2 if it would not start
 ```

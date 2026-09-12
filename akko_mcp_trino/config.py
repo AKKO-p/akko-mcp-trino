@@ -50,6 +50,16 @@ class Config:
     # be. A local host (Claude Desktop, Cursor, Vibe) launches the server for
     # one person; that person's token is the identity of the whole process.
     user_token: str = ""
+    # How the server reaches Trino. `impersonate` (default): connect as
+    # TRINO_USER (Basic auth with TRINO_PASSWORD over https when set) and set
+    # X-Trino-User to the caller; Trino's impersonation rules must allow it.
+    # `jwt`: send the caller's own verified bearer to Trino (JWT authenticator
+    # on Trino's side); no impersonation right needed, https required.
+    trino_http_scheme: str = "http"
+    trino_password: str = ""
+    trino_verify: str = "true"  # true, false, or a path to a CA bundle
+    trino_request_timeout: float = 30.0
+    trino_identity_mode: str = "impersonate"
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
@@ -80,4 +90,9 @@ class Config:
             introspection_client_secret=os.environ.get("MCP_INTROSPECTION_CLIENT_SECRET", ""),
             introspection_ttl_seconds=int(os.environ.get("MCP_INTROSPECTION_TTL_SECONDS", "30")),
             user_token=os.environ.get("MCP_USER_TOKEN", ""),
+            trino_http_scheme=os.environ.get("TRINO_HTTP_SCHEME", "http").lower(),
+            trino_password=os.environ.get("TRINO_PASSWORD", ""),
+            trino_verify=os.environ.get("TRINO_VERIFY", "true"),
+            trino_request_timeout=float(os.environ.get("TRINO_REQUEST_TIMEOUT_SECONDS", "30")),
+            trino_identity_mode=os.environ.get("TRINO_IDENTITY_MODE", "impersonate").lower(),
         )

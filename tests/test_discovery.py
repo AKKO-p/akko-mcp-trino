@@ -118,7 +118,7 @@ def test_401_carries_www_authenticate_with_resource_metadata():
     assert status == 401
     www = headers.get("www-authenticate", "")
     assert www.startswith("Bearer ")
-    assert 'realm="trino"' in www
+    assert 'realm="trino-mcp"' in www  # the server name
     assert f'resource_metadata="https://mcp.example.com{WELL_KNOWN_PATH}"' in www
     assert headers.get("x-reason") == "unauthenticated"
 
@@ -130,3 +130,9 @@ def test_401_without_discovery_still_says_why():
     assert status == 401
     assert headers.get("x-reason") == "unauthenticated"
     assert "www-authenticate" not in headers
+
+
+def test_realm_is_the_server_name_not_a_constant():
+    """A product built on this core announces itself under its own name."""
+    pr = ProtectedResource.from_config(_config(server_name="acme-data"))
+    assert 'realm="acme-data"' in pr.www_authenticate()

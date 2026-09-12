@@ -153,3 +153,30 @@ def test_introspection_defaults_off():
 def test_user_token_env_for_stdio(monkeypatch):
     monkeypatch.setenv("MCP_USER_TOKEN", "tok")
     assert Config.from_env().user_token == "tok"
+
+
+def test_trino_connection_env(monkeypatch):
+    monkeypatch.setenv("TRINO_HTTP_SCHEME", "https")
+    monkeypatch.setenv("TRINO_PASSWORD", "p")
+    monkeypatch.setenv("TRINO_VERIFY", "/ca.pem")
+    monkeypatch.setenv("TRINO_REQUEST_TIMEOUT_SECONDS", "12")
+    monkeypatch.setenv("TRINO_IDENTITY_MODE", "jwt")
+    c = Config.from_env()
+    assert (
+        c.trino_http_scheme,
+        c.trino_password,
+        c.trino_verify,
+        c.trino_request_timeout,
+        c.trino_identity_mode,
+    ) == ("https", "p", "/ca.pem", 12.0, "jwt")
+
+
+def test_trino_connection_defaults():
+    c = Config.from_env()
+    assert (
+        c.trino_http_scheme,
+        c.trino_password,
+        c.trino_verify,
+        c.trino_request_timeout,
+        c.trino_identity_mode,
+    ) == ("http", "", "true", 30.0, "impersonate")

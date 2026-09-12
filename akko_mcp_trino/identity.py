@@ -38,3 +38,26 @@ def current_subject() -> Optional[str]:
     """The identity to forward to Trino, or None (falls back to the service account)."""
     p = _current_principal.get()
     return p.subject if p and p.subject else None
+
+
+# The raw bearer of the current request, for the `jwt` identity mode only. It
+# lives in its own ContextVar so that neither the Principal nor the audit
+# record can carry it by accident.
+_current_bearer: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "mcp_current_bearer", default=None
+)
+
+
+def set_current_bearer(token: Optional[str]) -> contextvars.Token:
+    """Bind the raw bearer to the current request; returns the token for reset."""
+    return _current_bearer.set(token)
+
+
+def reset_current_bearer(token: contextvars.Token) -> None:
+    """Clear the bearer bound by ``set_current_bearer``."""
+    _current_bearer.reset(token)
+
+
+def current_bearer() -> Optional[str]:
+    """The raw bearer of the current request, or None."""
+    return _current_bearer.get()

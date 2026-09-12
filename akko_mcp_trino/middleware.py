@@ -42,7 +42,12 @@ from .agents import AGENT_KEY_HEADER, AgentRegistry, reset_current_agent, set_cu
 from .audit import REQUEST_ID_HEADER, reset_current_request_id, set_current_request_id
 from .auth import extract_bearer_token
 from .discovery import WELL_KNOWN_PATH, ProtectedResource
-from .identity import reset_current_principal, set_current_principal
+from .identity import (
+    reset_current_bearer,
+    reset_current_principal,
+    set_current_bearer,
+    set_current_principal,
+)
 from .ratelimit import RateLimiter
 from .revocation import IntrospectionCheck, IntrospectionError
 
@@ -137,9 +142,11 @@ class AuthIdentityMiddleware:
 
         token = set_current_principal(principal)
         agent_token = set_current_agent(agent)
+        bearer_token = set_current_bearer(extract_bearer_token(headers) if principal else None)
         try:
             await self.app(scope, receive, send)
         finally:
+            reset_current_bearer(bearer_token)
             reset_current_agent(agent_token)
             reset_current_principal(token)
 

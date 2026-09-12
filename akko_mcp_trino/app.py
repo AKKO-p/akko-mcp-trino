@@ -18,7 +18,7 @@ from typing import Any
 from .agents import AgentRegistry
 from .config import Config
 from .discovery import ProtectedResource
-from .identity import set_current_principal
+from .identity import set_current_bearer, set_current_principal
 from .middleware import AuthIdentityMiddleware
 from .ratelimit import RateLimiter
 from .revocation import IntrospectionCheck
@@ -50,6 +50,7 @@ def run_stdio(config: Config, mcp: Any, *, auth_provider: Any) -> None:
             "refusing to serve over stdio without a verified identity"
         )
     set_current_principal(principal)
+    set_current_bearer(config.user_token if principal else None)
     mcp.run(transport="stdio")
 
 

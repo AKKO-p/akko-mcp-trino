@@ -17,9 +17,11 @@ import json
 import uuid
 from typing import Any, Callable
 
+from mcp.types import ToolAnnotations
+
 from .agents import current_agent
 from .audit import AuditEvent, current_request_id
-from .identity import current_principal, current_subject
+from .identity import current_bearer, current_principal, current_subject
 from .sql_guard import is_read_only_sql, normalize_sql, safe_sql_string, validate_identifier
 from .trino_client import TrinoClient
 
@@ -101,8 +103,18 @@ def register_query_tools(
 
     `audit`, when given, receives one AuditEvent per call (see `akko_mcp_trino.audit`)."""
 
-    def tool(governed: bool = False):
-        register = mcp.tool()
+    def tool(title: str, governed: bool = False, idempotent: bool = True):
+        # MCP tool annotations: every tool here only reads, none is destructive,
+        # none reaches outside the engine. Hosts use them to skip confirmations.
+        register = mcp.tool(
+            annotations=ToolAnnotations(
+                title=title,
+                readOnlyHint=True,
+                destructiveHint=False,
+                idempotentHint=idempotent,
+                openWorldHint=False,
+            )
+        )
 
         def deco(fn):
             if governed:  # the model must know what a masked value means
@@ -115,9 +127,9 @@ def register_query_tools(
         # Identity comes from the VERIFIED Principal (X-Trino-User), never from a
         # parameter the agent supplies — that would be forgeable. None falls back
         # to the service account (auth disabled).
-        return client.query(sql, user=current_subject())
+        return client.query(sql, user=current_subject(), bearer=current_bearer())
 
-    @tool()
+    @tool("List catalogs")
     def list_catalogs() -> str:
         """List the Trino catalogs (data sources) the current user can see.
 
@@ -130,7 +142,7 @@ def register_query_tools(
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
             return _error(e)
 
-    @tool()
+    @tool("List schemas")
     def list_schemas(catalog: str) -> str:
         """List the schemas of a catalog the current user can see.
 
@@ -143,7 +155,7 @@ def register_query_tools(
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
-    @tool()
+    @tool("List tables")
     def list_tables(catalog: str, schema: str) -> str:
         """List the tables and views of a schema the current user can see.
 
@@ -158,7 +170,7 @@ def register_query_tools(
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
-    @tool(governed=True)
+    @tool("Describe table", governed=True)
     def describe_table(catalog: str, schema: str, table: str, sample_rows: int = 0) -> str:
         """Describe a table: its columns, their types and comments, and optionally
         a few sample rows.
@@ -181,7 +193,7 @@ def register_query_tools(
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
-    @tool(governed=True)
+    @tool("Search columns", governed=True)
     def search_columns(pattern: str, catalog: str = "") -> str:
         """Find tables that have a column whose name matches a pattern.
 
@@ -216,7 +228,7 @@ def register_query_tools(
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
-    @tool(governed=True)
+    @tool("Profile table", governed=True)
     def profile_table(catalog: str, schema: str, table: str) -> str:
         """Profile a table with the statistics Trino keeps: row count, and per
         column the data size, number of distinct values, fraction of nulls,
@@ -235,7 +247,7 @@ def register_query_tools(
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
-    @tool()
+    @tool("Explain query")
     def explain_query(sql: str) -> str:
         """Show how Trino would execute a read-only SQL query, without running it.
 
@@ -253,7 +265,7 @@ def register_query_tools(
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
-    @tool(governed=True)
+    @tool("Run a read-only query", governed=True)
     def execute_query(sql: str) -> str:
         """Run one read-only SQL statement on Trino and return the rows.
 

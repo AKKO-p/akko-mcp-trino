@@ -15,21 +15,23 @@ from dataclasses import dataclass
 from .config import Config
 
 WELL_KNOWN_PATH = "/.well-known/oauth-protected-resource"
-REALM = "trino"
 
 
 @dataclass(frozen=True)
 class ProtectedResource:
-    """What RFC 9728 needs to say about this server: its URL and its issuer."""
+    """What RFC 9728 needs to say about this server: its URL, its issuer, its realm."""
 
     resource: str
     issuer: str
+    realm: str = "trino-mcp"
 
     @staticmethod
     def from_config(config: Config) -> "ProtectedResource":
         """Build from ``MCP_RESOURCE_URL`` and ``MCP_OIDC_ISSUER``."""
         return ProtectedResource(
-            resource=config.resource_url.rstrip("/"), issuer=config.oidc_issuer
+            resource=config.resource_url.rstrip("/"),
+            issuer=config.oidc_issuer,
+            realm=config.server_name,
         )
 
     def document(self) -> dict:
@@ -42,4 +44,4 @@ class ProtectedResource:
 
     def www_authenticate(self) -> str:
         """The ``WWW-Authenticate`` value a 401 carries."""
-        return f'Bearer realm="{REALM}", resource_metadata="{self.resource}{WELL_KNOWN_PATH}"'
+        return f'Bearer realm="{self.realm}", resource_metadata="{self.resource}{WELL_KNOWN_PATH}"'

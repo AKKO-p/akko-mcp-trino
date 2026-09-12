@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Governed MCP server for Trino: every tool call carries the identity of the user the agent acts for, and the engine decides."
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 authors = [{ name = "Abderrahmen Dridi", email = "contact@akko-ai.com" }]
 maintainers = [{ name = "AKKO", email = "contact@akko-ai.com" }]

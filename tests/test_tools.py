@@ -15,10 +15,12 @@ class FakeMCP:
 
     def __init__(self):
         self.tools = {}
+        self.annotations = {}
 
-    def tool(self):
+    def tool(self, annotations=None, **kw):
         def deco(fn):
             self.tools[fn.__name__] = fn
+            self.annotations[fn.__name__] = annotations
             return fn
 
         return deco
@@ -30,7 +32,7 @@ class FakeClient:
         self._raises = raises
         self.calls = []
 
-    def query(self, sql, user=None, params=None):
+    def query(self, sql, user=None, params=None, bearer=None):
         self.calls.append((sql, user))
         if self._raises:
             raise self._raises
@@ -431,3 +433,38 @@ def test_uuid_is_serialised_and_unknown_types_still_fail_loudly():
     assert json.loads(dumps({"u": uuid.UUID(int=1)}))["u"] == "00000000-0000-0000-0000-000000000001"
     with pytest.raises(TypeError):
         dumps({"x": object()})
+
+
+def test_tools_pass_the_callers_bearer_to_the_client_for_jwt_passthrough():
+    """The bearer travels in its own ContextVar, never inside the Principal or the audit."""
+    from akko_mcp_trino.identity import reset_current_bearer, set_current_bearer
+
+    class _Client(FakeClient):
+        def query(self, sql, user=None, params=None, bearer=None):
+            self.calls.append((sql, user, bearer))
+            return self._result
+
+    mcp = FakeMCP()
+    client = _Client()
+    register_query_tools(mcp, client)
+    t = set_current_bearer("eyJ.raw")
+    try:
+        mcp.tools["execute_query"]("SELECT 1")
+        mcp.tools["list_catalogs"]()
+    finally:
+        reset_current_bearer(t)
+    assert all(c[2] == "eyJ.raw" for c in client.calls)
+    mcp.tools["list_catalogs"]()
+    assert client.calls[-1][2] is None, "the bearer must be cleared after the request"
+
+
+def test_every_tool_declares_mcp_annotations_read_only_and_non_destructive():
+    """MCP tool annotations (2025-06-18) let a host show that a tool only reads.
+    Every tool here reads; none is destructive; discovery is idempotent."""
+    mcp, _ = _registered()
+    for name, ann in mcp.annotations.items():
+        assert ann.readOnlyHint is True, name
+        assert ann.destructiveHint is False, name
+        assert ann.openWorldHint is False, name
+        assert ann.title, name
+    assert mcp.annotations["list_catalogs"].idempotentHint is True
