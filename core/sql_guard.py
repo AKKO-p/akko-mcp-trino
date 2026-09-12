@@ -17,6 +17,13 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 
 # sqlglot expression types that are purely READS.
 _READ_TYPES = (exp.Select, exp.Union, exp.Describe, exp.Pragma)
+# Node types that WRITE or have side effects, wherever they sit in the tree.
+# Checking only the root once let ``WITH w AS (DELETE FROM t) SELECT 1``
+# through (found by the live adversarial proof, 12 September 2026).
+_WRITE_TYPES = (
+    exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop,
+    exp.Alter, exp.TruncateTable, exp.Grant, exp.Command, exp.Set,
+)
 # SHOW/EXPLAIN/DESC parse as a generic `Command` (sqlglot does not structure
 # them); they are allowed by leading keyword, reads only.
 _COMMAND_READ_HEADS = ("SHOW", "EXPLAIN", "DESCRIBE", "DESC")
@@ -67,7 +74,8 @@ def is_read_only_sql(sql: str) -> bool:
         return False
     st = statements[0]
     if isinstance(st, _READ_TYPES):
-        return True
+        # A read at the root is not enough: refuse any write nested anywhere.
+        return not any(isinstance(node, _WRITE_TYPES) for node in st.walk())
     if isinstance(st, exp.Command):  # SHOW / EXPLAIN / DESC, unstructured
         head = s.upper().split(None, 1)[0]
         return head in _COMMAND_READ_HEADS

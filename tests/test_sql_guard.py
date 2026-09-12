@@ -51,3 +51,17 @@ def test_is_read_only_sql_blocks_writes(sql):
 ])
 def test_is_read_only_sql_blocks_edge_cases_the_prefix_filter_missed(sql):
     assert sql_guard.is_read_only_sql(sql) is False
+
+
+@pytest.mark.parametrize("sql", [
+    "WITH w AS (DELETE FROM t) SELECT 1",
+    "WITH w AS (INSERT INTO t VALUES (1)) SELECT * FROM w",
+    "SELECT * FROM (DROP TABLE t) x",
+    "WITH a AS (SELECT 1), b AS (UPDATE t SET x = 1) SELECT 1",
+])
+def test_write_nested_anywhere_in_the_tree_is_refused(sql):
+    """Found by the live adversarial proof on 12 September 2026: the guard only
+    looked at the root node, so a write wrapped in a CTE reached Trino. Trino
+    happened to refuse it as a syntax error; the guard must not rely on that."""
+    from core.sql_guard import is_read_only_sql
+    assert is_read_only_sql(sql) is False
