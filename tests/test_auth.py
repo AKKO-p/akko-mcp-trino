@@ -116,7 +116,8 @@ def test_jwks_rejects_wrong_audience():
 
 
 def test_jwks_rejects_expired():
-    assert _jwks_provider().verify(_bearer(_sign(exp_delta=-10))) is None
+    """Expired beyond the 30 s clock leeway."""
+    assert _jwks_provider().verify(_bearer(_sign(exp_delta=-60))) is None
 
 
 def test_jwks_no_token_returns_none():
@@ -167,3 +168,34 @@ def test_token_id_is_carried_from_jti_for_audit():
 
 def test_token_id_is_empty_when_the_token_has_no_jti():
     assert _jwks_provider().verify(_bearer(_sign({"sub": "u"}))).token_id == ""
+
+
+def test_a_token_issued_one_second_in_the_future_is_accepted_within_leeway():
+    """Found live on 13 September 2026: the issuer's clock was one second ahead
+    of the server's, every fresh token had `iat` in the future, and one request
+    in three got a 401. Clocks drift; a leeway of a few seconds is standard."""
+    tok = _sign({"sub": "u", "iat": int(time.time()) + 2, "nbf": int(time.time()) + 2})
+    assert _jwks_provider().verify(_bearer(tok)) is not None
+
+
+def test_leeway_does_not_resurrect_an_expired_token():
+    tok = _sign({"sub": "u"}, exp_delta=-120)
+    assert _jwks_provider().verify(_bearer(tok)) is None
+
+
+def test_leeway_is_configurable_and_bounded(monkeypatch):
+    provider = auth.JwksJwtAuth(
+        "https://kc/jwks", _ISS, _AUD, jwks_client=_FakeJwks(), leeway_seconds=0
+    )
+    tok = _sign({"sub": "u", "iat": int(time.time()) + 5})
+    assert provider.verify(_bearer(tok)) is None
+
+
+def test_refusal_reason_is_logged_without_the_token(caplog):
+    import logging
+
+    tok = _sign({"sub": "u"}, key=_OTHER)
+    with caplog.at_level(logging.INFO, logger="akko_mcp_trino.auth"):
+        assert _jwks_provider().verify(_bearer(tok)) is None
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "refused" in joined and tok not in joined

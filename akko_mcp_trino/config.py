@@ -65,6 +65,8 @@ class Config:
     context_providers: str = ""
     context_file: str = ""
     context_ttl_seconds: float = 60.0
+    # Tolerance on exp/nbf/iat for clock drift between the issuer and this server.
+    jwt_leeway_seconds: int = 30
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
@@ -103,4 +105,5 @@ class Config:
             context_providers=os.environ.get("MCP_CONTEXT_PROVIDERS", ""),
             context_file=os.environ.get("MCP_CONTEXT_FILE", ""),
             context_ttl_seconds=float(os.environ.get("MCP_CONTEXT_TTL_SECONDS", "60")),
+            jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
         )

@@ -192,3 +192,10 @@ def test_context_env(monkeypatch):
         "/ctx.json",
         5.0,
     )
+
+
+def test_jwt_leeway_env(monkeypatch):
+    monkeypatch.setenv("MCP_JWT_LEEWAY_SECONDS", "5")
+    assert Config.from_env().jwt_leeway_seconds == 5
+    monkeypatch.delenv("MCP_JWT_LEEWAY_SECONDS")
+    assert Config.from_env().jwt_leeway_seconds == 30

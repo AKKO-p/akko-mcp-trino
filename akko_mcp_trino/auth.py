@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -88,7 +91,12 @@ def build_auth(config) -> Optional[AuthProvider]:
             "unverified JWT checking (fail-closed). Set MCP_JWKS_URL, MCP_OIDC_ISSUER "
             "and MCP_OIDC_AUDIENCE to your identity provider."
         )
-    return JwksJwtAuth(config.jwks_url, config.oidc_issuer, config.oidc_audience)
+    return JwksJwtAuth(
+        config.jwks_url,
+        config.oidc_issuer,
+        config.oidc_audience,
+        leeway_seconds=config.jwt_leeway_seconds,
+    )
 
 
 def _principal_from_claims(claims: dict) -> Principal:
@@ -121,13 +129,21 @@ class JwksJwtAuth:
     token — yields None. Fail closed."""
 
     def __init__(
-        self, jwks_url: str, issuer: str, audience: str, *, jwks_client=None, algorithms=None
+        self,
+        jwks_url: str,
+        issuer: str,
+        audience: str,
+        *,
+        jwks_client=None,
+        algorithms=None,
+        leeway_seconds: int = 30,
     ):
         """Verify tokens against ``jwks_url`` for ``issuer`` and ``audience``; ``jwks_client`` is
         injectable for tests.
         """
         self._issuer = issuer
         self._audience = audience
+        self._leeway = leeway_seconds
         self._algorithms = algorithms or ["RS256"]
         if jwks_client is not None:
             self._client = jwks_client
@@ -151,7 +167,9 @@ class JwksJwtAuth:
                 algorithms=self._algorithms,
                 issuer=self._issuer,
                 audience=self._audience,
+                leeway=self._leeway,  # clocks drift; an iat one second ahead is not a forgery
             )
-        except Exception:  # noqa: BLE001 — signature/iss/aud/exp invalide → fail-closed
+        except Exception as exc:  # noqa: BLE001 — signature/iss/aud/exp invalid → fail-closed
+            log.info("token refused: %s", type(exc).__name__)  # the reason, never the token
             return None
         return _principal_from_claims(claims)

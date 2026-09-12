@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Context providers (`MCP_CONTEXT_PROVIDERS`): `trino-comments` (the `COMMENT ON` Trino already carries, read under the caller's identity), `file` (a versioned JSON document: description, owner, tier, grain, joins, tags, column classification and values), chained field by field with a TTL cache; a product plugs its own catalogue through `build_server(context=...)`. `describe_table` returns `table` and `column_context`; new tool `explain_table`. A provider describes and never decides; one that fails never hides the columns.
+- `MCP_JWT_LEEWAY_SECONDS` (default 30) for clock drift between the issuer and the server; the refusal reason (exception class, never the token) is logged.
+
+### Fixed
+- A token whose `iat` was one second in the future (issuer clock ahead of the server's) was refused: one request in three got a 401 on a real deployment. Leeway added.
+
 ## [0.2.0] - 2026-09-13
 
 ### Changed

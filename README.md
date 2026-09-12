@@ -300,6 +300,7 @@ Run it twice with two users' tokens and compare. The
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0–20) | columns, types, comments; a governed sample when asked |
 | `search_columns` | `pattern` (SQL LIKE), `catalog` (optional) | tables having a column matching the pattern |
 | `profile_table` | `catalog`, `schema`, `table` | `SHOW STATS`: row count, distinct values, null fraction, ranges |
+| `explain_table` | `catalog`, `schema`, `table` | what the table means: description, owner, tier, grain, joins, tags (from the context providers) |
 | `explain_query` | `sql` | Trino's plan for a read-only statement, without running it |
 | `execute_query` | `sql` | `{"columns": [...], "rows": [...], "row_count": n}` |
 
@@ -319,6 +320,40 @@ ANALYZE` is refused: it executes what it explains. Results are capped at `TRINO_
 
 Errors come back to the agent as `{"error": "..."}`; a permission refusal from
 Trino is an ordinary error, not a crash.
+
+## Context: what Trino cannot say
+
+`DESCRIBE` gives columns and types. It does not say what `segment` means, who
+owns the table, whether it is trustworthy, which column joins it to another,
+or that `email` is personal data. A model without that guesses, and guesses
+wrong.
+
+The server knows no catalogue. It knows an interface, `ContextProvider`, and a
+chain of providers fills it, in priority order:
+
+| Provider | Where the knowledge comes from | Needs |
+|---|---|---|
+| `trino-comments` | the `COMMENT ON` Trino already carries, read under the caller's identity | nothing |
+| `file` | a versioned JSON document kept with your code: description, owner, tier, grain, joins, tags, column classification and values | `MCP_CONTEXT_FILE` |
+| your catalogue | OpenMetadata, DataHub, Atlas… a provider implementing the same two methods, shipped as a separate package and passed to `build_server(context=...)` | that package |
+
+```json
+{"version": 1, "tables": {
+  "core_postgres.clients.customers": {
+    "description": "One row per customer", "owner": "Customer data team", "tier": "gold",
+    "grain": ["customer_id"],
+    "joins": [{"columns": ["customer_id"], "target": "core_postgres.clients.accounts", "target_columns": ["customer_id"]}],
+    "tags": ["pii"],
+    "columns": {"email": {"description": "Contact address", "classification": ["PII"]},
+                "segment": {"description": "Commercial segment", "values": ["retail", "business", "premium"]}}}}}
+```
+
+With `MCP_CONTEXT_PROVIDERS=file,trino-comments`, `describe_table` returns the
+columns **and** a `table` block (description, owner, tier, grain, joins, tags)
+and a `column_context` block; `explain_table` answers from the same knowledge,
+or `{"known": false}`. The file wins where both speak. A provider describes;
+it never decides: knowing a column is PII changes nothing about the mask,
+which the engine applies. A provider that fails never hides the columns.
 
 ## What happens on a request
 
@@ -395,6 +430,7 @@ never falls back to the service account when a request has no bearer.
 | `MCP_AUTH_REQUIRED` | refuse requests without a verified identity | `false` |
 | `MCP_JWKS_URL` | the provider's JWKS endpoint | — (required when auth is enabled) |
 | `MCP_OIDC_ISSUER`, `MCP_OIDC_AUDIENCE` | claims to enforce | — |
+| `MCP_JWT_LEEWAY_SECONDS` | tolerance on `exp`/`nbf`/`iat` for clock drift between the issuer and this server | `30` |
 | `MCP_RESOURCE_URL` | public URL of this server; enables RFC 9728 discovery | — (off) |
 | `MCP_AGENT_KEYS` | `name:key,name:key` — registered agent products; empty disables the check | — (off) |
 
@@ -411,6 +447,14 @@ refuses to start for the same reason.
 | `MCP_INTROSPECTION_URL` | RFC 7662 endpoint; enables the revocation check | — (off) |
 | `MCP_INTROSPECTION_CLIENT_ID`, `MCP_INTROSPECTION_CLIENT_SECRET` | credentials the provider expects | — (required with the URL) |
 | `MCP_INTROSPECTION_TTL_SECONDS` | how long a verdict is cached by `jti` | `30` |
+
+### Context providers
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `MCP_CONTEXT_PROVIDERS` | comma-separated, priority order: `trino-comments`, `file`, `none` | — (none) |
+| `MCP_CONTEXT_FILE` | the JSON document for `file` (format below) | — |
+| `MCP_CONTEXT_TTL_SECONDS` | how long an answer is cached | `60` |
 
 ### Serving
 
