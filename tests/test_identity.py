@@ -1,6 +1,7 @@
-"""core.identity: the current-identity ContextVar (X-Trino-User propagation)."""
-from core import identity
-from core.auth import Principal
+"""akko_mcp_trino.identity: the current-identity ContextVar (X-Trino-User propagation)."""
+
+from akko_mcp_trino import identity
+from akko_mcp_trino.auth import Principal
 
 
 def test_default_no_principal():

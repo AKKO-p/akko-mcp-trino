@@ -10,6 +10,7 @@ key it cannot have.
 The agent name travels in a ContextVar next to the Principal, and is reset
 after the request. Keys are compared with a constant-time function.
 """
+
 from __future__ import annotations
 
 import hmac

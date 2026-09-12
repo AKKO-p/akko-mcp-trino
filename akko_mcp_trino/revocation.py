@@ -10,6 +10,7 @@ fail closed (503), because "unknown" is not "still valid".
 `post` is injectable so the check is testable without a network; the default
 uses httpx synchronously, which is fine at the rate a guard is called.
 """
+
 from __future__ import annotations
 
 import threading

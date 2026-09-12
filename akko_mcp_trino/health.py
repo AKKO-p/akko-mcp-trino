@@ -5,6 +5,7 @@ downstream would restart every pod the moment Trino hiccups, turning a partial
 outage into a total one. /ready runs a bounded `SELECT 1`. /metrics is exposed
 when a metrics registry is supplied.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -29,9 +30,11 @@ def build_health_app(client: TrinoClient, metrics: Any = None) -> Starlette:
 
     routes = [Route("/health", health), Route("/ready", ready)]
     if metrics is not None:
+
         async def metrics_route(_request):
             body, content_type = metrics.render()
             return Response(body, media_type=content_type)
+
         routes.append(Route("/metrics", metrics_route))
 
     return Starlette(routes=routes)

@@ -11,6 +11,7 @@ not become a leaked credential.
 a logger, which is what a container runtime collects. `InMemoryAudit` is for
 tests and for a product that wants to expose the join over HTTP.
 """
+
 from __future__ import annotations
 
 import json

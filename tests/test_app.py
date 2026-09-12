@@ -6,21 +6,33 @@ was ``sse``; every call on the served transport then ran under the service
 account. The guard must be mounted by the same code path for both, and a test
 must say so for each.
 """
+
 from __future__ import annotations
 
 from starlette.applications import Starlette
 
-from core.app import build_asgi_app, transports_supported
-from core.config import Config
-from core.middleware import AuthIdentityMiddleware
+from akko_mcp_trino.app import build_asgi_app, transports_supported
+from akko_mcp_trino.config import Config
+from akko_mcp_trino.middleware import AuthIdentityMiddleware
 
 
 def _config(transport: str) -> Config:
     return Config(
-        trino_host="h", trino_port=8080, trino_user="u", trino_catalog="c",
-        max_rows=100, read_only=True, auth_enabled=False, server_name="trino-mcp",
-        health_port=3001, jwks_url="", oidc_issuer="", oidc_audience="",
-        transport=transport, mcp_port=3000, auth_required=False,
+        trino_host="h",
+        trino_port=8080,
+        trino_user="u",
+        trino_catalog="c",
+        max_rows=100,
+        read_only=True,
+        auth_enabled=False,
+        server_name="trino-mcp",
+        health_port=3001,
+        jwks_url="",
+        oidc_issuer="",
+        oidc_audience="",
+        transport=transport,
+        mcp_port=3000,
+        auth_required=False,
     )
 
 
@@ -73,7 +85,7 @@ def test_strictness_follows_config():
 
 
 def test_entrypoint_imports_without_side_effects():
-    """``python -m core`` must be importable without starting anything.
+    """``python -m akko_mcp_trino`` must be importable without starting anything.
 
     Importing the module proves every name the glue refers to exists; it must
     not open a port or touch Trino, which is why ``main`` is only called under
@@ -81,15 +93,21 @@ def test_entrypoint_imports_without_side_effects():
     """
     import importlib
 
-    module = importlib.import_module("core.__main__")
+    module = importlib.import_module("akko_mcp_trino.__main__")
     assert callable(module.main)
 
 
 def test_agent_registry_and_discovery_are_wired_from_config():
     """The served app enforces X-Agent-Key and serves RFC 9728 when configured."""
-    cfg = Config(**{**_config("sse").__dict__, "auth_required": True,
-                    "resource_url": "https://mcp.example.com",
-                    "agent_keys": "cursor:k1", "oidc_issuer": "https://idp"})
+    cfg = Config(
+        **{
+            **_config("sse").__dict__,
+            "auth_required": True,
+            "resource_url": "https://mcp.example.com",
+            "agent_keys": "cursor:k1",
+            "oidc_issuer": "https://idp",
+        }
+    )
     app = build_asgi_app(cfg, _FakeMCP(), auth_provider=object())
     layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
     assert layer.kwargs["agents"].resolve("k1") == "cursor"
@@ -105,8 +123,14 @@ def test_malformed_agent_keys_refuse_to_start():
 
 
 def test_rate_limiter_is_wired_from_config():
-    cfg = Config(**{**_config("sse").__dict__, "rate_limit_user": 5, "rate_limit_agent": 50,
-                    "rate_limit_window_seconds": 30})
+    cfg = Config(
+        **{
+            **_config("sse").__dict__,
+            "rate_limit_user": 5,
+            "rate_limit_agent": 50,
+            "rate_limit_window_seconds": 30,
+        }
+    )
     app = build_asgi_app(cfg, _FakeMCP(), auth_provider=object())
     layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
     lim = layer.kwargs["limiter"]
@@ -114,8 +138,14 @@ def test_rate_limiter_is_wired_from_config():
 
 
 def test_revocation_check_is_wired_from_config():
-    cfg = Config(**{**_config("sse").__dict__, "introspection_url": "https://idp/introspect",
-                    "introspection_client_id": "mcp", "introspection_client_secret": "s"})
+    cfg = Config(
+        **{
+            **_config("sse").__dict__,
+            "introspection_url": "https://idp/introspect",
+            "introspection_client_id": "mcp",
+            "introspection_client_secret": "s",
+        }
+    )
     app = build_asgi_app(cfg, _FakeMCP(), auth_provider=object())
     layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
     assert layer.kwargs["revocation"] is not None

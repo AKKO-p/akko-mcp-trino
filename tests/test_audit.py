@@ -6,17 +6,25 @@ the tool, the user subject, the agent product, the token id (`jti`) and the
 outcome. The bearer itself is never in it: a leaked audit log must not become
 a leaked credential.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 
-from core.audit import AuditEvent, InMemoryAudit, LoggingAudit
+from akko_mcp_trino.audit import AuditEvent, InMemoryAudit, LoggingAudit
 
 
 def _event(**over) -> AuditEvent:
-    base = dict(request_id="req-1", tool="execute_query", subject="alice_admin",
-                agent="cursor", token_id="jti-9", ok=True, error="")
+    base = dict(
+        request_id="req-1",
+        tool="execute_query",
+        subject="alice_admin",
+        agent="cursor",
+        token_id="jti-9",
+        ok=True,
+        error="",
+    )
     base.update(over)
     return AuditEvent(**base)
 
@@ -24,8 +32,15 @@ def _event(**over) -> AuditEvent:
 def test_event_is_frozen_and_serialisable():
     e = _event()
     doc = e.as_dict()
-    assert doc == {"request_id": "req-1", "tool": "execute_query", "subject": "alice_admin",
-                   "agent": "cursor", "token_id": "jti-9", "ok": True, "error": ""}
+    assert doc == {
+        "request_id": "req-1",
+        "tool": "execute_query",
+        "subject": "alice_admin",
+        "agent": "cursor",
+        "token_id": "jti-9",
+        "ok": True,
+        "error": "",
+    }
 
 
 def test_event_has_no_field_that_could_hold_a_token():

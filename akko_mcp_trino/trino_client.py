@@ -1,4 +1,5 @@
 """Trino client: one connection, bounded execution, identity forwarded per query."""
+
 from __future__ import annotations
 
 import time

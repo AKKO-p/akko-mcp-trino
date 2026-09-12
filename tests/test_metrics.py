@@ -1,16 +1,30 @@
-"""core.metrics: isolated registry, TrinoClient instrumentation, /metrics route."""
+"""akko_mcp_trino.metrics: isolated registry, TrinoClient instrumentation, /metrics route."""
+
 from prometheus_client import CollectorRegistry
 from starlette.testclient import TestClient
 
-from core.config import Config
-from core.health import build_health_app
-from core.metrics import Metrics
-from core.trino_client import TrinoClient
+from akko_mcp_trino.config import Config
+from akko_mcp_trino.health import build_health_app
+from akko_mcp_trino.metrics import Metrics
+from akko_mcp_trino.trino_client import TrinoClient
 from tests.test_trino_client import _patch_connect
 
 _CFG = Config(
-    trino_host="h", trino_port=8080, trino_user="u", trino_catalog="c",
-    max_rows=100, read_only=True, auth_enabled=False, server_name="x", health_port=3001, jwks_url="", oidc_issuer="", oidc_audience="", transport="sse", mcp_port=3000, auth_required=False,
+    trino_host="h",
+    trino_port=8080,
+    trino_user="u",
+    trino_catalog="c",
+    max_rows=100,
+    read_only=True,
+    auth_enabled=False,
+    server_name="x",
+    health_port=3001,
+    jwks_url="",
+    oidc_issuer="",
+    oidc_audience="",
+    transport="sse",
+    mcp_port=3000,
+    auth_required=False,
 )
 
 
@@ -35,9 +49,13 @@ def test_query_increments_counters_and_latency(monkeypatch):
 
 def test_query_error_increments_error_counter(monkeypatch):
     m = Metrics(CollectorRegistry())
-    import core.trino_client as tc
-    monkeypatch.setattr(tc.trino.dbapi, "connect", lambda **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    import akko_mcp_trino.trino_client as tc
+
+    monkeypatch.setattr(
+        tc.trino.dbapi, "connect", lambda **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     import pytest
+
     with pytest.raises(RuntimeError):
         TrinoClient(_CFG, metrics=m).query("SELECT 1")
     assert _val(m, "mcp_trino_queries_total") == 1.0
@@ -54,6 +72,7 @@ def test_query_without_metrics_does_not_instrument(monkeypatch):
 def test_metrics_route_present_when_metrics_provided():
     m = Metrics(CollectorRegistry())
     from tests.test_tools import FakeClient
+
     app = build_health_app(FakeClient(), metrics=m)
     r = TestClient(app).get("/metrics")
     assert r.status_code == 200
@@ -62,5 +81,6 @@ def test_metrics_route_present_when_metrics_provided():
 
 def test_metrics_route_absent_without_metrics():
     from tests.test_tools import FakeClient
+
     app = build_health_app(FakeClient())
     assert TestClient(app).get("/metrics").status_code == 404

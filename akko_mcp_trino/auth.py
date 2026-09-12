@@ -5,6 +5,7 @@ It verifies the signature against the issuer's JWKS, the issuer, the audience
 and the expiry, and fails closed. `UnverifiedJwtAuth` stays in the module for
 local development and tests only; `build_auth` never selects it.
 """
+
 from __future__ import annotations
 
 import base64
@@ -16,6 +17,7 @@ from typing import Optional, Protocol
 @dataclass(frozen=True)
 class Principal:
     """A verified identity. `subject` is what gets forwarded to Trino as X-Trino-User."""
+
     subject: str
     roles: list = field(default_factory=list)
     email: str = ""
@@ -116,7 +118,9 @@ class JwksJwtAuth:
     local RSA key and no network. Any failure — signature, iss, aud, exp, missing
     token — yields None. Fail closed."""
 
-    def __init__(self, jwks_url: str, issuer: str, audience: str, *, jwks_client=None, algorithms=None):
+    def __init__(
+        self, jwks_url: str, issuer: str, audience: str, *, jwks_client=None, algorithms=None
+    ):
         self._issuer = issuer
         self._audience = audience
         self._algorithms = algorithms or ["RS256"]
@@ -124,6 +128,7 @@ class JwksJwtAuth:
             self._client = jwks_client
         else:  # pragma: no cover - network construction (PyJWKClient), proven by running it
             from jwt import PyJWKClient
+
             self._client = PyJWKClient(jwks_url)
 
     def verify(self, headers: dict) -> Optional[Principal]:
@@ -132,10 +137,14 @@ class JwksJwtAuth:
             return None
         try:
             import jwt as _jwt
+
             key = self._client.get_signing_key_from_jwt(token).key
             claims = _jwt.decode(
-                token, key, algorithms=self._algorithms,
-                issuer=self._issuer, audience=self._audience,
+                token,
+                key,
+                algorithms=self._algorithms,
+                issuer=self._issuer,
+                audience=self._audience,
             )
         except Exception:  # noqa: BLE001 — signature/iss/aud/exp invalide → fail-closed
             return None

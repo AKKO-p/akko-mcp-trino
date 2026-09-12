@@ -5,24 +5,35 @@ Cursor, Claude and VS Code look for protected-resource metadata at
 `WWW-Authenticate: Bearer` with a `resource_metadata` URL. Without both, a host
 cannot even start an auth flow; it just sees a refused request.
 """
+
 from __future__ import annotations
 
 import json
 
 import anyio
 
-from core.auth import Principal
-from core.config import Config
-from core.discovery import ProtectedResource, WELL_KNOWN_PATH
-from core.middleware import AuthIdentityMiddleware
+from akko_mcp_trino.config import Config
+from akko_mcp_trino.discovery import WELL_KNOWN_PATH, ProtectedResource
+from akko_mcp_trino.middleware import AuthIdentityMiddleware
 
 
 def _config(**over) -> Config:
     base = dict(
-        trino_host="h", trino_port=8080, trino_user="u", trino_catalog="c",
-        max_rows=100, read_only=True, auth_enabled=True, server_name="trino-mcp",
-        health_port=3001, jwks_url="https://idp/certs", oidc_issuer="https://idp/realms/data",
-        oidc_audience="data", transport="sse", mcp_port=3000, auth_required=True,
+        trino_host="h",
+        trino_port=8080,
+        trino_user="u",
+        trino_catalog="c",
+        max_rows=100,
+        read_only=True,
+        auth_enabled=True,
+        server_name="trino-mcp",
+        health_port=3001,
+        jwks_url="https://idp/certs",
+        oidc_issuer="https://idp/realms/data",
+        oidc_audience="data",
+        transport="sse",
+        mcp_port=3000,
+        auth_required=True,
         resource_url="https://mcp.example.com",
     )
     base.update(over)
@@ -49,12 +60,20 @@ async def _call_async(app, path="/mcp", headers=None):
     async def send(m):
         sent.append(m)
 
-    scope = {"type": "http", "method": "GET", "path": path,
-             "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]}
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": path,
+        "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+    }
     await app(scope, receive, send)
     start = next(m for m in sent if m["type"] == "http.response.start")
     body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
-    return start["status"], dict((k.decode(), v.decode()) for k, v in start.get("headers", [])), body
+    return (
+        start["status"],
+        dict((k.decode(), v.decode()) for k, v in start.get("headers", [])),
+        body,
+    )
 
 
 def _call(app, path="/mcp", headers=None):
@@ -76,8 +95,12 @@ def test_metadata_has_no_authorization_server_when_issuer_is_unknown():
 
 
 def test_well_known_is_served_without_a_token():
-    app = AuthIdentityMiddleware(_Down(), auth_provider=_Reject(), require_auth=True,
-                                 discovery=ProtectedResource.from_config(_config()))
+    app = AuthIdentityMiddleware(
+        _Down(),
+        auth_provider=_Reject(),
+        require_auth=True,
+        discovery=ProtectedResource.from_config(_config()),
+    )
     status, headers, body = _call(app, WELL_KNOWN_PATH)
     assert status == 200
     assert headers.get("content-type", "").startswith("application/json")
@@ -85,8 +108,12 @@ def test_well_known_is_served_without_a_token():
 
 
 def test_401_carries_www_authenticate_with_resource_metadata():
-    app = AuthIdentityMiddleware(_Down(), auth_provider=_Reject(), require_auth=True,
-                                 discovery=ProtectedResource.from_config(_config()))
+    app = AuthIdentityMiddleware(
+        _Down(),
+        auth_provider=_Reject(),
+        require_auth=True,
+        discovery=ProtectedResource.from_config(_config()),
+    )
     status, headers, _ = _call(app, "/mcp")
     assert status == 401
     www = headers.get("www-authenticate", "")

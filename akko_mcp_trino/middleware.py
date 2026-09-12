@@ -1,6 +1,6 @@
 """ASGI identity middleware: binds the user and the agent product on every request.
 
-Mounted on the transport app FastMCP serves — see `core.app`, which mounts it
+Mounted on the transport app FastMCP serves — see `akko_mcp_trino.app`, which mounts it
 on whichever transport is configured. Every tool call is an HTTP request
 carrying an Authorization header. The middleware verifies it through the
 AuthProvider, stores the Principal in the ContextVar the tools read, and clears
@@ -16,10 +16,10 @@ Two more concerns live here because they are part of the same door:
   every 401 carries `WWW-Authenticate` pointing at it, so an MCP host knows
   where to authenticate instead of seeing a bare refusal;
 * quotas per user and per agent product, checked after authentication and
-  refused with 429 and `Retry-After` — see `core.ratelimit`;
+  refused with 429 and `Retry-After` — see `akko_mcp_trino.ratelimit`;
 * optional revocation through RFC 7662 introspection, refused with 401
   `revoked`, failing closed with 503 when the issuer cannot answer — see
-  `core.revocation`.
+  `akko_mcp_trino.revocation`.
 
 Every request gets a request id — honoured from `X-Request-Id` when the edge
 sent one, generated otherwise — echoed on the response and exposed to the
@@ -30,6 +30,7 @@ IMPORTANT: this is a PURE ASGI middleware, not BaseHTTPMiddleware. The latter
 runs the downstream in a separate task, which BREAKS ContextVar propagation to
 the tools — the identity would never reach them.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -37,13 +38,13 @@ from typing import Any
 
 from starlette.responses import JSONResponse
 
-from .audit import REQUEST_ID_HEADER, reset_current_request_id, set_current_request_id
 from .agents import AGENT_KEY_HEADER, AgentRegistry, reset_current_agent, set_current_agent
+from .audit import REQUEST_ID_HEADER, reset_current_request_id, set_current_request_id
+from .auth import extract_bearer_token
 from .discovery import WELL_KNOWN_PATH, ProtectedResource
 from .identity import reset_current_principal, set_current_principal
 from .ratelimit import RateLimiter
 from .revocation import IntrospectionCheck, IntrospectionError
-from .auth import extract_bearer_token
 
 
 class AuthIdentityMiddleware:
@@ -140,7 +141,9 @@ class AuthIdentityMiddleware:
         headers = {"X-Reason": reason}
         if self._discovery is not None:
             headers["WWW-Authenticate"] = self._discovery.www_authenticate()
-        await JSONResponse({"error": reason}, status_code=401, headers=headers)(scope, receive, send)
+        await JSONResponse({"error": reason}, status_code=401, headers=headers)(
+            scope, receive, send
+        )
 
 
 def _echoing(send, request_id: str):

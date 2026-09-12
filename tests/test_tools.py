@@ -2,11 +2,12 @@
 
 Same outputs, same read-only guard, identity forwarded and never forgeable.
 """
+
 import json
 
 import pytest
 
-from core.tools import register_query_tools
+from akko_mcp_trino.tools import register_query_tools
 
 
 class FakeMCP:
@@ -19,6 +20,7 @@ class FakeMCP:
         def deco(fn):
             self.tools[fn.__name__] = fn
             return fn
+
         return deco
 
 
@@ -58,12 +60,18 @@ def test_tool_annotations_are_classes_not_strings():
 def test_exactly_the_five_tools_are_registered():
     mcp, _ = _registered()
     assert set(mcp.tools) == {
-        "list_catalogs", "list_schemas", "list_tables", "describe_table", "execute_query",
+        "list_catalogs",
+        "list_schemas",
+        "list_tables",
+        "describe_table",
+        "execute_query",
     }
 
 
 def test_list_catalogs_returns_json_array():
-    mcp, _ = _registered(result={"columns": ["Catalog"], "rows": [["iceberg"], ["tpch"]], "row_count": 2})
+    mcp, _ = _registered(
+        result={"columns": ["Catalog"], "rows": [["iceberg"], ["tpch"]], "row_count": 2}
+    )
     assert json.loads(mcp.tools["list_catalogs"]()) == ["iceberg", "tpch"]
 
 
@@ -76,7 +84,9 @@ def test_list_schemas_validates_identifier():
 
 
 def test_list_tables_validates_both_identifiers():
-    mcp, client = _registered(result={"columns": ["Table"], "rows": [["scores"], ["alerts"]], "row_count": 2})
+    mcp, client = _registered(
+        result={"columns": ["Table"], "rows": [["scores"], ["alerts"]], "row_count": 2}
+    )
     assert json.loads(mcp.tools["list_tables"]("iceberg", "fraud")) == ["scores", "alerts"]
     assert "SHOW TABLES FROM iceberg.fraud" in client.calls[-1][0]
     with pytest.raises(ValueError):
@@ -84,7 +94,9 @@ def test_list_tables_validates_both_identifiers():
 
 
 def test_describe_table_builds_qualified_name():
-    mcp, client = _registered(result={"columns": ["Column", "Type"], "rows": [["id", "bigint"]], "row_count": 1})
+    mcp, client = _registered(
+        result={"columns": ["Column", "Type"], "rows": [["id", "bigint"]], "row_count": 1}
+    )
     out = json.loads(mcp.tools["describe_table"]("iceberg", "fraud", "scores"))
     assert out["columns"] == ["Column", "Type"]
     assert "DESCRIBE iceberg.fraud.scores" in client.calls[-1][0]
@@ -116,8 +128,9 @@ def test_execute_query_surfaces_error_as_json():
 
 
 def test_execute_query_propagates_authenticated_identity_not_a_param():
-    from core import identity
-    from core.auth import Principal
+    from akko_mcp_trino import identity
+    from akko_mcp_trino.auth import Principal
+
     mcp, client = _registered(result={"columns": [], "rows": [], "row_count": 0})
     # identity = the verified Principal in the context, not a tool parameter
     tok = identity.set_current_principal(Principal(subject="dave_steward"))
@@ -137,15 +150,20 @@ def test_execute_query_falls_back_to_service_account_when_no_identity():
 def test_execute_query_no_longer_exposes_spoofable_user_param():
     mcp, _ = _registered()
     import inspect
+
     assert "user" not in inspect.signature(mcp.tools["execute_query"]).parameters
 
 
 # ---- audit: every tool call leaves one record, never the token ----
 
-from core.agents import reset_current_agent, set_current_agent  # noqa: E402
-from core.audit import InMemoryAudit, reset_current_request_id, set_current_request_id  # noqa: E402
-from core.auth import Principal  # noqa: E402
-from core.identity import reset_current_principal, set_current_principal  # noqa: E402
+from akko_mcp_trino.agents import reset_current_agent, set_current_agent  # noqa: E402
+from akko_mcp_trino.audit import (  # noqa: E402
+    InMemoryAudit,
+    reset_current_request_id,
+    set_current_request_id,
+)
+from akko_mcp_trino.auth import Principal  # noqa: E402
+from akko_mcp_trino.identity import reset_current_principal, set_current_principal  # noqa: E402
 
 
 def _registered_with_audit(read_only=True, **client_kw):
@@ -173,15 +191,32 @@ def test_execute_query_records_who_what_and_from_which_product():
     _in_request(lambda: mcp.tools["execute_query"]("SELECT 1"))
     assert len(audit.events) == 1
     e = audit.events[0]
-    assert (e.request_id, e.tool, e.subject, e.agent, e.token_id, e.ok) == \
-        ("req-1", "execute_query", "alice_admin", "cursor", "jti-9", True)
+    assert (e.request_id, e.tool, e.subject, e.agent, e.token_id, e.ok) == (
+        "req-1",
+        "execute_query",
+        "alice_admin",
+        "cursor",
+        "jti-9",
+        True,
+    )
 
 
 def test_every_tool_is_audited():
     mcp, _, audit = _registered_with_audit()
-    _in_request(lambda: (mcp.tools["list_catalogs"](), mcp.tools["list_schemas"]("c"),
-                         mcp.tools["list_tables"]("c", "s"), mcp.tools["describe_table"]("c", "s", "t")))
-    assert [e.tool for e in audit.events] == ["list_catalogs", "list_schemas", "list_tables", "describe_table"]
+    _in_request(
+        lambda: (
+            mcp.tools["list_catalogs"](),
+            mcp.tools["list_schemas"]("c"),
+            mcp.tools["list_tables"]("c", "s"),
+            mcp.tools["describe_table"]("c", "s", "t"),
+        )
+    )
+    assert [e.tool for e in audit.events] == [
+        "list_catalogs",
+        "list_schemas",
+        "list_tables",
+        "describe_table",
+    ]
 
 
 def test_refused_write_is_audited_as_failure():
@@ -213,3 +248,14 @@ def test_outside_a_request_the_record_has_no_identity():
 def test_no_audit_sink_means_no_record_and_no_error():
     mcp, _ = _registered()
     assert mcp.tools["list_catalogs"]()
+
+
+def test_trailing_semicolon_is_stripped_before_trino():
+    """Models end SQL with `;` by habit; Trino refuses it with a syntax error.
+    Seen live with a Mistral agent that retried the same statement twelve times.
+    One trailing semicolon is dropped; stacked statements are still refused."""
+    mcp, client = _registered()
+    mcp.tools["execute_query"]("SELECT 1 ;  ")
+    assert client.calls[-1][0] == "SELECT 1"
+    out = json.loads(mcp.tools["execute_query"]("SELECT 1; SELECT 2"))
+    assert "error" in out and len(client.calls) == 1

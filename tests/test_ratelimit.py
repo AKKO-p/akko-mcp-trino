@@ -6,13 +6,14 @@ by the agent product. A limit of zero disables that window. The refusal is
 host can back off and an operator can find it in the audit join. The clock is
 injectable so the tests are deterministic.
 """
+
 from __future__ import annotations
 
 import anyio
 
-from core.auth import Principal
-from core.middleware import AuthIdentityMiddleware
-from core.ratelimit import RateLimiter, SlidingWindow
+from akko_mcp_trino.auth import Principal
+from akko_mcp_trino.middleware import AuthIdentityMiddleware
+from akko_mcp_trino.ratelimit import RateLimiter, SlidingWindow
 
 
 class _Clock:
@@ -55,8 +56,13 @@ def test_zero_limit_disables_the_window():
 
 
 def test_limiter_from_env_reads_both_limits():
-    lim = RateLimiter.from_env({"MCP_RATE_LIMIT_USER": "10", "MCP_RATE_LIMIT_AGENT": "100",
-                                "MCP_RATE_LIMIT_WINDOW_SECONDS": "30"})
+    lim = RateLimiter.from_env(
+        {
+            "MCP_RATE_LIMIT_USER": "10",
+            "MCP_RATE_LIMIT_AGENT": "100",
+            "MCP_RATE_LIMIT_WINDOW_SECONDS": "30",
+        }
+    )
     assert lim.enabled
     assert (lim.user.limit, lim.agent.limit, lim.user.seconds) == (10, 100, 30)
 
@@ -69,24 +75,29 @@ def test_limiter_is_disabled_when_unset():
 
 def test_limiter_checks_user_then_agent_and_reports_the_longer_wait():
     clock = _Clock()
-    lim = RateLimiter(user=SlidingWindow(limit=1, seconds=60, clock=clock),
-                      agent=SlidingWindow(limit=2, seconds=10, clock=clock))
+    lim = RateLimiter(
+        user=SlidingWindow(limit=1, seconds=60, clock=clock),
+        agent=SlidingWindow(limit=2, seconds=10, clock=clock),
+    )
     assert lim.check(subject="alice", agent="cursor") == (True, 0)
     assert lim.check(subject="alice", agent="cursor") == (False, 60)  # user window is full
-    assert lim.check(subject="bob", agent="cursor") == (True, 0)      # agent has one slot left
+    assert lim.check(subject="bob", agent="cursor") == (True, 0)  # agent has one slot left
     assert lim.check(subject="carol", agent="cursor") == (False, 10)  # agent window is full
 
 
 def test_limiter_skips_a_window_whose_key_is_unknown():
     """No subject (auth off) means no per-user count; the agent window still applies."""
     clock = _Clock()
-    lim = RateLimiter(user=SlidingWindow(limit=1, seconds=60, clock=clock),
-                      agent=SlidingWindow(limit=1, seconds=60, clock=clock))
+    lim = RateLimiter(
+        user=SlidingWindow(limit=1, seconds=60, clock=clock),
+        agent=SlidingWindow(limit=1, seconds=60, clock=clock),
+    )
     assert lim.check(subject=None, agent="cursor") == (True, 0)
     assert lim.check(subject=None, agent="cursor") == (False, 60)
 
 
 # ---- through the guard ----
+
 
 class _Auth:
     def verify(self, headers):
@@ -112,8 +123,12 @@ async def _call_async(app, headers=None):
     async def send(m):
         sent.append(m)
 
-    scope = {"type": "http", "method": "POST", "path": "/mcp",
-             "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]}
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+    }
     await app(scope, receive, send)
     start = next(m for m in sent if m["type"] == "http.response.start")
     return start["status"], dict((k.decode(), v.decode()) for k, v in start.get("headers", []))
@@ -125,8 +140,10 @@ def _call(app, headers=None):
 
 def test_guard_refuses_with_429_retry_after_and_reason():
     clock = _Clock()
-    lim = RateLimiter(user=SlidingWindow(limit=1, seconds=60, clock=clock),
-                      agent=SlidingWindow(limit=0, seconds=60, clock=clock))
+    lim = RateLimiter(
+        user=SlidingWindow(limit=1, seconds=60, clock=clock),
+        agent=SlidingWindow(limit=0, seconds=60, clock=clock),
+    )
     down = _Down()
     app = AuthIdentityMiddleware(down, auth_provider=_Auth(), require_auth=True, limiter=lim)
     assert _call(app, {"Authorization": "Bearer x"})[0] == 200
@@ -141,8 +158,10 @@ def test_guard_refuses_with_429_retry_after_and_reason():
 def test_guard_counts_after_authentication_not_before():
     """An unauthenticated request is refused with 401 and does not consume a slot."""
     clock = _Clock()
-    lim = RateLimiter(user=SlidingWindow(limit=1, seconds=60, clock=clock),
-                      agent=SlidingWindow(limit=0, seconds=60, clock=clock))
+    lim = RateLimiter(
+        user=SlidingWindow(limit=1, seconds=60, clock=clock),
+        agent=SlidingWindow(limit=0, seconds=60, clock=clock),
+    )
 
     class _Reject:
         def verify(self, headers):

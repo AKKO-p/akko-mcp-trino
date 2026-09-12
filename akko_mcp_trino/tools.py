@@ -12,7 +12,7 @@ from typing import Any, Callable
 from .agents import current_agent
 from .audit import AuditEvent, current_request_id
 from .identity import current_principal, current_subject
-from .sql_guard import is_read_only_sql, validate_identifier
+from .sql_guard import is_read_only_sql, normalize_sql, validate_identifier
 from .trino_client import TrinoClient
 
 
@@ -37,15 +37,17 @@ def _audited(audit: Any, fn: Callable[..., str]) -> Callable[..., str]:
             return out
         finally:
             principal = current_principal()
-            audit.record(AuditEvent(
-                request_id=current_request_id() or "",
-                tool=fn.__name__,
-                subject=principal.subject if principal else "",
-                agent=current_agent() or "",
-                token_id=principal.token_id if principal else "",
-                ok=ok,
-                error=error,
-            ))
+            audit.record(
+                AuditEvent(
+                    request_id=current_request_id() or "",
+                    tool=fn.__name__,
+                    subject=principal.subject if principal else "",
+                    agent=current_agent() or "",
+                    token_id=principal.token_id if principal else "",
+                    ok=ok,
+                    error=error,
+                )
+            )
 
     return wrapped
 
@@ -55,13 +57,14 @@ def register_query_tools(
 ) -> None:
     """Register the five generic Trino tools on the FastMCP instance `mcp`.
 
-    `audit`, when given, receives one AuditEvent per call (see `core.audit`)."""
+    `audit`, when given, receives one AuditEvent per call (see `akko_mcp_trino.audit`)."""
 
     def tool():
         register = mcp.tool()
 
         def deco(fn):
             return register(_audited(audit, fn))
+
         return deco
 
     @tool()
@@ -103,8 +106,11 @@ def register_query_tools(
         # Identity comes from the VERIFIED Principal (X-Trino-User), never from a
         # parameter the agent supplies — that would be forgeable. None falls back
         # to the service account.
+        sql = normalize_sql(sql)
         if read_only and not is_read_only_sql(sql):
-            return json.dumps({"error": "Read-only mode: only SELECT/SHOW/DESCRIBE/EXPLAIN queries allowed"})
+            return json.dumps(
+                {"error": "Read-only mode: only SELECT/SHOW/DESCRIBE/EXPLAIN queries allowed"}
+            )
         try:
             return json.dumps(client.query(sql, user=current_subject()))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent

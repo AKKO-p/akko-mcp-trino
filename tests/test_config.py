@@ -1,16 +1,33 @@
-"""core.config: every setting comes from the environment, with neutral defaults."""
+"""akko_mcp_trino.config: every setting comes from the environment, with neutral defaults."""
+
 import pytest
 
-from core.config import Config
+from akko_mcp_trino.config import Config
 
 _ENV_KEYS = [
-    "TRINO_HOST", "TRINO_PORT", "TRINO_USER", "TRINO_CATALOG",
-    "TRINO_MAX_ROWS", "TRINO_READ_ONLY", "MCP_AUTH_ENABLED",
-    "MCP_SERVER_NAME", "MCP_HEALTH_PORT",
-    "MCP_JWKS_URL", "MCP_OIDC_ISSUER", "MCP_OIDC_AUDIENCE",
-    "MCP_TRANSPORT", "MCP_PORT", "MCP_AUTH_REQUIRED", "MCP_RESOURCE_URL", "MCP_AGENT_KEYS",
-    "MCP_RATE_LIMIT_USER", "MCP_RATE_LIMIT_AGENT", "MCP_RATE_LIMIT_WINDOW_SECONDS",
-    "MCP_INTROSPECTION_URL", "MCP_INTROSPECTION_CLIENT_ID", "MCP_INTROSPECTION_CLIENT_SECRET",
+    "TRINO_HOST",
+    "TRINO_PORT",
+    "TRINO_USER",
+    "TRINO_CATALOG",
+    "TRINO_MAX_ROWS",
+    "TRINO_READ_ONLY",
+    "MCP_AUTH_ENABLED",
+    "MCP_SERVER_NAME",
+    "MCP_HEALTH_PORT",
+    "MCP_JWKS_URL",
+    "MCP_OIDC_ISSUER",
+    "MCP_OIDC_AUDIENCE",
+    "MCP_TRANSPORT",
+    "MCP_PORT",
+    "MCP_AUTH_REQUIRED",
+    "MCP_RESOURCE_URL",
+    "MCP_AGENT_KEYS",
+    "MCP_RATE_LIMIT_USER",
+    "MCP_RATE_LIMIT_AGENT",
+    "MCP_RATE_LIMIT_WINDOW_SECONDS",
+    "MCP_INTROSPECTION_URL",
+    "MCP_INTROSPECTION_CLIENT_ID",
+    "MCP_INTROSPECTION_CLIENT_SECRET",
     "MCP_INTROSPECTION_TTL_SECONDS",
 ]
 
@@ -89,7 +106,9 @@ def test_resource_url_and_agent_keys_env(monkeypatch):
     monkeypatch.setenv("MCP_RESOURCE_URL", "https://mcp.example.com/")
     monkeypatch.setenv("MCP_AGENT_KEYS", "cursor:k1")
     c = Config.from_env()
-    assert c.resource_url == "https://mcp.example.com", "trailing slash would double in the metadata URL"
+    assert c.resource_url == "https://mcp.example.com", (
+        "trailing slash would double in the metadata URL"
+    )
     assert c.agent_keys == "cursor:k1"
 
 
@@ -117,8 +136,12 @@ def test_introspection_env(monkeypatch):
     monkeypatch.setenv("MCP_INTROSPECTION_CLIENT_SECRET", "s")
     monkeypatch.setenv("MCP_INTROSPECTION_TTL_SECONDS", "10")
     c = Config.from_env()
-    assert (c.introspection_url, c.introspection_client_id, c.introspection_client_secret,
-            c.introspection_ttl_seconds) == ("https://idp/introspect", "mcp", "s", 10)
+    assert (
+        c.introspection_url,
+        c.introspection_client_id,
+        c.introspection_client_secret,
+        c.introspection_ttl_seconds,
+    ) == ("https://idp/introspect", "mcp", "s", 10)
 
 
 def test_introspection_defaults_off():

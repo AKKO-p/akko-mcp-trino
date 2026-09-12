@@ -7,6 +7,7 @@ start an auth flow. The document names only what the configuration says:
 ``authorization_servers`` is empty when no issuer is configured, because a
 guessed IdP is a trap, not a convenience.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,7 +25,9 @@ class ProtectedResource:
 
     @staticmethod
     def from_config(config: Config) -> "ProtectedResource":
-        return ProtectedResource(resource=config.resource_url.rstrip("/"), issuer=config.oidc_issuer)
+        return ProtectedResource(
+            resource=config.resource_url.rstrip("/"), issuer=config.oidc_issuer
+        )
 
     def document(self) -> dict:
         return {

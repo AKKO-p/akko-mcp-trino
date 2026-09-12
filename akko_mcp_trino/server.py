@@ -4,6 +4,7 @@
 five generic tools, then applies any extra tool registrars a product wants to
 add. That registrar hook is the only extension point, and it is deliberate.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Tuple
@@ -16,10 +17,13 @@ from .trino_client import TrinoClient
 ToolRegistrar = Callable[[Any, TrinoClient], None]
 
 
-def _default_mcp_factory(name: str):  # pragma: no cover - production factory (real FastMCP), proven by running it
+def _default_mcp_factory(
+    name: str,
+):  # pragma: no cover - production factory (real FastMCP), proven by running it
     # Lazy import: FastMCP is only needed for real assembly, which keeps
     # build_server testable through an injected mcp_factory.
     from mcp.server.fastmcp import FastMCP
+
     return FastMCP(name)
 
 

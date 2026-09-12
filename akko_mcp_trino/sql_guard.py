@@ -5,6 +5,7 @@ by looking at the first keyword: it rejects multi-statement input, a WITH that
 wraps a write, and side-effecting commands. Anything that cannot be parsed is
 refused. Fail closed.
 """
+
 from __future__ import annotations
 
 import re
@@ -21,8 +22,17 @@ _READ_TYPES = (exp.Select, exp.Union, exp.Describe, exp.Pragma)
 # Checking only the root once let ``WITH w AS (DELETE FROM t) SELECT 1``
 # through (found by the live adversarial proof, 12 September 2026).
 _WRITE_TYPES = (
-    exp.Insert, exp.Update, exp.Delete, exp.Merge, exp.Create, exp.Drop,
-    exp.Alter, exp.TruncateTable, exp.Grant, exp.Command, exp.Set,
+    exp.Insert,
+    exp.Update,
+    exp.Delete,
+    exp.Merge,
+    exp.Create,
+    exp.Drop,
+    exp.Alter,
+    exp.TruncateTable,
+    exp.Grant,
+    exp.Command,
+    exp.Set,
 )
 # SHOW/EXPLAIN/DESC parse as a generic `Command` (sqlglot does not structure
 # them); they are allowed by leading keyword, reads only.
@@ -39,6 +49,19 @@ def safe_sql_string(text: str) -> str:
     text = text.replace("\\", "\\\\")
     text = text.replace("'", "''")
     return text
+
+
+def normalize_sql(sql: str) -> str:
+    """Trim the statement and drop one trailing semicolon.
+
+    Models end SQL with ``;`` by habit and Trino refuses it with a syntax
+    error. Only one trailing terminator is removed; stacked statements are
+    still refused by ``is_read_only_sql``.
+    """
+    s = sql.strip()
+    if s.endswith(";"):
+        s = s[:-1].rstrip()
+    return s
 
 
 def validate_identifier(name: str, label: str = "identifier") -> str:

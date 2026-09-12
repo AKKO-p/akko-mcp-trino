@@ -3,6 +3,7 @@
 Counts Trino queries, errors and latency; exposed on /metrics by the health app.
 A dedicated `CollectorRegistry` avoids global state shared across instances and tests.
 """
+
 from __future__ import annotations
 
 from prometheus_client import (

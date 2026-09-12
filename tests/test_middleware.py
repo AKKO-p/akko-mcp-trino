@@ -1,15 +1,16 @@
-"""core.middleware: per-request JWT verification and ContextVar propagation (pure ASGI).
+"""akko_mcp_trino.middleware: per-request JWT verification and ContextVar propagation (pure ASGI).
 
 Proves the identity set by the middleware IS visible in the endpoint (the
 BaseHTTPMiddleware separate-task trap is avoided), and the strict mode (401)."""
+
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from core.auth import Principal
-from core.identity import current_subject
-from core.middleware import AuthIdentityMiddleware
+from akko_mcp_trino.auth import Principal
+from akko_mcp_trino.identity import current_subject
+from akko_mcp_trino.middleware import AuthIdentityMiddleware
 
 
 class _FakeAuth:
@@ -27,7 +28,9 @@ def _client(auth_provider, require_auth=False):
         return JSONResponse({"subject": current_subject()})  # read INSIDE the request
 
     app = Starlette(routes=[Route("/whoami", whoami)])
-    app.add_middleware(AuthIdentityMiddleware, auth_provider=auth_provider, require_auth=require_auth)
+    app.add_middleware(
+        AuthIdentityMiddleware, auth_provider=auth_provider, require_auth=require_auth
+    )
     return TestClient(app)
 
 
@@ -37,7 +40,9 @@ def test_no_provider_subject_is_none():
 
 def test_provider_principal_visible_in_endpoint():
     # the point: the ContextVar set by the pure ASGI middleware reaches the endpoint
-    assert _client(_FakeAuth(Principal(subject="carol"))).get("/whoami").json()["subject"] == "carol"
+    assert (
+        _client(_FakeAuth(Principal(subject="carol"))).get("/whoami").json()["subject"] == "carol"
+    )
 
 
 def test_provider_receives_request_headers():
@@ -76,7 +81,7 @@ def test_non_http_scope_passes_through():
 
 # ---- request id: assigned or honoured, echoed, visible inside the request ----
 
-from core.audit import current_request_id  # noqa: E402
+from akko_mcp_trino.audit import current_request_id  # noqa: E402
 
 
 def _client_with_request_id(auth_provider=None):
@@ -102,7 +107,9 @@ def test_request_id_is_generated_and_echoed_otherwise():
 
 
 def test_request_id_is_on_the_401_too():
-    r = _client(_FakeAuth(None), require_auth=True).get("/whoami", headers={"X-Request-Id": "edge-7"})
+    r = _client(_FakeAuth(None), require_auth=True).get(
+        "/whoami", headers={"X-Request-Id": "edge-7"}
+    )
     assert r.status_code == 401 and r.headers["x-request-id"] == "edge-7"
 
 

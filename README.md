@@ -1,28 +1,77 @@
+<p align="center">
+  <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
+  <img src="https://img.shields.io/badge/tests-173%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
+  <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
+  <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351%20%C2%B7%20tested%20483-blue" alt="Trino">
+  <img src="https://img.shields.io/badge/MCP-1.8%20%C2%B7%20sse%20%7C%20streamable--http-blue" alt="MCP">
+  <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
+  <img src="https://img.shields.io/badge/code%20style-ruff-000000" alt="Ruff">
+  <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
+</p>
+
 # akko-mcp-trino
 
-A governed [MCP](https://modelcontextprotocol.io) server for Trino. Every tool
-call an agent makes carries the identity of the person it acts for; the
-decision on what that person may read is taken inside Trino, by the policy
-engine you already run (OPA, Ranger, or Trino's own access control). The
-server never reads on the user's behalf with a service account.
+**Give your AI agents access to Trino without giving them your data.**
 
-- Apache 2.0, Python 3.12, no product dependency.
-- Five read tools. Writes are refused before they reach Trino.
-- Works with any OIDC provider that publishes a JWKS.
-- 172 tests, 100 % coverage, proven live against Trino behind Keycloak and OPA.
+akko-mcp-trino is a governed [MCP](https://modelcontextprotocol.io) server for
+Trino. Every tool call an agent makes carries the identity of the person it
+acts for; what that person may read is decided inside Trino, by the policy
+engine you already run (OPA, Ranger, or Trino's own access control). The server
+never reads on the user's behalf with a service account, and it never decides
+access on its own.
+
+## Why
+
+Most MCP servers for SQL engines connect with one technical account. Every
+agent, every user, every prompt then reads with the same broad rights, and the
+only thing between a prompt injection and your customer table is the model's
+good will.
+
+This server takes the opposite stance. The agent brings the user's token. The
+token becomes `X-Trino-User`. Trino applies that user's catalog scope, row
+filters and column masks, exactly as it does for a BI tool or a notebook.
+
+Same question, same server, two users:
+
+```
+$ python examples/agent.py "Give me three customer e-mails with their country"
+
+as alice_admin     marie.martin0@gmail.com, FR   thomas.devries1@outlook.com, DE   léa.dubois2@proton.me, ES
+as carol_analyst   ***@gmail.com, FR             ***@outlook.com, FR              ***@proton.me, FR
+```
+
+That run is real: a Mistral model driving the tools, on a Trino behind
+Keycloak and OPA. The model did not know carol was restricted; it did not need
+to.
+
+## Highlights
+
+- **Identity, end to end.** Verified JWT (JWKS, issuer, audience, expiry) → `X-Trino-User`. No impersonation without a verified identity.
+- **Read-only by construction.** SQL is parsed into an AST and refused if a write appears anywhere in the tree, CTEs and subqueries included.
+- **Two principals.** `X-Agent-Key` names the calling product (Cursor, Claude, your own agent) for quotas and audit; it is never a user.
+- **Standard discovery.** RFC 9728 metadata and `WWW-Authenticate` on every `401`, so hosts know where to log in.
+- **Quotas, revocation, audit.** Per-user and per-agent limits, optional RFC 7662 introspection, one JSON audit line per call keyed by `X-Request-Id` — never the token.
+- **Any OIDC provider, any MCP host, any model.** Keycloak, Entra ID, Okta… Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
+- **Small and proven.** 1 300 lines, 173 tests at 100 % coverage, a product-neutral guard in CI, and three live proofs (functional, adversarial, agent-driven) on a real cluster.
 
 ## Contents
 
 1. [How it works](#how-it-works)
-2. [Prerequisites](#prerequisites)
-3. [Install and run](#install-and-run)
-4. [Connect an MCP host](#connect-an-mcp-host)
-5. [The tools](#the-tools)
-6. [What happens on a request](#what-happens-on-a-request)
-7. [Configuration](#configuration)
-8. [Operations](#operations)
-9. [Development](#development)
-10. [Design notes](#design-notes)
+2. [Compatibility](#compatibility)
+3. [Prerequisites](#prerequisites)
+4. [Install and run](#install-and-run)
+5. [Connect an MCP host](#connect-an-mcp-host)
+6. [Use it from an agent](#use-it-from-an-agent)
+7. [The tools](#the-tools)
+8. [What happens on a request](#what-happens-on-a-request)
+9. [Configuration](#configuration)
+10. [Operations](#operations)
+11. [Development](#development)
+12. [Design notes](#design-notes)
+13. [Contributing](#contributing)
+14. [About AKKO](#about-akko)
 
 ## How it works
 
@@ -55,6 +104,18 @@ the user could have read from any other client.
 Two people asking the same question through the same server get two different
 answers. That is the whole point.
 
+## Compatibility
+
+| | Supported | Tested |
+|---|---|---|
+| Python | 3.12, 3.13 | 3.12, 3.13 (CI) |
+| Trino | 351 and later (the `X-Trino-User` protocol header) | 483, behind OPA |
+| Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA with row filters and column masks |
+| Identity providers | any OIDC provider publishing a JWKS | Keycloak 26 |
+| MCP | protocol 2025-03-26 via the official `mcp` SDK 1.8; transports `sse` and `streamable-http` | both transports, official SDK client |
+| MCP hosts | anything that sends a bearer header: Cursor, Claude Desktop, VS Code, the Python SDK | Python SDK, the example agent |
+| Models | any, the server never talks to a model | Mistral Small 3.2 through OpenRouter, driving the tools |
+
 ## Prerequisites
 
 | You need | Why | Notes |
@@ -73,11 +134,20 @@ server.
 ## Install and run
 
 ```bash
+pip install akko-mcp-trino
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/AKKO-p/akko-mcp-trino.git
 cd akko-mcp-trino
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
+
+The package installs a Python module (`akko_mcp_trino`) and a command
+(`akko-mcp-trino`); `python -m akko_mcp_trino` is the same entrypoint.
 
 Point it at your Trino and your identity provider, then serve:
 
@@ -93,7 +163,7 @@ export MCP_JWKS_URL=https://idp.example.com/realms/data/protocol/openid-connect/
 export MCP_OIDC_ISSUER=https://idp.example.com/realms/data
 export MCP_OIDC_AUDIENCE=data-platform
 
-python -m core
+python -m akko_mcp_trino
 ```
 
 You should see:
@@ -116,18 +186,10 @@ that way where the data matters.
 
 ### Container
 
-```dockerfile
-FROM python:3.12-slim
-WORKDIR /app
-COPY pyproject.toml README.md ./
-COPY core ./core
-RUN pip install --no-cache-dir .
-EXPOSE 3000 3001
-CMD ["python", "-m", "core"]
-```
-
-Build the image with your usual tooling and run it with the same environment
-variables, publishing ports `3000` (MCP) and `3001` (health).
+A [Dockerfile](Dockerfile) ships with the repository (non-root, health check,
+OCI labels); releases publish the image to `ghcr.io/akko-p/akko-mcp-trino`.
+Run it with the same environment variables, publishing ports `3000` (MCP) and
+`3001` (health).
 
 ## Connect an MCP host
 
@@ -171,6 +233,26 @@ anyio.run(main, "<token>")
 
 Set `MCP_TRANSPORT=streamable-http` to serve `/mcp` instead of `/sse`; the
 guard is the same on both.
+
+## Use it from an agent
+
+[`examples/agent.py`](examples/agent.py) is a complete agent in eighty lines:
+any OpenAI-compatible model (Mistral on La Plateforme, through OpenRouter or
+LiteLLM; or any other provider), the MCP tools, the user's token. The model
+never sees the token; the server receives it on every tool call.
+
+```bash
+pip install akko-mcp-trino openai
+export LLM_BASE_URL=https://api.mistral.ai/v1
+export LLM_API_KEY=...
+export LLM_MODEL=mistral-small-latest
+export MCP_URL=http://localhost:3000/sse
+export USER_TOKEN=<the user's access token>
+python examples/agent.py "Which catalogs can I see, and what is in them?"
+```
+
+Run it twice with two users' tokens and compare. The
+[examples](examples/README.md) folder has the details.
 
 ## The tools
 
@@ -359,11 +441,17 @@ and `mcp_trino_query_duration_seconds`.
 
 ```bash
 pip install -e ".[dev]"
-pytest                      # 172 tests; coverage below 100 % fails the run
-bash lint-vendor-neutral.sh # fails if core/ imports anything product-specific
+ruff check akko_mcp_trino tests && ruff format akko_mcp_trino tests
+bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
+pytest                        # 173 tests; coverage below 100 % fails the run
+python -m build && twine check dist/*
 ```
 
-Every module in `core/` has one responsibility and its own test file:
+CI runs the same steps on Python 3.12 and 3.13, then builds the container
+image. A `v*` tag publishes the package to PyPI (trusted publishing) and the
+image to GHCR — see [release.yml](.github/workflows/release.yml).
+
+Every module in `akko_mcp_trino/` has one responsibility and its own test file:
 
 | Module | Responsibility |
 |---|---|
@@ -402,6 +490,28 @@ Trino is the verified JWT subject.
 **The server does not decide access.** It carries identity. Putting policy in
 the server would duplicate — and eventually contradict — what the engine
 already enforces for every other client.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+ground rules (tests first, 100 % coverage, product-neutral, fail closed) and
+[SECURITY.md](SECURITY.md) for reporting a vulnerability privately.
+Changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
+## About AKKO
+
+akko-mcp-trino is built and maintained by [AKKO](https://akko-ai.com), a
+French company working on governed access for AI agents to enterprise data,
+in place, on the engines and identity providers customers already run. This
+server is the first brick of that work, extracted from the AKKO platform where
+it has run in production since July 2026 and released so that anyone running
+Trino can put identity in front of their agents today.
+
+If you run Trino behind Ranger or OPA and want a hand wiring this up, or want
+to see the rest of the platform, [say hello](https://akko-ai.com).
+
+**Author:** Abderrahmen Dridi ([@ab2dridi](https://github.com/ab2dridi)) ·
+**Issues:** [github.com/AKKO-p/akko-mcp-trino/issues](https://github.com/AKKO-p/akko-mcp-trino/issues)
 
 ## License
 

@@ -9,6 +9,7 @@ than pretend a shared store exists.
 The refusal is `429` with `Retry-After`, sent by the middleware. The clock is
 injectable so the windows are testable without sleeping.
 """
+
 from __future__ import annotations
 
 import math

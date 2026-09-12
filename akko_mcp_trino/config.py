@@ -3,6 +3,7 @@
 Nothing product-specific is hardcoded: the defaults here are neutral, and a
 product built on this core injects its own values through the environment.
 """
+
 from __future__ import annotations
 
 import os

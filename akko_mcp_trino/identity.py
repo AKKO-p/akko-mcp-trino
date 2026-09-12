@@ -6,6 +6,7 @@ query UNDER the user's identity rather than the service account. With no
 resolved identity (auth disabled, no token), `current_subject()` is None and the
 service account is used. Pure, and fully testable.
 """
+
 from __future__ import annotations
 
 import contextvars

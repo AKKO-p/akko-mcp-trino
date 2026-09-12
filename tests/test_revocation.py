@@ -6,14 +6,15 @@ verdict is cached by `jti` for a short TTL, and it fails closed: an issuer that
 cannot answer means the request is refused, not waved through. Off unless
 `MCP_INTROSPECTION_URL` is set.
 """
+
 from __future__ import annotations
 
 import anyio
 import pytest
 
-from core.auth import Principal
-from core.middleware import AuthIdentityMiddleware
-from core.revocation import IntrospectionCheck, IntrospectionError
+from akko_mcp_trino.auth import Principal
+from akko_mcp_trino.middleware import AuthIdentityMiddleware
+from akko_mcp_trino.revocation import IntrospectionCheck, IntrospectionError
 
 
 class _Clock:
@@ -38,8 +39,14 @@ class _Issuer:
 
 
 def _check(issuer, ttl=30, clock=None):
-    return IntrospectionCheck("https://idp/introspect", "mcp", "s3cret", ttl_seconds=ttl,
-                              post=issuer, clock=clock or _Clock())
+    return IntrospectionCheck(
+        "https://idp/introspect",
+        "mcp",
+        "s3cret",
+        ttl_seconds=ttl,
+        post=issuer,
+        clock=clock or _Clock(),
+    )
 
 
 def test_from_env_is_disabled_without_url():
@@ -95,6 +102,7 @@ def test_issuer_failure_raises_so_the_guard_fails_closed():
 
 # ---- through the guard ----
 
+
 class _Auth:
     def verify(self, headers):
         return Principal(subject="alice", token_id="jti-1") if "authorization" in headers else None
@@ -119,8 +127,12 @@ async def _call_async(app, headers=None):
     async def send(m):
         sent.append(m)
 
-    scope = {"type": "http", "method": "POST", "path": "/mcp",
-             "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]}
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+    }
     await app(scope, receive, send)
     start = next(m for m in sent if m["type"] == "http.response.start")
     return start["status"], dict((k.decode(), v.decode()) for k, v in start.get("headers", []))
@@ -132,8 +144,9 @@ def _call(app, headers=None):
 
 def test_guard_refuses_a_revoked_token_with_401_revoked():
     down = _Down()
-    app = AuthIdentityMiddleware(down, auth_provider=_Auth(), require_auth=True,
-                                 revocation=_check(_Issuer(active=False)))
+    app = AuthIdentityMiddleware(
+        down, auth_provider=_Auth(), require_auth=True, revocation=_check(_Issuer(active=False))
+    )
     status, headers = _call(app, {"Authorization": "Bearer tok"})
     assert status == 401 and headers["x-reason"] == "revoked"
     assert down.hits == 0
@@ -141,15 +154,17 @@ def test_guard_refuses_a_revoked_token_with_401_revoked():
 
 def test_guard_passes_an_active_token():
     down = _Down()
-    app = AuthIdentityMiddleware(down, auth_provider=_Auth(), require_auth=True,
-                                 revocation=_check(_Issuer(active=True)))
+    app = AuthIdentityMiddleware(
+        down, auth_provider=_Auth(), require_auth=True, revocation=_check(_Issuer(active=True))
+    )
     assert _call(app, {"Authorization": "Bearer tok"})[0] == 200 and down.hits == 1
 
 
 def test_guard_fails_closed_when_the_issuer_is_down():
     down = _Down()
-    app = AuthIdentityMiddleware(down, auth_provider=_Auth(), require_auth=True,
-                                 revocation=_check(_Issuer(fail=True)))
+    app = AuthIdentityMiddleware(
+        down, auth_provider=_Auth(), require_auth=True, revocation=_check(_Issuer(fail=True))
+    )
     status, headers = _call(app, {"Authorization": "Bearer tok"})
     assert status == 503 and headers["x-reason"] == "introspection_unavailable"
     assert down.hits == 0
@@ -158,8 +173,9 @@ def test_guard_fails_closed_when_the_issuer_is_down():
 def test_guard_does_not_introspect_when_there_is_no_principal():
     """Auth not required and no token: nothing to introspect, request passes."""
     issuer = _Issuer()
-    app = AuthIdentityMiddleware(_Down(), auth_provider=_Auth(), require_auth=False,
-                                 revocation=_check(issuer))
+    app = AuthIdentityMiddleware(
+        _Down(), auth_provider=_Auth(), require_auth=False, revocation=_check(issuer)
+    )
     assert _call(app, {})[0] == 200 and issuer.calls == []
 
 
@@ -167,7 +183,7 @@ def test_default_post_uses_httpx_form_post_with_basic_auth(monkeypatch):
     """The real transport: form-encoded POST, client credentials as Basic auth."""
     import httpx
 
-    from core import revocation
+    from akko_mcp_trino import revocation
 
     seen = {}
 
@@ -184,8 +200,12 @@ def test_default_post_uses_httpx_form_post_with_basic_auth(monkeypatch):
             return client.post(url, **kw)
 
     monkeypatch.setattr(httpx, "post", post_via_mock)
-    assert revocation._default_post("https://idp/introspect", data={"token": "t", "token_type_hint": "access_token"},
-                                    auth=("mcp", "s"), timeout=1.0) == {"active": True}
+    assert revocation._default_post(
+        "https://idp/introspect",
+        data={"token": "t", "token_type_hint": "access_token"},
+        auth=("mcp", "s"),
+        timeout=1.0,
+    ) == {"active": True}
     assert seen["url"] == "https://idp/introspect"
     assert "token=t" in seen["body"] and "token_type_hint=access_token" in seen["body"]
     assert seen["auth"].startswith("Basic ")

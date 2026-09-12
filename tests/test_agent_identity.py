@@ -8,13 +8,14 @@ for quotas and audit, not for data access. This module adopts that shape.
 Empty configuration disables the check, exactly as in the blueprint: a
 deployment that has not registered any agent product is not asked for a key.
 """
+
 from __future__ import annotations
 
 import anyio
 
-from core.agents import AgentRegistry, current_agent
-from core.auth import Principal
-from core.middleware import AuthIdentityMiddleware
+from akko_mcp_trino.agents import AgentRegistry, current_agent
+from akko_mcp_trino.auth import Principal
+from akko_mcp_trino.middleware import AuthIdentityMiddleware
 
 
 class _Downstream:
@@ -41,8 +42,12 @@ async def _call_async(app, headers=None):
     async def send(m):
         sent.append(m)
 
-    scope = {"type": "http", "method": "POST", "path": "/mcp",
-             "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]}
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+    }
     await app(scope, receive, send)
     start = next(m for m in sent if m["type"] == "http.response.start")
     return start["status"], dict((k.decode(), v.decode()) for k, v in start.get("headers", []))

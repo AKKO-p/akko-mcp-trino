@@ -1,4 +1,5 @@
-"""core.auth: unverified JWT helpers, Principal, JwksJwtAuth (real crypto), build_auth."""
+"""akko_mcp_trino.auth: unverified JWT helpers, Principal, JwksJwtAuth (real crypto), build_auth."""
+
 import base64
 import json
 import time
@@ -7,9 +8,8 @@ import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from core import auth
-from core.config import Config
-
+from akko_mcp_trino import auth
+from akko_mcp_trino.config import Config
 
 # --- test RSA key (generated once) + fake JWKS (no network) ---
 _PRIV = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -71,8 +71,17 @@ def test_principal_defaults():
 
 # ---- UnverifiedJwtAuth (repli) ----
 def test_unverified_provider_returns_principal():
-    p = auth.UnverifiedJwtAuth().verify(_bearer(_unsafe_jwt(
-        {"preferred_username": "dave_steward", "email": "d@x", "realm_access": {"roles": ["akko-steward"]}})))
+    p = auth.UnverifiedJwtAuth().verify(
+        _bearer(
+            _unsafe_jwt(
+                {
+                    "preferred_username": "dave_steward",
+                    "email": "d@x",
+                    "realm_access": {"roles": ["akko-steward"]},
+                }
+            )
+        )
+    )
     assert p == auth.Principal(subject="dave_steward", roles=["akko-steward"], email="d@x")
 
 
@@ -117,10 +126,21 @@ def test_jwks_no_token_returns_none():
 # ---- build_auth (provider selection) ----
 def _cfg(auth_enabled, jwks_url=""):
     return Config(
-        trino_host="h", trino_port=8080, trino_user="u", trino_catalog="c",
-        max_rows=100, read_only=True, auth_enabled=auth_enabled,
-        server_name="x", health_port=3001, jwks_url=jwks_url,
-        oidc_issuer=_ISS, oidc_audience=_AUD, transport="sse", mcp_port=3000, auth_required=False,
+        trino_host="h",
+        trino_port=8080,
+        trino_user="u",
+        trino_catalog="c",
+        max_rows=100,
+        read_only=True,
+        auth_enabled=auth_enabled,
+        server_name="x",
+        health_port=3001,
+        jwks_url=jwks_url,
+        oidc_issuer=_ISS,
+        oidc_audience=_AUD,
+        transport="sse",
+        mcp_port=3000,
+        auth_required=False,
     )
 
 
