@@ -42,6 +42,10 @@ class Config:
     introspection_client_id: str = ""
     introspection_client_secret: str = ""
     introspection_ttl_seconds: int = 30
+    # stdio only: the user's access token, verified like a bearer header would
+    # be. A local host (Claude Desktop, Cursor, Vibe) launches the server for
+    # one person; that person's token is the identity of the whole process.
+    user_token: str = ""
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
@@ -70,4 +74,5 @@ class Config:
             introspection_client_id=os.environ.get("MCP_INTROSPECTION_CLIENT_ID", ""),
             introspection_client_secret=os.environ.get("MCP_INTROSPECTION_CLIENT_SECRET", ""),
             introspection_ttl_seconds=int(os.environ.get("MCP_INTROSPECTION_TTL_SECONDS", "30")),
+            user_token=os.environ.get("MCP_USER_TOKEN", ""),
         )

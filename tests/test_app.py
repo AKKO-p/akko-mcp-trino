@@ -55,16 +55,16 @@ def _has_guard(app) -> bool:
     return any(m.cls is AuthIdentityMiddleware for m in getattr(app, "user_middleware", []))
 
 
-def test_both_transports_are_guarded():
-    for transport in transports_supported():
+def test_both_http_transports_are_guarded():
+    for transport in ("sse", "streamable-http"):
         mcp = _FakeMCP()
         app = build_asgi_app(_config(transport), mcp, auth_provider=object())
         assert mcp.served == transport, "the wrong transport app was built"
         assert _has_guard(app), f"transport {transport!r} is served without the identity guard"
 
 
-def test_supported_transports_are_exactly_the_two_fastmcp_offers():
-    assert set(transports_supported()) == {"sse", "streamable-http"}
+def test_supported_transports_are_the_two_http_ones_and_stdio():
+    assert set(transports_supported()) == {"sse", "streamable-http", "stdio"}
 
 
 def test_unknown_transport_is_refused_not_defaulted():
@@ -155,3 +155,69 @@ def test_revocation_check_is_absent_when_not_configured():
     app = build_asgi_app(_config("sse"), _FakeMCP(), auth_provider=object())
     layer = next(m for m in app.user_middleware if m.cls is AuthIdentityMiddleware)
     assert layer.kwargs["revocation"] is None
+
+
+# ---- stdio: a local host launches the server; the user's token comes from the environment
+
+
+class _FakeStdioMCP:
+    def __init__(self):
+        self.ran_with = None
+        self.subject_seen = "unset"
+
+    def run(self, transport):
+        from akko_mcp_trino.identity import current_subject
+
+        self.ran_with = transport
+        self.subject_seen = current_subject()
+
+
+class _Auth:
+    def __init__(self, principal):
+        self._p, self.seen = principal, None
+
+    def verify(self, headers):
+        self.seen = headers
+        return self._p
+
+
+def test_stdio_is_a_supported_transport():
+    assert "stdio" in transports_supported()
+
+
+def test_stdio_runs_fastmcp_over_stdio_with_the_token_from_the_environment():
+    from akko_mcp_trino.app import run_stdio
+    from akko_mcp_trino.auth import Principal
+
+    cfg = Config(**{**_config("stdio").__dict__, "auth_required": True, "user_token": "tok"})
+    mcp, provider = _FakeStdioMCP(), _Auth(Principal(subject="alice"))
+    run_stdio(cfg, mcp, auth_provider=provider)
+    assert mcp.ran_with == "stdio"
+    assert provider.seen == {"authorization": "Bearer tok"}
+    assert mcp.subject_seen == "alice", "the tools would not run under the user's identity"
+
+
+def test_stdio_refuses_to_start_without_a_verified_identity_in_strict_mode():
+    import pytest
+
+    from akko_mcp_trino.app import run_stdio
+
+    cfg = Config(**{**_config("stdio").__dict__, "auth_required": True, "user_token": "bad"})
+    with pytest.raises(PermissionError):
+        run_stdio(cfg, _FakeStdioMCP(), auth_provider=_Auth(None))
+
+
+def test_stdio_without_auth_runs_as_the_service_account():
+    from akko_mcp_trino.app import run_stdio
+
+    mcp = _FakeStdioMCP()
+    run_stdio(_config("stdio"), mcp, auth_provider=None)
+    assert mcp.ran_with == "stdio" and mcp.subject_seen is None
+
+
+def test_build_asgi_app_refuses_stdio():
+    """stdio has no ASGI app; asking for one is a wiring error, not a fallback."""
+    import pytest
+
+    with pytest.raises(ValueError):
+        build_asgi_app(_config("stdio"), _FakeMCP(), auth_provider=None)

@@ -1,4 +1,4 @@
-"""The five core tools, characterised through a fake FastMCP.
+"""The eight core tools, characterised through a fake FastMCP.
 
 Same outputs, same read-only guard, identity forwarded and never forgeable.
 """
@@ -57,13 +57,16 @@ def test_tool_annotations_are_classes_not_strings():
             )
 
 
-def test_exactly_the_five_tools_are_registered():
+def test_exactly_the_eight_tools_are_registered():
     mcp, _ = _registered()
     assert set(mcp.tools) == {
         "list_catalogs",
         "list_schemas",
         "list_tables",
         "describe_table",
+        "search_columns",
+        "profile_table",
+        "explain_query",
         "execute_query",
     }
 
@@ -79,8 +82,8 @@ def test_list_schemas_validates_identifier():
     mcp, client = _registered(result={"columns": ["Schema"], "rows": [["fraud"]], "row_count": 1})
     assert json.loads(mcp.tools["list_schemas"]("iceberg")) == ["fraud"]
     assert "SHOW SCHEMAS FROM iceberg" in client.calls[-1][0]
-    with pytest.raises(ValueError):
-        mcp.tools["list_schemas"]("bad;name")
+    out = json.loads(mcp.tools["list_schemas"]("bad;name"))
+    assert "Invalid catalog" in out["error"] and len(client.calls) == 1, "nothing must reach Trino"
 
 
 def test_list_tables_validates_both_identifiers():
@@ -89,8 +92,8 @@ def test_list_tables_validates_both_identifiers():
     )
     assert json.loads(mcp.tools["list_tables"]("iceberg", "fraud")) == ["scores", "alerts"]
     assert "SHOW TABLES FROM iceberg.fraud" in client.calls[-1][0]
-    with pytest.raises(ValueError):
-        mcp.tools["list_tables"]("iceberg", "bad schema")
+    out = json.loads(mcp.tools["list_tables"]("iceberg", "bad schema"))
+    assert "Invalid schema" in out["error"] and len(client.calls) == 1
 
 
 def test_describe_table_builds_qualified_name():
@@ -231,10 +234,11 @@ def test_trino_error_is_audited_as_failure():
     assert audit.events[0].ok is False and "Access Denied" in audit.events[0].error
 
 
-def test_invalid_identifier_is_audited_then_raised():
+def test_invalid_identifier_is_audited_as_a_failure():
+    """An agent gets {"error": …} it can act on, and the audit line says it failed."""
     mcp, _, audit = _registered_with_audit()
-    with pytest.raises(ValueError):
-        _in_request(lambda: mcp.tools["list_schemas"]("bad;name"))
+    out = json.loads(_in_request(lambda: mcp.tools["list_schemas"]("bad;name")))
+    assert "Invalid catalog" in out["error"]
     assert audit.events[0].ok is False and audit.events[0].tool == "list_schemas"
 
 
@@ -259,3 +263,138 @@ def test_trailing_semicolon_is_stripped_before_trino():
     assert client.calls[-1][0] == "SELECT 1"
     out = json.loads(mcp.tools["execute_query"]("SELECT 1; SELECT 2"))
     assert "error" in out and len(client.calls) == 1
+
+
+# ---- every tool runs under the caller's identity, not only execute_query
+
+
+def test_every_tool_forwards_the_callers_identity_to_trino():
+    """Found while reviewing 0.2: discovery tools queried Trino as the service
+    account, so a restricted user could list catalogs, schemas, tables and
+    columns the engine would hide from them. Metadata is data."""
+    mcp, client = _registered()
+    calls = [
+        ("list_catalogs", {}),
+        ("list_schemas", {"catalog": "c"}),
+        ("list_tables", {"catalog": "c", "schema": "s"}),
+        ("describe_table", {"catalog": "c", "schema": "s", "table": "t"}),
+        ("execute_query", {"sql": "SELECT 1"}),
+    ]
+    _in_request(lambda: [mcp.tools[n](**a) for n, a in calls])
+    assert [u for _, u in client.calls] == ["alice_admin"] * len(calls)
+
+
+# ---- 0.2 exploration tools
+
+
+def test_describe_table_can_add_a_governed_sample():
+    mcp, client = _registered()
+    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("c", "s", "t", sample_rows=5)))
+    assert out["sample"]["rows"] == [["v"]]
+    assert client.calls[-1] == ("SELECT * FROM c.s.t LIMIT 5", "alice_admin")
+
+
+def test_describe_table_sample_is_capped_and_never_negative():
+    mcp, client = _registered()
+    mcp.tools["describe_table"]("c", "s", "t", sample_rows=999)
+    assert client.calls[-1][0].endswith("LIMIT 20")
+    calls_before = len(client.calls)
+    mcp.tools["describe_table"]("c", "s", "t", sample_rows=-3)
+    assert len(client.calls) == calls_before + 1, "a negative sample must not query data"
+
+
+def test_search_columns_builds_a_safe_like_over_information_schema():
+    mcp, client = _registered(
+        result={
+            "columns": ["s", "t", "c", "ty"],
+            "rows": [["clients", "customers", "email", "varchar"]],
+            "row_count": 1,
+        }
+    )
+    out = json.loads(mcp.tools["search_columns"]("%E'Mail%", catalog="core_postgres"))
+    sql = client.calls[-1][0]
+    assert "core_postgres.information_schema.columns" in sql and "LIKE '%e''mail%'" in sql
+    assert out == [
+        {
+            "catalog": "core_postgres",
+            "schema": "clients",
+            "table": "customers",
+            "column": "email",
+            "type": "varchar",
+        }
+    ]
+
+
+def test_search_columns_without_catalog_walks_every_visible_catalog():
+    mcp, client = _registered(result={"columns": ["a"], "rows": [["x"]], "row_count": 1})
+    mcp.tools["search_columns"]("%id%")
+    assert client.calls[0][0] == "SHOW CATALOGS"
+    assert len(client.calls) == 2  # one catalog "x" came back, one search on it
+
+
+def test_search_columns_requires_a_pattern():
+    mcp, _ = _registered()
+    assert "error" in json.loads(mcp.tools["search_columns"]("   "))
+
+
+def test_search_columns_rejects_an_injected_catalog():
+    mcp, _ = _registered()
+    assert (
+        "Invalid catalog" in json.loads(mcp.tools["search_columns"]("%x%", catalog="a;b"))["error"]
+    )
+
+
+def test_profile_table_uses_show_stats():
+    mcp, client = _registered()
+    mcp.tools["profile_table"]("c", "s", "t")
+    assert client.calls[-1][0] == "SHOW STATS FOR c.s.t"
+
+
+def test_explain_query_explains_reads_only():
+    mcp, client = _registered(
+        result={"columns": ["Query Plan"], "rows": [["Fragment 0"], ["  Output"]], "row_count": 2}
+    )
+    out = json.loads(mcp.tools["explain_query"]("SELECT 1;"))
+    assert out["plan"] == "Fragment 0\n  Output" and client.calls[-1][0] == "EXPLAIN SELECT 1"
+    assert (
+        "error" in json.loads(mcp.tools["explain_query"]("DROP TABLE t")) and len(client.calls) == 1
+    )
+
+
+def test_discovery_errors_are_returned_not_raised():
+    mcp, _ = _registered(raises=RuntimeError("Access Denied"))
+    for name, args in (
+        ("list_catalogs", {}),
+        ("list_schemas", {"catalog": "c"}),
+        ("profile_table", {"catalog": "c", "schema": "s", "table": "t"}),
+    ):
+        assert "Access Denied" in json.loads(mcp.tools[name](**args))["error"]
+
+
+def test_tool_descriptions_tell_the_model_about_governed_values():
+    mcp, _ = _registered()
+    for name in ("execute_query", "describe_table", "search_columns", "profile_table"):
+        doc = mcp.tools[name].__doc__ or ""
+        assert "masked" in doc and "not an error" in doc, (
+            f"{name} does not explain masking to the model"
+        )
+
+
+def test_describe_and_explain_return_trino_errors_as_json():
+    mcp, _ = _registered(raises=RuntimeError("Access Denied: Cannot select"))
+    assert "Access Denied" in json.loads(mcp.tools["describe_table"]("c", "s", "t"))["error"]
+    assert "Access Denied" in json.loads(mcp.tools["explain_query"]("SELECT 1"))["error"]
+
+
+def test_audit_records_an_exception_raised_by_a_tool_then_reraises():
+    """The audited wrapper must not swallow a raise from a custom registrar's tool."""
+    from akko_mcp_trino.tools import _audited
+
+    audit = InMemoryAudit()
+
+    def boom() -> str:
+        raise RuntimeError("kaboom")
+
+    with pytest.raises(RuntimeError):
+        _audited(audit, boom)()
+    assert audit.events[0].ok is False and "kaboom" in audit.events[0].error

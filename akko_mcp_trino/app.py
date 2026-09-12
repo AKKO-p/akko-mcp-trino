@@ -18,16 +18,39 @@ from typing import Any
 from .agents import AgentRegistry
 from .config import Config
 from .discovery import ProtectedResource
+from .identity import set_current_principal
 from .middleware import AuthIdentityMiddleware
 from .ratelimit import RateLimiter
 from .revocation import IntrospectionCheck
 
-_TRANSPORTS = ("sse", "streamable-http")
+_HTTP_TRANSPORTS = ("sse", "streamable-http")
+_TRANSPORTS = _HTTP_TRANSPORTS + ("stdio",)
 
 
 def transports_supported() -> tuple[str, ...]:
-    """The transports FastMCP can serve over HTTP, and nothing else."""
+    """Every transport the server can serve: the two HTTP ones and stdio."""
     return _TRANSPORTS
+
+
+def run_stdio(config: Config, mcp: Any, *, auth_provider: Any) -> None:
+    """Serve over stdio for a local host, as one user.
+
+    There is no request, hence no header: the identity is ``MCP_USER_TOKEN``,
+    verified by the same provider a bearer header would be, and bound to the
+    whole process. In strict mode a missing or invalid token refuses to start,
+    which is the stdio equivalent of a 401. Nothing here writes to stdout:
+    stdout is the protocol channel.
+    """
+    principal = None
+    if auth_provider is not None and config.user_token:
+        principal = auth_provider.verify({"authorization": f"Bearer {config.user_token}"})
+    if config.auth_required and principal is None:
+        raise PermissionError(
+            "MCP_AUTH_REQUIRED=true and MCP_USER_TOKEN is missing or invalid: "
+            "refusing to serve over stdio without a verified identity"
+        )
+    set_current_principal(principal)
+    mcp.run(transport="stdio")
 
 
 def build_asgi_app(config: Config, mcp: Any, *, auth_provider: Any) -> Any:
@@ -44,7 +67,8 @@ def build_asgi_app(config: Config, mcp: Any, *, auth_provider: Any) -> Any:
         app = mcp.streamable_http_app()
     else:
         raise ValueError(
-            f"unsupported MCP_TRANSPORT {config.transport!r}; expected one of {_TRANSPORTS}"
+            f"no ASGI app for MCP_TRANSPORT {config.transport!r}; "
+            f"expected one of {_HTTP_TRANSPORTS} (stdio uses run_stdio)"
         )
     # Both are built from the same Config the transport came from: a registry
     # or a discovery document that could not start is refused here, not at

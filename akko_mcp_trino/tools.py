@@ -1,8 +1,13 @@
-"""The five generic Trino tools, registered on a FastMCP instance through a registrar.
+"""The Trino tools, registered on a FastMCP instance through a registrar.
 
 The tools are closures over a `TrinoClient`, so they are testable with a fake
-client. Their docstrings are the descriptions MCP hosts show to the model. A
-product built on this core adds its own tools through the same registrar hook.
+client. Their docstrings are the descriptions MCP hosts show to the model, so
+they are written for a model: what the tool is for, what it returns, and what
+a masked value or a missing row means. A product built on this core adds its
+own tools through the same registrar hook.
+
+Every tool, discovery included, runs in Trino under the caller's identity.
+Metadata is data: a user who may not read a schema must not list it either.
 """
 
 import functools
@@ -12,8 +17,17 @@ from typing import Any, Callable
 from .agents import current_agent
 from .audit import AuditEvent, current_request_id
 from .identity import current_principal, current_subject
-from .sql_guard import is_read_only_sql, normalize_sql, validate_identifier
+from .sql_guard import is_read_only_sql, normalize_sql, safe_sql_string, validate_identifier
 from .trino_client import TrinoClient
+
+MAX_SAMPLE_ROWS = 20
+
+_GOVERNANCE_NOTE = (
+    "Results are governed for the current user: values may come back masked "
+    "(for example ***@domain) and rows or objects may be missing. That is the "
+    "data access policy, not an error; report what is returned, verbatim, and "
+    "do not retry the same call."
+)
 
 
 def _audited(audit: Any, fn: Callable[..., str]) -> Callable[..., str]:
@@ -52,66 +66,188 @@ def _audited(audit: Any, fn: Callable[..., str]) -> Callable[..., str]:
     return wrapped
 
 
+def _error(exc: Exception) -> str:
+    return json.dumps({"error": str(exc)})
+
+
 def register_query_tools(
     mcp, client: TrinoClient, *, read_only: bool = True, audit: Any = None
 ) -> None:
-    """Register the five generic Trino tools on the FastMCP instance `mcp`.
+    """Register the Trino tools on the FastMCP instance `mcp`.
 
     `audit`, when given, receives one AuditEvent per call (see `akko_mcp_trino.audit`)."""
 
-    def tool():
+    def tool(governed: bool = False):
         register = mcp.tool()
 
         def deco(fn):
+            if governed:  # the model must know what a masked value means
+                fn.__doc__ = (fn.__doc__ or "").rstrip() + "\n\n" + _GOVERNANCE_NOTE + "\n"
             return register(_audited(audit, fn))
 
         return deco
 
+    def run(sql: str) -> dict:
+        # Identity comes from the VERIFIED Principal (X-Trino-User), never from a
+        # parameter the agent supplies — that would be forgeable. None falls back
+        # to the service account (auth disabled).
+        return client.query(sql, user=current_subject())
+
     @tool()
     def list_catalogs() -> str:
-        """List all available Trino catalogs (data sources)."""
-        result = client.query("SHOW CATALOGS")
-        return json.dumps([r[0] for r in result["rows"]])
+        """List the Trino catalogs (data sources) the current user can see.
+
+        Returns a JSON array of catalog names. Start here, then list_schemas,
+        list_tables and describe_table before writing SQL. Only catalogs the
+        user is allowed to see are listed.
+        """
+        try:
+            return json.dumps([r[0] for r in run("SHOW CATALOGS")["rows"]])
+        except Exception as e:  # noqa: BLE001 - surface the error to the agent
+            return _error(e)
 
     @tool()
     def list_schemas(catalog: str) -> str:
-        """List schemas in a Trino catalog."""
-        cat = validate_identifier(catalog, "catalog")
-        result = client.query(f"SHOW SCHEMAS FROM {cat}")
-        return json.dumps([r[0] for r in result["rows"]])
+        """List the schemas of a catalog the current user can see.
+
+        Args: catalog, a bare name from list_catalogs (no quotes, no dots).
+        Returns a JSON array of schema names.
+        """
+        try:
+            cat = validate_identifier(catalog, "catalog")
+            return json.dumps([r[0] for r in run(f"SHOW SCHEMAS FROM {cat}")["rows"]])
+        except Exception as e:  # noqa: BLE001
+            return _error(e)
 
     @tool()
     def list_tables(catalog: str, schema: str) -> str:
-        """List tables in a Trino catalog.schema."""
-        cat = validate_identifier(catalog, "catalog")
-        sch = validate_identifier(schema, "schema")
-        result = client.query(f"SHOW TABLES FROM {cat}.{sch}")
-        return json.dumps([r[0] for r in result["rows"]])
+        """List the tables and views of a schema the current user can see.
 
-    @tool()
-    def describe_table(catalog: str, schema: str, table: str) -> str:
-        """Describe columns of a Trino table."""
-        cat = validate_identifier(catalog, "catalog")
-        sch = validate_identifier(schema, "schema")
-        tbl = validate_identifier(table, "table")
-        result = client.query(f"DESCRIBE {cat}.{sch}.{tbl}")
-        return json.dumps({"columns": result["columns"], "rows": result["rows"]})
-
-    @tool()
-    def execute_query(sql: str) -> str:
-        """Execute a SQL query on Trino and return results (max 100 rows).
-
-        In read-only mode (default), only SELECT/SHOW/DESCRIBE/EXPLAIN are allowed.
+        Args: catalog and schema, bare names (no quotes, no dots).
+        Returns a JSON array of table names. Fully qualify them as
+        catalog.schema.table in SQL.
         """
-        # Identity comes from the VERIFIED Principal (X-Trino-User), never from a
-        # parameter the agent supplies — that would be forgeable. None falls back
-        # to the service account.
+        try:
+            cat = validate_identifier(catalog, "catalog")
+            sch = validate_identifier(schema, "schema")
+            return json.dumps([r[0] for r in run(f"SHOW TABLES FROM {cat}.{sch}")["rows"]])
+        except Exception as e:  # noqa: BLE001
+            return _error(e)
+
+    @tool(governed=True)
+    def describe_table(catalog: str, schema: str, table: str, sample_rows: int = 0) -> str:
+        """Describe a table: its columns, their types and comments, and optionally
+        a few sample rows.
+
+        Args: catalog, schema, table as bare names; sample_rows (0 to 20) adds
+        that many rows of data. Returns JSON {"columns": [...], "rows": [...]}
+        where each row is [name, type, extra, comment], plus {"sample": {...}}
+        when sample_rows > 0.
+        """
+        try:
+            cat = validate_identifier(catalog, "catalog")
+            sch = validate_identifier(schema, "schema")
+            tbl = validate_identifier(table, "table")
+            described = run(f"DESCRIBE {cat}.{sch}.{tbl}")
+            out = {"columns": described["columns"], "rows": described["rows"]}
+            n = max(0, min(int(sample_rows), MAX_SAMPLE_ROWS))
+            if n:
+                out["sample"] = run(f"SELECT * FROM {cat}.{sch}.{tbl} LIMIT {n}")
+            return json.dumps(out)
+        except Exception as e:  # noqa: BLE001
+            return _error(e)
+
+    @tool(governed=True)
+    def search_columns(pattern: str, catalog: str = "") -> str:
+        """Find tables that have a column whose name matches a pattern.
+
+        Args: pattern, a SQL LIKE pattern on the column name, case-insensitive
+        (use % as wildcard, e.g. "%email%"); catalog, optional bare name to
+        search a single catalog (much faster). Without a catalog, every catalog
+        the user can see is searched. Returns a JSON array of
+        {"catalog", "schema", "table", "column", "type"}.
+        """
+        try:
+            like = safe_sql_string(pattern.strip().lower())
+            if not like:
+                return json.dumps({"error": "pattern is required, for example '%email%'"})
+            catalogs = (
+                [validate_identifier(catalog, "catalog")]
+                if catalog
+                else [r[0] for r in run("SHOW CATALOGS")["rows"]]
+            )
+            found = []
+            for cat in catalogs:
+                res = run(
+                    f"SELECT table_schema, table_name, column_name, data_type "
+                    f"FROM {cat}.information_schema.columns "
+                    f"WHERE lower(column_name) LIKE '{like}' "
+                    f"AND table_schema <> 'information_schema'"
+                )
+                found += [
+                    {"catalog": cat, "schema": r[0], "table": r[1], "column": r[2], "type": r[3]}
+                    for r in res["rows"]
+                ]
+            return json.dumps(found)
+        except Exception as e:  # noqa: BLE001
+            return _error(e)
+
+    @tool(governed=True)
+    def profile_table(catalog: str, schema: str, table: str) -> str:
+        """Profile a table with the statistics Trino keeps: row count, and per
+        column the data size, number of distinct values, fraction of nulls,
+        low and high values.
+
+        Args: catalog, schema, table as bare names. Returns JSON
+        {"columns": [...], "rows": [...]} from SHOW STATS; the row whose
+        column_name is null carries the table row count. Statistics may be
+        absent (null) when the connector does not collect them.
+        """
+        try:
+            cat = validate_identifier(catalog, "catalog")
+            sch = validate_identifier(schema, "schema")
+            tbl = validate_identifier(table, "table")
+            return json.dumps(run(f"SHOW STATS FOR {cat}.{sch}.{tbl}"))
+        except Exception as e:  # noqa: BLE001
+            return _error(e)
+
+    @tool()
+    def explain_query(sql: str) -> str:
+        """Show how Trino would execute a read-only SQL query, without running it.
+
+        Use it to validate a query before execute_query, or to see which
+        connector receives which predicate. Args: sql, one read-only statement,
+        no trailing semicolon needed. Returns JSON {"plan": "..."} or
+        {"error": "..."} (a syntax or permission error from Trino).
+        """
+        try:
+            sql = normalize_sql(sql)
+            if not is_read_only_sql(sql):
+                return json.dumps({"error": "Only a read-only statement can be explained"})
+            res = run(f"EXPLAIN {sql}")
+            return json.dumps({"plan": "\n".join(str(r[0]) for r in res["rows"])})
+        except Exception as e:  # noqa: BLE001
+            return _error(e)
+
+    @tool(governed=True)
+    def execute_query(sql: str) -> str:
+        """Run one read-only SQL statement on Trino and return the rows.
+
+        Args: sql, Trino SQL with fully qualified tables (catalog.schema.table),
+        one statement, no trailing semicolon needed. Only SELECT, SHOW, DESCRIBE
+        and EXPLAIN are accepted; INSERT, UPDATE, DELETE, CREATE, DROP and the
+        like are refused before reaching Trino, wherever they appear in the
+        statement. Returns JSON {"columns": [...], "rows": [...], "row_count": n},
+        capped at the server's row limit; add LIMIT and ORDER BY yourself for
+        large tables. On failure returns {"error": "..."} with Trino's message,
+        which is usually enough to fix the SQL.
+        """
         sql = normalize_sql(sql)
         if read_only and not is_read_only_sql(sql):
             return json.dumps(
                 {"error": "Read-only mode: only SELECT/SHOW/DESCRIBE/EXPLAIN queries allowed"}
             )
         try:
-            return json.dumps(client.query(sql, user=current_subject()))
+            return json.dumps(run(sql))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
-            return json.dumps({"error": str(e)})
+            return _error(e)

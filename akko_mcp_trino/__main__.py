@@ -16,7 +16,7 @@ import threading
 
 import uvicorn
 
-from .app import build_asgi_app
+from .app import build_asgi_app, run_stdio
 from .audit import LoggingAudit
 from .auth import build_auth
 from .config import Config
@@ -33,6 +33,15 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
     metrics = Metrics()
     mcp, client = build_server(config, metrics=metrics, audit=LoggingAudit())
     auth_provider = build_auth(config)
+
+    if config.transport == "stdio":
+        log.info(
+            "serving transport=stdio auth=%s strict=%s",
+            auth_provider is not None,
+            config.auth_required,
+        )
+        run_stdio(config, mcp, auth_provider=auth_provider)
+        return
 
     threading.Thread(
         target=lambda: uvicorn.run(

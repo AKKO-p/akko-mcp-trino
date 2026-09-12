@@ -35,6 +35,9 @@ def test_build_server_returns_mcp_and_client():
         "list_schemas",
         "list_tables",
         "describe_table",
+        "search_columns",
+        "profile_table",
+        "explain_query",
         "execute_query",
     }
     assert isinstance(client, TrinoClient)
@@ -51,7 +54,7 @@ def test_build_server_applies_extra_registrars():
     mcp, _ = build_server(
         _CFG, extra_tool_registrars=[registrar], mcp_factory=lambda name: FakeMCP()
     )
-    assert len(mcp.tools) == 6
+    assert len(mcp.tools) == 9
     assert "outil_maison" in mcp.tools
 
 

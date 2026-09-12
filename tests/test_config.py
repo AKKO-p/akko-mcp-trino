@@ -29,6 +29,7 @@ _ENV_KEYS = [
     "MCP_INTROSPECTION_CLIENT_ID",
     "MCP_INTROSPECTION_CLIENT_SECRET",
     "MCP_INTROSPECTION_TTL_SECONDS",
+    "MCP_USER_TOKEN",
 ]
 
 
@@ -147,3 +148,8 @@ def test_introspection_env(monkeypatch):
 def test_introspection_defaults_off():
     c = Config.from_env()
     assert c.introspection_url == "" and c.introspection_ttl_seconds == 30
+
+
+def test_user_token_env_for_stdio(monkeypatch):
+    monkeypatch.setenv("MCP_USER_TOKEN", "tok")
+    assert Config.from_env().user_token == "tok"
