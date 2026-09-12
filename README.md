@@ -71,6 +71,42 @@ the shape of the query; it comes from the engine enforcing policy under the
 user's identity. The blueprint's belt-and-braces guards — refusing `SELECT *`,
 capping rows, validating identifiers — are kept or on the roadmap.
 
+## Run it
+
+Three steps, against a Trino you already have.
+
+```bash
+# 1. install
+pip install -e .
+
+# 2. point it at your Trino and your identity provider
+export TRINO_HOST=trino.example.internal
+export TRINO_PORT=8080
+export TRINO_CATALOG=iceberg
+export MCP_AUTH_ENABLED=true
+export MCP_JWKS_URL=https://idp.example.com/realms/data/protocol/openid-connect/certs
+export MCP_OIDC_ISSUER=https://idp.example.com/realms/data
+export MCP_OIDC_AUDIENCE=data-platform
+
+# 3. serve
+python -m core
+```
+
+The MCP endpoint listens on `MCP_PORT` (default `3000`, transport `sse`), the
+health endpoints on `MCP_HEALTH_PORT` (default `3001`): `/health` never touches
+Trino, `/ready` runs a bounded `SELECT 1`, `/metrics` is Prometheus.
+
+An MCP host then connects with a bearer token from that identity provider:
+
+```json
+{ "mcpServers": { "trino": {
+    "url": "http://localhost:3000/sse",
+    "headers": { "Authorization": "Bearer <the user's token>" } } } }
+```
+
+To try it without an identity provider, leave `MCP_AUTH_ENABLED` unset: every
+query then runs as `TRINO_USER`. Do not run it that way anywhere that matters.
+
 ## Configuration
 
 Everything is environment-driven; nothing is hardcoded.
@@ -80,8 +116,8 @@ Everything is environment-driven; nothing is hardcoded.
 | `TRINO_HOST`, `TRINO_PORT` | the coordinator | — |
 | `TRINO_USER` | fallback identity when auth is **not** required | — |
 | `TRINO_CATALOG` | default catalog | — |
-| `MCP_READ_ONLY` | refuse writes in `execute_query` | `true` |
-| `MCP_MAX_ROWS` | result cap | `100` |
+| `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
+| `TRINO_MAX_ROWS` | result cap | `100` |
 | `MCP_AUTH_ENABLED` | verify bearer tokens | `true` |
 | `MCP_AUTH_REQUIRED` | refuse requests without a verified identity | `false` |
 | `MCP_JWKS_URL` | your IdP's JWKS endpoint | — (required when auth is enabled) |
@@ -94,7 +130,7 @@ authentication layer that cannot verify anything must not pretend to.
 
 ## Guarantees the tests hold
 
-96 tests, 100 % coverage, and a lint that fails the build if the core ever
+104 tests, 100 % coverage, and a lint that fails the build if the core ever
 imports a product-specific module. The guard that matters most is on the
 transport: **the identity middleware is mounted on whichever transport is
 served**, and a test asserts it for both. It once lived on a branch the default

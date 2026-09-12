@@ -1,4 +1,4 @@
-"""core.metrics (registry isolé) + instrumentation TrinoClient + route /metrics."""
+"""core.metrics: isolated registry, TrinoClient instrumentation, /metrics route."""
 from prometheus_client import CollectorRegistry
 from starlette.testclient import TestClient
 

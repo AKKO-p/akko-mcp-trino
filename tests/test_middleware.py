@@ -1,7 +1,7 @@
-"""core.middleware : vérification JWT par requête + propagation ContextVar (ASGI pur).
+"""core.middleware: per-request JWT verification and ContextVar propagation (pure ASGI).
 
-Prouve que l'identité posée par le middleware est BIEN visible côté endpoint (le piège
-BaseHTTPMiddleware/tâche-séparée est évité), et le mode strict (401)."""
+Proves the identity set by the middleware IS visible in the endpoint (the
+BaseHTTPMiddleware separate-task trap is avoided), and the strict mode (401)."""
 from starlette.applications import Starlette
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -24,7 +24,7 @@ class _FakeAuth:
 
 def _client(auth_provider, require_auth=False):
     async def whoami(_request):
-        return JSONResponse({"subject": current_subject()})  # lu DANS la requête
+        return JSONResponse({"subject": current_subject()})  # read INSIDE the request
 
     app = Starlette(routes=[Route("/whoami", whoami)])
     app.add_middleware(AuthIdentityMiddleware, auth_provider=auth_provider, require_auth=require_auth)
@@ -36,7 +36,7 @@ def test_no_provider_subject_is_none():
 
 
 def test_provider_principal_visible_in_endpoint():
-    # le cœur : le ContextVar posé par le middleware ASGI pur arrive jusqu'à l'endpoint
+    # the point: the ContextVar set by the pure ASGI middleware reaches the endpoint
     assert _client(_FakeAuth(Principal(subject="carol"))).get("/whoami").json()["subject"] == "carol"
 
 
@@ -58,7 +58,7 @@ def test_require_auth_passes_when_authenticated():
 
 def test_contextvar_is_reset_after_request():
     _client(_FakeAuth(Principal(subject="x"))).get("/whoami")
-    assert current_subject() is None  # nettoyé après la requête (pas de fuite)
+    assert current_subject() is None  # cleared after the request (no leak)
 
 
 def test_non_http_scope_passes_through():
@@ -71,4 +71,4 @@ def test_non_http_scope_passes_through():
 
     mw = AuthIdentityMiddleware(downstream, auth_provider=_FakeAuth(Principal(subject="x")))
     anyio.run(mw, {"type": "lifespan"}, None, None)
-    assert events == ["lifespan"]  # non-http → pass-through sans toucher l'identité
+    assert events == ["lifespan"]  # non-http passes through without touching identity

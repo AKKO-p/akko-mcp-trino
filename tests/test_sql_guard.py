@@ -1,4 +1,4 @@
-"""Caractérisation de core.sql_guard (P1 — comportement identique à server.py)."""
+"""core.sql_guard: literal escaping, identifier validation, read-only classification."""
 import pytest
 
 from core import sql_guard
@@ -8,7 +8,7 @@ def test_safe_sql_string_escapes_quotes_backslashes_nulls():
     assert sql_guard.safe_sql_string("O'Brien") == "O''Brien"
     assert sql_guard.safe_sql_string("a\\b") == "a\\\\b"
     assert sql_guard.safe_sql_string("x\0y") == "xy"
-    # apostrophe + antislash combinés
+    # quote and backslash combined
     assert sql_guard.safe_sql_string("a\\'b") == "a\\\\''b"
 
 
@@ -42,9 +42,9 @@ def test_is_read_only_sql_blocks_writes(sql):
 
 
 @pytest.mark.parametrize("sql", [
-    "SELECT 1; DROP TABLE t",                 # multi-statement empilé
-    "GRANT SELECT ON t TO u",                 # commande à effet de bord
-    "WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x",  # WITH qui enveloppe une écriture
+    "SELECT 1; DROP TABLE t",                 # stacked multi-statement
+    "GRANT SELECT ON t TO u",                 # side-effecting command
+    "WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x",  # a WITH that wraps a write
     "",                                       # vide
     "   ",                                    # blanc
     "this is not sql at all ((",              # non analysable → fail-closed

@@ -1,4 +1,4 @@
-"""Assemblage build_server + endpoints de santé (cœur)."""
+"""build_server assembly and the health endpoints."""
 from starlette.testclient import TestClient
 
 from core.config import Config
@@ -15,7 +15,7 @@ _CFG = Config(
 
 
 def test_build_server_returns_mcp_and_client():
-    # DI : factory FakeMCP → teste l'assemblage sans dépendre de la version FastMCP.
+    # Injected FakeMCP factory: tests assembly without depending on a FastMCP version.
     mcp, client = build_server(_CFG, mcp_factory=lambda name: FakeMCP())
     assert set(mcp.tools) == {
         "list_catalogs", "list_schemas", "list_tables", "describe_table", "execute_query",
@@ -24,7 +24,7 @@ def test_build_server_returns_mcp_and_client():
 
 
 def test_build_server_applies_extra_registrars():
-    """Le point d'extension : un produit ajoute ses outils sans toucher au cœur."""
+    """The extension point: a product adds its tools without touching the core."""
     def registrar(mcp, client):
         @mcp.tool()
         def outil_maison() -> str:

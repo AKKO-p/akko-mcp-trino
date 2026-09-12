@@ -1,7 +1,7 @@
-"""Métriques Prometheus — vendor-neutre, injectable (registry isolé → testable).
+"""Prometheus metrics, injectable with an isolated registry so they are testable.
 
-Compte les requêtes Trino, les erreurs et la latence. Exposées via /metrics (cf health).
-Un `CollectorRegistry` dédié évite l'état global partagé entre instances/tests.
+Counts Trino queries, errors and latency; exposed on /metrics by the health app.
+A dedicated `CollectorRegistry` avoids global state shared across instances and tests.
 """
 from __future__ import annotations
 
@@ -18,15 +18,15 @@ class Metrics:
     def __init__(self, registry: CollectorRegistry | None = None) -> None:
         self.registry = registry or CollectorRegistry()
         self.queries = Counter(
-            "mcp_trino_queries_total", "Requêtes Trino exécutées", registry=self.registry
+            "mcp_trino_queries_total", "Trino queries executed", registry=self.registry
         )
         self.errors = Counter(
-            "mcp_trino_query_errors_total", "Requêtes Trino en erreur", registry=self.registry
+            "mcp_trino_query_errors_total", "Trino queries that failed", registry=self.registry
         )
         self.duration = Histogram(
-            "mcp_trino_query_duration_seconds", "Latence des requêtes Trino", registry=self.registry
+            "mcp_trino_query_duration_seconds", "Trino query latency", registry=self.registry
         )
 
     def render(self) -> tuple[bytes, str]:
-        """Renvoie (corps exposition Prometheus, content-type)."""
+        """Return (Prometheus exposition body, content-type)."""
         return generate_latest(self.registry), CONTENT_TYPE_LATEST

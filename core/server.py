@@ -1,7 +1,8 @@
-"""Assemblage du serveur MCP (cœur générique). Aucune référence AKKO.
+"""Server assembly.
 
-`build_server` crée le FastMCP, le client Trino, enregistre les outils génériques,
-puis applique les enregistreurs d'outils additionnels (extensions, ex. AKKO ai_*).
+`build_server` creates the FastMCP instance and the Trino client, registers the
+five generic tools, then applies any extra tool registrars a product wants to
+add. That registrar hook is the only extension point, and it is deliberate.
 """
 from __future__ import annotations
 
@@ -11,13 +12,13 @@ from .config import Config
 from .tools import register_query_tools
 from .trino_client import TrinoClient
 
-# Un enregistreur d'outils : reçoit (mcp, client) et ajoute ses @mcp.tool().
+# A tool registrar receives (mcp, client) and adds its own @mcp.tool() functions.
 ToolRegistrar = Callable[[Any, TrinoClient], None]
 
 
-def _default_mcp_factory(name: str):  # pragma: no cover - factory de prod (FastMCP réel), prouvée au déploiement
-    # Import paresseux : FastMCP n'est nécessaire qu'à l'assemblage réel, ce qui
-    # garde build_server testable (mcp_factory injectable) sans charger FastMCP.
+def _default_mcp_factory(name: str):  # pragma: no cover - production factory (real FastMCP), proven by running it
+    # Lazy import: FastMCP is only needed for real assembly, which keeps
+    # build_server testable through an injected mcp_factory.
     from mcp.server.fastmcp import FastMCP
     return FastMCP(name)
 
@@ -29,8 +30,8 @@ def build_server(
     mcp_factory: Callable[[str], Any] = _default_mcp_factory,
     metrics: Any = None,
 ) -> Tuple[Any, TrinoClient]:
-    """Assemble le serveur. `mcp_factory` est injectable (DI) pour tester l'assemblage
-    sans dépendre de la version de FastMCP. `metrics` (optionnel) instrumente le client."""
+    """Assemble the server. `mcp_factory` is injectable so assembly can be tested
+    without depending on a FastMCP version. `metrics`, when given, instruments the client."""
     mcp = mcp_factory(config.server_name)
     client = TrinoClient(config, metrics=metrics)
     register_query_tools(mcp, client, read_only=config.read_only)

@@ -1,4 +1,4 @@
-"""Client Trino — vendor-neutre. Connexion + exécution bornée (P1 : à l'identique)."""
+"""Trino client: one connection, bounded execution, identity forwarded per query."""
 from __future__ import annotations
 
 import time
@@ -10,10 +10,10 @@ from .config import Config
 
 
 class TrinoClient:
-    """Encapsule la connexion Trino. `query` renvoie {columns, rows, row_count},
-    borné à `config.max_rows`. `user` permet la propagation d'identité (X-Trino-User)
-    — P1 garde le défaut = compte de service de la config (P2 câblera l'identité réelle).
-    `metrics` (optionnel) instrumente requêtes/erreurs/latence (Prometheus)."""
+    """Wraps the Trino connection. `query` returns {columns, rows, row_count},
+    capped at `config.max_rows`. `user` forwards an identity (X-Trino-User) per
+    query; when None, the service account `config.trino_user` is used.
+    `metrics`, when given, records queries, errors and latency."""
 
     def __init__(self, config: Config, metrics: Any = None) -> None:
         self._config = config

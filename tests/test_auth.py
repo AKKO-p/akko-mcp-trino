@@ -1,4 +1,4 @@
-"""core.auth : helpers JWT (non vérifiés), Principal, JwksJwtAuth (vraie crypto), build_auth."""
+"""core.auth: unverified JWT helpers, Principal, JwksJwtAuth (real crypto), build_auth."""
 import base64
 import json
 import time
@@ -11,7 +11,7 @@ from core import auth
 from core.config import Config
 
 
-# --- clé RSA de test (générée une fois) + JWKS factice (zéro réseau) ---
+# --- test RSA key (generated once) + fake JWKS (no network) ---
 _PRIV = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _PUB = _PRIV.public_key()
 _OTHER = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -42,7 +42,7 @@ def _unsafe_jwt(payload: dict) -> str:
     return f"header.{body}.sig"
 
 
-# ---- helpers JWT non vérifiés (hérités) ----
+# ---- unverified JWT helpers (legacy) ----
 def test_decode_jwt_unsafe_reads_payload_and_malformed():
     assert auth.decode_jwt_unsafe(_unsafe_jwt({"a": 1})) == {"a": 1}
     assert auth.decode_jwt_unsafe("not-a-jwt") is None
@@ -81,7 +81,7 @@ def test_unverified_provider_no_token_or_bad():
     assert auth.UnverifiedJwtAuth().verify(_bearer("garbage")) is None
 
 
-# ---- JwksJwtAuth (vérification réelle) ----
+# ---- JwksJwtAuth (real verification) ----
 def test_jwks_valid_token_returns_principal():
     tok = _sign({"preferred_username": "mcp-user", "realm_access": {"roles": ["akko-viewer"]}})
     p = _jwks_provider().verify(_bearer(tok))
@@ -94,7 +94,7 @@ def test_jwks_falls_back_to_sub_when_no_preferred_username():
 
 
 def test_jwks_rejects_bad_signature():
-    tok = _sign({"preferred_username": "x"}, key=_OTHER)  # signé par une autre clé
+    tok = _sign({"preferred_username": "x"}, key=_OTHER)  # signed with another key
     assert _jwks_provider().verify(_bearer(tok)) is None
 
 
@@ -114,7 +114,7 @@ def test_jwks_no_token_returns_none():
     assert _jwks_provider().verify({}) is None
 
 
-# ---- build_auth (sélection Lego) ----
+# ---- build_auth (provider selection) ----
 def _cfg(auth_enabled, jwks_url=""):
     return Config(
         trino_host="h", trino_port=8080, trino_user="u", trino_catalog="c",
@@ -134,7 +134,7 @@ def test_build_auth_jwks_when_url_set():
 
 
 def test_build_auth_fails_closed_when_no_jwks():
-    # F1 (audit sécu MCP 2026-07) : auth activée sans JWKS = ERREUR bloquante,
-    # PLUS de repli UnverifiedJwtAuth (qui acceptait tout JWT forgé = fail-open).
+    # Auth enabled without a JWKS URL is a blocking error. There is no fallback to
+    # UnverifiedJwtAuth any more: it accepted any forged JWT, which is fail-open.
     with pytest.raises(ValueError):
         auth.build_auth(_cfg(True))

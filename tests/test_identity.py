@@ -1,4 +1,4 @@
-"""core.identity : ContextVar d'identité courante (propagation X-Trino-User)."""
+"""core.identity: the current-identity ContextVar (X-Trino-User propagation)."""
 from core import identity
 from core.auth import Principal
 

@@ -1,4 +1,4 @@
-"""Caractérisation de core.config (P1 — mêmes variables d'env qu'avant)."""
+"""core.config: every setting comes from the environment, with neutral defaults."""
 import pytest
 
 from core.config import Config
@@ -30,7 +30,7 @@ def test_defaults_are_neutral():
     assert c.server_name == "trino-mcp"
     assert c.health_port == 3001
     assert c.jwks_url == "" and c.oidc_issuer == "" and c.oidc_audience == ""
-    # défauts SÛRS : transport SSE inchangé, auth non strict (opt-in)
+    # SAFE defaults: SSE transport, strict auth is opt-in
     assert c.transport == "sse" and c.mcp_port == 3000 and c.auth_required is False
 
 

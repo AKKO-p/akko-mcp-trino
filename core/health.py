@@ -1,7 +1,9 @@
-"""Endpoints de santé K8s — /health (liveness process) + /ready (dépendance Trino).
+"""Kubernetes health endpoints: /health (process liveness) and /ready (Trino reachable).
 
-P1 : comportement identique. /health ne sonde PAS Trino (anti-restart sur hoquet) ;
-/ready fait un `SELECT 1` borné. (P2 ajoutera /metrics.)
+/health deliberately does NOT probe Trino: a liveness check that depends on a
+downstream would restart every pod the moment Trino hiccups, turning a partial
+outage into a total one. /ready runs a bounded `SELECT 1`. /metrics is exposed
+when a metrics registry is supplied.
 """
 from __future__ import annotations
 

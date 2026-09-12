@@ -1,6 +1,6 @@
-"""Caractérisation des cinq outils du cœur via un FastMCP factice.
+"""The five core tools, characterised through a fake FastMCP.
 
-Mêmes sorties, même garde en lecture seule, identité propagée et jamais falsifiable.
+Same outputs, same read-only guard, identity forwarded and never forgeable.
 """
 import json
 
@@ -10,7 +10,7 @@ from core.tools import register_query_tools
 
 
 class FakeMCP:
-    """Capture les fonctions décorées par @mcp.tool() pour les appeler directement."""
+    """Captures the functions decorated with @mcp.tool() so tests can call them directly."""
 
     def __init__(self):
         self.tools = {}
@@ -43,9 +43,9 @@ def _registered(read_only=True, **client_kw):
 
 
 def test_tool_annotations_are_classes_not_strings():
-    """Garde-fou : FastMCP 1.8.1 introspecte les annotations comme des CLASSES
-    (issubclass). Un `from __future__ import annotations` dans un module d'outils les
-    transformerait en strings → crash au démarrage (observé en prod P1). On l'interdit."""
+    """Guard: FastMCP 1.8.1 introspects annotations as CLASSES (issubclass). A
+    `from __future__ import annotations` in a tools module would turn them into
+    strings and crash the server at startup (seen in production). Forbidden."""
     mcp, _ = _registered()
     for name, fn in mcp.tools.items():
         for param, annotation in getattr(fn, "__annotations__", {}).items():
@@ -94,7 +94,7 @@ def test_execute_query_read_only_blocks_writes():
     mcp, client = _registered(read_only=True)
     out = json.loads(mcp.tools["execute_query"]("INSERT INTO t VALUES (1)"))
     assert "Read-only mode" in out["error"]
-    assert client.calls == []  # jamais exécuté
+    assert client.calls == []  # never executed
 
 
 def test_execute_query_read_only_allows_select():
@@ -119,13 +119,13 @@ def test_execute_query_propagates_authenticated_identity_not_a_param():
     from core import identity
     from core.auth import Principal
     mcp, client = _registered(result={"columns": [], "rows": [], "row_count": 0})
-    # identité = Principal authentifié dans le contexte (pas un paramètre de l'outil)
+    # identity = the verified Principal in the context, not a tool parameter
     tok = identity.set_current_principal(Principal(subject="dave_steward"))
     try:
         mcp.tools["execute_query"]("SELECT 1")
     finally:
         identity.reset_current_principal(tok)
-    assert client.calls[-1][1] == "dave_steward"  # X-Trino-User = utilisateur authentifié
+    assert client.calls[-1][1] == "dave_steward"  # X-Trino-User = the authenticated user
 
 
 def test_execute_query_falls_back_to_service_account_when_no_identity():

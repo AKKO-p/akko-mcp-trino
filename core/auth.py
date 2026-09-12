@@ -1,9 +1,9 @@
-"""Authentification — interface pluggable + fonctions JWT actuelles (vendor-neutre).
+"""Authentication: a pluggable provider interface and the JWT verification behind it.
 
-P1 refactor pur : on PRÉSERVE le comportement existant — décodage JWT SANS
-vérification de signature, désactivé par défaut. L'interface `AuthProvider` prépare
-P2 (vérification JWKS réelle) sans changer le comportement courant. Aucune dépendance
-AKKO : la couche AKKO injectera un provider Keycloak/JWKS en P2.
+`AuthProvider` is the contract; `JwksJwtAuth` is the implementation that ships.
+It verifies the signature against the issuer's JWKS, the issuer, the audience
+and the expiry, and fails closed. `UnverifiedJwtAuth` stays in the module for
+local development and tests only; `build_auth` never selects it.
 """
 from __future__ import annotations
 
@@ -15,24 +15,24 @@ from typing import Optional, Protocol
 
 @dataclass(frozen=True)
 class Principal:
-    """Identité authentifiée. `subject` = identité propagée à Trino (X-Trino-User, S4)."""
+    """A verified identity. `subject` is what gets forwarded to Trino as X-Trino-User."""
     subject: str
     roles: list = field(default_factory=list)
     email: str = ""
 
 
 class AuthProvider(Protocol):
-    """Contrat d'authentification : vérifie les en-têtes et renvoie un Principal/None."""
+    """The authentication contract: inspect the request headers, return a Principal or None."""
 
     def verify(self, headers: dict) -> Optional[Principal]:  # pragma: no cover - protocole
         ...
 
 
 def decode_jwt_unsafe(token: str) -> Optional[dict]:
-    """Décode le payload d'un JWT SANS vérifier la signature.
+    """Decode a JWT payload WITHOUT verifying the signature.
 
-    ⚠️ P1 : comportement historique conservé tel quel. La vérification de signature
-    (JWKS) est le chantier P2.
+    Kept for development and tests. Never use it to make an access decision:
+    a forged token decodes just as well as a real one.
     """
     try:
         payload = token.split(".")[1]
@@ -43,9 +43,9 @@ def decode_jwt_unsafe(token: str) -> Optional[dict]:
 
 
 def validate_token(token: Optional[str]) -> Optional[list]:
-    """Valide un JWT et renvoie les rôles realm, ou None si invalide.
+    """Return the realm roles of a JWT, or None when it cannot be decoded.
 
-    NOTE : la signature N'EST PAS vérifiée (P1, à corriger en P2)."""
+    NOTE: the signature is NOT verified here. See `JwksJwtAuth` for the real check."""
     if not token:
         return None
     claims = decode_jwt_unsafe(token)
@@ -58,7 +58,7 @@ def validate_token(token: Optional[str]) -> Optional[list]:
 
 
 def extract_bearer_token(headers: dict) -> Optional[str]:
-    """Extrait le token Bearer d'un dict d'en-têtes (insensible à la casse de la clé)."""
+    """Extract the bearer token from a headers dict; the header name is case-insensitive."""
     auth = headers.get("authorization") or headers.get("Authorization") or ""
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
@@ -66,21 +66,22 @@ def extract_bearer_token(headers: dict) -> Optional[str]:
 
 
 def build_auth(config) -> Optional[AuthProvider]:
-    """Sélectionne le provider d'auth selon la config (Lego, zéro hardcoding) :
-    auth désactivée → None ; JWKS configuré → JwksJwtAuth (signature vérifiée).
+    """Pick the auth provider from configuration, with nothing hardcoded.
 
-    FAIL-CLOSED (F1, audit sécu MCP 2026-07) : auth ACTIVÉE sans `jwks_url` = ERREUR
-    de configuration bloquante. On REFUSE de démarrer avec une vérification JWT non
-    signée (l'ancien repli `UnverifiedJwtAuth` acceptait n'importe quel JWT forgé =
-    porte fail-open). `UnverifiedJwtAuth` reste dans le module pour les tests/dev
-    mais n'est JAMAIS sélectionné automatiquement."""
+    Auth disabled: None. JWKS configured: `JwksJwtAuth`, which verifies signatures.
+
+    FAIL-CLOSED: auth enabled without a `jwks_url` is a blocking configuration
+    error, and the server refuses to start. An authentication layer that cannot
+    verify anything must not pretend to; the old fallback to `UnverifiedJwtAuth`
+    accepted any forged token. That class stays available for tests and local
+    development, but is never selected automatically."""
     if not config.auth_enabled:
         return None
     if not config.jwks_url:
         raise ValueError(
-            "MCP auth_enabled=true mais jwks_url vide : refus de demarrer avec une "
-            "verification JWT non signee (fail-closed). Configurer MCP_JWKS_URL + "
-            "OIDC_ISSUER + OIDC_AUDIENCE vers Keycloak."
+            "MCP_AUTH_ENABLED=true but MCP_JWKS_URL is empty: refusing to start with "
+            "unverified JWT checking (fail-closed). Set MCP_JWKS_URL, MCP_OIDC_ISSUER "
+            "and MCP_OIDC_AUDIENCE to your identity provider."
         )
     return JwksJwtAuth(config.jwks_url, config.oidc_issuer, config.oidc_audience)
 
@@ -95,8 +96,8 @@ def _principal_from_claims(claims: dict) -> Principal:
 
 
 class UnverifiedJwtAuth:
-    """Provider hérité : décode le JWT SANS vérifier la signature (P1). À n'utiliser
-    qu'en repli ; préférer JwksJwtAuth en prod (S3)."""
+    """Development-only provider: decodes the JWT WITHOUT verifying the signature.
+    Never selected by `build_auth`; use `JwksJwtAuth` anywhere that matters."""
 
     def verify(self, headers: dict) -> Optional[Principal]:
         claims = decode_jwt_unsafe(extract_bearer_token(headers) or "")
@@ -106,10 +107,11 @@ class UnverifiedJwtAuth:
 
 
 class JwksJwtAuth:
-    """Provider S3 : vérifie SIGNATURE (JWKS de l'émetteur) + issuer + audience + exp.
+    """Verifies the SIGNATURE against the issuer's JWKS, plus issuer, audience and expiry.
 
-    Le `jwks_client` (PyJWKClient) est injectable → testable avec une clé RSA locale,
-    sans appel réseau. Tout échec (signature, iss, aud, exp, absence) → None (fail-closed)."""
+    `jwks_client` (a PyJWKClient) is injectable, so the class is testable with a
+    local RSA key and no network. Any failure — signature, iss, aud, exp, missing
+    token — yields None. Fail closed."""
 
     def __init__(self, jwks_url: str, issuer: str, audience: str, *, jwks_client=None, algorithms=None):
         self._issuer = issuer
@@ -117,7 +119,7 @@ class JwksJwtAuth:
         self._algorithms = algorithms or ["RS256"]
         if jwks_client is not None:
             self._client = jwks_client
-        else:  # pragma: no cover - construction réseau (PyJWKClient), prouvée au déploiement
+        else:  # pragma: no cover - network construction (PyJWKClient), proven by running it
             from jwt import PyJWKClient
             self._client = PyJWKClient(jwks_url)
 

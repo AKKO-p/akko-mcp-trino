@@ -1,8 +1,7 @@
-"""Configuration du serveur MCP Trino — env-driven, vendor-neutre.
+"""Server configuration, read from the environment.
 
-Aucune valeur AKKO en dur : les défauts génériques ici sont neutres ; la couche
-AKKO (akko/defaults.py) injecte ses propres valeurs via l'environnement. P1 refactor
-pur : mêmes variables d'environnement et mêmes défauts effectifs qu'avant.
+Nothing product-specific is hardcoded: the defaults here are neutral, and a
+product built on this core injects its own values through the environment.
 """
 from __future__ import annotations
 

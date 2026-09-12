@@ -1,10 +1,10 @@
-"""Identité de la requête courante — propagée vers Trino (X-Trino-User).
+"""Identity of the current request, forwarded to Trino as X-Trino-User.
 
-Pattern standard ASGI : un middleware (par requête) résout le Principal vérifié et le
-pose dans un ContextVar ; les outils lisent `current_subject()` pour exécuter la requête
-SOUS l'identité de l'utilisateur (et non le compte de service). Sans identité résolue
-(auth désactivée / pas de token), `current_subject()` = None → repli compte de service.
-Vendor-neutre, pur, 100% testable.
+Standard ASGI pattern: a per-request middleware resolves the verified Principal
+and stores it in a ContextVar; the tools read `current_subject()` to run the
+query UNDER the user's identity rather than the service account. With no
+resolved identity (auth disabled, no token), `current_subject()` is None and the
+service account is used. Pure, and fully testable.
 """
 from __future__ import annotations
 
@@ -31,6 +31,6 @@ def current_principal() -> Optional[Principal]:
 
 
 def current_subject() -> Optional[str]:
-    """Identité à propager à Trino, ou None (→ repli compte de service)."""
+    """The identity to forward to Trino, or None (falls back to the service account)."""
     p = _current_principal.get()
     return p.subject if p and p.subject else None

@@ -1,4 +1,4 @@
-"""Caractérisation de core.trino_client (connexion mockée — zéro Trino réel)."""
+"""core.trino_client with a mocked connection: no real Trino involved."""
 from core.config import Config
 from core.trino_client import TrinoClient
 
@@ -44,7 +44,7 @@ def test_query_returns_columns_rows_count_bounded(monkeypatch):
     cap = {}
     _patch_connect(monkeypatch, [(1, 2), (3, 4), (5, 6)], cap)
     out = TrinoClient(_CFG).query("SELECT * FROM t")
-    assert out == {"columns": ["a", "b"], "rows": [[1, 2], [3, 4]], "row_count": 2}  # borné max_rows=2
+    assert out == {"columns": ["a", "b"], "rows": [[1, 2], [3, 4]], "row_count": 2}  # capped at max_rows=2
 
 
 def test_query_uses_config_identity_by_default(monkeypatch):
@@ -58,7 +58,7 @@ def test_query_propagates_explicit_user(monkeypatch):
     cap = {}
     _patch_connect(monkeypatch, [], cap)
     TrinoClient(_CFG).query("SELECT 1", user="dave_steward")
-    assert cap["user"] == "dave_steward"  # X-Trino-User = identité de bout en bout
+    assert cap["user"] == "dave_steward"  # X-Trino-User = identity end to end
 
 
 def test_query_no_description_returns_empty_columns(monkeypatch):

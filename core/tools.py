@@ -1,8 +1,8 @@
-"""Outils MCP Trino GÉNÉRIQUES — enregistrés dans un FastMCP via un registre.
+"""The five generic Trino tools, registered on a FastMCP instance through a registrar.
 
-P1 refactor pur : mêmes noms, signatures et docstrings (= description MCP) que
-server.py. Les outils sont des closures sur un `TrinoClient` → testables avec un
-client factice. La couche AKKO enregistre ses outils en plus via le même mécanisme.
+The tools are closures over a `TrinoClient`, so they are testable with a fake
+client. Their docstrings are the descriptions MCP hosts show to the model. A
+product built on this core adds its own tools through the same registrar hook.
 """
 
 import json
@@ -13,7 +13,7 @@ from .trino_client import TrinoClient
 
 
 def register_query_tools(mcp, client: TrinoClient, *, read_only: bool = True) -> None:
-    """Enregistre les 5 outils Trino génériques sur l'instance FastMCP `mcp`."""
+    """Register the five generic Trino tools on the FastMCP instance `mcp`."""
 
     @mcp.tool()
     def list_catalogs() -> str:
@@ -51,11 +51,12 @@ def register_query_tools(mcp, client: TrinoClient, *, read_only: bool = True) ->
 
         In read-only mode (default), only SELECT/SHOW/DESCRIBE/EXPLAIN are allowed.
         """
-        # L'identité vient du Principal AUTHENTIFIÉ (X-Trino-User), pas d'un paramètre
-        # fourni par l'agent (anti-usurpation). None → repli compte de service.
+        # Identity comes from the VERIFIED Principal (X-Trino-User), never from a
+        # parameter the agent supplies — that would be forgeable. None falls back
+        # to the service account.
         if read_only and not is_read_only_sql(sql):
             return json.dumps({"error": "Read-only mode: only SELECT/SHOW/DESCRIBE/EXPLAIN queries allowed"})
         try:
             return json.dumps(client.query(sql, user=current_subject()))
-        except Exception as e:  # noqa: BLE001 — renvoyer l'erreur à l'agent, comme avant
+        except Exception as e:  # noqa: BLE001 - surface the error to the agent
             return json.dumps({"error": str(e)})

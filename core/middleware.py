@@ -1,13 +1,15 @@
-"""Middleware ASGI d'identité — vérifie le JWT par requête et pose le Principal.
+"""ASGI identity middleware: verifies the JWT on every request and sets the Principal.
 
-Branché sur l'app Streamable HTTP de FastMCP : chaque appel d'outil est une requête
-HTTP portant l'en-tête Authorization. Le middleware le vérifie (AuthProvider), pose le
-Principal dans le ContextVar (lu par les outils → X-Trino-User), et nettoie après. En
-mode strict (`require_auth`), une requête non authentifiée est rejetée (401).
+Mounted on the transport app FastMCP serves — see `core.app`, which mounts it
+on whichever transport is configured. Every tool call is an HTTP request
+carrying an Authorization header. The middleware verifies it through the
+AuthProvider, stores the Principal in the ContextVar the tools read, and clears
+it afterwards. In strict mode (`require_auth`) an unauthenticated request is
+rejected with 401.
 
-IMPORTANT : middleware ASGI PUR (pas BaseHTTPMiddleware) — ce dernier exécute la suite
-dans une TÂCHE séparée, ce qui CASSE la propagation du ContextVar jusqu'aux outils.
-Vendor-neutre, 100% testable.
+IMPORTANT: this is a PURE ASGI middleware, not BaseHTTPMiddleware. The latter
+runs the downstream in a separate task, which BREAKS ContextVar propagation to
+the tools — the identity would never reach them.
 """
 from __future__ import annotations
 
