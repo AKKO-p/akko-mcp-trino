@@ -36,7 +36,13 @@ _WRITE_TYPES = (
 )
 # SHOW/EXPLAIN/DESC parse as a generic `Command` (sqlglot does not structure
 # them); they are allowed by leading keyword, reads only.
-_COMMAND_READ_HEADS = ("SHOW", "EXPLAIN", "DESCRIBE", "DESC")
+_COMMAND_READ_HEADS = ("SHOW", "DESCRIBE", "DESC")
+# EXPLAIN [ ( options ) ] [ANALYZE] [VERBOSE] <statement>. sqlglot keeps the
+# whole thing as an opaque Command, so the statement inside is checked on its
+# own. EXPLAIN ANALYZE *executes* the statement it explains and is refused.
+_EXPLAIN_RE = re.compile(
+    r"^\s*EXPLAIN\s*(?:\([^)]*\))?\s*(ANALYZE\s+)?(?:VERBOSE\s+)?(.*)$", re.I | re.S
+)
 
 
 def safe_sql_string(text: str) -> str:
@@ -101,5 +107,10 @@ def is_read_only_sql(sql: str) -> bool:
         return not any(isinstance(node, _WRITE_TYPES) for node in st.walk())
     if isinstance(st, exp.Command):  # SHOW / EXPLAIN / DESC, unstructured
         head = s.upper().split(None, 1)[0]
+        if head == "EXPLAIN":
+            m = _EXPLAIN_RE.match(s)
+            if m is None or m.group(1):  # malformed, or ANALYZE: it would run the statement
+                return False
+            return is_read_only_sql(m.group(2))  # the explained statement must itself be a read
         return head in _COMMAND_READ_HEADS
     return False  # Insert / Update / Delete / Create / Drop / Alter / Grant / …

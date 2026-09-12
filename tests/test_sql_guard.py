@@ -89,3 +89,38 @@ def test_write_nested_anywhere_in_the_tree_is_refused(sql):
     from akko_mcp_trino.sql_guard import is_read_only_sql
 
     assert is_read_only_sql(sql) is False
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "EXPLAIN ANALYZE INSERT INTO t VALUES (1)",
+        "EXPLAIN ANALYZE DELETE FROM t",
+        "EXPLAIN ANALYZE VERBOSE UPDATE t SET x = 1",
+        "explain analyze select 1",  # EXPLAIN ANALYZE *runs* the statement, whatever it is
+        "EXPLAIN INSERT INTO t VALUES (1)",  # plans a write; nothing to gain, refuse
+        "EXPLAIN (TYPE DISTRIBUTED) DELETE FROM t",
+    ],
+)
+def test_explain_of_a_write_or_explain_analyze_is_refused(sql):
+    """Found on 13 September 2026 while reading another server's guard: sqlglot
+    parses EXPLAIN as an opaque Command, and Trino's EXPLAIN ANALYZE executes
+    the statement it explains. `EXPLAIN ANALYZE INSERT …` was a write that passed."""
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql(sql) is False
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "EXPLAIN SELECT 1",
+        "EXPLAIN (TYPE DISTRIBUTED, FORMAT TEXT) SELECT * FROM t WHERE x = 1",
+        "EXPLAIN VERBOSE WITH w AS (SELECT 1) SELECT * FROM w",
+        "explain\n  select 1",
+    ],
+)
+def test_explain_of_a_read_is_allowed(sql):
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql(sql) is True

@@ -314,7 +314,8 @@ in SQL. `execute_query` accepts any SQL Trino accepts, **as long as it is a
 read**: the statement is parsed into an AST and refused if it is more than one
 statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `DROP`,
 `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree — including
-inside a CTE or a subquery. Results are capped at `TRINO_MAX_ROWS`.
+inside a CTE, a subquery, or the statement an `EXPLAIN` explains. `EXPLAIN
+ANALYZE` is refused: it executes what it explains. Results are capped at `TRINO_MAX_ROWS`.
 
 Errors come back to the agent as `{"error": "..."}`; a permission refusal from
 Trino is an ordinary error, not a crash.
