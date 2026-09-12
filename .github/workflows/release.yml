@@ -40,7 +40,7 @@ jobs:
           path: .
           format: spdx-json
           output-file: sbom.spdx.json
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*
       - run: gh release upload "${GITHUB_REF_NAME}" dist/* sbom.spdx.json --clobber
@@ -75,7 +75,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/akko-p/akko-mcp-trino
           subject-digest: ${{ steps.push.outputs.digest }}
