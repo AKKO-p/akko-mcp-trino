@@ -10,8 +10,11 @@ Every tool, discovery included, runs in Trino under the caller's identity.
 Metadata is data: a user who may not read a schema must not list it either.
 """
 
+import datetime as dt
+import decimal
 import functools
 import json
+import uuid
 from typing import Any, Callable
 
 from .agents import current_agent
@@ -66,8 +69,28 @@ def _audited(audit: Any, fn: Callable[..., str]) -> Callable[..., str]:
     return wrapped
 
 
+def _plain(value: Any) -> Any:
+    """What JSON cannot carry, rendered the way SQL would print it.
+
+    Trino returns dates, timestamps, decimals, varbinary and UUIDs as Python
+    objects. A date column must not make a whole result unserialisable."""
+    if isinstance(value, (dt.datetime, dt.date, dt.time)):
+        return value.isoformat()
+    if isinstance(value, decimal.Decimal):
+        return str(value)  # exact digits; a float would silently round money
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex()
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    raise TypeError(f"unserialisable value of type {type(value).__name__}")
+
+
+def dumps(obj: Any) -> str:
+    return json.dumps(obj, default=_plain)
+
+
 def _error(exc: Exception) -> str:
-    return json.dumps({"error": str(exc)})
+    return dumps({"error": str(exc)})
 
 
 def register_query_tools(
@@ -102,7 +125,7 @@ def register_query_tools(
         user is allowed to see are listed.
         """
         try:
-            return json.dumps([r[0] for r in run("SHOW CATALOGS")["rows"]])
+            return dumps([r[0] for r in run("SHOW CATALOGS")["rows"]])
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
             return _error(e)
 
@@ -115,7 +138,7 @@ def register_query_tools(
         """
         try:
             cat = validate_identifier(catalog, "catalog")
-            return json.dumps([r[0] for r in run(f"SHOW SCHEMAS FROM {cat}")["rows"]])
+            return dumps([r[0] for r in run(f"SHOW SCHEMAS FROM {cat}")["rows"]])
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
@@ -130,7 +153,7 @@ def register_query_tools(
         try:
             cat = validate_identifier(catalog, "catalog")
             sch = validate_identifier(schema, "schema")
-            return json.dumps([r[0] for r in run(f"SHOW TABLES FROM {cat}.{sch}")["rows"]])
+            return dumps([r[0] for r in run(f"SHOW TABLES FROM {cat}.{sch}")["rows"]])
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
@@ -153,7 +176,7 @@ def register_query_tools(
             n = max(0, min(int(sample_rows), MAX_SAMPLE_ROWS))
             if n:
                 out["sample"] = run(f"SELECT * FROM {cat}.{sch}.{tbl} LIMIT {n}")
-            return json.dumps(out)
+            return dumps(out)
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
@@ -170,7 +193,7 @@ def register_query_tools(
         try:
             like = safe_sql_string(pattern.strip().lower())
             if not like:
-                return json.dumps({"error": "pattern is required, for example '%email%'"})
+                return dumps({"error": "pattern is required, for example '%email%'"})
             catalogs = (
                 [validate_identifier(catalog, "catalog")]
                 if catalog
@@ -188,7 +211,7 @@ def register_query_tools(
                     {"catalog": cat, "schema": r[0], "table": r[1], "column": r[2], "type": r[3]}
                     for r in res["rows"]
                 ]
-            return json.dumps(found)
+            return dumps(found)
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
@@ -207,7 +230,7 @@ def register_query_tools(
             cat = validate_identifier(catalog, "catalog")
             sch = validate_identifier(schema, "schema")
             tbl = validate_identifier(table, "table")
-            return json.dumps(run(f"SHOW STATS FOR {cat}.{sch}.{tbl}"))
+            return dumps(run(f"SHOW STATS FOR {cat}.{sch}.{tbl}"))
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
@@ -223,9 +246,9 @@ def register_query_tools(
         try:
             sql = normalize_sql(sql)
             if not is_read_only_sql(sql):
-                return json.dumps({"error": "Only a read-only statement can be explained"})
+                return dumps({"error": "Only a read-only statement can be explained"})
             res = run(f"EXPLAIN {sql}")
-            return json.dumps({"plan": "\n".join(str(r[0]) for r in res["rows"])})
+            return dumps({"plan": "\n".join(str(r[0]) for r in res["rows"])})
         except Exception as e:  # noqa: BLE001
             return _error(e)
 
@@ -244,10 +267,10 @@ def register_query_tools(
         """
         sql = normalize_sql(sql)
         if read_only and not is_read_only_sql(sql):
-            return json.dumps(
+            return dumps(
                 {"error": "Read-only mode: only SELECT/SHOW/DESCRIBE/EXPLAIN queries allowed"}
             )
         try:
-            return json.dumps(run(sql))
+            return dumps(run(sql))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
             return _error(e)

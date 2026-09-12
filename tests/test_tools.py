@@ -398,3 +398,36 @@ def test_audit_records_an_exception_raised_by_a_tool_then_reraises():
     with pytest.raises(RuntimeError):
         _audited(audit, boom)()
     assert audit.events[0].ok is False and "kaboom" in audit.events[0].error
+
+
+def test_results_with_dates_decimals_and_bytes_are_serialisable():
+    """Found by the live adversarial proof on 0.2: a table with a DATE column
+    made every tool fail with 'Object of type date is not JSON serializable'.
+    Trino returns dates, timestamps, decimals and varbinary as Python objects."""
+    import datetime as dt
+    import decimal
+
+    row = [
+        dt.date(2024, 12, 31),
+        dt.datetime(2024, 12, 31, 23, 59, 5),
+        decimal.Decimal("12.50"),
+        b"\x01\xff",
+        None,
+    ]
+    mcp, _ = _registered(
+        result={"columns": ["d", "ts", "amount", "blob", "n"], "rows": [row], "row_count": 1}
+    )
+    out = json.loads(mcp.tools["execute_query"]("SELECT 1"))
+    assert out["rows"][0] == ["2024-12-31", "2024-12-31T23:59:05", "12.50", "01ff", None]
+    sample = json.loads(mcp.tools["describe_table"]("c", "s", "t", sample_rows=1))
+    assert sample["sample"]["rows"][0][0] == "2024-12-31"
+
+
+def test_uuid_is_serialised_and_unknown_types_still_fail_loudly():
+    import uuid
+
+    from akko_mcp_trino.tools import dumps
+
+    assert json.loads(dumps({"u": uuid.UUID(int=1)}))["u"] == "00000000-0000-0000-0000-000000000001"
+    with pytest.raises(TypeError):
+        dumps({"x": object()})
