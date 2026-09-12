@@ -16,8 +16,10 @@ Two more concerns live here because they are part of the same door:
   every 401 carries `WWW-Authenticate` pointing at it, so an MCP host knows
   where to authenticate instead of seeing a bare refusal.
 
-Every refusal carries an `X-Reason` header naming the cause; the body never
-carries the token.
+Every request gets a request id — honoured from `X-Request-Id` when the edge
+sent one, generated otherwise — echoed on the response and exposed to the
+tools for the audit join. Every refusal carries an `X-Reason` header naming
+the cause; the body never carries the token.
 
 IMPORTANT: this is a PURE ASGI middleware, not BaseHTTPMiddleware. The latter
 runs the downstream in a separate task, which BREAKS ContextVar propagation to
@@ -25,10 +27,12 @@ the tools — the identity would never reach them.
 """
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from starlette.responses import JSONResponse
 
+from .audit import REQUEST_ID_HEADER, reset_current_request_id, set_current_request_id
 from .agents import AGENT_KEY_HEADER, AgentRegistry, reset_current_agent, set_current_agent
 from .discovery import WELL_KNOWN_PATH, ProtectedResource
 from .identity import reset_current_principal, set_current_principal
@@ -58,7 +62,15 @@ class AuthIdentityMiddleware:
             await JSONResponse(self._discovery.document())(scope, receive, send)
             return
         headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        request_id = headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
+        send = _echoing(send, request_id)
+        rid_token = set_current_request_id(request_id)
+        try:
+            await self._handle(scope, receive, send, headers)
+        finally:
+            reset_current_request_id(rid_token)
 
+    async def _handle(self, scope, receive, send, headers) -> None:
         agent = None
         if self._agents is not None:
             presented = headers.get(AGENT_KEY_HEADER)
@@ -88,3 +100,15 @@ class AuthIdentityMiddleware:
         if self._discovery is not None:
             headers["WWW-Authenticate"] = self._discovery.www_authenticate()
         await JSONResponse({"error": reason}, status_code=401, headers=headers)(scope, receive, send)
+
+
+def _echoing(send, request_id: str):
+    """Wrap ``send`` so the response start carries ``X-Request-Id``."""
+
+    async def wrapped(message):
+        if message["type"] == "http.response.start":
+            extra = [(REQUEST_ID_HEADER.encode(), request_id.encode())]
+            message = {**message, "headers": list(message.get("headers", [])) + extra}
+        await send(message)
+
+    return wrapped

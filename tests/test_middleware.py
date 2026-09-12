@@ -72,3 +72,40 @@ def test_non_http_scope_passes_through():
     mw = AuthIdentityMiddleware(downstream, auth_provider=_FakeAuth(Principal(subject="x")))
     anyio.run(mw, {"type": "lifespan"}, None, None)
     assert events == ["lifespan"]  # non-http passes through without touching identity
+
+
+# ---- request id: assigned or honoured, echoed, visible inside the request ----
+
+from core.audit import current_request_id  # noqa: E402
+
+
+def _client_with_request_id(auth_provider=None):
+    async def whoami(_request):
+        return JSONResponse({"request_id": current_request_id()})
+
+    app = Starlette(routes=[Route("/whoami", whoami)])
+    app.add_middleware(AuthIdentityMiddleware, auth_provider=auth_provider)
+    return TestClient(app)
+
+
+def test_request_id_is_honoured_when_the_edge_sends_one():
+    r = _client_with_request_id().get("/whoami", headers={"X-Request-Id": "edge-42"})
+    assert r.json()["request_id"] == "edge-42"
+    assert r.headers["x-request-id"] == "edge-42"
+
+
+def test_request_id_is_generated_and_echoed_otherwise():
+    r = _client_with_request_id().get("/whoami")
+    generated = r.json()["request_id"]
+    assert generated and len(generated) >= 16
+    assert r.headers["x-request-id"] == generated
+
+
+def test_request_id_is_on_the_401_too():
+    r = _client(_FakeAuth(None), require_auth=True).get("/whoami", headers={"X-Request-Id": "edge-7"})
+    assert r.status_code == 401 and r.headers["x-request-id"] == "edge-7"
+
+
+def test_request_id_is_cleared_after_request():
+    _client_with_request_id().get("/whoami", headers={"X-Request-Id": "edge-1"})
+    assert current_request_id() is None

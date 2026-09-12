@@ -164,9 +164,24 @@ never guesses an identity provider. Every refusal carries `X-Reason`
 (`unauthenticated`, `agent_key_missing`, `agent_key_unknown`) and never the
 token.
 
+## Audit join
+
+Every response carries `X-Request-Id` — the one the edge sent, or one the
+server generated. Every tool call writes one JSON line to the `mcp.audit`
+logger keyed by that id:
+
+```json
+{"request_id":"edge-42","tool":"execute_query","subject":"alice_admin","agent":"cursor","token_id":"jti-9","ok":false,"error":"Access Denied: Cannot select from columns [email] in table iceberg.bank.customers"}
+```
+
+`token_id` is the JWT's `jti`; the record has no field that could hold the
+bearer. An operator joins gateway logs and Trino's query log on the request
+id. A product that wants the join over HTTP passes its own sink to
+`build_server(audit=…)` (see `core.audit.AuditSink`).
+
 ## Guarantees the tests hold
 
-122 tests, 100 % coverage, and a lint that fails the build if the core ever
+139 tests, 100 % coverage, and a lint that fails the build if the core ever
 imports a product-specific module. The guard that matters most is on the
 transport: **the identity middleware is mounted on whichever transport is
 served**, and a test asserts it for both. It once lived on a branch the default
@@ -179,7 +194,7 @@ impossible.
 1. ~~Dual identity: `X-Agent-Key` for the agent product, distinct from the user.~~ Done.
 2. ~~RFC 9728 protected-resource metadata and `401` with `resource_metadata`.~~ Done.
 3. Rate limits per user and per agent.
-4. Request-id audit join — tool, subject, agent, token id, never the raw token.
+4. ~~Request-id audit join — tool, subject, agent, token id, never the raw token.~~ Done.
 5. Optional token-state check for revocation before expiry.
 
 ## Status

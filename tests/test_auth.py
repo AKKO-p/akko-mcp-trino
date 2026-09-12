@@ -138,3 +138,12 @@ def test_build_auth_fails_closed_when_no_jwks():
     # UnverifiedJwtAuth any more: it accepted any forged JWT, which is fail-open.
     with pytest.raises(ValueError):
         auth.build_auth(_cfg(True))
+
+
+def test_token_id_is_carried_from_jti_for_audit():
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "u", "jti": "tok-123"})))
+    assert p.token_id == "tok-123"
+
+
+def test_token_id_is_empty_when_the_token_has_no_jti():
+    assert _jwks_provider().verify(_bearer(_sign({"sub": "u"}))).token_id == ""

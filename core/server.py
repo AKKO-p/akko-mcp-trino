@@ -29,12 +29,14 @@ def build_server(
     extra_tool_registrars: Iterable[ToolRegistrar] = (),
     mcp_factory: Callable[[str], Any] = _default_mcp_factory,
     metrics: Any = None,
+    audit: Any = None,
 ) -> Tuple[Any, TrinoClient]:
     """Assemble the server. `mcp_factory` is injectable so assembly can be tested
-    without depending on a FastMCP version. `metrics`, when given, instruments the client."""
+    without depending on a FastMCP version. `metrics`, when given, instruments the client;
+    `audit`, when given, receives one record per tool call."""
     mcp = mcp_factory(config.server_name)
     client = TrinoClient(config, metrics=metrics)
-    register_query_tools(mcp, client, read_only=config.read_only)
+    register_query_tools(mcp, client, read_only=config.read_only, audit=audit)
     for registrar in extra_tool_registrars:
         registrar(mcp, client)
     return mcp, client

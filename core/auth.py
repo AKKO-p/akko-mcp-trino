@@ -19,6 +19,8 @@ class Principal:
     subject: str
     roles: list = field(default_factory=list)
     email: str = ""
+    # The token's `jti`, for the audit join. Never the token itself.
+    token_id: str = ""
 
 
 class AuthProvider(Protocol):
@@ -92,6 +94,7 @@ def _principal_from_claims(claims: dict) -> Principal:
         subject=str(claims.get("preferred_username") or claims.get("sub") or ""),
         roles=roles if isinstance(roles, list) else [],
         email=str(claims.get("email") or ""),
+        token_id=str(claims.get("jti") or ""),
     )
 
 

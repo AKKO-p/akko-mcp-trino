@@ -138,3 +138,78 @@ def test_execute_query_no_longer_exposes_spoofable_user_param():
     mcp, _ = _registered()
     import inspect
     assert "user" not in inspect.signature(mcp.tools["execute_query"]).parameters
+
+
+# ---- audit: every tool call leaves one record, never the token ----
+
+from core.agents import reset_current_agent, set_current_agent  # noqa: E402
+from core.audit import InMemoryAudit, reset_current_request_id, set_current_request_id  # noqa: E402
+from core.auth import Principal  # noqa: E402
+from core.identity import reset_current_principal, set_current_principal  # noqa: E402
+
+
+def _registered_with_audit(read_only=True, **client_kw):
+    mcp = FakeMCP()
+    client = FakeClient(**client_kw)
+    audit = InMemoryAudit()
+    register_query_tools(mcp, client, read_only=read_only, audit=audit)
+    return mcp, client, audit
+
+
+def _in_request(fn):
+    t1 = set_current_principal(Principal(subject="alice_admin", token_id="jti-9"))
+    t2 = set_current_agent("cursor")
+    t3 = set_current_request_id("req-1")
+    try:
+        return fn()
+    finally:
+        reset_current_request_id(t3)
+        reset_current_agent(t2)
+        reset_current_principal(t1)
+
+
+def test_execute_query_records_who_what_and_from_which_product():
+    mcp, _, audit = _registered_with_audit()
+    _in_request(lambda: mcp.tools["execute_query"]("SELECT 1"))
+    assert len(audit.events) == 1
+    e = audit.events[0]
+    assert (e.request_id, e.tool, e.subject, e.agent, e.token_id, e.ok) == \
+        ("req-1", "execute_query", "alice_admin", "cursor", "jti-9", True)
+
+
+def test_every_tool_is_audited():
+    mcp, _, audit = _registered_with_audit()
+    _in_request(lambda: (mcp.tools["list_catalogs"](), mcp.tools["list_schemas"]("c"),
+                         mcp.tools["list_tables"]("c", "s"), mcp.tools["describe_table"]("c", "s", "t")))
+    assert [e.tool for e in audit.events] == ["list_catalogs", "list_schemas", "list_tables", "describe_table"]
+
+
+def test_refused_write_is_audited_as_failure():
+    mcp, _, audit = _registered_with_audit()
+    _in_request(lambda: mcp.tools["execute_query"]("DROP TABLE t"))
+    assert audit.events[0].ok is False and "Read-only" in audit.events[0].error
+
+
+def test_trino_error_is_audited_as_failure():
+    mcp, _, audit = _registered_with_audit(raises=RuntimeError("Access Denied: Cannot select"))
+    _in_request(lambda: mcp.tools["execute_query"]("SELECT 1"))
+    assert audit.events[0].ok is False and "Access Denied" in audit.events[0].error
+
+
+def test_invalid_identifier_is_audited_then_raised():
+    mcp, _, audit = _registered_with_audit()
+    with pytest.raises(ValueError):
+        _in_request(lambda: mcp.tools["list_schemas"]("bad;name"))
+    assert audit.events[0].ok is False and audit.events[0].tool == "list_schemas"
+
+
+def test_outside_a_request_the_record_has_no_identity():
+    mcp, _, audit = _registered_with_audit()
+    mcp.tools["list_catalogs"]()
+    e = audit.events[0]
+    assert e.subject == "" and e.agent == "" and e.request_id == "" and e.token_id == ""
+
+
+def test_no_audit_sink_means_no_record_and_no_error():
+    mcp, _ = _registered()
+    assert mcp.tools["list_catalogs"]()

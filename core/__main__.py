@@ -16,6 +16,7 @@ import threading
 import uvicorn
 
 from .app import build_asgi_app
+from .audit import LoggingAudit
 from .auth import build_auth
 from .config import Config
 from .health import build_health_app
@@ -29,7 +30,7 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
 
     config = Config.from_env()
     metrics = Metrics()
-    mcp, client = build_server(config, metrics=metrics)
+    mcp, client = build_server(config, metrics=metrics, audit=LoggingAudit())
     auth_provider = build_auth(config)
 
     threading.Thread(
