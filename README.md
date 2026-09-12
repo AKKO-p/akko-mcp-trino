@@ -205,7 +205,7 @@ id. A product that wants the join over HTTP passes its own sink to
 
 ## Guarantees the tests hold
 
-168 tests, 100 % coverage, and a lint that fails the build if the core ever
+172 tests, 100 % coverage, and a lint that fails the build if the core ever
 imports a product-specific module. The guard that matters most is on the
 transport: **the identity middleware is mounted on whichever transport is
 served**, and a test asserts it for both. It once lived on a branch the default
