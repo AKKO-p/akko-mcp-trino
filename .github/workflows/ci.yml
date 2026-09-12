@@ -1,0 +1,14 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[test]"
+      # Le cœur reste neutre : aucun couplage à un produit, vérifié à chaque poussée.
+      - run: bash lint-vendor-neutral.sh
+      # 100 % de couverture, par les tests du cœur seul.
+      - run: python -m pytest -q

@@ -1,0 +1,23 @@
+[project]
+name = "akko-mcp-trino"
+version = "0.1.0"
+description = "Governed MCP server for Trino: every tool call carries the identity of the user the agent acts for, and the engine decides."
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.12"
+dependencies = [
+  "mcp[cli]==1.8.1",
+  "trino==0.337.0",
+  "httpx==0.28.0",
+  "starlette==0.46.2",
+  "uvicorn==0.34.2",
+  "sqlglot==25.34.0",
+  "prometheus-client==0.21.1",
+  "PyJWT[crypto]==2.10.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.3.4", "pytest-cov==6.0.0"]
+
+[tool.setuptools]
+packages = ["core"]
