@@ -22,11 +22,37 @@ jobs:
           python-version: "3.12"
       - run: pip install build twine && python -m build && twine check dist/*
       - uses: pypa/gh-action-pypi-publish@release/v1
+  provenance:
+    # Signed build provenance and an SBOM for the wheel and sdist, attached to the release.
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build && python -m build
+      - uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - run: gh release upload "${GITHUB_REF_NAME}" dist/* sbom.spdx.json --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
   image:
     runs-on: ubuntu-latest
     permissions:
       packages: write
       contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -43,8 +69,14 @@ jobs:
             type=semver,pattern={{version}}
             type=raw,value=latest
       - uses: docker/build-push-action@v6
+        id: push
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/akko-p/akko-mcp-trino
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

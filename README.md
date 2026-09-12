@@ -1,11 +1,11 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-173%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-199%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
-  <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351%20%C2%B7%20tested%20483-blue" alt="Trino">
-  <img src="https://img.shields.io/badge/MCP-1.8%20%C2%B7%20sse%20%7C%20streamable--http-blue" alt="MCP">
+  <img src="https://img.shields.io/badge/MCP-2025--06--18%20%C2%B7%20streamable--http%20%7C%20sse%20%7C%20stdio-blue" alt="MCP">
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
   <img src="https://img.shields.io/badge/code%20style-ruff-000000" alt="Ruff">
   <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
@@ -54,7 +54,7 @@ to.
 - **Standard discovery.** RFC 9728 metadata and `WWW-Authenticate` on every `401`, so hosts know where to log in.
 - **Quotas, revocation, audit.** Per-user and per-agent limits, optional RFC 7662 introspection, one JSON audit line per call keyed by `X-Request-Id` — never the token.
 - **Any OIDC provider, any MCP host, any model.** Keycloak, Entra ID, Okta… Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1 300 lines, 173 tests at 100 % coverage, a product-neutral guard in CI, and three live proofs (functional, adversarial, agent-driven) on a real cluster.
+- **Small and proven.** 1 400 lines, 199 tests at 100 % coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and three live proofs (functional, adversarial, agent-driven) on a real cluster.
 
 ## Contents
 
@@ -112,8 +112,8 @@ answers. That is the whole point.
 | Trino | 351 and later (the `X-Trino-User` protocol header) | 483, behind OPA |
 | Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA with row filters and column masks |
 | Identity providers | any OIDC provider publishing a JWKS | Keycloak 26 |
-| MCP | protocol 2025-03-26 via the official `mcp` SDK 1.8; transports `sse` and `streamable-http` | both transports, official SDK client |
-| MCP hosts | anything that sends a bearer header: Cursor, Claude Desktop, VS Code, the Python SDK | Python SDK, the example agent |
+| MCP | protocol 2025-06-18 via the official `mcp` SDK 1.30; transports `streamable-http`, `sse` and `stdio` | all three, official SDK client, in CI |
+| MCP hosts | remote: anything that sends a bearer header (Cursor, Claude Desktop, VS Code, Le Chat connectors); local: any stdio host | Python SDK, the example agent |
 | Models | any, the server never talks to a model | Mistral Small 3.2 through OpenRouter, driving the tools |
 
 ## Prerequisites
@@ -169,7 +169,7 @@ python -m akko_mcp_trino
 You should see:
 
 ```
-INFO:__main__:serving transport=sse port=3000 auth=True strict=True
+INFO:__main__:serving transport=streamable-http port=3000 auth=True strict=True
 ```
 
 Check it is alive and can reach Trino:
@@ -203,7 +203,7 @@ Cursor, Claude Desktop, VS Code (`mcp.json`):
 {
   "mcpServers": {
     "trino": {
-      "url": "http://localhost:3000/sse",
+      "url": "http://localhost:3000/mcp",
       "headers": {
         "Authorization": "Bearer <the user's access token>",
         "X-Agent-Key": "<the key registered for this product, if any>"
@@ -218,11 +218,11 @@ From Python, with the official SDK:
 ```python
 import anyio
 from mcp import ClientSession
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 
 async def main(token: str):
     headers = {"Authorization": f"Bearer {token}", "X-Agent-Key": "my-agent-key"}
-    async with sse_client("http://localhost:3000/sse", headers=headers) as (read, write):
+    async with streamablehttp_client("http://localhost:3000/mcp", headers=headers) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("execute_query", {"sql": "SELECT 1"})
@@ -231,8 +231,37 @@ async def main(token: str):
 anyio.run(main, "<token>")
 ```
 
-Set `MCP_TRANSPORT=streamable-http` to serve `/mcp` instead of `/sse`; the
-guard is the same on both.
+`streamable-http` (`/mcp`) is the default and what current hosts expect. Set
+`MCP_TRANSPORT=sse` for older hosts (`/sse`); the guard is the same on both.
+
+### Local hosts over stdio
+
+Claude Desktop, Cursor and Mistral Vibe can launch the server themselves.
+There is no request then, so the identity comes from the environment: the
+user's own access token, verified exactly like a bearer header would be, and
+bound to the process. Strict mode refuses to start without it.
+
+```json
+{
+  "mcpServers": {
+    "trino": {
+      "command": "uvx",
+      "args": ["akko-mcp-trino"],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "TRINO_HOST": "trino.example.internal",
+        "MCP_AUTH_ENABLED": "true", "MCP_AUTH_REQUIRED": "true",
+        "MCP_JWKS_URL": "https://idp.example.com/realms/data/protocol/openid-connect/certs",
+        "MCP_OIDC_ISSUER": "https://idp.example.com/realms/data",
+        "MCP_OIDC_AUDIENCE": "data-platform",
+        "MCP_USER_TOKEN": "<the user's access token>"
+      }
+    }
+  }
+}
+```
+
+`uvx akko-mcp-trino` runs the published package without installing anything.
 
 ## Use it from an agent
 
@@ -246,7 +275,7 @@ pip install akko-mcp-trino openai
 export LLM_BASE_URL=https://api.mistral.ai/v1
 export LLM_API_KEY=...
 export LLM_MODEL=mistral-small-latest
-export MCP_URL=http://localhost:3000/sse
+export MCP_URL=http://localhost:3000/mcp
 export USER_TOKEN=<the user's access token>
 python examples/agent.py "Which catalogs can I see, and what is in them?"
 ```
@@ -260,9 +289,18 @@ Run it twice with two users' tokens and compare. The
 |---|---|---|
 | `list_catalogs` | — | the catalogs the user can see |
 | `list_schemas` | `catalog` | schemas in that catalog |
-| `list_tables` | `catalog`, `schema` | tables in that schema |
-| `describe_table` | `catalog`, `schema`, `table` | columns and types |
+| `list_tables` | `catalog`, `schema` | tables and views in that schema |
+| `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0–20) | columns, types, comments; a governed sample when asked |
+| `search_columns` | `pattern` (SQL LIKE), `catalog` (optional) | tables having a column matching the pattern |
+| `profile_table` | `catalog`, `schema`, `table` | `SHOW STATS`: row count, distinct values, null fraction, ranges |
+| `explain_query` | `sql` | Trino's plan for a read-only statement, without running it |
 | `execute_query` | `sql` | `{"columns": [...], "rows": [...], "row_count": n}` |
+
+Every tool runs in Trino under the caller's identity, discovery included:
+metadata is data, and a user who may not read a schema does not list it
+either. Every description is written for a model: what the tool returns,
+and that a masked value or a missing row is the access policy, not an error
+to retry.
 
 Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed
 in SQL. `execute_query` accepts any SQL Trino accepts, **as long as it is a
@@ -355,9 +393,10 @@ refuses to start for the same reason.
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `MCP_TRANSPORT` | `sse` or `streamable-http` | `sse` |
+| `MCP_TRANSPORT` | `streamable-http`, `sse` or `stdio` | `streamable-http` |
 | `MCP_PORT`, `MCP_HEALTH_PORT` | listening ports | `3000`, `3001` |
 | `MCP_SERVER_NAME` | name announced to hosts | `trino-mcp` |
+| `MCP_USER_TOKEN` | stdio only: the user's access token, verified like a bearer header | — (required in strict mode) |
 
 ## Operations
 
@@ -380,7 +419,7 @@ token, and every `401` says where to go:
 curl -s https://mcp.example.com/.well-known/oauth-protected-resource
 # {"resource":"https://mcp.example.com","authorization_servers":["https://idp.example.com/realms/data"],"bearer_methods_supported":["header"]}
 
-curl -si https://mcp.example.com/sse | grep -i -e www-auth -e x-reason
+curl -si https://mcp.example.com/mcp | grep -i -e www-auth -e x-reason
 # WWW-Authenticate: Bearer realm="trino", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"
 # X-Reason: unauthenticated
 ```
@@ -443,7 +482,7 @@ and `mcp_trino_query_duration_seconds`.
 pip install -e ".[dev]"
 ruff check akko_mcp_trino tests && ruff format akko_mcp_trino tests
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 173 tests; coverage below 100 % fails the run
+pytest                        # 199 tests; coverage below 100 % fails the run
 python -m build && twine check dist/*
 ```
 
@@ -461,7 +500,7 @@ Every module in `akko_mcp_trino/` has one responsibility and its own test file:
 | `middleware.py` | the guard: key, token, revocation, quotas, discovery, request id |
 | `discovery.py`, `ratelimit.py`, `revocation.py`, `audit.py` | one guard each |
 | `sql_guard.py` | identifier validation, read-only decision on the AST |
-| `tools.py`, `trino_client.py` | the five tools, the Trino connection |
+| `tools.py`, `trino_client.py` | the eight tools, the Trino connection |
 | `server.py`, `app.py`, `__main__.py` | assembly, transport, entrypoint |
 
 The README is tested too: every variable listed here is read by `config.py`,
@@ -477,6 +516,10 @@ sessions of two users on both transports — zero crossed responses.
 **Mounting is transport-independent.** One code path builds the transport app
 and mounts the guard, whatever the transport. The guard once lived only on the
 branch the default transport never took; a test now asserts it for both.
+
+**Every tool carries the identity, not only `execute_query`.** Version 0.1
+ran discovery as the service account; a restricted user could list what the
+engine would hide from them. Fixed in 0.2 with a test that walks every tool.
 
 **Read-only is decided on the AST, anywhere in the tree.** A leading-keyword
 check lets `WITH w AS (DELETE FROM t) SELECT 1` through. So did a root-node

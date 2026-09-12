@@ -42,6 +42,6 @@ def test_readme_defaults_match_the_code(monkeypatch):
     cfg = Config.from_env()
     assert cfg.mcp_port == 3000 and "`3000`" in README
     assert cfg.health_port == 3001 and "`3001`" in README
-    assert cfg.transport == "sse"
+    assert cfg.transport == "streamable-http" and "`streamable-http`" in README
     assert cfg.max_rows == 100 and "`100`" in README
     assert cfg.read_only is True

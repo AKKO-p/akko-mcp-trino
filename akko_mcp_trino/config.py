@@ -62,7 +62,7 @@ class Config:
             jwks_url=os.environ.get("MCP_JWKS_URL", ""),
             oidc_issuer=os.environ.get("MCP_OIDC_ISSUER", ""),
             oidc_audience=os.environ.get("MCP_OIDC_AUDIENCE", ""),
-            transport=os.environ.get("MCP_TRANSPORT", "sse"),
+            transport=os.environ.get("MCP_TRANSPORT", "streamable-http"),
             mcp_port=int(os.environ.get("MCP_PORT", "3000")),
             auth_required=os.environ.get("MCP_AUTH_REQUIRED", "false").lower() == "true",
             resource_url=os.environ.get("MCP_RESOURCE_URL", "").rstrip("/"),

@@ -8,7 +8,7 @@ JWT on every tool call, and Trino answers as that user.
     export LLM_BASE_URL=https://api.mistral.ai/v1
     export LLM_API_KEY=...
     export LLM_MODEL=mistral-small-latest
-    export MCP_URL=http://localhost:3000/sse
+    export MCP_URL=http://localhost:3000/mcp      # or .../sse for the sse transport
     export USER_TOKEN=<the user's access token>
     export AGENT_KEY=<optional X-Agent-Key>
     python examples/agent.py "Give me three customer e-mails and their country"
@@ -25,6 +25,7 @@ import sys
 import anyio
 from mcp import ClientSession
 from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamablehttp_client
 from openai import OpenAI
 
 SYSTEM = (
@@ -58,9 +59,10 @@ async def run(question: str) -> str:
     if os.environ.get("AGENT_KEY"):
         headers["X-Agent-Key"] = os.environ["AGENT_KEY"]
 
-    async with sse_client(
-        os.environ.get("MCP_URL", "http://localhost:3000/sse"), headers=headers
-    ) as (r, w):
+    url = os.environ.get("MCP_URL", "http://localhost:3000/mcp")
+    opener = sse_client if url.rstrip("/").endswith("/sse") else streamablehttp_client
+    async with opener(url, headers=headers) as streams:
+        r, w = streams[0], streams[1]
         async with ClientSession(r, w) as session:
             await session.initialize()
             tools = _openai_tools((await session.list_tools()).tools)

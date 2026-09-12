@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akko-mcp-trino"
-version = "0.1.0"
+version = "0.2.0"
 description = "Governed MCP server for Trino: every tool call carries the identity of the user the agent acts for, and the engine decides."
 readme = "README.md"
 license = "Apache-2.0"
@@ -42,8 +42,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest==8.3.4", "pytest-cov==6.0.0"]
-dev = ["pytest==8.3.4", "pytest-cov==6.0.0", "ruff==0.9.4", "build==1.2.2", "twine==6.1.0"]
+test = ["pytest==9.1.1", "pytest-cov==7.1.0"]
+dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "build==1.2.2", "twine==6.1.0"]
 
 [project.scripts]
 akko-mcp-trino = "akko_mcp_trino.__main__:main"
