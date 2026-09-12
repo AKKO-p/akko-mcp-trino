@@ -5,6 +5,11 @@ on:
     tags: ["v*"]
 jobs:
   pypi:
+    # Runs once trusted publishing is configured on pypi.org for this repository
+    # (Publishing → pending publisher: AKKO-p/akko-mcp-trino, release.yml, environment pypi)
+    # and the repository variable PYPI_TRUSTED_PUBLISHING is set to "true".
+    # Until then, releases are uploaded with twine from a maintainer's machine.
+    if: vars.PYPI_TRUSTED_PUBLISHING == 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
