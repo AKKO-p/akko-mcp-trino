@@ -221,8 +221,16 @@ impossible.
 4. ~~Request-id audit join — tool, subject, agent, token id, never the raw token.~~ Done.
 5. ~~Optional token-state check for revocation before expiry.~~ Done (RFC 7662).
 
-All five are in. Next is the proof against real engines: Trino 483, ODP, and a
-Cloudera 7.1.9 with Ranger 2.4 — two accounts, two answers, journal attached.
+All five are in and proven against a live Trino behind Keycloak and OPA on
+12 September 2026: two accounts, two answers on the same query through the
+same server (one user reads e-mails in clear across six countries, the other
+reads them masked and only for one), every refusal named, the audit line
+without a token, a logged-out token refused. Next are the same proof on ODP
+with Ranger and on Cloudera 7.1.9 with Ranger 2.4.
+
+One thing the live proof taught: Keycloak introspects only for a client that
+is in the token's `aud`. Register this server as its own confidential client
+and add it to the audience mapper; the issuing client is not enough.
 
 ## Status
 
