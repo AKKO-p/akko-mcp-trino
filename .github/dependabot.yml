@@ -1,12 +1,20 @@
 version: 2
+# One grouped pull request per ecosystem per month: Actions minutes on a
+# private repository are finite, and a burst of ten PRs burned them once.
 updates:
   - package-ecosystem: pip
     directory: /
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 5
+    schedule: { interval: monthly }
+    groups:
+      python-dependencies: { patterns: ["*"] }
+    open-pull-requests-limit: 1
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    groups:
+      actions: { patterns: ["*"] }
+    open-pull-requests-limit: 1
   - package-ecosystem: docker
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1
