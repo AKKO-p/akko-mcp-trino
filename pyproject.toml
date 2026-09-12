@@ -37,7 +37,7 @@ dependencies = [
   "starlette==1.6.0",
   "uvicorn==0.52.4",
   "sqlglot==30.18.0",
-  "prometheus-client==0.21.1",
+  "prometheus-client==0.26.0",
   "PyJWT[crypto]==2.14.0",
 ]
 
