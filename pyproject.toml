@@ -31,19 +31,19 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "mcp[cli]==1.30.0",
+  "mcp[cli]==2.2.0",
   "trino==0.339.0",
   "httpx==0.28.1",
   "starlette==1.6.0",
   "uvicorn==0.52.4",
   "sqlglot==30.18.0",
-  "prometheus-client==0.21.1",
+  "prometheus-client==0.26.0",
   "PyJWT[crypto]==2.14.0",
 ]
 
 [project.optional-dependencies]
 test = ["pytest==9.1.1", "pytest-cov==7.1.0"]
-dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "mypy==2.3.1", "pip-audit==2.10.1", "build==1.2.2", "twine==6.1.0"]
+dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "mypy==2.3.1", "pip-audit==2.10.1", "build==1.6.1", "twine==7.0.0"]
 
 [project.scripts]
 akko-mcp-trino = "akko_mcp_trino.__main__:main"
