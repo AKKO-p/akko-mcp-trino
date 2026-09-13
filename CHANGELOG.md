@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-13
+
+### Added
+- `server.json` and the `mcp-name` marker in the README so the package can be listed in the official MCP Registry (`io.github.akko-p/akko-mcp-trino`); the release workflow publishes the server entry after the package.
+
 ## [0.3.0] - 2026-09-13
 
 ### Added

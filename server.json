@@ -1,0 +1,45 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.akko-p/akko-mcp-trino",
+  "title": "AKKO MCP server for Trino",
+  "description": "Governed MCP server for Trino: every tool call carries the user's OIDC identity down to Trino, read-only enforced on the SQL tree, quotas, revocation and audit. Any OIDC provider, any MCP host, any model.",
+  "version": "0.3.1",
+  "websiteUrl": "https://akko-ai.com/docs/akko-mcp-trino/",
+  "repository": {
+    "url": "https://github.com/AKKO-p/akko-mcp-trino",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "akko-mcp-trino",
+      "version": "0.3.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TRINO_HOST",
+          "description": "Trino coordinator host",
+          "isRequired": true
+        },
+        {
+          "name": "MCP_JWKS_URL",
+          "description": "JWKS endpoint of the OIDC provider",
+          "isRequired": true
+        },
+        {
+          "name": "MCP_OIDC_ISSUER",
+          "description": "Expected token issuer",
+          "isRequired": true
+        },
+        {
+          "name": "MCP_USER_TOKEN",
+          "description": "The user's bearer token (stdio transport)",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

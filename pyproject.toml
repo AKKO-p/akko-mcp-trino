@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akko-mcp-trino"
-version = "0.3.0"
+version = "0.3.1"
 description = "Governed MCP server for Trino: every tool call carries the identity of the user the agent acts for, and the engine decides."
 readme = "README.md"
 license = "Apache-2.0"

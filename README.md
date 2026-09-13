@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
   <img src="https://img.shields.io/badge/tests-260%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
-  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351%20%C2%B7%20tested%20483-blue" alt="Trino">
   <img src="https://img.shields.io/badge/MCP-2025--06--18%20%C2%B7%20streamable--http%20%7C%20sse%20%7C%20stdio-blue" alt="MCP">
@@ -12,6 +12,8 @@
 </p>
 
 # akko-mcp-trino
+
+<!-- mcp-name: io.github.akko-p/akko-mcp-trino -->
 
 **Give your AI agents access to Trino without giving them your data.**
 
