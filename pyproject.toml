@@ -10,7 +10,7 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
-authors = [{ name = "Abderrahmen Dridi", email = "contact@akko-ai.com" }]
+authors = [{ name = "AKKO", email = "contact@akko-ai.com" }]
 maintainers = [{ name = "AKKO", email = "contact@akko-ai.com" }]
 keywords = [
   "mcp", "model-context-protocol", "trino", "lakehouse", "data-governance",

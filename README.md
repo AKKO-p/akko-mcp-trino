@@ -626,7 +626,7 @@ Trino can put identity in front of their agents today.
 If you run Trino behind Ranger or OPA and want a hand wiring this up, or want
 to see the rest of the platform, [say hello](https://akko-ai.com).
 
-**Author:** Abderrahmen Dridi ([@ab2dridi](https://github.com/ab2dridi)) ·
+**Maintained by:** AKKO ([contact@akko-ai.com](mailto:contact@akko-ai.com)) ·
 **Issues:** [github.com/AKKO-p/akko-mcp-trino/issues](https://github.com/AKKO-p/akko-mcp-trino/issues)
 
 ## License
