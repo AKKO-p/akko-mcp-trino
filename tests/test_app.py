@@ -37,7 +37,7 @@ def _config(transport: str) -> Config:
 
 
 class _FakeMCP:
-    """Stands in for FastMCP: returns a bare ASGI app per transport and records which."""
+    """Stands in for MCPServer: returns a bare ASGI app per transport and records which."""
 
     def __init__(self):
         self.served = None

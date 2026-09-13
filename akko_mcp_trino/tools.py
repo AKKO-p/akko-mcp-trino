@@ -1,4 +1,4 @@
-"""The Trino tools, registered on a FastMCP instance through a registrar.
+"""The Trino tools, registered on an MCPServer instance through a registrar.
 
 The tools are closures over a `TrinoClient`, so they are testable with a fake
 client. Their docstrings are the descriptions MCP hosts show to the model, so
@@ -105,7 +105,7 @@ def register_query_tools(
     audit: Any = None,
     context: Any = None,
 ) -> None:
-    """Register the Trino tools on the FastMCP instance `mcp`.
+    """Register the Trino tools on the MCPServer instance `mcp`.
 
     `audit`, when given, receives one AuditEvent per call (see `akko_mcp_trino.audit`).
     `context`, when given, is a ContextProvider (see `akko_mcp_trino.context`) that
@@ -119,10 +119,10 @@ def register_query_tools(
         register = mcp.tool(
             annotations=ToolAnnotations(
                 title=title,
-                readOnlyHint=True,
-                destructiveHint=False,
-                idempotentHint=idempotent,
-                openWorldHint=False,
+                read_only_hint=True,
+                destructive_hint=False,
+                idempotent_hint=idempotent,
+                open_world_hint=False,
             )
         )
 

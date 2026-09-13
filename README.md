@@ -120,7 +120,7 @@ answers. That is the whole point.
 | Trino | 351 and later (the `X-Trino-User` protocol header); http or https; password, or JWT passthrough | 483 behind OPA, in-cluster http with impersonation and public https with JWT passthrough |
 | Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA with row filters and column masks |
 | Identity providers | any OIDC provider publishing a JWKS | Keycloak 26 |
-| MCP | protocol 2025-06-18 via the official `mcp` SDK 1.30; transports `streamable-http`, `sse` and `stdio` | all three, official SDK client, in CI |
+| MCP | protocol 2025-06-18 via the official `mcp` SDK 2.2; transports `streamable-http`, `sse` and `stdio` | all three, official SDK client, in CI |
 | MCP hosts | remote: anything that sends a bearer header (Cursor, Claude Desktop, VS Code, Le Chat connectors); local: any stdio host | Python SDK, the example agent |
 | Models | any, the server never talks to a model | Mistral Small 3.2 through OpenRouter, driving the tools |
 
@@ -231,15 +231,18 @@ From Python, with the official SDK:
 ```python
 import anyio
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
 
 async def main(token: str):
     headers = {"Authorization": f"Bearer {token}", "X-Agent-Key": "my-agent-key"}
-    async with streamablehttp_client("http://localhost:3000/mcp", headers=headers) as (read, write, _):
+    http = create_mcp_http_client(headers=headers)
+    async with streamable_http_client("http://localhost:3000/mcp", http_client=http) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("execute_query", {"sql": "SELECT 1"})
             print(result.content[0].text)
+
 
 anyio.run(main, "<token>")
 ```

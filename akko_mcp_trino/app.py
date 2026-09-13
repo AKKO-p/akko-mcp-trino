@@ -58,7 +58,7 @@ def build_asgi_app(config: Config, mcp: Any, *, auth_provider: Any) -> Any:
     """Return the transport app for ``config.transport`` with the guard mounted.
 
     ``mcp`` is anything exposing ``sse_app()`` and ``streamable_http_app()`` —
-    a real FastMCP in production, a stand-in under test. An unknown transport
+    a real MCPServer in production, a stand-in under test. An unknown transport
     raises rather than falling back: a typo in configuration must not silently
     pick a transport.
     """

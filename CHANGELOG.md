@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - `server.json` and the `mcp-name` marker in the README so the package can be listed in the official MCP Registry (`io.github.akko-p/akko-mcp-trino`); the release workflow publishes the server entry after the package.
 
+### Changed
+- MCP SDK 2.2 (was 1.30): the server is built on `mcp.server.mcpserver.MCPServer`, tool annotations use the SDK's snake_case fields, and the in-process transport suite uses the 2.x client (`streamable_http_client` with an `httpx2` client). The wire protocol, the tools and the guard are unchanged; hosts on either SDK generation connect the same way. The 1.x SDK is no longer supported: `mcp<2` would need the previous release.
+
 ## [0.3.0] - 2026-09-13
 
 ### Added

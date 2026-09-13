@@ -1,4 +1,4 @@
-"""End to end, in process: the real FastMCP, the real SDK client, each transport.
+"""End to end, in process: the real MCPServer, the real SDK client, each transport.
 
 Unit tests prove each piece; this proves the pieces fit the SDK we pin. The
 server runs in a thread on a free port with a fake Trino connection and a real
@@ -25,7 +25,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from akko_mcp_trino import auth
 from akko_mcp_trino.app import build_asgi_app
@@ -123,13 +123,20 @@ def served(request, monkeypatch):
     server.should_exit = True
 
 
+def _open(transport, url, headers):
+    """The SDK 2.x streamable client takes a configured httpx2 client, the SSE
+    client still takes headers: one opener for the tests, whatever the transport."""
+    if transport == "sse":
+        return sse_client(url, headers=headers)
+    return streamable_http_client(url, http_client=create_mcp_http_client(headers=headers))
+
+
 async def _call(transport, url, headers, tool, args):
-    opener = sse_client if transport == "sse" else streamablehttp_client
-    async with opener(url, headers=headers) as streams:
+    async with _open(transport, url, headers) as streams:
         async with ClientSession(streams[0], streams[1]) as s:
             await s.initialize()
             res = await s.call_tool(tool, args)
-            return res.isError, res.content[0].text
+            return res.is_error, res.content[0].text
 
 
 def test_each_http_transport_serves_tools_under_the_callers_identity(served):
@@ -151,8 +158,7 @@ def test_each_http_transport_lists_the_eight_tools(served):
     headers = {"Authorization": f"Bearer {_token('alice')}", "X-Agent-Key": "k1"}
 
     async def names():
-        opener = sse_client if transport == "sse" else streamablehttp_client
-        async with opener(url, headers=headers) as streams:
+        async with _open(transport, url, headers) as streams:
             async with ClientSession(streams[0], streams[1]) as s:
                 await s.initialize()
                 return sorted(t.name for t in (await s.list_tools()).tools)

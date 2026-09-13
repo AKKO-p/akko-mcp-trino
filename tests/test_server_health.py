@@ -28,7 +28,7 @@ _CFG = Config(
 
 
 def test_build_server_returns_mcp_and_client():
-    # Injected FakeMCP factory: tests assembly without depending on a FastMCP version.
+    # Injected FakeMCP factory: tests assembly without depending on an SDK version.
     mcp, client = build_server(_CFG, mcp_factory=lambda name: FakeMCP())
     assert set(mcp.tools) == {
         "list_catalogs",

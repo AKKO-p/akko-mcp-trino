@@ -1,6 +1,6 @@
 """Server assembly.
 
-`build_server` creates the FastMCP instance and the Trino client, registers the
+`build_server` creates the MCPServer instance and the Trino client, registers the
 five generic tools, then applies any extra tool registrars a product wants to
 add. That registrar hook is the only extension point, and it is deliberate.
 """
@@ -19,12 +19,12 @@ ToolRegistrar = Callable[[Any, TrinoClient], None]
 
 def _default_mcp_factory(
     name: str,
-):  # pragma: no cover - production factory (real FastMCP), proven by running it
-    # Lazy import: FastMCP is only needed for real assembly, which keeps
+):  # pragma: no cover - production factory (real MCPServer), proven by running it
+    # Lazy import: the SDK server is only needed for real assembly, which keeps
     # build_server testable through an injected mcp_factory.
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
-    return FastMCP(name)
+    return MCPServer(name)
 
 
 def build_server(
@@ -37,7 +37,7 @@ def build_server(
     context: Any = None,
 ) -> Tuple[Any, TrinoClient]:
     """Assemble the server. `mcp_factory` is injectable so assembly can be tested
-    without depending on a FastMCP version. `metrics`, when given, instruments the client;
+    without depending on an SDK version. `metrics`, when given, instruments the client;
     `audit`, when given, receives one record per tool call;
     `context`, when given, is the ContextProvider (else built from the environment by main)."""
     mcp = mcp_factory(config.server_name)

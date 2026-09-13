@@ -1,6 +1,6 @@
 """ASGI identity middleware: binds the user and the agent product on every request.
 
-Mounted on the transport app FastMCP serves — see `akko_mcp_trino.app`, which mounts it
+Mounted on the transport app the SDK server serves — see `akko_mcp_trino.app`, which mounts it
 on whichever transport is configured. Every tool call is an HTTP request
 carrying an Authorization header. The middleware verifies it through the
 AuthProvider, stores the Principal in the ContextVar the tools read, and clears
