@@ -22,6 +22,7 @@ from .identity import set_current_bearer, set_current_principal
 from .middleware import AuthIdentityMiddleware
 from .ratelimit import RateLimiter
 from .revocation import IntrospectionCheck
+from .transport_security import transport_security_for
 
 _HTTP_TRANSPORTS = ("sse", "streamable-http")
 _TRANSPORTS = _HTTP_TRANSPORTS + ("stdio",)
@@ -57,15 +58,20 @@ def run_stdio(config: Config, mcp: Any, *, auth_provider: Any) -> None:
 def build_asgi_app(config: Config, mcp: Any, *, auth_provider: Any) -> Any:
     """Return the transport app for ``config.transport`` with the guard mounted.
 
-    ``mcp`` is anything exposing ``sse_app()`` and ``streamable_http_app()`` —
+    ``mcp`` is anything exposing ``sse_app(transport_security=)`` and
+    ``streamable_http_app(transport_security=)`` —
     a real MCPServer in production, a stand-in under test. An unknown transport
     raises rather than falling back: a typo in configuration must not silently
     pick a transport.
     """
+    # Left unset, the SDK assumes a localhost server and answers 421 to any
+    # other Host header: a pod reached by its service name would refuse every
+    # call. The setting is always explicit here (see `transport_security`).
+    security = transport_security_for(config.allowed_hosts)
     if config.transport == "sse":
-        app = mcp.sse_app()
+        app = mcp.sse_app(transport_security=security)
     elif config.transport == "streamable-http":
-        app = mcp.streamable_http_app()
+        app = mcp.streamable_http_app(transport_security=security)
     else:
         raise ValueError(
             f"no ASGI app for MCP_TRANSPORT {config.transport!r}; "

@@ -196,3 +196,17 @@ def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
                 return sorted(t.name for t in (await s.list_tools()).tools)
 
     assert "execute_query" in anyio.run(go)
+
+
+def test_a_foreign_host_header_is_served_not_refused_with_421(served):
+    """In a cluster the pod is reached as a service name, on the internet as a
+    public name: neither is localhost, both must be served."""
+    transport, url = served
+    headers = {
+        "Authorization": f"Bearer {_token('alice')}",
+        "X-Agent-Key": "k1",
+        "Host": "akko-mcp-trino.akko.svc:3000",
+    }
+    is_err, text = anyio.run(_call, transport, url, headers, "execute_query", {"sql": "SELECT 1"})
+    assert not is_err
+    assert json.loads(text)["rows"][0][0] == "alice"

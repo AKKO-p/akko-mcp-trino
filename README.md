@@ -444,6 +444,7 @@ never falls back to the service account when a request has no bearer.
 | `MCP_JWT_LEEWAY_SECONDS` | tolerance on `exp`/`nbf`/`iat` for clock drift between the issuer and this server | `30` |
 | `MCP_RESOURCE_URL` | public URL of this server; enables RFC 9728 discovery | — (off) |
 | `MCP_AGENT_KEYS` | `name:key,name:key` — registered agent products; empty disables the check | — (off) |
+| `MCP_ALLOWED_HOSTS` | Host header filter (the SDK's DNS rebinding protection): `host` or `host:port` entries, comma-separated, `*` wildcards; empty serves any Host | — (off) |
 
 Auth enabled without a JWKS URL refuses to start: an authentication layer that
 cannot verify anything must not pretend to. A malformed `MCP_AGENT_KEYS` entry
