@@ -142,8 +142,12 @@ server.
 ## Install and run
 
 ```bash
-pip install akko-mcp-trino
+pip install akko-mcp-trino        # or: pipx install akko-mcp-trino
+uvx akko-mcp-trino --version      # run it without installing, the way most MCP hosts do
+docker run --rm ghcr.io/akko-p/akko-mcp-trino --version
 ```
+
+The package is a plain PyPI package, so `uv`, `pipx`, `poetry` and `pip` all work; no separate distribution is needed for `uv`. A conda-forge recipe is not published: MCP hosts do not use conda, and every dependency is pure Python. Tell us in an issue if a conda-only environment needs it.
 
 Or from source:
 
