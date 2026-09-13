@@ -13,6 +13,7 @@ if grep -rnE --include=*.py --exclude-dir=__pycache__ "^\s*(from|import)\s+akko(
 fi
 
 # 2. No product or vendor value hardcoded (hosts, catalogs, model runtimes).
+#    Catalogue names are allowed only as plugin names in documentation strings.
 FORBIDDEN='akko-trino|akko_ai|akko-ai\.com|harbor\.akko|iceberg|ollama|"mcp-trino"'
 if grep -rniE --include=*.py --exclude-dir=__pycache__ "$FORBIDDEN" akko_mcp_trino/ 2>/dev/null; then
   echo "FAIL: akko_mcp_trino/ contains a hardcoded product or vendor value; inject it through the environment." >&2

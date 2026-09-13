@@ -290,3 +290,29 @@ def test_cli_check_reports_a_missing_context_file(monkeypatch, capsys):
     monkeypatch.setenv("MCP_CONTEXT_FILE", "/nowhere/ctx.json")
     assert check_config(Config.from_env()) == 2
     assert "ctx.json" in capsys.readouterr().out
+
+
+def test_cli_check_hands_the_whole_environment_to_context_plugins(monkeypatch, capsys):
+    """A plugin reads its own variables (OPENMETADATA_URL…); the launcher must
+    pass the process environment, not only the MCP_CONTEXT_* keys. Found live."""
+    from akko_mcp_trino import context as ctx
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    seen = {}
+
+    class _EP:
+        name = "acme"
+
+        def load(self):
+            def factory(env, query):
+                seen.update(env)
+                return ctx.NoContext()
+
+            return factory
+
+    monkeypatch.setattr(ctx, "_entry_points", lambda: [_EP()])
+    monkeypatch.setenv("MCP_CONTEXT_PROVIDERS", "acme")
+    monkeypatch.setenv("ACME_URL", "https://acme")
+    assert check_config(Config.from_env()) == 0
+    assert seen.get("ACME_URL") == "https://acme" and seen.get("MCP_CONTEXT_PROVIDERS") == "acme"

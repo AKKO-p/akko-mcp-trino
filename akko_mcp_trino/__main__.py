@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
 from typing import Any
@@ -51,6 +52,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="validate the configuration, print the effective settings without secrets, exit",
     )
     return parser.parse_args(argv)
+
+
+def _context_env(config: Config) -> dict[str, str]:
+    """The environment context providers read: the whole process environment (plugins
+    have their own variables) with the MCP_CONTEXT_* settings as the Config resolved them."""
+    return {
+        **os.environ,
+        "MCP_CONTEXT_PROVIDERS": config.context_providers,
+        "MCP_CONTEXT_FILE": config.context_file,
+        "MCP_CONTEXT_TTL_SECONDS": str(config.context_ttl_seconds),
+    }
 
 
 def check_config(config: Config) -> int:
@@ -92,13 +104,7 @@ def check_config(config: Config) -> int:
         problems.append(str(exc))
     RateLimiter.from_env({"MCP_RATE_LIMIT_USER": str(config.rate_limit_user)})
     try:
-        build_context(
-            {
-                "MCP_CONTEXT_PROVIDERS": config.context_providers,
-                "MCP_CONTEXT_FILE": config.context_file,
-            },
-            lambda sql: {"rows": []},
-        )
+        build_context(_context_env(config), lambda sql: {"rows": []})
     except (ValueError, FileNotFoundError) as exc:
         problems.append(str(exc))
     print("\n".join(lines))
@@ -121,11 +127,7 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
     # tools use; the client exists once build_server has run, hence the holder.
     holder: dict[str, Any] = {}
     context = build_context(
-        {
-            "MCP_CONTEXT_PROVIDERS": config.context_providers,
-            "MCP_CONTEXT_FILE": config.context_file,
-            "MCP_CONTEXT_TTL_SECONDS": str(config.context_ttl_seconds),
-        },
+        _context_env(config),
         lambda sql: holder["client"].query(sql, user=current_subject(), bearer=current_bearer()),
     )
     mcp, client = build_server(config, metrics=metrics, audit=LoggingAudit(), context=context)

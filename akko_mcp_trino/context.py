@@ -28,6 +28,7 @@ import os
 import threading
 import time
 from dataclasses import asdict, dataclass, field
+from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Protocol, Sequence
 
@@ -284,16 +285,26 @@ def cached(
 
 
 _BUILTIN = ("none", "trino-comments", "file")
+ENTRY_POINT_GROUP = "akko_mcp_trino.context"
+
+
+def _entry_points() -> Sequence[Any]:
+    """The providers other packages register under ``akko_mcp_trino.context``."""
+    return list(entry_points(group=ENTRY_POINT_GROUP))
 
 
 def build_context(env: Mapping[str, str], query: Callable[[str], dict]) -> Any:
     """Build the provider chain from ``MCP_CONTEXT_PROVIDERS`` (comma-separated, priority order).
 
-    Names: ``trino-comments``, ``file`` (needs ``MCP_CONTEXT_FILE``), ``none``.
-    A name the package does not know refuses to start; a product plugs its own
-    provider through ``build_server(context=...)`` instead of a name.
+    Built-in names: ``trino-comments``, ``file`` (needs ``MCP_CONTEXT_FILE``),
+    ``none``. Any other name is looked up among the entry points other packages
+    register under ``akko_mcp_trino.context``; the factory found is called as
+    ``factory(env, query)``. An unknown name refuses to start and lists what is
+    installed. A product may also pass a provider directly to
+    ``build_server(context=...)``.
     """
     names = [n.strip() for n in env.get("MCP_CONTEXT_PROVIDERS", "").split(",") if n.strip()]
+    plugins = {ep.name: ep for ep in _entry_points()}
     providers: list[Any] = []
     for name in names:
         if name == "none":
@@ -307,8 +318,13 @@ def build_context(env: Mapping[str, str], query: Callable[[str], dict]) -> Any:
                     "MCP_CONTEXT_PROVIDERS includes 'file' but MCP_CONTEXT_FILE is empty"
                 )
             providers.append(FileContext(path))
+        elif name in plugins:
+            providers.append(plugins[name].load()(env, query))
         else:
-            raise ValueError(f"unknown context provider {name!r}; built-in: {_BUILTIN}")
+            raise ValueError(
+                f"unknown context provider {name!r}; built-in: {_BUILTIN}; "
+                f"installed plugins: {sorted(plugins) or 'none'}"
+            )
     if not providers:
         return NoContext()
     ttl = float(env.get("MCP_CONTEXT_TTL_SECONDS", os.environ.get("MCP_CONTEXT_TTL_SECONDS", "60")))

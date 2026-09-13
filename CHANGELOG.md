@@ -6,8 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-13
+
 ### Added
 - Context providers (`MCP_CONTEXT_PROVIDERS`): `trino-comments` (the `COMMENT ON` Trino already carries, read under the caller's identity), `file` (a versioned JSON document: description, owner, tier, grain, joins, tags, column classification and values), chained field by field with a TTL cache; a product plugs its own catalogue through `build_server(context=...)`. `describe_table` returns `table` and `column_context`; new tool `explain_table`. A provider describes and never decides; one that fails never hides the columns.
+- Plugin mechanism: any package can register a context provider under the entry-point group `akko_mcp_trino.context`; `akko-mcp-trino-openmetadata` (in `providers/openmetadata`) is the first, handing the agent OpenMetadata's descriptions, owners, tier, tags, keys and column classifications such as `PII.Sensitive`.
 - `MCP_JWT_LEEWAY_SECONDS` (default 30) for clock drift between the issuer and the server; the refusal reason (exception class, never the token) is logged.
 
 ### Fixed

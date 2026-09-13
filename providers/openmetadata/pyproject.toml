@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "akko-mcp-trino-openmetadata"
+version = "0.1.0"
+description = "OpenMetadata context provider for akko-mcp-trino: descriptions, owners, tiers, PII classifications and keys, handed to the agent alongside the columns."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+authors = [{ name = "Abderrahmen Dridi", email = "contact@akko-ai.com" }]
+maintainers = [{ name = "AKKO", email = "contact@akko-ai.com" }]
+keywords = ["mcp", "trino", "openmetadata", "data-catalog", "data-governance", "ai-agents"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Database",
+]
+dependencies = ["akko-mcp-trino>=0.3.0", "httpx>=0.28"]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "mypy==2.3.1"]
+
+[project.entry-points."akko_mcp_trino.context"]
+openmetadata = "akko_mcp_trino_openmetadata:from_env"
+
+[project.urls]
+Homepage = "https://github.com/AKKO-p/akko-mcp-trino/tree/main/providers/openmetadata"
+Repository = "https://github.com/AKKO-p/akko-mcp-trino"
+Documentation = "https://akko-ai.com/docs/akko-mcp-trino/"
+
+[tool.setuptools]
+packages = ["akko_mcp_trino_openmetadata"]
+
+[tool.setuptools.package-data]
+akko_mcp_trino_openmetadata = ["py.typed"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=akko_mcp_trino_openmetadata --cov-branch --cov-report=term-missing --cov-fail-under=100 -p no:cacheprovider"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

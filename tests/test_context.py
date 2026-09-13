@@ -247,3 +247,52 @@ def test_build_context_ignores_the_name_none_in_a_list(tmp_path):
         lambda sql: {"rows": []},
     )
     assert p.table("c", "s", "t").description == "d"
+
+
+def test_build_context_loads_a_provider_registered_as_an_entry_point(monkeypatch):
+    """A catalogue shipped as a separate package registers itself under the
+    entry-point group `akko_mcp_trino.context`; the core imports nothing of it."""
+    from akko_mcp_trino import context as ctx
+
+    class _EP:
+        name = "acme-catalog"
+
+        def load(self):
+            def factory(env, query):
+                assert env.get("ACME_URL") == "https://acme" and callable(query)
+                return _Static()
+
+            return factory
+
+    class _Static:
+        def table(self, c, s, t):
+            return TableContext(description="from acme")
+
+        def column(self, c, s, t, col):
+            return None
+
+    monkeypatch.setattr(ctx, "_entry_points", lambda: [_EP()])
+    p = build_context(
+        {
+            "MCP_CONTEXT_PROVIDERS": "acme-catalog",
+            "ACME_URL": "https://acme",
+            "MCP_CONTEXT_TTL_SECONDS": "0",
+        },
+        lambda sql: {"rows": []},
+    )
+    assert p.table("c", "s", "t").description == "from acme"
+
+
+def test_build_context_names_the_installed_plugins_when_a_name_is_unknown(monkeypatch):
+    from akko_mcp_trino import context as ctx
+
+    class _EP:
+        name = "acme-catalog"
+
+        def load(self):
+            return lambda env, query: NoContext()
+
+    monkeypatch.setattr(ctx, "_entry_points", lambda: [_EP()])
+    with pytest.raises(ValueError) as e:
+        build_context({"MCP_CONTEXT_PROVIDERS": "nope"}, lambda sql: {"rows": []})
+    assert "acme-catalog" in str(e.value)

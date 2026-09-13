@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
   <img src="https://img.shields.io/badge/tests-230%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
-  <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351%20%C2%B7%20tested%20483-blue" alt="Trino">
   <img src="https://img.shields.io/badge/MCP-2025--06--18%20%C2%B7%20streamable--http%20%7C%20sse%20%7C%20stdio-blue" alt="MCP">
@@ -335,7 +335,8 @@ chain of providers fills it, in priority order:
 |---|---|---|
 | `trino-comments` | the `COMMENT ON` Trino already carries, read under the caller's identity | nothing |
 | `file` | a versioned JSON document kept with your code: description, owner, tier, grain, joins, tags, column classification and values | `MCP_CONTEXT_FILE` |
-| your catalogue | OpenMetadata, DataHub, Atlas… a provider implementing the same two methods, shipped as a separate package and passed to `build_server(context=...)` | that package |
+| `openmetadata` | descriptions, owners, tier, tags, primary key as grain, foreign keys as joins, column classifications such as `PII.Sensitive`, from [OpenMetadata](providers/openmetadata/) | `pip install akko-mcp-trino-openmetadata`, `OPENMETADATA_URL`, `OPENMETADATA_TOKEN`, `OPENMETADATA_SERVICE` |
+| your catalogue | DataHub, Atlas, Collibra… a package that implements the same two methods and registers itself under the entry-point group `akko_mcp_trino.context`; or a provider passed to `build_server(context=...)` | that package |
 
 ```json
 {"version": 1, "tables": {
