@@ -9,6 +9,8 @@ must say so for each.
 
 from __future__ import annotations
 
+import dataclasses
+
 from starlette.applications import Starlette
 
 from akko_mcp_trino.app import build_asgi_app, transports_supported
@@ -37,17 +39,20 @@ def _config(transport: str) -> Config:
 
 
 class _FakeMCP:
-    """Stands in for FastMCP: returns a bare ASGI app per transport and records which."""
+    """Stands in for MCPServer: returns a bare ASGI app per transport and records which."""
 
     def __init__(self):
         self.served = None
+        self.security = "unset"
 
-    def sse_app(self):
+    def sse_app(self, *, transport_security=None):
         self.served = "sse"
+        self.security = transport_security
         return Starlette()
 
-    def streamable_http_app(self):
+    def streamable_http_app(self, *, transport_security=None):
         self.served = "streamable-http"
+        self.security = transport_security
         return Starlette()
 
 
@@ -316,3 +321,28 @@ def test_cli_check_hands_the_whole_environment_to_context_plugins(monkeypatch, c
     monkeypatch.setenv("ACME_URL", "https://acme")
     assert check_config(Config.from_env()) == 0
     assert seen.get("ACME_URL") == "https://acme" and seen.get("MCP_CONTEXT_PROVIDERS") == "acme"
+
+
+# ---- Host header: the SDK's DNS rebinding protection is for localhost servers
+
+
+def test_network_server_does_not_filter_the_host_header_by_default():
+    """The SDK enables DNS rebinding protection on its own when it believes it
+    serves localhost, and then answers 421 to any other Host: a pod reached as
+    `akko-mcp-trino.akko.svc` would refuse every call. This server binds
+    0.0.0.0 behind the identity guard, so the Host filter is off unless asked."""
+    for transport in ("sse", "streamable-http"):
+        mcp = _FakeMCP()
+        build_asgi_app(_config(transport), mcp, auth_provider=object())
+        assert mcp.security is not None, "transport_security left to the SDK's localhost default"
+        assert mcp.security.enable_dns_rebinding_protection is False
+
+
+def test_allowed_hosts_turn_the_host_filter_on_with_exactly_those_hosts():
+    mcp = _FakeMCP()
+    cfg = dataclasses.replace(
+        _config("streamable-http"), allowed_hosts="mcp.example.org, mcp.example.org:3000"
+    )
+    build_asgi_app(cfg, mcp, auth_provider=object())
+    assert mcp.security.enable_dns_rebinding_protection is True
+    assert mcp.security.allowed_hosts == ["mcp.example.org", "mcp.example.org:3000"]

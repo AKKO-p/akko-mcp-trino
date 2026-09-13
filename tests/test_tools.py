@@ -1,4 +1,4 @@
-"""The eight core tools, characterised through a fake FastMCP.
+"""The eight core tools, characterised through a fake MCPServer.
 
 Same outputs, same read-only guard, identity forwarded and never forgeable.
 """
@@ -47,7 +47,7 @@ def _registered(read_only=True, **client_kw):
 
 
 def test_tool_annotations_are_classes_not_strings():
-    """Guard: FastMCP 1.8.1 introspects annotations as CLASSES (issubclass). A
+    """Guard: the SDK introspects annotations as CLASSES (issubclass). A
     `from __future__ import annotations` in a tools module would turn them into
     strings and crash the server at startup (seen in production). Forbidden."""
     mcp, _ = _registered()
@@ -464,11 +464,11 @@ def test_every_tool_declares_mcp_annotations_read_only_and_non_destructive():
     Every tool here reads; none is destructive; discovery is idempotent."""
     mcp, _ = _registered()
     for name, ann in mcp.annotations.items():
-        assert ann.readOnlyHint is True, name
-        assert ann.destructiveHint is False, name
-        assert ann.openWorldHint is False, name
+        assert ann.read_only_hint is True, name
+        assert ann.destructive_hint is False, name
+        assert ann.open_world_hint is False, name
         assert ann.title, name
-    assert mcp.annotations["list_catalogs"].idempotentHint is True
+    assert mcp.annotations["list_catalogs"].idempotent_hint is True
 
 
 # ---- 0.3: context providers enrich describe_table and power explain_table

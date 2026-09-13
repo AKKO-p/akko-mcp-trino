@@ -120,7 +120,7 @@ answers. That is the whole point.
 | Trino | 351 and later (the `X-Trino-User` protocol header); http or https; password, or JWT passthrough | 483 behind OPA, in-cluster http with impersonation and public https with JWT passthrough |
 | Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA with row filters and column masks |
 | Identity providers | any OIDC provider publishing a JWKS | Keycloak 26 |
-| MCP | protocol 2025-06-18 via the official `mcp` SDK 1.30; transports `streamable-http`, `sse` and `stdio` | all three, official SDK client, in CI |
+| MCP | protocol 2025-06-18 via the official `mcp` SDK 2.2; transports `streamable-http`, `sse` and `stdio` | all three, official SDK client, in CI |
 | MCP hosts | remote: anything that sends a bearer header (Cursor, Claude Desktop, VS Code, Le Chat connectors); local: any stdio host | Python SDK, the example agent |
 | Models | any, the server never talks to a model | Mistral Small 3.2 through OpenRouter, driving the tools |
 
@@ -231,15 +231,19 @@ From Python, with the official SDK:
 ```python
 import anyio
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
 
 async def main(token: str):
     headers = {"Authorization": f"Bearer {token}", "X-Agent-Key": "my-agent-key"}
-    async with streamablehttp_client("http://localhost:3000/mcp", headers=headers) as (read, write, _):
+    http = create_mcp_http_client(headers=headers)
+    url = "http://localhost:3000/mcp"
+    async with streamable_http_client(url, http_client=http) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("execute_query", {"sql": "SELECT 1"})
             print(result.content[0].text)
+
 
 anyio.run(main, "<token>")
 ```
@@ -440,6 +444,7 @@ never falls back to the service account when a request has no bearer.
 | `MCP_JWT_LEEWAY_SECONDS` | tolerance on `exp`/`nbf`/`iat` for clock drift between the issuer and this server | `30` |
 | `MCP_RESOURCE_URL` | public URL of this server; enables RFC 9728 discovery | — (off) |
 | `MCP_AGENT_KEYS` | `name:key,name:key` — registered agent products; empty disables the check | — (off) |
+| `MCP_ALLOWED_HOSTS` | Host header filter (the SDK's DNS rebinding protection): `host` or `host:port` entries, comma-separated, `*` wildcards; empty serves any Host | — (off) |
 
 Auth enabled without a JWKS URL refuses to start: an authentication layer that
 cannot verify anything must not pretend to. A malformed `MCP_AGENT_KEYS` entry
