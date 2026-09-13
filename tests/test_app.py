@@ -346,3 +346,13 @@ def test_allowed_hosts_turn_the_host_filter_on_with_exactly_those_hosts():
     build_asgi_app(cfg, mcp, auth_provider=object())
     assert mcp.security.enable_dns_rebinding_protection is True
     assert mcp.security.allowed_hosts == ["mcp.example.org", "mcp.example.org:3000"]
+
+
+def test_cli_check_reports_tool_plugins_and_refuses_an_unknown_one(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("MCP_TOOL_PLUGINS", "nope")
+    assert check_config(Config.from_env()) == 2
+    out = capsys.readouterr().out
+    assert "tool plugins: nope" in out and "unknown tool plugin 'nope'" in out

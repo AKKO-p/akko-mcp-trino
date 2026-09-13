@@ -34,6 +34,7 @@ from .context import build_context
 from .health import build_health_app
 from .identity import current_bearer, current_subject
 from .metrics import Metrics
+from .plugins import tool_registrars
 from .ratelimit import RateLimiter
 from .revocation import IntrospectionCheck
 from .server import build_server
@@ -81,6 +82,7 @@ def check_config(config: Config) -> int:
         f"user token (stdio): {'set' if config.user_token else '-'}",
         f"trino identity mode: {config.trino_identity_mode} over {config.trino_http_scheme}",
         f"context providers: {config.context_providers or 'none'}",
+        f"tool plugins: {config.tool_plugins or 'none'}",
     ]
     problems: list[str] = []
     try:
@@ -107,6 +109,10 @@ def check_config(config: Config) -> int:
         build_context(_context_env(config), lambda sql: {"rows": []})
     except (ValueError, FileNotFoundError) as exc:
         problems.append(str(exc))
+    try:
+        tool_registrars({"MCP_TOOL_PLUGINS": config.tool_plugins})
+    except ValueError as exc:
+        problems.append(str(exc))
     print("\n".join(lines))
     for problem in problems:
         print(f"PROBLEM: {problem}")
@@ -130,7 +136,13 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         _context_env(config),
         lambda sql: holder["client"].query(sql, user=current_subject(), bearer=current_bearer()),
     )
-    mcp, client = build_server(config, metrics=metrics, audit=LoggingAudit(), context=context)
+    mcp, client = build_server(
+        config,
+        extra_tool_registrars=tool_registrars({"MCP_TOOL_PLUGINS": config.tool_plugins}),
+        metrics=metrics,
+        audit=LoggingAudit(),
+        context=context,
+    )
     holder["client"] = client
     auth_provider = build_auth(config)
 
