@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-230%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-260%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -54,7 +54,7 @@ to.
 - **Standard discovery.** RFC 9728 metadata and `WWW-Authenticate` on every `401`, so hosts know where to log in.
 - **Quotas, revocation, audit.** Per-user and per-agent limits, optional RFC 7662 introspection, one JSON audit line per call keyed by `X-Request-Id` — never the token.
 - **Any OIDC provider, any MCP host, any model.** Keycloak, Entra ID, Okta… Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1 700 lines, 230 tests at 100 % line and branch coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and six live proofs (functional, adversarial, agent-driven, stdio, a real host, JWT passthrough on public https) on a real cluster.
+- **Small and proven.** 1 900 lines, 260 tests at 100 % line and branch coverage (including an in-process suite on the real SDK for all three transports), a product-neutral guard in CI, and eight live proofs (functional, adversarial, agent-driven, stdio, a real host, JWT passthrough on public https, context providers, OpenMetadata) on a real cluster.
 
 ## Documentation
 
@@ -553,7 +553,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 230 tests; line or branch coverage below 100 % fails the run
+pytest                        # 260 tests; line or branch coverage below 100 % fails the run
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets, exit 2 if it would not start
 ```
