@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - The Host header filter is now decided by configuration (`MCP_ALLOWED_HOSTS`, off by default) and never by the SDK. Left to its default, the SDK since 1.10 assumes a localhost server and answers 421 Misdirected Request to any other Host, so a pod reached by its service name or a public name would have refused every call once the image moved past SDK 1.8.
 
+- Tool plugins: a package registers a registrar under the entry-point group `akko_mcp_trino.tools` and the operator names it in `MCP_TOOL_PLUGINS`; `--check` validates the names. This is how a product adds its own tools to the image without forking the server.
+
 ### Changed
 - MCP SDK 2.2 (was 1.30): the server is built on `mcp.server.mcpserver.MCPServer`, tool annotations use the SDK's snake_case fields, and the in-process transport suite uses the 2.x client (`streamable_http_client` with an `httpx2` client). The wire protocol, the tools and the guard are unchanged; hosts on either SDK generation connect the same way. The 1.x SDK is no longer supported: `mcp<2` would need the previous release.
 

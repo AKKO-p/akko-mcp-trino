@@ -71,6 +71,9 @@ class Config:
     context_providers: str = ""
     context_file: str = ""
     context_ttl_seconds: float = 60.0
+    # Tools another package adds (entry point group `akko_mcp_trino.tools`),
+    # by plugin name, comma-separated. Empty serves the generic tools only.
+    tool_plugins: str = ""
     # Tolerance on exp/nbf/iat for clock drift between the issuer and this server.
     jwt_leeway_seconds: int = 30
 
@@ -112,5 +115,6 @@ class Config:
             context_providers=os.environ.get("MCP_CONTEXT_PROVIDERS", ""),
             context_file=os.environ.get("MCP_CONTEXT_FILE", ""),
             context_ttl_seconds=float(os.environ.get("MCP_CONTEXT_TTL_SECONDS", "60")),
+            tool_plugins=os.environ.get("MCP_TOOL_PLUGINS", ""),
             jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
         )

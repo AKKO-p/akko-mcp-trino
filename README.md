@@ -331,6 +331,29 @@ ANALYZE` is refused: it executes what it explains. Results are capped at `TRINO_
 Errors come back to the agent as `{"error": "..."}`; a permission refusal from
 Trino is an ordinary error, not a crash.
 
+### Adding tools from another package
+
+A product built on this server can add its own tools without forking it. A
+package registers a registrar `(mcp, client) -> None` under the entry-point
+group `akko_mcp_trino.tools` and the operator names it in `MCP_TOOL_PLUGINS`:
+
+```toml
+[project.entry-points."akko_mcp_trino.tools"]
+my-tools = "my_package.tools:register"
+```
+
+```python
+def register(mcp, client):
+    @mcp.tool()
+    def my_tool(text: str) -> str:
+        return client.query("SELECT ...", user=current_subject(), bearer=current_bearer())
+```
+
+Nothing is loaded that is not named, and an unknown name refuses to start.
+Tools added this way go through the same client, hence the same identity,
+quotas and audit as the built-in ones. `build_server(extra_tool_registrars=...)`
+does the same from Python.
+
 ## Context: what Trino cannot say
 
 `DESCRIBE` gives columns and types. It does not say what `segment` means, who
@@ -467,6 +490,12 @@ refuses to start for the same reason.
 | `MCP_CONTEXT_PROVIDERS` | comma-separated, priority order: `trino-comments`, `file`, `none` | — (none) |
 | `MCP_CONTEXT_FILE` | the JSON document for `file` (format below) | — |
 | `MCP_CONTEXT_TTL_SECONDS` | how long an answer is cached | `60` |
+
+### Tool plugins
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `MCP_TOOL_PLUGINS` | comma-separated names of registrars installed under the entry-point group `akko_mcp_trino.tools` | — (none) |
 
 ### Serving
 
