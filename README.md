@@ -237,7 +237,8 @@ from mcp.client.streamable_http import create_mcp_http_client, streamable_http_c
 async def main(token: str):
     headers = {"Authorization": f"Bearer {token}", "X-Agent-Key": "my-agent-key"}
     http = create_mcp_http_client(headers=headers)
-    async with streamable_http_client("http://localhost:3000/mcp", http_client=http) as (read, write):
+    url = "http://localhost:3000/mcp"
+    async with streamable_http_client(url, http_client=http) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("execute_query", {"sql": "SELECT 1"})
