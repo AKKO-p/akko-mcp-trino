@@ -1,0 +1,255 @@
+"""akko_mcp_trino.auth: unverified JWT helpers, Principal, JwksJwtAuth (real crypto), build_auth."""
+
+import base64
+import json
+import time
+
+import jwt as pyjwt
+import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from akko_mcp_trino import auth
+from akko_mcp_trino.config import Config
+
+# --- test RSA key (generated once) + fake JWKS (no network) ---
+_PRIV = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_PUB = _PRIV.public_key()
+_OTHER = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_ISS = "https://kc.example/realms/akko"
+_AUD = "akko-mcp"
+
+
+def _sign(claims=None, key=None, iss=_ISS, aud=_AUD, exp_delta=3600):
+    payload = {"iss": iss, "aud": aud, "exp": int(time.time()) + exp_delta, **(claims or {})}
+    return pyjwt.encode(payload, key or _PRIV, algorithm="RS256")
+
+
+class _FakeJwks:
+    def get_signing_key_from_jwt(self, token):
+        return type("K", (), {"key": _PUB})()
+
+
+def _jwks_provider():
+    return auth.JwksJwtAuth("https://kc.example/jwks", _ISS, _AUD, jwks_client=_FakeJwks())
+
+
+def _bearer(tok):
+    return {"authorization": f"Bearer {tok}"}
+
+
+def _unsafe_jwt(payload: dict) -> str:
+    body = base64.b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    return f"header.{body}.sig"
+
+
+# ---- unverified JWT helpers (legacy) ----
+def test_decode_jwt_unsafe_reads_payload_and_malformed():
+    assert auth.decode_jwt_unsafe(_unsafe_jwt({"a": 1})) == {"a": 1}
+    assert auth.decode_jwt_unsafe("not-a-jwt") is None
+
+
+def test_validate_token_roles_and_none():
+    assert auth.validate_token(_unsafe_jwt({"realm_access": {"roles": ["r"]}})) == ["r"]
+    assert auth.validate_token(None) is None
+    assert auth.validate_token(_unsafe_jwt({"realm_access": {}})) is None
+    assert auth.validate_token(_unsafe_jwt({"realm_access": {"roles": "x"}})) is None
+    assert auth.validate_token("garbage-not-a-jwt") is None
+
+
+def test_extract_bearer_token():
+    assert auth.extract_bearer_token({"authorization": "Bearer abc"}) == "abc"
+    assert auth.extract_bearer_token({"Authorization": "bearer xyz"}) == "xyz"
+    assert auth.extract_bearer_token({"authorization": "Basic abc"}) is None
+    assert auth.extract_bearer_token({}) is None
+
+
+# ---- Principal ----
+def test_principal_defaults():
+    p = auth.Principal(subject="alice")
+    assert p.subject == "alice" and p.roles == [] and p.email == ""
+
+
+# ---- UnverifiedJwtAuth (repli) ----
+def test_unverified_provider_returns_principal():
+    p = auth.UnverifiedJwtAuth().verify(
+        _bearer(
+            _unsafe_jwt(
+                {
+                    "preferred_username": "dave_steward",
+                    "email": "d@x",
+                    "realm_access": {"roles": ["data-steward"]},
+                }
+            )
+        )
+    )
+    assert p == auth.Principal(subject="dave_steward", roles=["data-steward"], email="d@x")
+
+
+def test_unverified_provider_no_token_or_bad():
+    assert auth.UnverifiedJwtAuth().verify({}) is None
+    assert auth.UnverifiedJwtAuth().verify(_bearer("garbage")) is None
+
+
+# ---- JwksJwtAuth (real verification) ----
+def test_jwks_valid_token_returns_principal():
+    tok = _sign({"preferred_username": "mcp-user", "realm_access": {"roles": ["data-viewer"]}})
+    p = _jwks_provider().verify(_bearer(tok))
+    assert p == auth.Principal(subject="mcp-user", roles=["data-viewer"])
+
+
+def test_jwks_falls_back_to_sub_when_no_preferred_username():
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "uuid-123"})))
+    assert p.subject == "uuid-123"
+
+
+def test_jwks_rejects_bad_signature():
+    tok = _sign({"preferred_username": "x"}, key=_OTHER)  # signed with another key
+    assert _jwks_provider().verify(_bearer(tok)) is None
+
+
+def test_jwks_rejects_wrong_issuer():
+    assert _jwks_provider().verify(_bearer(_sign(iss="https://evil/realms/x"))) is None
+
+
+def test_jwks_rejects_wrong_audience():
+    assert _jwks_provider().verify(_bearer(_sign(aud="other-aud"))) is None
+
+
+def test_jwks_rejects_expired():
+    """Expired beyond the 30 s clock leeway."""
+    assert _jwks_provider().verify(_bearer(_sign(exp_delta=-60))) is None
+
+
+def test_jwks_no_token_returns_none():
+    assert _jwks_provider().verify({}) is None
+
+
+# ---- build_auth (provider selection) ----
+def _cfg(auth_enabled, jwks_url=""):
+    return Config(
+        trino_host="h",
+        trino_port=8080,
+        trino_user="u",
+        trino_catalog="c",
+        max_rows=100,
+        read_only=True,
+        auth_enabled=auth_enabled,
+        server_name="x",
+        health_port=3001,
+        jwks_url=jwks_url,
+        oidc_issuer=_ISS,
+        oidc_audience=_AUD,
+        transport="sse",
+        mcp_port=3000,
+        auth_required=False,
+    )
+
+
+def test_build_auth_disabled_returns_none():
+    assert auth.build_auth(_cfg(False)) is None
+
+
+def test_build_auth_jwks_when_url_set():
+    provider = auth.build_auth(_cfg(True, jwks_url="https://kc.example/jwks"))
+    assert isinstance(provider, auth.JwksJwtAuth)
+
+
+def test_build_auth_fails_closed_when_no_jwks():
+    # Auth enabled without a JWKS URL is a blocking error. There is no fallback to
+    # UnverifiedJwtAuth any more: it accepted any forged JWT, which is fail-open.
+    with pytest.raises(ValueError):
+        auth.build_auth(_cfg(True))
+
+
+def test_token_id_is_carried_from_jti_for_audit():
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "u", "jti": "tok-123"})))
+    assert p.token_id == "tok-123"
+
+
+def test_token_id_is_empty_when_the_token_has_no_jti():
+    assert _jwks_provider().verify(_bearer(_sign({"sub": "u"}))).token_id == ""
+
+
+def test_a_token_issued_one_second_in_the_future_is_accepted_within_leeway():
+    """Found live on 13 September 2026: the issuer's clock was one second ahead
+    of the server's, every fresh token had `iat` in the future, and one request
+    in three got a 401. Clocks drift; a leeway of a few seconds is standard."""
+    tok = _sign({"sub": "u", "iat": int(time.time()) + 2, "nbf": int(time.time()) + 2})
+    assert _jwks_provider().verify(_bearer(tok)) is not None
+
+
+def test_leeway_does_not_resurrect_an_expired_token():
+    tok = _sign({"sub": "u"}, exp_delta=-120)
+    assert _jwks_provider().verify(_bearer(tok)) is None
+
+
+def test_leeway_is_configurable_and_bounded(monkeypatch):
+    provider = auth.JwksJwtAuth(
+        "https://kc/jwks", _ISS, _AUD, jwks_client=_FakeJwks(), leeway_seconds=0
+    )
+    tok = _sign({"sub": "u", "iat": int(time.time()) + 5})
+    assert provider.verify(_bearer(tok)) is None
+
+
+def test_refusal_reason_is_logged_without_the_token(caplog):
+    import logging
+
+    tok = _sign({"sub": "u"}, key=_OTHER)
+    with caplog.at_level(logging.INFO, logger="akko_mcp_trino.auth"):
+        assert _jwks_provider().verify(_bearer(tok)) is None
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "refused" in joined and tok not in joined
+
+
+# ---- which application asked for the token, and with which scopes
+
+
+def test_principal_carries_the_client_that_asked_for_the_token():
+    """Keycloak names the application in `azp`; RFC 9068 in `client_id`."""
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "u", "azp": "host-a"})))
+    assert p.client_id == "host-a"
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "u", "client_id": "host-b"})))
+    assert p.client_id == "host-b"
+    assert _jwks_provider().verify(_bearer(_sign({"sub": "u"}))).client_id == ""
+
+
+def test_principal_carries_the_granted_scopes():
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "u", "scope": "openid data:query"})))
+    assert p.scopes == ("openid", "data:query")
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "u", "scope": ["a", "b"]})))
+    assert p.scopes == ("a", "b")
+    assert _jwks_provider().verify(_bearer(_sign({"sub": "u"}))).scopes == ()
+    assert _jwks_provider().verify(_bearer(_sign({"sub": "u", "scope": 3}))).scopes == ()
+
+
+def test_jwks_accepts_any_of_several_audiences():
+    provider = auth.JwksJwtAuth(
+        "https://kc/jwks", _ISS, ["data", "https://mcp.example.com/mcp"], jwks_client=_FakeJwks()
+    )
+    assert provider.verify(_bearer(_sign({"sub": "u"}, aud="data"))) is not None
+    assert provider.verify(_bearer(_sign({"sub": "u"}, aud="https://mcp.example.com/mcp")))
+    assert provider.verify(_bearer(_sign({"sub": "u"}, aud="other"))) is None
+
+
+def test_an_extensions_audiences_are_accepted_after_the_configured_one():
+    """An extension may accept more audiences (a server URL, for example); the configured
+    one comes first, and none is listed twice."""
+    cfg = _cfg(True)
+    assert auth.accepted_audiences(cfg) == [_AUD]
+    assert auth.accepted_audiences(cfg, ["https://mcp.example.com/mcp", _AUD]) == [
+        _AUD,
+        "https://mcp.example.com/mcp",
+    ]
+    provider = auth.build_auth(
+        Config(**{**cfg.__dict__, "jwks_url": "https://kc/jwks"}), ["https://mcp/mcp"]
+    )
+    assert provider._audience == [_AUD, "https://mcp/mcp"]
+    assert auth.accepted_audiences(_cfg(True)) == [_AUD]
+    nothing = Config(**{**_cfg(True).__dict__, "oidc_audience": ""})
+    assert auth.accepted_audiences(nothing) == []
+
+
+def test_no_accepted_audience_refuses_every_token():
+    """Nothing configured is not "any audience": fail closed, as before."""
+    provider = auth.JwksJwtAuth("https://kc/jwks", _ISS, [], jwks_client=_FakeJwks())
+    assert provider.verify(_bearer(_sign({"sub": "u"}))) is None

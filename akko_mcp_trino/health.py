@@ -1,0 +1,44 @@
+"""Kubernetes health endpoints: /health (process liveness) and /ready (Trino reachable).
+
+/health deliberately does NOT probe Trino: a liveness check that depends on a
+downstream would restart every pod the moment Trino hiccups, turning a partial
+outage into a total one. /ready checks Trino the way the identity mode can (a bounded
+`SELECT 1` in the core's `service` mode). /metrics is exposed when a metrics registry is supplied.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
+
+from .trino_client import TrinoClient
+
+
+def build_health_app(client: TrinoClient, metrics: Any = None) -> Starlette:
+    """The health app: ``/health`` never touches Trino, ``/ready`` checks Trino
+    (``TrinoClient.ping``), ``/metrics`` when metrics are given.
+    """
+
+    async def health(_request):
+        return JSONResponse({"status": "ok"})
+
+    async def ready(_request):
+        try:
+            client.ping()
+            return JSONResponse({"status": "ready"})
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"status": "error", "detail": str(e)}, status_code=503)
+
+    routes = [Route("/health", health), Route("/ready", ready)]
+    if metrics is not None:
+
+        async def metrics_route(_request):
+            body, content_type = metrics.render()
+            return Response(body, media_type=content_type)
+
+        routes.append(Route("/metrics", metrics_route))
+
+    return Starlette(routes=routes)

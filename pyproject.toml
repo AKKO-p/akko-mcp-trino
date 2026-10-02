@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "akko-mcp-trino"
+version = "0.5.0.dev0"
+description = "Read-only MCP server for Trino: six tools, writes refused on the SQL tree, one configured Trino identity, bounded rows and time, one audit line per call."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.12"
+authors = [{ name = "AKKO", email = "contact@akko-ai.com" }]
+maintainers = [{ name = "AKKO", email = "contact@akko-ai.com" }]
+keywords = [
+  "mcp", "model-context-protocol", "trino", "lakehouse", "data-governance",
+  "ai-agents", "oidc", "jwt", "opa", "ranger", "sql", "llm", "agent-gateway",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "Intended Audience :: System Administrators",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Database",
+  "Topic :: Security",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Typing :: Typed",
+]
+dependencies = [
+  "mcp[cli]==2.2.0",
+  "trino==0.339.0",
+  "httpx==0.28.1",
+  "starlette==1.6.0",
+  "uvicorn==0.52.4",
+  "sqlglot==30.18.0",
+  "prometheus-client==0.21.1",
+  "PyJWT[crypto]==2.15.0",
+  "cryptography==50.0.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1", "pytest-cov==7.1.0"]
+dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "mypy==2.3.1", "pip-audit==2.10.1", "build==1.2.2", "twine==6.1.0"]
+
+[project.scripts]
+akko-mcp-trino = "akko_mcp_trino.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/AKKO-p/akko-mcp-trino"
+Documentation = "https://github.com/AKKO-p/akko-mcp-trino#readme"
+Repository = "https://github.com/AKKO-p/akko-mcp-trino"
+Issues = "https://github.com/AKKO-p/akko-mcp-trino/issues"
+Changelog = "https://github.com/AKKO-p/akko-mcp-trino/blob/main/CHANGELOG.md"
+AKKO = "https://akko-ai.com"
+
+[tool.setuptools]
+packages = ["akko_mcp_trino"]
+
+[tool.setuptools.package-data]
+akko_mcp_trino = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# The package documents every public name; tests and examples need not.
+"akko_mcp_trino/**" = []
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.mypy]
+ignore_missing_imports = true
+strict_optional = true

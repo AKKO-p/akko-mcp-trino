@@ -1,0 +1,20 @@
+version: 2
+# One grouped pull request per ecosystem per month: a burst of ten PRs at
+# once is more noise than review.
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule: { interval: monthly }
+    groups:
+      python-dependencies: { patterns: ["*"] }
+    open-pull-requests-limit: 1
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }
+    groups:
+      actions: { patterns: ["*"] }
+    open-pull-requests-limit: 1
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 1

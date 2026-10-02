@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "trino": {
+      "command": "uvx",
+      "args": ["akko-mcp-trino"],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "TRINO_HOST": "trino.example.internal",
+        "MCP_AUTH_ENABLED": "true", "MCP_AUTH_REQUIRED": "true",
+        "MCP_JWKS_URL": "https://idp.example.com/realms/data/protocol/openid-connect/certs",
+        "MCP_OIDC_ISSUER": "https://idp.example.com/realms/data",
+        "MCP_OIDC_AUDIENCE": "data-platform",
+        "MCP_USER_TOKEN": "<the user's access token>"
+      }
+    }
+  }
+}

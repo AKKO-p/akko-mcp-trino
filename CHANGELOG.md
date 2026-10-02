@@ -1,0 +1,21 @@
+# Changelog
+
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.5.0.dev0] - unreleased
+
+First release.
+
+### Added
+- Six read-only tools: `list_catalogs`, `list_schemas`, `list_tables`, `describe_table`, `explain_query`, `execute_query`.
+- Identity mode `service` (`TRINO_IDENTITY_MODE`, the default and the core's only mode): every query runs as `TRINO_USER`, authenticated by `TRINO_PASSWORD` over https when it is set. A password is never sent over http; an unknown mode refuses to start.
+- Read-only guard on the SQL tree (CTEs and subqueries included), table functions and the `system` catalog refused; row cap with `truncated`, time budget per query and per tool call.
+- The door: bearer tokens verified by JWKS (issuer, audience, expiry, clock tolerance), strict mode refusing any request without a verified caller, transports `streamable-http`, `sse` and `stdio`, Host header filter.
+- One audit line per call: `request_id`, `tool`, `subject`, `ok`, `error`, `duration_ms`. Queries carry the source (`TRINO_SOURCE`).
+- Tool plugins (`akko_mcp_trino.tools`, `MCP_TOOL_PLUGINS`) and extension points (`akko_mcp_trino.extensions`, `MCP_EXTENSIONS`): a package registers a factory `(config, env) -> Extension`. Hooks: `identity_modes`, `audiences`, `before_auth` and `after_auth` guards (`Refusal`, `Admission`), `public_documents`, `challenge`, `routes` (behind the guard), `wrap_audit`, `client_tags`, `describe_table_doc`, `tool_registrars`, `check_lines`. An unknown name, or a factory that cannot serve its settings, refuses to start and is reported by `--check`. An extension can only refuse: its guards run around the core's token verification, never instead of it.
+- `ToolContext.add_describer(fn)` and public reply helpers for plugins (`error_reply`, `refusal_reply`, `listing_reply`, `was_cut`).
+- `/health`, `/ready`, Prometheus metrics, `--check` and `--version`.

@@ -1,0 +1,91 @@
+"""A minimal agent: any OpenAI-compatible model, the MCP tools, the user's token.
+
+Works unchanged with Mistral (La Plateforme, or through OpenRouter or LiteLLM),
+and with any other provider that speaks the OpenAI chat-completions API with
+tool calling. The model never sees a token; the MCP server receives the user's
+token on every tool call, verifies it, and queries Trino as its configured identity.
+
+    export LLM_BASE_URL=https://api.mistral.ai/v1
+    export LLM_API_KEY=...
+    export LLM_MODEL=mistral-small-latest
+    export MCP_URL=http://localhost:3000/mcp      # or .../sse for the sse transport
+    export USER_TOKEN=<the user's access token>
+    python examples/agent.py "Give me three customer e-mails and their country"
+
+Dependencies: pip install akko-mcp-trino openai
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+import anyio
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+from openai import OpenAI
+
+SYSTEM = (
+    "You are a data assistant. Use the tools to answer from Trino. "
+    "Find tables with list_catalogs, list_schemas and list_tables, read them with "
+    "describe_table, then run read-only SQL with execute_query. "
+    "Values may come back masked (for example ***@domain) or "
+    "rows may be missing: that is the data governance policy applied by Trino, "
+    "not an error. Report what the tools return, verbatim, and never repeat "
+    "a query that already succeeded. Answer with the data you retrieved, nothing else."
+)
+
+
+def _openai_tools(mcp_tools) -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description or "",
+                "parameters": t.inputSchema,
+            },
+        }
+        for t in mcp_tools
+    ]
+
+
+async def run(question: str) -> str:
+    llm = OpenAI(base_url=os.environ["LLM_BASE_URL"], api_key=os.environ["LLM_API_KEY"])
+    model = os.environ.get("LLM_MODEL", "mistral-small-latest")
+    headers = {"Authorization": f"Bearer {os.environ['USER_TOKEN']}"}
+
+    url = os.environ.get("MCP_URL", "http://localhost:3000/mcp")
+    if url.rstrip("/").endswith("/sse"):
+        opener = sse_client(url, headers=headers)
+    else:
+        opener = streamable_http_client(url, http_client=create_mcp_http_client(headers=headers))
+    async with opener as streams:
+        r, w = streams[0], streams[1]
+        async with ClientSession(r, w) as session:
+            await session.initialize()
+            tools = _openai_tools((await session.list_tools()).tools)
+            messages = [
+                {"role": "system", "content": SYSTEM},
+                {"role": "user", "content": question},
+            ]
+            for _ in range(12):  # bounded: an agent that loops forever is a bug, not a feature
+                reply = llm.chat.completions.create(model=model, messages=messages, tools=tools)
+                msg = reply.choices[0].message
+                if not msg.tool_calls:
+                    return msg.content or ""
+                messages.append(msg)
+                for call in msg.tool_calls:
+                    args = json.loads(call.function.arguments or "{}")
+                    result = await session.call_tool(call.function.name, args)
+                    print(f"  → {call.function.name}({args})", file=sys.stderr)
+                    messages.append(
+                        {"role": "tool", "tool_call_id": call.id, "content": result.content[0].text}
+                    )
+            return "The agent did not converge within the step budget."
+
+
+if __name__ == "__main__":
+    print(anyio.run(run, " ".join(sys.argv[1:]) or "Which catalogs can I see?"))

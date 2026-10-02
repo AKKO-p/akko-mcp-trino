@@ -1,0 +1,9 @@
+akko-mcp-trino
+Copyright 2026 AKKO (https://akko-ai.com)
+
+This product includes software developed by AKKO and contributors,
+licensed under the Apache License, Version 2.0.
+
+It depends on the Model Context Protocol Python SDK (MIT), the Trino Python
+client (Apache 2.0), sqlglot (MIT), Starlette (BSD-3), uvicorn (BSD-3),
+httpx (BSD-3), PyJWT (MIT) and prometheus_client (Apache 2.0).
