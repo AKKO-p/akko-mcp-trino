@@ -11,7 +11,8 @@ LABEL org.opencontainers.image.title="akko-mcp-trino" \
       org.opencontainers.image.licenses="Apache-2.0"
 RUN useradd --create-home --uid 10001 mcp
 COPY --from=build /src/dist/*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
+COPY image-requirements.txt /tmp/
+RUN pip install --no-cache-dir -c /tmp/image-requirements.txt /tmp/*.whl && rm /tmp/*.whl /tmp/image-requirements.txt
 USER mcp
 EXPOSE 3000 3001
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"MCP_HEALTH_PORT\",\"3001\")}/health')"
