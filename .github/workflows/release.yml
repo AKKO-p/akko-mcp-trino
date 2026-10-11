@@ -1,15 +1,22 @@
 name: release
-# Tag v* → package on PyPI (trusted publishing) and image on GHCR.
+# Tag v* → package on PyPI (trusted publishing), provenance, and the image.
+# Run by hand (workflow_dispatch) with an existing tag, it only builds and
+# pushes the image of that tag again, with the current workflow.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag whose image to push again (e.g. v0.5.3)"
+        required: true
 jobs:
   pypi:
     # Runs once trusted publishing is configured on pypi.org for this repository
     # (Publishing → pending publisher: AKKO-p/akko-mcp-trino, release.yml, environment pypi)
     # and the repository variable PYPI_TRUSTED_PUBLISHING is set to "true".
     # Until then, releases are uploaded with twine from a maintainer's machine.
-    if: vars.PYPI_TRUSTED_PUBLISHING == 'true'
+    if: github.event_name == 'push' && vars.PYPI_TRUSTED_PUBLISHING == 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -43,6 +50,7 @@ jobs:
       - run: ./mcp-publisher publish
   provenance:
     # Signed build provenance and an SBOM for the wheel and sdist, attached to the release.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -74,6 +82,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
@@ -95,8 +105,8 @@ jobs:
             ghcr.io/akko-p/akko-mcp-trino
             name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/akko-mcp-trino,enable=${{ vars.DOCKERHUB_USERNAME != '' }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
             type=raw,value=latest
       - uses: docker/build-push-action@v7
         id: push
