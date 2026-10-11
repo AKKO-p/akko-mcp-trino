@@ -45,11 +45,12 @@ class Config:
     # be. A local host (Claude Desktop, Cursor, Vibe) launches the server for
     # one person; that token names the verified caller of the whole process.
     user_token: str = ""
-    # How the server reaches Trino. `service` (the only mode of the core): every
-    # query runs as the one identity the administrator configured, `TRINO_USER`,
-    # with `TRINO_PASSWORD` over https when it is set (nothing, for a local Trino).
-    # An extension (`MCP_EXTENSIONS`) may add other modes; an unknown mode refuses
-    # to start.
+    # How the server reaches Trino. `service` (the default): every query runs as
+    # the one identity the administrator configured, `TRINO_USER`, with
+    # `TRINO_PASSWORD` over https when it is set (nothing, for a local Trino).
+    # `jwt`: every query runs as the caller, whose verified token Trino receives
+    # and verifies again (https only). An extension (`MCP_EXTENSIONS`) may add
+    # other modes; an unknown mode refuses to start.
     trino_http_scheme: str = "http"
     trino_verify: str = "true"  # true, false, or a path to a CA bundle
     trino_request_timeout: float = 30.0

@@ -1,7 +1,8 @@
 """The core alone serves the basics, and nothing more slips into it unnoticed.
 
 The core is what anyone may read and run: six SQL tools, the read-only guard
-on the SQL tree, one Trino identity the administrator configures, bounds on rows
+on the SQL tree, two Trino identities (the one the administrator configures, or
+the caller's own token, verified again by Trino), bounds on rows
 and time, one audit line per call. Every function beyond that lives in an extension and
 is loaded only when ``MCP_EXTENSIONS`` names it. These tests list what the core
 holds; they fail the day something is added without being listed here.
@@ -100,18 +101,23 @@ def test_every_setting_the_core_reads_is_documented():
     assert {name for name in read if f"`{name}`" not in readme} == set()
 
 
-def test_the_only_identity_mode_is_the_configured_one():
-    """Without an extension, every query runs as ``TRINO_USER``; a mode the core does not
-    know refuses to start rather than fall back to it."""
+def test_the_core_identity_modes_are_the_configured_one_and_the_callers_token():
+    """Without an extension, a query runs as ``TRINO_USER`` (``service``, the default) or as
+    the caller, whose own token Trino verifies (``jwt``); a mode the core does not know
+    refuses to start rather than fall back to either."""
     assert type(resolve_identity(_config())).__name__ == "ServiceIdentity"
-    for mode in ("per-user", "token"):
-        with pytest.raises(ValueError, match="expected one of \\('service',\\)"):
+    assert type(resolve_identity(_config(trino_identity_mode="jwt"))).__name__ == "JwtIdentity"
+    for mode in ("per-user", "token", "magic"):
+        with pytest.raises(ValueError, match="expected one of \\('jwt', 'service'\\)"):
             resolve_identity(_config(trino_identity_mode=mode))
     assert "trino_identity_mode" in {f.name for f in fields(Config)}
 
 
-def test_the_only_authentication_the_core_sends_trino_is_the_configured_password():
-    assert set(re.findall(r"trino\.auth\.(\w+)", _source())) == {"BasicAuthentication"}
+def test_the_core_sends_trino_the_configured_password_or_the_callers_token_nothing_else():
+    assert set(re.findall(r"trino\.auth\.(\w+)", _source())) == {
+        "BasicAuthentication",
+        "JWTAuthentication",
+    }
 
 
 def test_the_core_audit_line_has_its_six_fields_and_trino_gets_no_client_tag():

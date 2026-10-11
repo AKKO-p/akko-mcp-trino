@@ -3,9 +3,9 @@
 Mounted on the transport app the SDK server serves — see `akko_mcp_trino.app`, which mounts it
 on whichever transport is configured. Every tool call is an HTTP request
 carrying an Authorization header. The middleware verifies it through the
-AuthProvider, stores the Principal in the ContextVar the tools read, and clears
-it afterwards. In strict mode (`require_auth`) an unauthenticated request is
-rejected with 401.
+AuthProvider, stores the Principal in the ContextVar the tools read, binds the
+verified bearer for the ``jwt`` identity mode, and clears both afterwards. In
+strict mode (`require_auth`) an unauthenticated request is rejected with 401.
 
 Extensions (see `akko_mcp_trino.extensions`) add to the same door, never in
 place of it: documents served without a token, guards that refuse before the
@@ -36,7 +36,9 @@ from .audit import REQUEST_ID_HEADER, reset_current_request_id, set_current_requ
 from .auth import extract_bearer_token
 from .extensions import Admission, Extension, Refusal
 from .identity import (
+    reset_current_bearer,
     reset_current_principal,
+    set_current_bearer,
     set_current_principal,
 )
 
@@ -113,12 +115,15 @@ class AuthIdentityMiddleware:
                 return
 
         token = set_current_principal(principal)
+        # The bearer is bound only once verified: an unverified one never reaches Trino.
+        bearer_token = set_current_bearer(bearer if principal is not None else None)
         bound = [(var, var.set(value)) for var, value in admission.bindings]
         try:
             await self.app(scope, receive, send)
         finally:
             for var, var_token in reversed(bound):
                 var.reset(var_token)
+            reset_current_bearer(bearer_token)
             reset_current_principal(token)
 
     async def _refuse(self, refusal: Refusal, scope, receive, send) -> None:

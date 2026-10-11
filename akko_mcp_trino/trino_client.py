@@ -1,12 +1,20 @@
-"""Trino client: one connection per query, bounded execution, one configured identity.
+"""Trino client: one connection per query, bounded execution, the identity of a mode.
 
 Who the server is for Trino is an identity mode, chosen by ``TRINO_IDENTITY_MODE``.
-The core has one, ``service``: every query runs as the identity the administrator
-configured, ``TRINO_USER``, authenticated by ``TRINO_PASSWORD`` when it is set.
-Trino's access control then decides for that identity, the same for every caller:
-give it the rights every caller of this server may have, no more. A password never
-travels over plain http. An extension may add other modes (see
-`akko_mcp_trino.extensions`); an unknown mode refuses to start.
+The core has two:
+
+* ``service``, the default: every query runs as the identity the administrator
+  configured, ``TRINO_USER``, authenticated by ``TRINO_PASSWORD`` when it is set.
+  Trino's access control decides for that identity, the same for every caller:
+  give it the rights every caller of this server may have, no more.
+* ``jwt``: the caller's own bearer, already verified at the door, is sent to
+  Trino as its JWT. Trino verifies it again with its JWT authenticator and runs
+  the query as that user, so its access control (Ranger, OPA, file rules)
+  decides for the caller: no service account, no password, no right to act
+  for another user. A request without a verified bearer is refused, never run as anyone.
+
+A password or a bearer never travels over plain http. An extension may add other
+modes (see `akko_mcp_trino.extensions`); an unknown mode refuses to start.
 
 Every query tells Trino where it comes from: the source is the server name
 (``TRINO_SOURCE`` overrides it). Results are bounded twice: one row more than
@@ -24,11 +32,13 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, Sequence, Union
 
+import httpx
 import trino
 import trino.auth
 
 from .audit import ToolCall, current_call, time_allowed
 from .config import Config
+from .identity import current_bearer
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .extensions import Extension
@@ -99,10 +109,62 @@ class ServiceIdentity:
         client.query("SELECT 1")
 
 
+def trino_info(config: Config, verify: Any) -> None:
+    """Ask Trino's public ``/v1/info`` (no identity needed) whether it has finished starting."""
+    r = httpx.get(
+        f"{config.trino_http_scheme}://{config.trino_host}:{config.trino_port}/v1/info",
+        verify=verify,
+        timeout=5,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f"Trino /v1/info: HTTP {r.status_code}")
+    if r.json().get("starting", False):
+        raise RuntimeError("Trino is starting")
+
+
+class JwtIdentity:
+    """``jwt``: the caller's verified bearer goes to Trino, which verifies it again."""
+
+    def __init__(self, config: Config) -> None:
+        """Keep the core's settings."""
+        self._config = config
+
+    def trino_token(self, bearer: str) -> str:
+        """The token Trino receives for the caller: their own verified bearer."""
+        return bearer
+
+    def describe(self) -> list[str]:
+        """What the mode sends Trino; refuses to start over plain http."""
+        if self._config.trino_http_scheme != "https":
+            raise ValueError("TRINO_IDENTITY_MODE=jwt requires TRINO_HTTP_SCHEME=https")
+        return ["trino identity: the caller's own token (jwt), verified again by Trino"]
+
+    def connection(self, user: Optional[str]) -> tuple[str, Any]:
+        """The caller and their bearer; refused over http or without a verified bearer."""
+        cfg = self._config
+        bearer = current_bearer()
+        if cfg.trino_http_scheme != "https":
+            raise ValueError("TRINO_IDENTITY_MODE=jwt requires TRINO_HTTP_SCHEME=https")
+        if not bearer:
+            raise PermissionError(
+                "TRINO_IDENTITY_MODE=jwt and the request carries no verified bearer: "
+                "refusing to fall back to TRINO_USER"
+            )
+        return user or cfg.trino_user, trino.auth.JWTAuthentication(self.trino_token(bearer))
+
+    def ping(self, client: "TrinoClient") -> None:
+        """No identity of its own to query with: ask Trino's public ``/v1/info``."""
+        trino_info(self._config, verify_setting(self._config))
+
+
 def resolve_identity(config: Config, extensions: Sequence["Extension"] = ()) -> IdentityMode:
-    """The identity mode ``TRINO_IDENTITY_MODE`` names, checked: the core's ``service`` or
-    an extension's. Raises ValueError, naming the modes on offer, when none matches."""
-    modes: dict[str, IdentityMode] = {"service": ServiceIdentity(config)}
+    """The identity mode ``TRINO_IDENTITY_MODE`` names, checked: the core's ``service`` and
+    ``jwt``, or an extension's. Raises ValueError, naming the modes on offer, when none
+    matches."""
+    modes: dict[str, IdentityMode] = {
+        "service": ServiceIdentity(config),
+        "jwt": JwtIdentity(config),
+    }
     for ext in extensions:
         modes.update(ext.identity_modes())
     mode = modes.get(config.trino_identity_mode)
