@@ -9,7 +9,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from akko_mcp_trino.auth import Principal
-from akko_mcp_trino.identity import current_subject
+from akko_mcp_trino.identity import current_bearer, current_subject
 from akko_mcp_trino.middleware import AuthIdentityMiddleware
 
 
@@ -25,7 +25,8 @@ class _FakeAuth:
 
 def _client(auth_provider, require_auth=False):
     async def whoami(_request):
-        return JSONResponse({"subject": current_subject()})  # read INSIDE the request
+        # read INSIDE the request
+        return JSONResponse({"subject": current_subject(), "bearer": current_bearer()})
 
     app = Starlette(routes=[Route("/whoami", whoami)])
     app.add_middleware(
@@ -64,6 +65,17 @@ def test_require_auth_passes_when_authenticated():
 def test_contextvar_is_reset_after_request():
     _client(_FakeAuth(Principal(subject="x"))).get("/whoami")
     assert current_subject() is None  # cleared after the request (no leak)
+
+
+def test_the_bearer_is_bound_only_once_verified_and_cleared_afterwards():
+    """The ``jwt`` mode sends Trino the bound bearer: a token the provider did not verify
+    is never bound, so it never reaches Trino."""
+    headers = {"Authorization": "Bearer eyJ.raw"}
+    verified = _client(_FakeAuth(Principal(subject="alice"))).get("/whoami", headers=headers)
+    assert verified.json() == {"subject": "alice", "bearer": "eyJ.raw"}
+    forged = _client(_FakeAuth(None)).get("/whoami", headers=headers)
+    assert forged.json() == {"subject": None, "bearer": None}
+    assert current_bearer() is None
 
 
 def test_non_http_scope_passes_through():

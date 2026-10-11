@@ -112,10 +112,11 @@ class _FakeStdioMCP:
         self.subject_seen = "unset"
 
     def run(self, transport):
-        from akko_mcp_trino.identity import current_subject
+        from akko_mcp_trino.identity import current_bearer, current_subject
 
         self.ran_with = transport
         self.subject_seen = current_subject()
+        self.bearer_seen = current_bearer()
 
 
 class _Auth:
@@ -141,6 +142,25 @@ def test_stdio_runs_fastmcp_over_stdio_with_the_token_from_the_environment():
     assert mcp.ran_with == "stdio"
     assert provider.seen == {"authorization": "Bearer tok"}
     assert mcp.subject_seen == "alice", "the tools would not see the verified caller"
+
+
+def test_stdio_binds_the_token_as_the_bearer_only_once_verified():
+    """Over stdio the verified ``MCP_USER_TOKEN`` is the bearer the ``jwt`` mode sends;
+    a token the provider refused is never bound."""
+    from akko_mcp_trino.app import run_stdio
+    from akko_mcp_trino.auth import Principal
+    from akko_mcp_trino.identity import set_current_bearer, set_current_principal
+
+    cfg = Config(**{**_config("stdio").__dict__, "user_token": "tok"})
+    try:
+        verified = _FakeStdioMCP()
+        run_stdio(cfg, verified, auth_provider=_Auth(Principal(subject="alice")))
+        refused = _FakeStdioMCP()
+        run_stdio(cfg, refused, auth_provider=_Auth(None))
+    finally:
+        set_current_bearer(None)
+        set_current_principal(None)
+    assert verified.bearer_seen == "tok" and refused.bearer_seen is None
 
 
 def test_stdio_refuses_to_start_without_a_verified_identity_in_strict_mode():

@@ -17,7 +17,7 @@ from typing import Any, Sequence
 
 from .config import Config
 from .extensions import Admission, Extension
-from .identity import set_current_principal
+from .identity import set_current_bearer, set_current_principal
 from .middleware import AuthIdentityMiddleware
 from .transport_security import transport_security_for
 
@@ -37,11 +37,11 @@ def run_stdio(
 
     There is no request, hence no header: the caller is ``MCP_USER_TOKEN``,
     verified by the same provider a bearer header would be, and bound to the
-    whole process; the token itself reaches the extensions' guards only. In
-    strict mode a missing or invalid token refuses to start, which is the stdio
-    equivalent of a 401. The extensions' guards hold here
-    too, once, for the whole process. Nothing here writes to stdout: stdout is
-    the protocol channel.
+    whole process; once verified, the token is also the bearer the ``jwt``
+    identity mode sends to Trino. In strict mode a missing or invalid token
+    refuses to start, which is the stdio equivalent of a 401. The extensions'
+    guards hold here too, once, for the whole process. Nothing here writes to
+    stdout: stdout is the protocol channel.
     """
     principal = None
     if auth_provider is not None and config.user_token:
@@ -59,6 +59,7 @@ def run_stdio(
             "refusing to serve over stdio without a verified identity"
         )
     set_current_principal(principal)
+    set_current_bearer(config.user_token if principal is not None else None)
     for var, value in admission.bindings:
         var.set(value)
     mcp.run(transport="stdio")

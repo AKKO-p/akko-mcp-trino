@@ -21,31 +21,34 @@ akko-mcp-trino is an [MCP](https://modelcontextprotocol.io) server for Trino.
 It lets an agent list catalogs, schemas and tables, describe a table, explain a
 query and run it, and it guarantees that nothing it sends can write: every
 statement is parsed, and a write anywhere in it is refused before Trino. Every
-query runs as the one Trino identity the administrator configured, so Trino's
-access control (OPA, Ranger, or Trino's own rules) decides what the agent may
-read. Results are bounded in rows and in time, and every call leaves one audit
-line.
+query runs either as the one Trino identity the administrator configured, or as
+the user the agent acts for, whose own token Trino verifies again. Either way
+Trino's access control (OPA, Ranger, or Trino's own rules) decides what the
+agent may read. Results are bounded in rows and in time, and every call leaves
+one audit line.
 
 ## Why
 
 An agent that reads a lakehouse needs a small, predictable surface: a few tools
 whose descriptions a model understands, answers that never run away, and a
 guarantee that a prompt injection cannot turn a question into a `DROP TABLE`.
-This server is that surface, and nothing else. It does not decide access: give
-its Trino identity the rights every caller of this server may have, no more,
-and Trino enforces them.
+This server is that surface, and nothing else. It does not decide access: in
+`jwt` mode Trino decides for each user with the rules it already has, and in
+`service` mode for the one identity you give it, with the rights every caller
+of this server may have, no more.
 
 ## Highlights
 
 - **Read-only by construction.** SQL is parsed into an AST and refused if a write appears anywhere in the tree, CTEs and subqueries included. Table functions (`TABLE(...)`, such as a JDBC connector's `system.query`) and the `system` catalog are refused too, including through a name without a catalog when the session catalog is `system`.
-- **One identity, configured by the administrator.** Every query runs as `TRINO_USER`, authenticated by `TRINO_PASSWORD` over https (or nothing, for a local Trino). Trino's access control decides for it; the agent cannot name another user.
+- **The user's own rights, end to end.** In `jwt` mode the caller's verified token goes to Trino, which verifies it again and runs the query as that user: Ranger or OPA decide for the person, not for a service account, with no password and no right to act for another user. A request without a verified token is refused, never run as anyone else.
+- **Or one identity, configured by the administrator.** In `service` mode, the default, every query runs as `TRINO_USER`, authenticated by `TRINO_PASSWORD` over https (or nothing, for a local Trino). The agent cannot name another user.
 - **Bounded.** A row cap with a `truncated` flag, a time budget per query cancelled in Trino, a time budget per tool call.
 - **One audit line per call.** Keyed by `X-Request-Id`, never the token, never the SQL text: who called which tool, with which outcome, for how long.
 - **Six tools, no more.** List catalogs, schemas and tables, describe a table, explain a statement, run a read-only query.
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience, expiry, clock tolerance), strict mode refusing a request without a verified caller, a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 313 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, and a product-neutral guard in CI.
+- **Small and proven.** 322 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, and a product-neutral guard in CI.
 
 ## Documentation
 
@@ -84,8 +87,8 @@ flowchart LR
 
     Host -- "1. tool call + Bearer token" --> Server
     Server -. "verify signature<br/>against JWKS" .-> IdP
-    Server -- "2. read-only SQL as TRINO_USER" --> Trino
-    Trino -- "3. may TRINO_USER read this?" --> Policy
+    Server -- "2. read-only SQL, as the caller (jwt)<br/>or as TRINO_USER (service)" --> Trino
+    Trino -- "3. may this identity read this?" --> Policy
     Trino -- "4. rows, as that identity may read them" --> Server
     Server -- "5. result" --> Host
     Trino --> Data
@@ -95,20 +98,26 @@ The host calls a tool. When authentication is on, the server verifies the
 caller's token (signature against the provider's JWKS, issuer, audience,
 expiry) and refuses a request without one in strict mode; the caller's name
 goes into the audit line. The server then checks the statement (read-only,
-identifiers, table functions, the `system` catalog) and runs it in Trino as the
-identity the administrator configured. Trino asks its policy engine and returns
-what that identity may read, bounded in rows and time.
+identifiers, table functions, the `system` catalog) and runs it in Trino under
+the identity mode `TRINO_IDENTITY_MODE` names. Trino asks its policy engine and
+returns what that identity may read, bounded in rows and time.
 
-The caller's token never leaves the server. Every caller reads with the same
-rights: those of `TRINO_USER`. An extension (see [Extensions](#extensions))
-may add other identity modes.
+| Mode | Who Trino sees | What Trino needs | Who decides |
+|---|---|---|---|
+| `service` (default) | `TRINO_USER`, the same for every caller | a password (or nothing, locally) | the rights of that one identity |
+| `jwt` | the caller, by their own verified token | its JWT authenticator, trusting the same identity provider | the rights of each user |
+
+In `service` mode the caller's token never leaves the server. In `jwt` mode it
+goes to Trino only once verified, over https only, and never into the audit
+line; without one, the query is refused. An extension (see
+[Extensions](#extensions)) may add other identity modes.
 
 ## Compatibility
 
 | | Supported | Tested |
 |---|---|---|
 | Python | 3.12, 3.13 | 3.12, 3.13 (CI) |
-| Trino | 351 and later, over http (local) or https with a password | 483 behind OPA |
+| Trino | 351 and later, over http (local) or https with a password; https with the JWT authenticator for `jwt` | 483 behind OPA |
 | Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA with row filters and column masks |
 | Identity providers (the door) | any OIDC provider publishing a JWKS | Keycloak 26 |
 | MCP | protocol negotiated by the official `mcp` SDK 2.2 (versions up to 2025-11-25); transports `streamable-http`, `sse` and `stdio` | all three, official SDK client, in CI |
@@ -121,7 +130,8 @@ may add other identity modes.
 |---|---|---|
 | Python 3.12 or later | runtime | `pip` and a virtual environment |
 | A reachable Trino coordinator | the engine | any recent version (tested on 483); https when a password is set |
-| A Trino identity for this server | the rights of every caller | `TRINO_USER`, and `TRINO_PASSWORD` when Trino authenticates by password; give it read rights only on what every caller may read |
+| A Trino identity for this server (`service`) | the rights of every caller | `TRINO_USER`, and `TRINO_PASSWORD` when Trino authenticates by password; give it read rights only on what every caller may read |
+| Or Trino's JWT authenticator (`jwt`) | each user reads with their own rights | `http-server.authentication.type=JWT` with the identity provider's JWKS; the token's audience must be one Trino accepts |
 | A policy engine deciding for Trino | the governance | OPA (`opa.policy.uri`), Ranger, or Trino file-based rules |
 | An OIDC provider with a JWKS endpoint | the door (optional) | Keycloak, Entra ID, Okta, Dex… Tokens must carry `iss`, `aud`, `exp`, and a subject (`preferred_username` or `sub`) |
 | An MCP host | the client | Cursor, Claude Desktop, VS Code, or any client built on the `mcp` SDK |
@@ -187,6 +197,26 @@ Every query runs as `TRINO_USER`, whoever calls: give that identity the rights
 every caller of this server may have, no more. In strict mode, a request
 without a verified token is refused before any query.
 
+### Each user with their own rights (`jwt`)
+
+When Trino trusts the same identity provider, let it decide for each user:
+
+```bash
+export TRINO_IDENTITY_MODE=jwt         # the caller's verified token goes to Trino
+export TRINO_HTTP_SCHEME=https         # required: a token never travels over http
+export MCP_AUTH_ENABLED=true
+export MCP_AUTH_REQUIRED=true
+# TRINO_USER and TRINO_PASSWORD are not used
+```
+
+On the Trino side, `http-server.authentication.type=JWT`,
+`http-server.authentication.jwt.key-file` set to the provider's JWKS URL, and
+`http-server.authentication.jwt.principal-field` naming the same claim the
+server reads (`preferred_username` or `sub`); `required-issuer` and
+`required-audience` pin the token to your provider and to Trino. Two users asking the same question then get the answers their own
+rights allow. `/ready` asks Trino's public `/v1/info`, since there is no
+identity of the server's own to query with.
+
 ### Container
 
 A [Dockerfile](Dockerfile) ships with the repository (non-root, health check,
@@ -240,8 +270,8 @@ anyio.run(main, "<token>")
 Claude Desktop, Cursor and Mistral Vibe can launch the server themselves.
 There is no request then, so the caller comes from the environment: the
 user's own access token, verified exactly like a bearer header would be, and
-bound to the process. Strict mode refuses to start without it. Queries still run
-as `TRINO_USER`.
+bound to the process. Strict mode refuses to start without it. Queries run as
+`TRINO_USER` in `service` mode, and as the user, with that token, in `jwt` mode.
 
 ```json
 {
@@ -418,7 +448,7 @@ hook does nothing, so an extension overrides only what it adds.
 | Hook | What it adds |
 |---|---|
 | `check_lines()` | lines `--check` prints, never a secret |
-| `identity_modes()` | identity modes by `TRINO_IDENTITY_MODE` name, each an `IdentityMode` (`describe`, `connection(user)`, `ping`); one named `service` replaces the core's |
+| `identity_modes()` | identity modes by `TRINO_IDENTITY_MODE` name, each an `IdentityMode` (`describe`, `connection(user)`, `ping`); one named like a core mode (`service`, `jwt`) replaces it |
 | `audiences()` | token audiences accepted besides `MCP_OIDC_AUDIENCE` |
 | `before_auth(admission)` | a refusal before the token is looked at, or `None` |
 | `after_auth(admission)` | a refusal once the core has verified the token (or found none), or `None` |
@@ -444,7 +474,9 @@ a request without a verified identity whatever a guard answers, and the
 read-only guard on SQL applies to every query. An identity mode decides who the
 server is for Trino, query by query (`akko_mcp_trino.trino_client.resolve_identity`
 picks the mode `TRINO_IDENTITY_MODE` names among the core's and the extensions',
-and refuses an unknown one: there is no fallback to `service`); Trino decides
+and refuses an unknown one: there is no fallback to `service`). A plugin that
+calls its own backend for the caller reads the verified bearer with
+`akko_mcp_trino.identity.current_bearer()`. Trino decides
 what that identity may read.
 
 ## What happens on a request
@@ -497,7 +529,7 @@ reads its own variables from the same environment.
 | `TRINO_HTTP_SCHEME` | `http` or `https`; a password is never sent over `http` | `http` |
 | `TRINO_VERIFY` | TLS verification: `true`, `false`, or a path to the CA bundle Trino's TLS chain is checked against | `true` |
 | `TRINO_REQUEST_TIMEOUT_SECONDS` | per-request timeout on the Trino client | `30` |
-| `TRINO_IDENTITY_MODE` | who the server is for Trino: `service` (every query as `TRINO_USER`) is the core's only mode; an extension may add others, and an unknown mode refuses to start | `service` |
+| `TRINO_IDENTITY_MODE` | who the server is for Trino: `service` (every query as `TRINO_USER`) or `jwt` (every query as the caller, whose verified token Trino receives; https only, refused without a token); an extension may add others, and an unknown mode refuses to start | `service` |
 
 ### Identity
 

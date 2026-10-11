@@ -2,10 +2,13 @@
 
 Standard ASGI pattern: a per-request middleware resolves the verified Principal
 and stores it in a ContextVar. The audit line names it, and the tools hand its
-subject to the identity mode with every query. The core's mode, ``service``,
-runs every query as the configured identity whoever the caller is; an extension
-may read the caller here. With no verified caller (auth disabled, no token),
-``current_subject()`` is None. Pure, and fully testable.
+subject to the identity mode with every query. The ``service`` mode runs every
+query as the configured identity whoever the caller is; the ``jwt`` mode sends
+Trino the caller's own bearer, bound here too. The bearer lives in its own
+ContextVar, bound only once the guard has verified it, so that neither the
+Principal nor the audit line can carry it. With no verified caller (auth
+disabled, no token), ``current_subject()`` and ``current_bearer()`` are None.
+Pure, and fully testable.
 """
 
 from __future__ import annotations
@@ -39,3 +42,24 @@ def current_subject() -> Optional[str]:
     """The verified caller's subject, or None when no token was verified."""
     p = _current_principal.get()
     return p.subject if p and p.subject else None
+
+
+_current_bearer: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "mcp_current_bearer", default=None
+)
+
+
+def set_current_bearer(token: Optional[str]) -> contextvars.Token:
+    """Bind the verified caller's raw bearer to the current request; returns the reset token."""
+    return _current_bearer.set(token)
+
+
+def reset_current_bearer(token: contextvars.Token) -> None:
+    """Clear the bearer bound by ``set_current_bearer``."""
+    _current_bearer.reset(token)
+
+
+def current_bearer() -> Optional[str]:
+    """The verified caller's raw bearer for the current request, or None. The ``jwt`` mode
+    sends it to Trino; a tool plugin that calls its own backend for the caller reads it here."""
+    return _current_bearer.get()
