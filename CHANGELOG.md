@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-11
+
+### Changed
+- README: AKKO described as a French project, test count 322, no pinned Trino test version. No code change.
+
 ## [0.5.0] - 2026-10-11
 
 First release.
