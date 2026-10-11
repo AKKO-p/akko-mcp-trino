@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akko-mcp-trino"
-version = "0.5.0"
+version = "0.5.1"
 description = "Read-only MCP server for Trino: six tools, writes refused on the SQL tree, queries as one configured Trino identity or as the user by their own token, bounded rows and time, one audit line per call."
 readme = "README.md"
 license = "Apache-2.0"
