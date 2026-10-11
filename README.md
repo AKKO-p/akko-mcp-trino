@@ -13,6 +13,8 @@
 
 # akko-mcp-trino
 
+**English** · [Français](README.fr.md)
+
 <!-- mcp-name: io.github.ab2dridi/akko-mcp-trino -->
 
 **Give your AI agents read-only access to Trino, and nothing more.**
