@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akko-mcp-trino"
-version = "0.5.1"
+version = "0.5.2"
 description = "Read-only MCP server for Trino: six tools, writes refused on the SQL tree, queries as one configured Trino identity or as the user by their own token, bounded rows and time, one audit line per call."
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,16 +30,19 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Typing :: Typed",
 ]
+# Ranges, so that the server installs next to other tools and in conda-forge;
+# the lower bounds are tested in CI. The container image installs the exact
+# versions of image-requirements.txt.
 dependencies = [
-  "mcp[cli]==2.2.0",
-  "trino==0.339.0",
-  "httpx==0.28.1",
-  "starlette==1.6.0",
-  "uvicorn==0.52.4",
-  "sqlglot==30.18.0",
-  "prometheus-client==0.21.1",
-  "PyJWT[crypto]==2.15.0",
-  "cryptography==50.0.1",
+  "mcp[cli]>=2.2.0,<3",
+  "trino>=0.339.0,<1",
+  "httpx>=0.28.1,<1",
+  "starlette>=1.6.0,<2",
+  "uvicorn>=0.52.4,<1",
+  "sqlglot>=30.18.0,<31",
+  "prometheus-client>=0.21.1,<1",
+  "PyJWT[crypto]>=2.15.0,<3",
+  "cryptography>=50.0.1",
 ]
 
 [project.optional-dependencies]

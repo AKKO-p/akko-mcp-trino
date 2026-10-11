@@ -1,3 +1,4 @@
 # The sdist carries the package, its tests and its examples.
 prune dist
 prune .venv
+include image-requirements.txt

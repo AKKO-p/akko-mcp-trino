@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-11
+
+### Changed
+- Dependencies are declared as ranges (lower bound: the version tested so far, upper bound: the next major), so that the server installs next to other tools and can be packaged for conda-forge. CI runs the test suite at the lowest and at the highest versions the ranges allow.
+- The container image still installs exact versions, from `image-requirements.txt`.
+
 ## [0.5.1] - 2026-10-11
 
 ### Changed
