@@ -1,7 +1,13 @@
 """akko_mcp_trino.trino_client with a mocked connection: no real Trino involved."""
 
 from akko_mcp_trino.config import Config
-from akko_mcp_trino.trino_client import ServiceIdentity, TrinoClient, resolve_identity
+from akko_mcp_trino.identity import reset_current_bearer, set_current_bearer
+from akko_mcp_trino.trino_client import (
+    JwtIdentity,
+    ServiceIdentity,
+    TrinoClient,
+    resolve_identity,
+)
 
 _CFG = Config(
     trino_host="h",
@@ -149,11 +155,13 @@ def test_the_connection_carries_what_the_identity_mode_says(monkeypatch):
     assert seen["verify"] is True and seen["request_timeout"] == 30.0
 
 
-def test_the_core_has_one_mode_service_and_an_extension_may_add_or_replace_one():
+def test_the_core_has_two_modes_and_an_extension_may_add_or_replace_one():
     import pytest
 
     assert isinstance(resolve_identity(_cfg(trino_identity_mode="service")), ServiceIdentity)
-    with pytest.raises(ValueError, match="expected one of \\('service',\\)"):
+    jwt = _cfg(trino_identity_mode="jwt", trino_http_scheme="https")
+    assert isinstance(resolve_identity(jwt), JwtIdentity)
+    with pytest.raises(ValueError, match="expected one of \\('jwt', 'service'\\)"):
         resolve_identity(_cfg(trino_identity_mode="per-user"))
 
     class _Ext:
@@ -232,6 +240,124 @@ def test_ping_runs_a_bounded_select_1_as_the_configured_identity(monkeypatch):
     monkeypatch.setattr(tc.trino.dbapi, "connect", lambda **kw: cap.update(kw) or conn)
     TrinoClient(_CFG).ping()
     assert conn._cur.executed == ("SELECT 1", None) and cap["user"] == "svc"
+
+
+# ---- jwt: the caller's own token, verified again by Trino
+
+
+def _as_bearer(token):
+    """Run the body with ``token`` bound as the verified caller's bearer, as the door does."""
+    import contextlib
+
+    @contextlib.contextmanager
+    def bound():
+        t = set_current_bearer(token)
+        try:
+            yield
+        finally:
+            reset_current_bearer(t)
+
+    return bound()
+
+
+def test_jwt_mode_sends_the_callers_own_token_to_trino(monkeypatch):
+    """Trino verifies the same token the door verified and runs the query as the caller:
+    no service account, no password, no right to act for another user."""
+    import trino.auth
+
+    seen = _capture(monkeypatch)
+    cfg = _cfg(trino_http_scheme="https", trino_identity_mode="jwt")
+    with _as_bearer("eyJ.token"):
+        TrinoClient(cfg).query("SELECT 1", user="alice")
+    assert isinstance(seen["auth"], trino.auth.JWTAuthentication)
+    assert seen["auth"].token == "eyJ.token" and seen["user"] == "alice"
+
+
+def test_jwt_mode_refuses_a_query_without_a_verified_bearer(monkeypatch):
+    """No token, no query: falling back to TRINO_USER would be the silent escalation this
+    mode exists to prevent."""
+    import pytest
+
+    seen = _capture(monkeypatch)
+    cfg = _cfg(trino_http_scheme="https", trino_identity_mode="jwt")
+    with pytest.raises(PermissionError, match="TRINO_USER"):
+        TrinoClient(cfg).query("SELECT 1", user="alice")
+    assert seen == {}, "nothing reached Trino"
+
+
+def test_jwt_mode_refuses_plain_http_at_start_and_per_query():
+    import pytest
+
+    cfg = _cfg(trino_identity_mode="jwt")
+    with pytest.raises(ValueError, match="TRINO_HTTP_SCHEME=https"):
+        resolve_identity(cfg)
+    with _as_bearer("eyJ.token"), pytest.raises(ValueError, match="TRINO_HTTP_SCHEME=https"):
+        JwtIdentity(cfg).connection("alice")
+
+
+def test_jwt_mode_says_what_it_sends_never_a_token():
+    mode = JwtIdentity(_cfg(trino_http_scheme="https"))
+    assert mode.describe() == [
+        "trino identity: the caller's own token (jwt), verified again by Trino"
+    ]
+
+
+def test_jwt_mode_sends_the_token_a_subclass_chooses_for_the_caller(monkeypatch):
+    """An extension may send Trino another token for the caller (one for Trino's own
+    audience, for example) by overriding ``trino_token``."""
+    import trino.auth
+
+    class _ForTrino(JwtIdentity):
+        def trino_token(self, bearer):
+            return "for-trino:" + bearer
+
+    seen = _capture(monkeypatch)
+    cfg = _cfg(trino_http_scheme="https", trino_identity_mode="jwt")
+    mode = _ForTrino(cfg)
+    with _as_bearer("for-mcp"):
+        TrinoClient(cfg, identity=mode).query("SELECT 1", user="alice")
+    assert isinstance(seen["auth"], trino.auth.JWTAuthentication)
+    assert seen["auth"].token == "for-trino:for-mcp"
+
+
+class _InfoResp:
+    def __init__(self, status, body):
+        self.status_code, self._b = status, body
+
+    def json(self):
+        return self._b
+
+
+def test_jwt_mode_readiness_asks_trinos_public_v1_info(monkeypatch):
+    """No identity of its own: readiness asks /v1/info, which needs none."""
+    import akko_mcp_trino.trino_client as tc
+
+    seen = {}
+
+    def fake_get(url, **kw):
+        seen["url"], seen["verify"] = url, kw.get("verify")
+        return _InfoResp(200, {"starting": False})
+
+    monkeypatch.setattr(tc.httpx, "get", fake_get)
+    cfg = _cfg(
+        trino_identity_mode="jwt", trino_http_scheme="https", trino_port=8443, trino_verify="/ca"
+    )
+    TrinoClient(cfg).ping()
+    assert seen == {"url": "https://h:8443/v1/info", "verify": "/ca"}
+
+
+def test_jwt_mode_is_not_ready_while_trino_starts_or_errors(monkeypatch):
+    import pytest
+
+    import akko_mcp_trino.trino_client as tc
+
+    cfg = _cfg(trino_identity_mode="jwt", trino_http_scheme="https")
+    monkeypatch.setattr(tc.httpx, "get", lambda url, **kw: _InfoResp(200, {"starting": True}))
+    with pytest.raises(RuntimeError, match="starting"):
+        TrinoClient(cfg).ping()
+    monkeypatch.setattr(tc.httpx, "get", lambda url, **kw: _InfoResp(503, {}))
+    with pytest.raises(RuntimeError, match="503"):
+        TrinoClient(cfg).ping()
 
 
 # ---- the source, and the client tags an extension adds
