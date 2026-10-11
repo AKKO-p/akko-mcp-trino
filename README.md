@@ -1,10 +1,10 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-313%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-322%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.5.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
-  <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351%20%C2%B7%20tested%20483-blue" alt="Trino">
+  <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351-blue" alt="Trino">
   <img src="https://img.shields.io/badge/MCP-up%20to%202025--11--25%20%C2%B7%20streamable--http%20%7C%20sse%20%7C%20stdio-blue" alt="MCP">
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
   <img src="https://img.shields.io/badge/code%20style-ruff-000000" alt="Ruff">
@@ -117,7 +117,7 @@ line; without one, the query is refused. An extension (see
 | | Supported | Tested |
 |---|---|---|
 | Python | 3.12, 3.13 | 3.12, 3.13 (CI) |
-| Trino | 351 and later, over http (local) or https with a password; https with the JWT authenticator for `jwt` | 483 behind OPA |
+| Trino | 351 and later, over http (local) or https with a password; https with the JWT authenticator for `jwt` | a recent release behind OPA, with row filters and column masks |
 | Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA with row filters and column masks |
 | Identity providers (the door) | any OIDC provider publishing a JWKS | Keycloak 26 |
 | MCP | protocol negotiated by the official `mcp` SDK 2.2 (versions up to 2025-11-25); transports `streamable-http`, `sse` and `stdio` | all three, official SDK client, in CI |
@@ -129,7 +129,7 @@ line; without one, the query is refused. An extension (see
 | You need | Why | Notes |
 |---|---|---|
 | Python 3.12 or later | runtime | `pip` and a virtual environment |
-| A reachable Trino coordinator | the engine | any recent version (tested on 483); https when a password is set |
+| A reachable Trino coordinator | the engine | any recent version; https when a password is set, and for `jwt` |
 | A Trino identity for this server (`service`) | the rights of every caller | `TRINO_USER`, and `TRINO_PASSWORD` when Trino authenticates by password; give it read rights only on what every caller may read |
 | Or Trino's JWT authenticator (`jwt`) | each user reads with their own rights | `http-server.authentication.type=JWT` with the identity provider's JWKS; the token's audience must be one Trino accepts |
 | A policy engine deciding for Trino | the governance | OPA (`opa.policy.uri`), Ranger, or Trino file-based rules |
@@ -611,7 +611,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 313 tests; line or branch coverage below 100 % fails the run
+pytest                        # 322 tests; line or branch coverage below 100 % fails the run
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start
 ```
@@ -690,8 +690,8 @@ Changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 ## About AKKO
 
 akko-mcp-trino is built and maintained by [AKKO](https://akko-ai.com), a
-French company working on governed access for AI agents to enterprise data,
-in place, on the engines and identity providers customers already run.
+French project working on governed access for AI agents to enterprise data,
+in place, on the engines and identity providers organisations already run.
 
 **Maintained by:** AKKO ([contact@akko-ai.com](mailto:contact@akko-ai.com)) ·
 **Issues:** [github.com/AKKO-p/akko-mcp-trino/issues](https://github.com/AKKO-p/akko-mcp-trino/issues)

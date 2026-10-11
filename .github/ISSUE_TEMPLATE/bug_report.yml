@@ -8,7 +8,7 @@ body:
     validations: { required: true }
   - type: input
     id: trino
-    attributes: { label: Trino version and policy engine, placeholder: "483, OPA" }
+    attributes: { label: Trino version and policy engine, placeholder: "e.g. 470, OPA" }
     validations: { required: true }
   - type: dropdown
     id: transport
