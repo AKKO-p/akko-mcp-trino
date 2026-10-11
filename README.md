@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
   <img src="https://img.shields.io/badge/tests-322%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
-  <img src="https://img.shields.io/badge/version-0.5.2-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.5.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351-blue" alt="Trino">
   <img src="https://img.shields.io/badge/MCP-up%20to%202025--11--25%20%C2%B7%20streamable--http%20%7C%20sse%20%7C%20stdio-blue" alt="MCP">
@@ -13,7 +13,7 @@
 
 # akko-mcp-trino
 
-<!-- mcp-name: io.github.akko-p/akko-mcp-trino -->
+<!-- mcp-name: io.github.ab2dridi/akko-mcp-trino -->
 
 **Give your AI agents read-only access to Trino, and nothing more.**
 

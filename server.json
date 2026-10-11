@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.akko-p/akko-mcp-trino",
+  "name": "io.github.ab2dridi/akko-mcp-trino",
   "title": "AKKO MCP server for Trino",
   "description": "Read-only MCP server for Trino: queries run as the user, and Trino's own policies decide.",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "websiteUrl": "https://akko-ai.com/docs/akko-mcp-trino/",
   "repository": {
     "url": "https://github.com/AKKO-p/akko-mcp-trino",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "akko-mcp-trino",
-      "version": "0.5.2",
+      "version": "0.5.3",
       "transport": {
         "type": "stdio"
       },
