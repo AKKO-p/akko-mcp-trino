@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.5.0.dev0] - unreleased
+## [0.5.0] - 2026-10-11
 
 First release.
 
