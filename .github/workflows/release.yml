@@ -121,3 +121,18 @@ jobs:
           subject-name: ghcr.io/akko-p/akko-mcp-trino
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+  dockerhub-page:
+    # The Docker Hub page (overview and short description) follows DOCKERHUB.md,
+    # read from the tag pushed, or from the default branch when run by hand.
+    if: vars.DOCKERHUB_USERNAME != ''
+    needs: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_USERNAME }}/akko-mcp-trino
+          short-description: "Read-only MCP server for Trino: queries run as the user, and Trino's own policies decide."
+          readme-filepath: ./DOCKERHUB.md
