@@ -191,7 +191,7 @@ Check it is alive and can reach Trino:
 
 ```bash
 curl -s localhost:3001/health   # {"status":"ok"}       never touches Trino
-curl -s localhost:3001/ready    # {"status":"ready"}    a bounded SELECT 1 as TRINO_USER
+curl -s localhost:3001/ready    # {"status":"ready"}    service: a bounded SELECT 1 as TRINO_USER; jwt: Trino's /v1/info
 curl -s localhost:3001/metrics  # Prometheus exposition
 ```
 
@@ -668,18 +668,20 @@ guard refuses every table function and the `system` catalog (which shows other
 users' SQL in `system.runtime.queries`). The engine policy must refuse them as
 well; the guard is a second line, not the only one.
 
-**One configured identity, never one the caller names.** Every query runs as
-`TRINO_USER`. A caller sending a header that names a Trino user changes
-nothing, and the caller's token never reaches Trino. A password is never sent
-over plain http, and an identity mode the core does not know refuses to start
-rather than fall back.
+**The verified identity, never one the caller names.** In `service` mode every
+query runs as `TRINO_USER`, and the caller's token never reaches Trino. In
+`jwt` mode Trino receives the caller's token only once the server has verified
+it, and verifies it again. Either way, a caller sending a header that names a
+Trino user changes nothing. A password or a token is never sent over plain
+http, and an identity mode the core does not know refuses to start rather than
+fall back.
 
 **An extension can only refuse.** Its guards run around the token
 verification, never instead of it, and the read-only guard applies whatever
 they answer.
 
 **The server does not decide access.** Trino does, for the configured
-identity. Putting policy in the server would duplicate, and eventually
+identity or for each caller. Putting policy in the server would duplicate, and eventually
 contradict, what the engine already enforces for every other client.
 
 ## Contributing
