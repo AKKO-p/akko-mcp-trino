@@ -1,11 +1,11 @@
 # Exact versions the container image installs (pip install -c), tested in CI.
 # The package itself declares ranges (pyproject.toml); Dependabot keeps these current.
-mcp[cli]==2.2.0
+mcp==2.2.0
 trino==0.339.0
 httpx==0.28.1
 starlette==1.6.0
 uvicorn==0.52.4
 sqlglot==30.18.0
 prometheus-client==0.21.1
-PyJWT[crypto]==2.15.0
+PyJWT==2.15.0
 cryptography==50.0.1
