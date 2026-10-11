@@ -5,4 +5,4 @@ identity the administrator configured; Trino and its policy engine decide what
 that identity may read.
 """
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"

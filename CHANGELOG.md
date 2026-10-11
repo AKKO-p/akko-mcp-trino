@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-11
+
+### Changed
+- Listed in the official MCP registry as `io.github.ab2dridi/akko-mcp-trino` (README marker and `server.json`). No code change.
+
 ## [0.5.2] - 2026-10-11
 
 ### Changed
