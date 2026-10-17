@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.6.0] - unreleased
+## [0.6.0] - 2026-10-17
 
 Safe defaults, and no token passthrough. **Breaking changes**: read
 [MIGRATING.md](MIGRATING.md) before upgrading.
