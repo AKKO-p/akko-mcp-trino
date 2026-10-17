@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - unreleased
+
+Safe defaults, and no token passthrough. **Breaking changes**: read
+[MIGRATING.md](MIGRATING.md) before upgrading.
+
+### Security
+- **No token passthrough.** In `jwt` mode the server no longer sends Trino the caller's own token, which the MCP authorization specification forbids. It obtains a token for Trino by OAuth 2.0 Token Exchange (RFC 8693) at the identity provider, with its own confidential client (`TRINO_TOKEN_EXCHANGE_URL`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_AUDIENCE`, `_SCOPE`, `_VERIFY`), keeps it in memory until shortly before it expires, and never returns it to the agent or the host. The token endpoint is https only.
+- **Audience binding (RFC 8707).** A token must be issued for this server: its audience is `MCP_OIDC_AUDIENCE` or the new `MCP_RESOURCE_URL`. A token whose audience includes Trino's (`TRINO_TOKEN_EXCHANGE_AUDIENCE`) is refused, even if it also names this server. A configuration that would accept Trino's audience, or that sets no audience while auth is on, refuses to start.
+- **Safe by default.** `TRINO_IDENTITY_MODE` defaults to `jwt` (was `service`); `MCP_AUTH_ENABLED` and `MCP_AUTH_REQUIRED` default to `true` (were `false`). A request without a valid token is refused with `401` and a body that says what to send. `jwt` and `impersonation` refuse to start unless the door requires a valid token. `MCP_AUTH_REQUIRED=true` with `MCP_AUTH_ENABLED=false` refuses to start (it would refuse every request).
+- **Service mode only when named, and announced.** `service` mode and an open door are still possible, chosen explicitly. The server then logs a warning at start, `--check` prints it, and every MCP host receives it in the `instructions` of the initialization.
+- **Tool annotations follow the settings.** With `TRINO_READ_ONLY=false`, `execute_query` is annotated `readOnlyHint: false`, `destructiveHint: true`, `idempotentHint: false`, its title is "Run a query (writes allowed)" and its description says it may write. Before, it was annotated read-only whatever the setting, so a host could skip a confirmation it should have asked for.
+- The README and SECURITY.md say what read-only covers and what it does not: the guard covers what passes through this server, not what a user's Trino rights allow by other means, with the engine rules to make it end to end.
+
+### Added
+- Identity mode `impersonation`, for an identity provider without token exchange: the server authenticates to Trino as `TRINO_USER` (password, or a client certificate) and Trino runs each query as the verified caller, under an impersonation rule only that account has. Readiness runs `SELECT 1` as the account, impersonating no one.
+- `TRINO_CLIENT_CERT` and `TRINO_CLIENT_KEY`: the server's account may authenticate to Trino by client certificate (mTLS), in `service` and `impersonation` modes.
+- `MCP_RESOURCE_URL`: this server's canonical URL. Accepted as an audience; the server publishes its protected resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource` (and under the URL's path), and a `401` carries `WWW-Authenticate: Bearer resource_metadata="…"`. An extension's documents and challenges take precedence.
+- `Refusal.message`: a guard may tell the client in the body what to do. `ToolContext.tool(destructive=...)`.
+- `Config.problems()` and `Config.warnings()`; `--check` prints `WARNING:` lines.
+- `integration/`: a live run against a disposable Keycloak and Trino in Docker (token exchange, impersonation by client certificate, service mode, every refusal at the door), run in CI on every pull request.
+
+### Changed
+- Default budgets: `TRINO_QUERY_TIMEOUT_SECONDS` is `60` (was `0`, no limit) and `MCP_CALL_TIMEOUT_SECONDS` is `120` (was `0`). `0` still removes the limit. `TRINO_MAX_ROWS` must be 1 or more, and a negative budget refuses to start.
+- `build_server` passes `instructions=` to `mcp_factory` when the configuration has warnings; a custom factory must accept that keyword in `service` mode or with an open door.
+- The `serving` log line names the identity mode.
+
 ## [0.5.3] - 2026-10-11
 
 ### Changed

@@ -2,15 +2,22 @@
   "mcpServers": {
     "trino": {
       "command": "uvx",
-      "args": ["akko-mcp-trino"],
+      "args": [
+        "akko-mcp-trino"
+      ],
       "env": {
         "MCP_TRANSPORT": "stdio",
         "TRINO_HOST": "trino.example.internal",
-        "MCP_AUTH_ENABLED": "true", "MCP_AUTH_REQUIRED": "true",
+        "TRINO_PORT": "8443",
+        "TRINO_HTTP_SCHEME": "https",
         "MCP_JWKS_URL": "https://idp.example.com/realms/data/protocol/openid-connect/certs",
         "MCP_OIDC_ISSUER": "https://idp.example.com/realms/data",
-        "MCP_OIDC_AUDIENCE": "data-platform",
-        "MCP_USER_TOKEN": "<the user's access token>"
+        "MCP_OIDC_AUDIENCE": "akko-mcp",
+        "TRINO_TOKEN_EXCHANGE_URL": "https://idp.example.com/realms/data/protocol/openid-connect/token",
+        "TRINO_TOKEN_EXCHANGE_CLIENT_ID": "akko-mcp",
+        "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET": "<this server's client secret>",
+        "TRINO_TOKEN_EXCHANGE_AUDIENCE": "trino",
+        "MCP_USER_TOKEN": "<the user's access token, issued for the MCP server>"
       }
     }
   }
