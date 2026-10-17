@@ -213,6 +213,28 @@ def listing_reply(key: str, items: list, truncated: bool) -> str:
     return dumps({key: items, "truncated": truncated})
 
 
+# The description of execute_query, written for a model; ``rule`` says whether it may write.
+_EXECUTE_DOC = """Run {what} on Trino and return the rows.
+
+        Args: sql, Trino SQL with fully qualified tables (catalog.schema.table),
+        one statement, no trailing semicolon needed. {rule} max_rows, optional,
+        asks for fewer rows than the server's cap (never more). Returns JSON
+        {{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}};
+        truncated is true when more rows existed than were returned: add LIMIT,
+        ORDER BY or an aggregate rather than reading everything. A query that
+        runs past the server's time budget is cancelled. On failure returns
+        {{"error": "..."}} with Trino's message, which is usually enough to fix the SQL.
+        """
+_READ_ONLY_RULE = (
+    "Only SELECT, SHOW, DESCRIBE and EXPLAIN are accepted; INSERT, UPDATE, DELETE, "
+    "CREATE, DROP and the like are refused before reaching Trino, wherever they "
+    "appear in the statement."
+)
+_WRITE_RULE = (
+    "The statement may write (INSERT, UPDATE, DELETE, CREATE, DROP and the like), "
+    "as far as Trino's access control allows the identity it runs as."
+)
+
 # A describer adds to what describe_table answers, from what Trino described:
 # ``(catalog, schema, table, rows) -> dict``, merged into the answer.
 Describer = Callable[[str, str, str, list], dict]
@@ -271,17 +293,20 @@ class ToolContext:
         idempotent: bool = True,
         read_only: bool = True,
         open_world: bool = False,
+        destructive: bool = False,
     ) -> Callable[[Callable], Callable]:
         """Decorator: register an audited tool with its MCP annotations.
 
         ``governed`` appends to the description what a masked value or a
         missing row means, so the model reports it instead of retrying.
+        ``read_only`` and ``destructive`` must say what the tool can really do:
+        a host skips its confirmation on a tool annotated read-only.
         """
         register = self._mcp.tool(
             annotations=ToolAnnotations(
                 title=title,
                 read_only_hint=read_only,
-                destructive_hint=False,
+                destructive_hint=destructive,
                 idempotent_hint=idempotent,
                 open_world_hint=open_world,
             )
@@ -321,8 +346,10 @@ def register_query_tools(
         read_only=read_only,
         call_timeout_seconds=call_timeout_seconds,
     )
-    # MCP tool annotations: every tool here only reads, none is destructive,
-    # none reaches outside the engine. Hosts use them to skip confirmations.
+    # MCP tool annotations: the listing, describing and explaining tools only read,
+    # whatever the settings; execute_query reads only while TRINO_READ_ONLY is true,
+    # and is annotated as it is. None reaches outside the engine. Hosts use the
+    # annotations to skip confirmations, so they must never claim less than the tool does.
     tool = tools.tool
     run = tools.run
 
@@ -438,22 +465,7 @@ def register_query_tools(
         except Exception as e:  # noqa: BLE001
             return error_reply(e)
 
-    @tool("Run a read-only query", governed=True)
     def execute_query(sql: str, max_rows: int = 0) -> str:
-        """Run one read-only SQL statement on Trino and return the rows.
-
-        Args: sql, Trino SQL with fully qualified tables (catalog.schema.table),
-        one statement, no trailing semicolon needed. Only SELECT, SHOW, DESCRIBE
-        and EXPLAIN are accepted; INSERT, UPDATE, DELETE, CREATE, DROP and the
-        like are refused before reaching Trino, wherever they appear in the
-        statement. max_rows, optional, asks for fewer rows than the server's
-        cap (never more). Returns JSON {"columns": [...], "rows": [...],
-        "row_count": n, "truncated": bool}; truncated is true when more rows
-        existed than were returned: add LIMIT, ORDER BY or an aggregate rather
-        than reading everything. A query that runs past the server's time
-        budget is cancelled. On failure returns {"error": "..."} with Trino's
-        message, which is usually enough to fix the SQL.
-        """
         sql = normalize_sql(sql)
         if read_only and not is_read_only_sql(sql, session_catalog):
             return refusal_reply(
@@ -467,4 +479,19 @@ def register_query_tools(
         note(rows=res["row_count"], truncated=bool(res.get("truncated", False)))
         return dumps(res)
 
+    execute_query.__doc__ = _EXECUTE_DOC.format(
+        what="one read-only SQL statement" if read_only else "one SQL statement",
+        rule=_READ_ONLY_RULE if read_only else _WRITE_RULE,
+    )
+    if read_only:
+        tool("Run a read-only query", governed=True)(execute_query)
+    else:
+        # TRINO_READ_ONLY=false: the statement may write, and the tool says it may.
+        tool(
+            "Run a query (writes allowed)",
+            governed=True,
+            read_only=False,
+            destructive=True,
+            idempotent=False,
+        )(execute_query)
     return tools

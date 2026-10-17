@@ -42,6 +42,9 @@ class FakeTrino:
 
 _CFG = dict(
     trino_host="h",
+    trino_identity_mode="service",
+    query_timeout_seconds=0.0,
+    call_timeout_seconds=0.0,
     trino_port=8080,
     trino_user="u",
     trino_catalog="c",
@@ -91,9 +94,9 @@ def _server(monkeypatch, registrars, **config):
     )
     audit = InMemoryAudit()
     mcp, client = build_server(
-        Config(**_CFG, **config),
+        Config(**{**_CFG, **config}),
         extra_tool_registrars=registrars,
-        mcp_factory=lambda name: SdkLikeMCP(),
+        mcp_factory=lambda name, **_: SdkLikeMCP(),
         audit=audit,
     )
     return mcp, client, trino, audit

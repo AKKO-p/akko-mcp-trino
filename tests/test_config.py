@@ -22,6 +22,18 @@ _ENV_KEYS = [
     "MCP_PORT",
     "MCP_AUTH_REQUIRED",
     "MCP_USER_TOKEN",
+    "TRINO_IDENTITY_MODE",
+    "TRINO_QUERY_TIMEOUT_SECONDS",
+    "MCP_CALL_TIMEOUT_SECONDS",
+    "MCP_RESOURCE_URL",
+    "TRINO_TOKEN_EXCHANGE_URL",
+    "TRINO_TOKEN_EXCHANGE_CLIENT_ID",
+    "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET",
+    "TRINO_TOKEN_EXCHANGE_AUDIENCE",
+    "TRINO_TOKEN_EXCHANGE_SCOPE",
+    "TRINO_TOKEN_EXCHANGE_VERIFY",
+    "TRINO_CLIENT_CERT",
+    "TRINO_CLIENT_KEY",
 ]
 
 
@@ -39,12 +51,95 @@ def test_defaults_are_neutral():
     assert c.trino_catalog == "system"
     assert c.max_rows == 100
     assert c.read_only is True
-    assert c.auth_enabled is False
+    assert c.auth_enabled is True
     assert c.server_name == "trino-mcp"
     assert c.health_port == 3001
     assert c.jwks_url == "" and c.oidc_issuer == "" and c.oidc_audience == ""
-    # streamable-http is the current MCP standard (Le Chat, Cursor, Claude); strict auth is opt-in
-    assert c.transport == "streamable-http" and c.mcp_port == 3000 and c.auth_required is False
+    # streamable-http is the current MCP standard (Le Chat, Cursor, Claude); a verified
+    # caller is required unless the administrator says otherwise
+    assert c.transport == "streamable-http" and c.mcp_port == 3000 and c.auth_required is True
+
+
+def test_the_default_runs_every_query_as_the_verified_caller_and_warns_of_nothing():
+    """Safe by default: each query runs as the caller (``jwt``), a verified token is
+    required, and there is nothing to warn about."""
+    c = Config.from_env()
+    assert (c.trino_identity_mode, c.auth_enabled, c.auth_required) == ("jwt", True, True)
+    assert c.warnings() == []
+
+
+def test_service_mode_and_an_open_door_are_warned_of_when_chosen(monkeypatch):
+    monkeypatch.setenv("TRINO_IDENTITY_MODE", "service")
+    monkeypatch.setenv("TRINO_USER", "reader")
+    assert Config.from_env().warnings() == [
+        "TRINO_IDENTITY_MODE=service: every query runs as the Trino user 'reader', "
+        "whoever calls; Trino cannot tell callers apart"
+    ]
+    monkeypatch.setenv("MCP_AUTH_REQUIRED", "false")
+    assert "a request without a valid token is served too" in Config.from_env().warnings()[1]
+    monkeypatch.setenv("MCP_AUTH_ENABLED", "false")
+    assert "no caller is verified" in Config.from_env().warnings()[1]
+
+
+def test_a_door_that_requires_tokens_it_cannot_verify_is_a_problem(monkeypatch):
+    monkeypatch.setenv("MCP_AUTH_ENABLED", "false")
+    assert Config.from_env().problems() == [
+        "MCP_AUTH_REQUIRED=true but MCP_AUTH_ENABLED=false: no token can be verified and "
+        "every request would be refused; enable MCP_AUTH_ENABLED, or set "
+        "MCP_AUTH_REQUIRED=false to serve without verifying callers"
+    ]
+
+
+def test_bounds_no_server_can_serve_are_problems(monkeypatch):
+    assert Config.from_env().problems() == []
+    monkeypatch.setenv("TRINO_MAX_ROWS", "0")
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "-1")
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "-2")
+    assert Config.from_env().problems() == [
+        "TRINO_MAX_ROWS=0: the row cap must be 1 or more",
+        "TRINO_QUERY_TIMEOUT_SECONDS=-1: a time budget is 0 (none) or more",
+        "MCP_CALL_TIMEOUT_SECONDS=-2: a time budget is 0 (none) or more",
+    ]
+
+
+def test_token_exchange_resource_and_client_certificate_env(monkeypatch):
+    c = Config.from_env()
+    assert (c.resource_url, c.token_exchange_url, c.token_exchange_verify) == ("", "", "true")
+    assert (c.trino_client_cert, c.trino_client_key) == ("", "")
+    for name, value in {
+        "MCP_RESOURCE_URL": "https://mcp.example/mcp",
+        "TRINO_TOKEN_EXCHANGE_URL": "https://idp/token",
+        "TRINO_TOKEN_EXCHANGE_CLIENT_ID": "mcp",
+        "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET": "s",
+        "TRINO_TOKEN_EXCHANGE_AUDIENCE": "trino",
+        "TRINO_TOKEN_EXCHANGE_SCOPE": "openid",
+        "TRINO_TOKEN_EXCHANGE_VERIFY": "/ca.pem",
+        "TRINO_CLIENT_CERT": "/c.pem",
+        "TRINO_CLIENT_KEY": "/k.pem",
+    }.items():
+        monkeypatch.setenv(name, value)
+    c = Config.from_env()
+    assert (
+        c.resource_url,
+        c.token_exchange_url,
+        c.token_exchange_client_id,
+        c.token_exchange_client_secret,
+        c.token_exchange_audience,
+        c.token_exchange_scope,
+        c.token_exchange_verify,
+        c.trino_client_cert,
+        c.trino_client_key,
+    ) == (
+        "https://mcp.example/mcp",
+        "https://idp/token",
+        "mcp",
+        "s",
+        "trino",
+        "openid",
+        "/ca.pem",
+        "/c.pem",
+        "/k.pem",
+    )
 
 
 def test_oidc_env_overrides(monkeypatch):
@@ -115,7 +210,7 @@ def test_trino_connection_env(monkeypatch):
 
 
 def test_trino_connection_defaults():
-    """The core's one mode, the configured identity, is the default, with no password."""
+    """The caller's identity (``jwt``) is the default mode, with no password."""
     c = Config.from_env()
     assert (
         c.trino_http_scheme,
@@ -123,7 +218,7 @@ def test_trino_connection_defaults():
         c.trino_request_timeout,
         c.trino_identity_mode,
         c.trino_password,
-    ) == ("http", "true", 30.0, "service", "")
+    ) == ("http", "true", 30.0, "jwt", "")
 
 
 def test_trino_password_env(monkeypatch):
@@ -138,22 +233,22 @@ def test_jwt_leeway_env(monkeypatch):
     assert Config.from_env().jwt_leeway_seconds == 30
 
 
-def test_trino_source_and_query_budget_default_off_and_are_configurable(monkeypatch):
+def test_trino_source_defaults_off_and_the_query_budget_to_a_minute(monkeypatch):
     monkeypatch.delenv("TRINO_SOURCE", raising=False)
     monkeypatch.delenv("TRINO_QUERY_TIMEOUT_SECONDS", raising=False)
     c = Config.from_env()
-    assert (c.trino_source, c.query_timeout_seconds) == ("", 0.0)
+    assert (c.trino_source, c.query_timeout_seconds) == ("", 60.0)
     monkeypatch.setenv("TRINO_SOURCE", "agents-gateway")
     monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "45")
     c = Config.from_env()
     assert (c.trino_source, c.query_timeout_seconds) == ("agents-gateway", 45.0)
 
 
-def test_the_bound_of_a_call_defaults_off_and_is_configurable(monkeypatch):
+def test_the_bound_of_a_call_defaults_to_two_minutes_and_is_configurable(monkeypatch):
     monkeypatch.delenv("MCP_CALL_TIMEOUT_SECONDS", raising=False)
-    assert Config.from_env().call_timeout_seconds == 0.0
-    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "120")
     assert Config.from_env().call_timeout_seconds == 120.0
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    assert Config.from_env().call_timeout_seconds == 0.0
 
 
 def test_extensions_default_to_none_and_are_named_in_order(monkeypatch):

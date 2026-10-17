@@ -13,6 +13,12 @@ token is looked at or once it is verified, and the challenge a refusal carries.
 A guard can only refuse; the token is verified by the core whatever a guard
 answers.
 
+Without an extension, a refusal of the core says in its body what the client
+should send, and when ``MCP_RESOURCE_URL`` names this server, the core publishes
+its protected resource metadata (RFC 9728) and points to it in the challenge of
+a 401, as the MCP authorization specification asks. An extension's documents
+and challenges take precedence over the core's.
+
 Every request gets a request id — honoured from `X-Request-Id` when the edge
 sent a plain token (letters, digits, `.`, `_`, `:`, `-`, at most 128), generated
 otherwise — echoed on the response and exposed to the tools for the audit.
@@ -28,7 +34,8 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
+from urllib.parse import urlsplit
 
 from starlette.responses import JSONResponse
 
@@ -44,6 +51,33 @@ from .identity import (
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 UNAUTHENTICATED = "unauthenticated"
+NO_TOKEN_MESSAGE = (
+    "this server requires a bearer token issued for it by the identity provider: "
+    "send Authorization: Bearer <access token>"
+)
+INVALID_TOKEN_MESSAGE = (
+    "the bearer token is invalid, expired, or not issued for this server: "
+    "ask the identity provider for a token whose audience is this server"
+)
+METADATA_PATH = "/.well-known/oauth-protected-resource"
+
+
+def protected_resource(resource_url: str, issuer: str) -> tuple[dict[str, dict], str]:
+    """The protected resource metadata (RFC 9728) of the server ``resource_url`` names, by
+    the paths it is served at, and its URL; nothing when ``resource_url`` is empty."""
+    if not resource_url:
+        return {}, ""
+    parts = urlsplit(resource_url)
+    path = parts.path.rstrip("/")
+    document = {
+        "resource": resource_url,
+        "authorization_servers": [issuer] if issuer else [],
+        "bearer_methods_supported": ["header"],
+    }
+    paths = {METADATA_PATH: document}
+    if path:
+        paths[METADATA_PATH + path] = document
+    return paths, f"{parts.scheme}://{parts.netloc}{METADATA_PATH}{path}"
 
 
 def _request_id(sent: str | None) -> str:
@@ -63,13 +97,18 @@ class AuthIdentityMiddleware:
         *,
         require_auth: bool = False,
         extensions: Sequence[Extension] = (),
+        documents: Mapping[str, dict] = {},
+        metadata_url: str = "",
     ):
-        """Mount on ``app``; ``extensions`` add their documents, guards and challenges."""
+        """Mount on ``app``; ``documents`` are the core's public documents and
+        ``metadata_url`` the protected resource metadata a 401 points to; ``extensions``
+        add their documents, guards and challenges, which take precedence."""
         self.app = app
         self._auth = auth_provider
         self._require = require_auth
         self._extensions = tuple(extensions)
-        self._documents: dict[str, dict] = {}
+        self._metadata_url = metadata_url
+        self._documents: dict[str, dict] = dict(documents)
         for ext in self._extensions:
             self._documents.update(ext.public_documents())
 
@@ -103,8 +142,12 @@ class AuthIdentityMiddleware:
         principal = self._auth.verify(headers) if self._auth is not None else None
         if self._require and principal is None:
             # RFC 6750 §3.1: no error code when no token was sent at all.
-            error = "invalid_token" if bearer else ""
-            await self._refuse(Refusal(UNAUTHENTICATED, error=error), scope, receive, send)
+            refusal = (
+                Refusal(UNAUTHENTICATED, error="invalid_token", message=INVALID_TOKEN_MESSAGE)
+                if bearer
+                else Refusal(UNAUTHENTICATED, message=NO_TOKEN_MESSAGE)
+            )
+            await self._refuse(refusal, scope, receive, send)
             return
 
         admission.principal = principal
@@ -133,9 +176,16 @@ class AuthIdentityMiddleware:
             if challenge is not None:
                 headers["WWW-Authenticate"] = challenge
                 break
-        await JSONResponse({"error": refusal.reason}, status_code=refusal.status, headers=headers)(
-            scope, receive, send
-        )
+        else:
+            if self._metadata_url and refusal.reason == UNAUTHENTICATED:
+                error = f', error="{refusal.error}"' if refusal.error else ""
+                headers["WWW-Authenticate"] = (
+                    f'Bearer resource_metadata="{self._metadata_url}"{error}'
+                )
+        body = {"error": refusal.reason}
+        if refusal.message:
+            body["message"] = refusal.message
+        await JSONResponse(body, status_code=refusal.status, headers=headers)(scope, receive, send)
 
 
 def _echoing(send, request_id: str):

@@ -11,6 +11,9 @@ from tests.test_trino_client import _patch_connect
 
 _CFG = Config(
     trino_host="h",
+    trino_identity_mode="service",
+    query_timeout_seconds=0.0,
+    call_timeout_seconds=0.0,
     trino_port=8080,
     trino_user="u",
     trino_catalog="c",

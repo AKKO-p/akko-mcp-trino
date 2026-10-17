@@ -57,3 +57,40 @@ def test_package_version_matches_pyproject_and_changelog():
     assert project["version"] == __version__
     assert f"## [{__version__}]" in (root / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"version-{__version__}-blue" in README
+
+
+def test_readme_states_the_safe_defaults_the_code_has(monkeypatch):
+    """The defaults are the security posture: the README must say the ones the code has."""
+    for name in (
+        "TRINO_IDENTITY_MODE",
+        "MCP_AUTH_ENABLED",
+        "MCP_AUTH_REQUIRED",
+        "TRINO_QUERY_TIMEOUT_SECONDS",
+        "MCP_CALL_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    cfg = Config.from_env()
+    rows = {
+        m.group(1): m.group(2)
+        for m in re.finditer(r"^\| `([A-Z_]+)`[^\n]*\| `([^`]+)` \|$", README, re.M)
+    }
+    assert cfg.trino_identity_mode == rows["TRINO_IDENTITY_MODE"] == "jwt"
+    assert cfg.auth_enabled is True and rows["MCP_AUTH_ENABLED"] == "true"
+    assert cfg.auth_required is True and rows["MCP_AUTH_REQUIRED"] == "true"
+    assert cfg.query_timeout_seconds == float(rows["TRINO_QUERY_TIMEOUT_SECONDS"]) == 60
+    assert cfg.call_timeout_seconds == float(rows["MCP_CALL_TIMEOUT_SECONDS"]) == 120
+
+
+def test_migration_guide_and_changelog_name_every_breaking_default():
+    root = pathlib.Path(__file__).resolve().parents[1]
+    guide = (root / "MIGRATING.md").read_text(encoding="utf-8")
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    for name in (
+        "TRINO_IDENTITY_MODE",
+        "MCP_AUTH_ENABLED",
+        "MCP_AUTH_REQUIRED",
+        "TRINO_QUERY_TIMEOUT_SECONDS",
+        "MCP_CALL_TIMEOUT_SECONDS",
+        "TRINO_TOKEN_EXCHANGE_AUDIENCE",
+    ):
+        assert name in guide and name in changelog, name

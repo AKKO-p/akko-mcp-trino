@@ -36,6 +36,9 @@ _SEEN: contextvars.ContextVar = contextvars.ContextVar("seen", default=None)
 def _config(**over) -> Config:
     base = dict(
         trino_host="h",
+        trino_identity_mode="service",
+        query_timeout_seconds=0.0,
+        call_timeout_seconds=0.0,
         trino_port=8443,
         trino_user="svc",
         trino_catalog="c",
@@ -371,7 +374,7 @@ def test_build_server_applies_everything_an_extension_adds(monkeypatch):
         _config(trino_identity_mode="stand-in"),
         extensions=[ext],
         extra_tool_registrars=[plugin],
-        mcp_factory=lambda name: FakeMCP(),
+        mcp_factory=lambda name, **_: FakeMCP(),
         audit=audit,
     )
     assert ext.order == ["extension", "plugin"], "an extension's tools come before plugins'"
@@ -383,8 +386,10 @@ def test_build_server_applies_everything_an_extension_adds(monkeypatch):
 
 
 def test_an_extension_that_adds_nothing_leaves_the_core_as_it_is():
-    mcp, _ = build_server(_config(), extensions=[Extension()], mcp_factory=lambda name: FakeMCP())
-    plain, _ = build_server(_config(), mcp_factory=lambda name: FakeMCP())
+    mcp, _ = build_server(
+        _config(), extensions=[Extension()], mcp_factory=lambda name, **_: FakeMCP()
+    )
+    plain, _ = build_server(_config(), mcp_factory=lambda name, **_: FakeMCP())
     assert mcp.tools["describe_table"].__doc__ == plain.tools["describe_table"].__doc__
     app = build_asgi_app(_config(), _FakeMCP(), auth_provider=None, extensions=[Extension()])
     assert TestClient(app).get("/ops").status_code == 404

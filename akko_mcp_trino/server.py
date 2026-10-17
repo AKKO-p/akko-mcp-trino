@@ -30,12 +30,22 @@ ToolRegistrar = Callable[..., None]
 
 def _default_mcp_factory(
     name: str,
+    instructions: str | None = None,
 ):  # pragma: no cover - production factory (real MCPServer), proven by running it
     # Lazy import: the SDK server is only needed for real assembly, which keeps
     # build_server testable through an injected mcp_factory.
     from mcp.server.mcpserver import MCPServer
 
-    return MCPServer(name)
+    return MCPServer(name, instructions=instructions)
+
+
+def instructions_for(config: Config) -> str:
+    """What the server tells every MCP host at initialization: the warnings of its
+    configuration (see ``Config.warnings``), or nothing."""
+    warnings = config.warnings()
+    if not warnings:
+        return ""
+    return "WARNING, set by the administrator of this server: " + "; ".join(warnings) + "."
 
 
 class _AuditedServer:
@@ -78,7 +88,7 @@ def build_server(
     config: Config,
     *,
     extra_tool_registrars: Iterable[ToolRegistrar] = (),
-    mcp_factory: Callable[[str], Any] = _default_mcp_factory,
+    mcp_factory: Callable[..., Any] = _default_mcp_factory,
     metrics: Any = None,
     audit: Any = None,
     extensions: Sequence[Extension] = (),
@@ -88,8 +98,19 @@ def build_server(
     `audit`, when given, receives one record per tool call, a plugin's included, through
     whatever the extensions wrap around it; `extensions` add identity modes, client tags
     and tools (see `akko_mcp_trino.extensions`). An identity mode that cannot serve its
-    settings refuses to start."""
-    mcp = mcp_factory(config.server_name)
+    settings refuses to start, and so does a setting no server can serve
+    (``Config.problems``). The warnings of the configuration (``Config.warnings``) go to
+    every host in the instructions of the initialization: ``mcp_factory`` then
+    receives them as ``instructions``."""
+    problems = config.problems()
+    if problems:
+        raise ValueError("; ".join(problems))
+    instructions = instructions_for(config)
+    mcp = (
+        mcp_factory(config.server_name, instructions=instructions)
+        if instructions
+        else mcp_factory(config.server_name)
+    )
     exts = tuple(extensions)
 
     def tags() -> list[str]:

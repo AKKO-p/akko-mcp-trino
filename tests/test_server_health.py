@@ -10,6 +10,9 @@ from tests.test_tools import FakeClient, FakeMCP
 
 _CFG = Config(
     trino_host="h",
+    trino_identity_mode="service",
+    query_timeout_seconds=0.0,
+    call_timeout_seconds=0.0,
     trino_port=8080,
     trino_user="u",
     trino_catalog="c",
@@ -30,7 +33,7 @@ _CFG = Config(
 
 def test_build_server_returns_mcp_and_client():
     # Injected FakeMCP factory: tests assembly without depending on an SDK version.
-    mcp, client = build_server(_CFG, mcp_factory=lambda name: FakeMCP())
+    mcp, client = build_server(_CFG, mcp_factory=lambda name, **_: FakeMCP())
     assert set(mcp.tools) == {
         "list_catalogs",
         "list_schemas",
@@ -51,7 +54,7 @@ def test_build_server_applies_extra_registrars():
             return "ok"
 
     mcp, _ = build_server(
-        _CFG, extra_tool_registrars=[registrar], mcp_factory=lambda name: FakeMCP()
+        _CFG, extra_tool_registrars=[registrar], mcp_factory=lambda name, **_: FakeMCP()
     )
     assert len(mcp.tools) == 7
     assert "outil_maison" in mcp.tools
@@ -60,12 +63,58 @@ def test_build_server_applies_extra_registrars():
 def test_build_server_passes_server_name_to_factory():
     seen = {}
 
-    def factory(name):
+    def factory(name, instructions=None):
         seen["name"] = name
         return FakeMCP()
 
     build_server(_CFG, mcp_factory=factory)
     assert seen["name"] == "trino-mcp"
+
+
+def test_service_mode_is_announced_to_every_host_in_the_initialization_instructions():
+    """Chosen explicitly, ``service`` mode still tells every host that Trino sees one
+    identity for every caller, and that no caller is verified when the door is off."""
+    seen = {}
+
+    def factory(name, instructions=None):
+        seen["instructions"] = instructions
+        return FakeMCP()
+
+    build_server(_CFG, mcp_factory=factory)
+    text = seen["instructions"]
+    assert text.startswith("WARNING")
+    assert "TRINO_IDENTITY_MODE=service" in text and "'u'" in text
+    assert "MCP_AUTH_ENABLED=false" in text
+
+
+def test_a_mode_that_runs_as_the_caller_sends_no_instructions(monkeypatch):
+    from akko_mcp_trino import server
+
+    seen = {}
+
+    def factory(*args, **kwargs):
+        seen["call"] = (args, kwargs)
+        return FakeMCP()
+
+    cfg = Config(**{**_CFG.__dict__, "auth_enabled": True, "auth_required": True})
+    monkeypatch.setattr(server, "resolve_identity", lambda config, exts: object())
+    jwt_cfg = Config(**{**cfg.__dict__, "trino_identity_mode": "jwt"})
+    build_server(jwt_cfg, mcp_factory=factory)
+    assert seen["call"] == (("trino-mcp",), {})
+
+
+def test_a_setting_no_server_can_serve_refuses_to_build():
+    import pytest
+
+    for over in (
+        {"max_rows": 0},
+        {"query_timeout_seconds": -1.0},
+        {"call_timeout_seconds": -5.0},
+    ):
+        with pytest.raises(ValueError, match="TRINO_MAX_ROWS|TIME|budget"):
+            build_server(
+                Config(**{**_CFG.__dict__, **over}), mcp_factory=lambda name, **_: FakeMCP()
+            )
 
 
 def test_health_ok_always():

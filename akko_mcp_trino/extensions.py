@@ -38,13 +38,15 @@ class Refusal:
     """A guard's refusal: ``reason`` in ``X-Reason`` and in the body, never the token.
 
     ``error`` is the RFC 6750 error code a challenge may carry (``invalid_token``,
-    ``insufficient_scope``); ``headers`` are added to the response (``Retry-After``).
+    ``insufficient_scope``); ``headers`` are added to the response (``Retry-After``);
+    ``message``, when set, tells the client in the body what to do about it.
     """
 
     reason: str
     status: int = 401
     error: str = ""
     headers: Mapping[str, str] = field(default_factory=dict)
+    message: str = ""
 
 
 @dataclass

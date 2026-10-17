@@ -22,6 +22,9 @@ from akko_mcp_trino.middleware import AuthIdentityMiddleware
 def _config(transport: str) -> Config:
     return Config(
         trino_host="h",
+        trino_identity_mode="service",
+        query_timeout_seconds=0.0,
+        call_timeout_seconds=0.0,
         trino_port=8080,
         trino_user="u",
         trino_catalog="c",
@@ -206,21 +209,90 @@ def test_cli_version_prints_and_exits(capsys):
     assert __version__ in out
 
 
+_JWT_ENV = {
+    "TRINO_HOST": "trino.example",
+    "TRINO_HTTP_SCHEME": "https",
+    "MCP_JWKS_URL": "https://idp/certs",
+    "MCP_OIDC_ISSUER": "https://idp",
+    "MCP_OIDC_AUDIENCE": "mcp-server",
+    "TRINO_TOKEN_EXCHANGE_URL": "https://idp/token",
+    "TRINO_TOKEN_EXCHANGE_CLIENT_ID": "mcp-server",
+    "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET": "exchange-secret",
+    "TRINO_TOKEN_EXCHANGE_AUDIENCE": "trino",
+}
+
+
+def _clean_identity_env(monkeypatch):
+    for name in (
+        "TRINO_IDENTITY_MODE",
+        "MCP_AUTH_ENABLED",
+        "MCP_AUTH_REQUIRED",
+        "MCP_TRANSPORT",
+        "MCP_EXTENSIONS",
+        "MCP_TOOL_PLUGINS",
+        "MCP_RESOURCE_URL",
+        "TRINO_PASSWORD",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_cli_check_reports_effective_config_without_secrets(monkeypatch, capsys):
     from akko_mcp_trino.__main__ import check_config
 
-    monkeypatch.setenv("TRINO_HOST", "trino.example")
-    monkeypatch.setenv("MCP_AUTH_ENABLED", "true")
-    monkeypatch.setenv("MCP_JWKS_URL", "https://idp/certs")
+    _clean_identity_env(monkeypatch)
+    for name, value in _JWT_ENV.items():
+        monkeypatch.setenv(name, value)
     monkeypatch.setenv("MCP_USER_TOKEN", "tok-secret")
     from akko_mcp_trino.config import Config
 
     code = check_config(Config.from_env())
     out = capsys.readouterr().out
-    assert code == 0
+    assert code == 0, out
     assert "trino.example" in out and "https://idp/certs" in out
-    assert "tok-secret" not in out, "a secret leaked into --check output"
-    assert "extensions: none" in out
+    assert "token exchange: https://idp/token as client mcp-server (secret set)" in out
+    assert "tok-secret" not in out and "exchange-secret" not in out, "a secret leaked"
+    assert "extensions: none" in out and "WARNING" not in out
+
+
+def test_cli_check_of_the_defaults_names_what_the_safe_mode_needs(monkeypatch, capsys):
+    """Unconfigured, the server would not start: the default mode needs an identity
+    provider to verify callers and to exchange their tokens, and --check names it."""
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    _clean_identity_env(monkeypatch)
+    for name in _JWT_ENV:
+        monkeypatch.delenv(name, raising=False)
+    assert check_config(Config.from_env()) == 2
+    out = capsys.readouterr().out
+    assert "MCP_JWKS_URL" in out and "TRINO_IDENTITY_MODE=jwt requires TRINO_HTTP_SCHEME" in out
+
+
+def test_cli_check_warns_of_service_mode_chosen_explicitly(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    _clean_identity_env(monkeypatch)
+    monkeypatch.setenv("TRINO_IDENTITY_MODE", "service")
+    monkeypatch.setenv("MCP_AUTH_ENABLED", "false")
+    monkeypatch.setenv("MCP_AUTH_REQUIRED", "false")
+    assert check_config(Config.from_env()) == 0
+    out = capsys.readouterr().out
+    assert "WARNING: TRINO_IDENTITY_MODE=service: every query runs as the Trino user" in out
+    assert "WARNING: MCP_AUTH_ENABLED=false" in out
+
+
+def test_cli_check_reports_settings_no_server_can_serve(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    _clean_identity_env(monkeypatch)
+    monkeypatch.setenv("TRINO_IDENTITY_MODE", "service")
+    monkeypatch.setenv("MCP_AUTH_ENABLED", "false")
+    monkeypatch.setenv("MCP_AUTH_REQUIRED", "false")
+    monkeypatch.setenv("TRINO_MAX_ROWS", "0")
+    assert check_config(Config.from_env()) == 2
+    assert "PROBLEM: TRINO_MAX_ROWS=0" in capsys.readouterr().out
 
 
 def test_cli_check_fails_on_an_invalid_configuration(monkeypatch, capsys):
@@ -302,8 +374,13 @@ def test_cli_check_reports_the_query_source_and_budget(monkeypatch, capsys):
     monkeypatch.delenv("MCP_CALL_TIMEOUT_SECONDS", raising=False)
     check_config(Config.from_env())
     out = capsys.readouterr().out
-    assert "trino queries: source agents, time budget: Trino's" in out
-    assert "tool call time budget: none" in out
+    assert "trino queries: source agents, time budget: 60 s" in out
+    assert "tool call time budget: 120 s, every query of the call included" in out
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    check_config(Config.from_env())
+    out = capsys.readouterr().out
+    assert "time budget: Trino's" in out and "tool call time budget: none" in out
     monkeypatch.setenv("TRINO_SOURCE", "gateway")
     monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "45")
     monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "120")
@@ -311,3 +388,31 @@ def test_cli_check_reports_the_query_source_and_budget(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "source gateway, time budget: 45 s" in out
     assert "tool call time budget: 120 s, every query of the call included" in out
+
+
+def test_a_server_that_names_its_resource_publishes_its_metadata_on_every_transport():
+    """MCP_RESOURCE_URL names this server (RFC 8707): the served app publishes its
+    protected resource metadata (RFC 9728) and a 401 points to it."""
+    from starlette.testclient import TestClient
+
+    for transport in ("sse", "streamable-http"):
+        cfg = dataclasses.replace(
+            _config(transport),
+            auth_enabled=True,
+            auth_required=True,
+            oidc_issuer="https://idp/realms/r",
+            resource_url="https://mcp.example.com/mcp",
+        )
+        client = TestClient(build_asgi_app(cfg, _FakeMCP(), auth_provider=_Nobody()))
+        meta = client.get("/.well-known/oauth-protected-resource/mcp").json()
+        assert meta["resource"] == "https://mcp.example.com/mcp"
+        assert meta["authorization_servers"] == ["https://idp/realms/r"]
+        assert client.post("/mcp").headers["www-authenticate"] == (
+            'Bearer resource_metadata="https://mcp.example.com/.well-known/'
+            'oauth-protected-resource/mcp"'
+        )
+
+
+class _Nobody:
+    def verify(self, headers):
+        return None
