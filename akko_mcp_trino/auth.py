@@ -88,7 +88,13 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
     error, and the server refuses to start. An authentication layer that cannot
     verify anything must not pretend to; the old fallback to `UnverifiedJwtAuth`
     accepted any forged token. That class stays available for tests and local
-    development, but is never selected automatically."""
+    development, but is never selected automatically.
+
+    A token must be issued for this server (RFC 8707): its audience is
+    ``MCP_OIDC_AUDIENCE``, ``MCP_RESOURCE_URL`` or an extension's, and never the audience
+    of the token the server obtains for Trino (``TRINO_TOKEN_EXCHANGE_AUDIENCE``). A
+    token Trino would accept is refused here, even when it names this server too, and a
+    configuration that would accept one refuses to start."""
     if not config.auth_enabled:
         return None
     if not config.jwks_url:
@@ -97,11 +103,27 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
             "unverified JWT checking (fail-closed). Set MCP_JWKS_URL, MCP_OIDC_ISSUER "
             "and MCP_OIDC_AUDIENCE to your identity provider."
         )
+    accepted = accepted_audiences(config, [*audiences, config.resource_url])
+    if not accepted:
+        raise ValueError(
+            "MCP_AUTH_ENABLED=true but no token audience is set: set MCP_OIDC_AUDIENCE (or "
+            "MCP_RESOURCE_URL) to the audience the identity provider gives tokens issued "
+            "for this server"
+        )
+    refused = [a for a in (config.token_exchange_audience,) if a]
+    overlap = sorted(set(accepted) & set(refused))
+    if overlap:
+        raise ValueError(
+            f"audience {overlap[0]!r} is both accepted from callers and requested for Trino "
+            f"(TRINO_TOKEN_EXCHANGE_AUDIENCE): a token issued for Trino must not open this "
+            f"server; give this server an audience of its own"
+        )
     return JwksJwtAuth(
         config.jwks_url,
         config.oidc_issuer,
-        accepted_audiences(config, audiences),
+        accepted,
         leeway_seconds=config.jwt_leeway_seconds,
+        refused_audiences=refused,
     )
 
 
@@ -153,7 +175,7 @@ class JwksJwtAuth:
 
     `jwks_client` (a PyJWKClient) is injectable, so the class is testable with a
     local RSA key and no network. Any failure — signature, iss, aud, exp, missing
-    token — yields None. Fail closed."""
+    token, an audience in ``refused_audiences`` — yields None. Fail closed."""
 
     def __init__(
         self,
@@ -164,10 +186,13 @@ class JwksJwtAuth:
         jwks_client=None,
         algorithms=None,
         leeway_seconds: int = 30,
+        refused_audiences: Sequence[str] = (),
     ):
         """Verify tokens against ``jwks_url`` for ``issuer`` and ``audience`` (one value or
-        several, any of which may match); ``jwks_client`` is injectable for tests.
+        several, any of which may match), refusing a token that also names one of
+        ``refused_audiences``; ``jwks_client`` is injectable for tests.
         """
+        self._refused = frozenset(refused_audiences)
         self._issuer = issuer
         self._audience = audience if isinstance(audience, str) else list(audience)
         self._leeway = leeway_seconds
@@ -198,5 +223,9 @@ class JwksJwtAuth:
             )
         except Exception as exc:  # noqa: BLE001 — signature/iss/aud/exp invalid → fail-closed
             log.info("token refused: %s", type(exc).__name__)  # the reason, never the token
+            return None
+        aud = claims.get("aud")
+        if self._refused & set([aud] if isinstance(aud, str) else aud or []):
+            log.info("token refused: issued for another resource")
             return None
         return _principal_from_claims(claims)

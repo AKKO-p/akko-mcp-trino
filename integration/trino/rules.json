@@ -1,0 +1,13 @@
+{
+  "impersonation": [
+    {"original_user": "mcp-service", "new_user": "(alice|bob)", "allow": true}
+  ],
+  "catalogs": [
+    {"user": "(alice|bob|mcp-service)", "catalog": "(tpch|system)", "allow": "read-only"}
+  ],
+  "tables": [
+    {"user": "alice", "catalog": "tpch", "privileges": ["SELECT"]},
+    {"user": "bob", "catalog": "tpch", "schema": "tiny", "table": "nation",
+     "privileges": ["SELECT"], "filter": "regionkey = 3"}
+  ]
+}

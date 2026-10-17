@@ -40,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse the command line; ``--version`` prints and exits."""
     parser = argparse.ArgumentParser(
         prog="akko-mcp-trino",
-        description="Read-only MCP server for Trino, with one configured Trino identity.",
+        description="Read-only MCP server for Trino: each query runs as the verified caller.",
     )
     parser.add_argument("--version", action="version", version=f"akko-mcp-trino {__version__}")
     parser.add_argument(
@@ -57,7 +57,7 @@ def _audiences(extensions: list[Extension]) -> list[str]:
 
 def check_config(config: Config) -> int:
     """Print the effective configuration without secrets; 0 if it would start, 2 otherwise."""
-    problems: list[str] = []
+    problems: list[str] = list(config.problems())
     extensions: list[Extension] = []
     loaded = True
     try:
@@ -77,7 +77,7 @@ def check_config(config: Config) -> int:
         f"catalog {config.trino_catalog}, read_only={config.read_only}, max_rows={config.max_rows}",
         f"auth: enabled={config.auth_enabled} required={config.auth_required} "
         f"jwks={config.jwks_url or '-'} issuer={config.oidc_issuer or '-'} "
-        f"audience={config.oidc_audience or '-'}",
+        f"audience={config.oidc_audience or '-'} resource={config.resource_url or '-'}",
         "audiences accepted: "
         + (", ".join(accepted_audiences(config, _audiences(extensions))) or "-"),
         f"user token (stdio): {'set' if config.user_token else '-'}",
@@ -112,6 +112,8 @@ def check_config(config: Config) -> int:
     except ValueError as exc:
         problems.append(str(exc))
     print("\n".join(lines))
+    for warning in config.warnings():
+        print(f"WARNING: {warning}")
     for problem in problems:
         print(f"PROBLEM: {problem}")
     return 2 if problems else 0
@@ -136,12 +138,15 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         extensions=extensions,
     )
     auth_provider = build_auth(config, _audiences(extensions))
+    for warning in config.warnings():
+        log.warning(warning)
 
     if config.transport == "stdio":
         log.info(
-            "serving transport=stdio auth=%s strict=%s",
+            "serving transport=stdio auth=%s strict=%s identity=%s",
             auth_provider is not None,
             config.auth_required,
+            config.trino_identity_mode,
         )
         run_stdio(config, mcp, auth_provider=auth_provider, extensions=extensions)
         return
@@ -158,11 +163,12 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
 
     app = build_asgi_app(config, mcp, auth_provider=auth_provider, extensions=extensions)
     log.info(
-        "serving transport=%s port=%d auth=%s strict=%s extensions=%s",
+        "serving transport=%s port=%d auth=%s strict=%s identity=%s extensions=%s",
         config.transport,
         config.mcp_port,
         auth_provider is not None,
         config.auth_required,
+        config.trino_identity_mode,
         ",".join(extension_names(config.extensions)) or "none",
     )
     uvicorn.run(app, host="0.0.0.0", port=config.mcp_port, log_level="warning")

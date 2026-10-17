@@ -45,6 +45,18 @@ jobs:
       - run: uv venv && uv pip install --resolution ${{ matrix.resolution }} -e . "pytest==9.1.1" "pytest-cov==7.1.0"
       - name: tests at the ${{ matrix.resolution }} versions of every dependency
         run: .venv/bin/python -m pytest -q
+  integration:
+    # The identity modes, live: a disposable Keycloak (token exchange) and Trino (JWT and
+    # client certificates), three servers built from this commit, every check of
+    # integration/check.py, then everything removed.
+    name: integration (Keycloak and Trino)
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build, start, check, remove
+        run: bash integration/run.sh
   image:
     name: container image builds
     runs-on: ubuntu-latest

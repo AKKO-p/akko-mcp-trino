@@ -424,3 +424,36 @@ def test_every_tool_declares_mcp_annotations_read_only_and_non_destructive():
         assert ann.open_world_hint is False, name
         assert ann.title, name
     assert mcp.annotations["list_catalogs"].idempotent_hint is True
+
+
+# ---- the annotations say what the tools can really do
+
+
+def test_annotations_follow_the_read_only_setting():
+    """A host skips its confirmation on a tool annotated read-only: with
+    TRINO_READ_ONLY=false, execute_query may write and must say so. The other tools
+    only read whatever the setting."""
+    for read_only in (True, False):
+        mcp = FakeMCP()
+        register_query_tools(mcp, FakeClient(), read_only=read_only)
+        run = mcp.annotations["execute_query"]
+        assert run.read_only_hint is read_only
+        assert run.destructive_hint is (not read_only)
+        assert run.idempotent_hint is read_only
+        for name in ("list_catalogs", "list_schemas", "list_tables", "describe_table"):
+            assert mcp.annotations[name].read_only_hint is True
+            assert mcp.annotations[name].destructive_hint is False
+        assert mcp.annotations["explain_query"].read_only_hint is True
+
+
+def test_the_description_of_execute_query_follows_the_read_only_setting():
+    ro, rw = FakeMCP(), FakeMCP()
+    register_query_tools(ro, FakeClient(), read_only=True)
+    register_query_tools(rw, FakeClient(), read_only=False)
+    assert ro.tools["execute_query"].__doc__.startswith("Run one read-only SQL statement")
+    assert "are refused before reaching Trino" in ro.tools["execute_query"].__doc__
+    assert ro.annotations["execute_query"].title == "Run a read-only query"
+    assert rw.tools["execute_query"].__doc__.startswith("Run one SQL statement")
+    assert "The statement may write" in rw.tools["execute_query"].__doc__
+    assert "refused" not in rw.tools["execute_query"].__doc__.split("max_rows")[0]
+    assert rw.annotations["execute_query"].title == "Run a query (writes allowed)"

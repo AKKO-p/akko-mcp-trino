@@ -1,20 +1,29 @@
 """Trino client: one connection per query, bounded execution, the identity of a mode.
 
 Who the server is for Trino is an identity mode, chosen by ``TRINO_IDENTITY_MODE``.
-The core has two:
+The core has three:
 
-* ``service``, the default: every query runs as the identity the administrator
-  configured, ``TRINO_USER``, authenticated by ``TRINO_PASSWORD`` when it is set.
-  Trino's access control decides for that identity, the same for every caller:
-  give it the rights every caller of this server may have, no more.
-* ``jwt``: the caller's own bearer, already verified at the door, is sent to
-  Trino as its JWT. Trino verifies it again with its JWT authenticator and runs
-  the query as that user, so its access control (Ranger, OPA, file rules)
-  decides for the caller: no service account, no password, no right to act
-  for another user. A request without a verified bearer is refused, never run as anyone.
+* ``jwt``, the default: every query runs as the verified caller. The server
+  exchanges the caller's token, issued for this server, for a token whose
+  audience is Trino (OAuth 2.0 Token Exchange, RFC 8693, see
+  `akko_mcp_trino.token_exchange`). Trino verifies that token with its JWT
+  authenticator and its access control (Ranger, OPA, file rules) decides for the
+  caller. The caller's own token never leaves the server: the MCP authorization
+  specification forbids passing it through.
+* ``impersonation``, for an identity provider that cannot exchange tokens: the
+  server authenticates to Trino as its own account (``TRINO_USER`` with
+  ``TRINO_PASSWORD``, or a client certificate), and asks Trino to run the query
+  as the verified caller. Trino allows it under an impersonation rule that only
+  this account has. The caller's name comes from their verified token, never from
+  a header they wrote.
+* ``service``, only when named: every query runs as ``TRINO_USER``, the same for
+  every caller. The server says so at start and in its instructions to hosts.
 
-A password or a bearer never travels over plain http. An extension may add other
-modes (see `akko_mcp_trino.extensions`); an unknown mode refuses to start.
+Both modes that run as the caller refuse to start unless the door requires a
+verified token, and refuse a query without a verified caller: never run as
+anyone else. A password, a token or a certificate never travels over plain http.
+An extension may add other modes (see `akko_mcp_trino.extensions`); an unknown
+mode refuses to start.
 
 Every query tells Trino where it comes from: the source is the server name
 (``TRINO_SOURCE`` overrides it). Results are bounded twice: one row more than
@@ -39,6 +48,7 @@ import trino.auth
 from .audit import ToolCall, current_call, time_allowed
 from .config import Config
 from .identity import current_bearer
+from .token_exchange import TokenExchange
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .extensions import Extension
@@ -77,36 +87,100 @@ class IdentityMode(Protocol):
         ...
 
 
+def _server_account(cfg: Config) -> tuple[str, Any]:
+    """The line ``--check`` prints and the authentication of the server's own Trino
+    account: a client certificate (mTLS), a password, or nothing for a local Trino.
+    Refuses a secret over plain http, and a certificate without its key."""
+    if bool(cfg.trino_client_cert) != bool(cfg.trino_client_key):
+        raise ValueError("TRINO_CLIENT_CERT and TRINO_CLIENT_KEY go together")
+    if (cfg.trino_password or cfg.trino_client_cert) and cfg.trino_http_scheme != "https":
+        raise ValueError(
+            "TRINO_PASSWORD or TRINO_CLIENT_CERT is set but TRINO_HTTP_SCHEME is not https"
+        )
+    if cfg.trino_client_cert:
+        return "client certificate", trino.auth.CertificateAuthentication(
+            cfg.trino_client_cert, cfg.trino_client_key
+        )
+    if cfg.trino_password:
+        return "password set", trino.auth.BasicAuthentication(cfg.trino_user, cfg.trino_password)
+    return "no password", None
+
+
+def _require_verified_callers(cfg: Config) -> None:
+    """A mode that runs every query as the caller needs a door that refuses a request
+    without a verified token (401), rather than a query that fails later."""
+    if not (cfg.auth_enabled and cfg.auth_required):
+        raise ValueError(
+            f"TRINO_IDENTITY_MODE={cfg.trino_identity_mode} runs every query as the verified "
+            f"caller and needs MCP_AUTH_ENABLED=true and MCP_AUTH_REQUIRED=true; to run every "
+            f"query as TRINO_USER instead, set TRINO_IDENTITY_MODE=service"
+        )
+
+
+def _verified_caller(cfg: Config, user: Optional[str]) -> str:
+    if not user:
+        raise PermissionError(
+            f"TRINO_IDENTITY_MODE={cfg.trino_identity_mode} and the request has no verified "
+            f"caller: refusing to run the query as anyone else"
+        )
+    return user
+
+
 class ServiceIdentity:
     """``service``: every query runs as ``TRINO_USER``, the identity the administrator
-    configured; Basic authentication with ``TRINO_PASSWORD`` when it is set."""
+    configured; a client certificate or ``TRINO_PASSWORD`` when one is set."""
 
     def __init__(self, config: Config) -> None:
         """Keep the core's settings."""
         self._config = config
 
     def describe(self) -> list[str]:
-        """The configured user and whether a password is set, never the password; refuses
-        a password over plain http."""
+        """The configured user and how it authenticates, never the secret; refuses a
+        secret over plain http."""
         cfg = self._config
-        if cfg.trino_password and cfg.trino_http_scheme != "https":
-            raise ValueError("TRINO_PASSWORD is set but TRINO_HTTP_SCHEME is not https")
-        secret = "password set" if cfg.trino_password else "no password"
+        secret, _ = _server_account(cfg)
         return [f"trino identity: {cfg.trino_user} ({secret}), the same for every caller"]
 
     def connection(self, user: Optional[str]) -> tuple[str, Any]:
         """The configured user, whoever the caller."""
         cfg = self._config
-        self.describe()
-        if cfg.trino_password:
-            return cfg.trino_user, trino.auth.BasicAuthentication(
-                cfg.trino_user, cfg.trino_password
-            )
-        return cfg.trino_user, None
+        return cfg.trino_user, _server_account(cfg)[1]
 
     def ping(self, client: "TrinoClient") -> None:
         """A bounded ``SELECT 1`` as the configured identity."""
         client.query("SELECT 1")
+
+
+class ImpersonationIdentity(ServiceIdentity):
+    """``impersonation``: the server authenticates as ``TRINO_USER`` and Trino runs each
+    query as the verified caller, under an impersonation rule only that account has."""
+
+    def describe(self) -> list[str]:
+        """The server's account and the rule Trino needs; refuses to start without https,
+        without a credential for the account, or with a door that admits unverified callers."""
+        cfg = self._config
+        _require_verified_callers(cfg)
+        if cfg.trino_http_scheme != "https":
+            raise ValueError("TRINO_IDENTITY_MODE=impersonation requires TRINO_HTTP_SCHEME=https")
+        secret, auth = _server_account(cfg)
+        if auth is None:
+            raise ValueError(
+                "TRINO_IDENTITY_MODE=impersonation needs the server's own Trino account to "
+                "authenticate: set TRINO_PASSWORD, or TRINO_CLIENT_CERT and TRINO_CLIENT_KEY"
+            )
+        return [
+            f"trino identity: the verified caller, impersonated by {cfg.trino_user} ({secret}); "
+            f"Trino must allow only {cfg.trino_user} to impersonate"
+        ]
+
+    def connection(self, user: Optional[str]) -> tuple[str, Any]:
+        """The verified caller, with the server account's authentication."""
+        cfg = self._config
+        return _verified_caller(cfg, user), _server_account(cfg)[1]
+
+    def ping(self, client: "TrinoClient") -> None:
+        """A bounded ``SELECT 1`` as the server's own account, impersonating no one."""
+        client.query("SELECT 1", user=self._config.trino_user)
 
 
 def trino_info(config: Config, verify: Any) -> None:
@@ -123,24 +197,35 @@ def trino_info(config: Config, verify: Any) -> None:
 
 
 class JwtIdentity:
-    """``jwt``: the caller's verified bearer goes to Trino, which verifies it again."""
+    """``jwt``: Trino receives, for the verified caller, a token the server obtained by
+    token exchange; never the caller's own."""
 
-    def __init__(self, config: Config) -> None:
-        """Keep the core's settings."""
+    def __init__(self, config: Config, exchange: Optional[TokenExchange] = None) -> None:
+        """Keep the core's settings and the token exchange (built from them by default)."""
         self._config = config
+        self._exchange = exchange if exchange is not None else TokenExchange(config)
 
     def trino_token(self, bearer: str) -> str:
-        """The token Trino receives for the caller: their own verified bearer."""
-        return bearer
+        """The token Trino receives for the caller: the caller's verified bearer, exchanged
+        at the identity provider for one whose audience is Trino. An extension may override
+        it to obtain that token another way; it must never return ``bearer`` itself."""
+        return self._exchange.token_for(bearer)
 
     def describe(self) -> list[str]:
-        """What the mode sends Trino; refuses to start over plain http."""
-        if self._config.trino_http_scheme != "https":
+        """What the mode sends Trino; refuses to start over plain http, without the token
+        exchange's settings, or with a door that admits unverified callers."""
+        cfg = self._config
+        _require_verified_callers(cfg)
+        if cfg.trino_http_scheme != "https":
             raise ValueError("TRINO_IDENTITY_MODE=jwt requires TRINO_HTTP_SCHEME=https")
-        return ["trino identity: the caller's own token (jwt), verified again by Trino"]
+        return [
+            "trino identity: the verified caller, with a token for Trino obtained by token "
+            "exchange; the caller's own token never leaves the server",
+            *self._exchange.describe(),
+        ]
 
     def connection(self, user: Optional[str]) -> tuple[str, Any]:
-        """The caller and their bearer; refused over http or without a verified bearer."""
+        """The caller and a token for Trino; refused over http or without a verified caller."""
         cfg = self._config
         bearer = current_bearer()
         if cfg.trino_http_scheme != "https":
@@ -150,7 +235,8 @@ class JwtIdentity:
                 "TRINO_IDENTITY_MODE=jwt and the request carries no verified bearer: "
                 "refusing to fall back to TRINO_USER"
             )
-        return user or cfg.trino_user, trino.auth.JWTAuthentication(self.trino_token(bearer))
+        caller = _verified_caller(cfg, user)
+        return caller, trino.auth.JWTAuthentication(self.trino_token(bearer))
 
     def ping(self, client: "TrinoClient") -> None:
         """No identity of its own to query with: ask Trino's public ``/v1/info``."""
@@ -158,12 +244,13 @@ class JwtIdentity:
 
 
 def resolve_identity(config: Config, extensions: Sequence["Extension"] = ()) -> IdentityMode:
-    """The identity mode ``TRINO_IDENTITY_MODE`` names, checked: the core's ``service`` and
-    ``jwt``, or an extension's. Raises ValueError, naming the modes on offer, when none
-    matches."""
+    """The identity mode ``TRINO_IDENTITY_MODE`` names, checked: the core's ``jwt``,
+    ``impersonation`` and ``service``, or an extension's. Raises ValueError, naming the
+    modes on offer, when none matches."""
     modes: dict[str, IdentityMode] = {
         "service": ServiceIdentity(config),
         "jwt": JwtIdentity(config),
+        "impersonation": ImpersonationIdentity(config),
     }
     for ext in extensions:
         modes.update(ext.identity_modes())

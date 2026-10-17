@@ -45,12 +45,14 @@ class Config:
     # be. A local host (Claude Desktop, Cursor, Vibe) launches the server for
     # one person; that token names the verified caller of the whole process.
     user_token: str = ""
-    # How the server reaches Trino. `service` (the default): every query runs as
-    # the one identity the administrator configured, `TRINO_USER`, with
-    # `TRINO_PASSWORD` over https when it is set (nothing, for a local Trino).
-    # `jwt`: every query runs as the caller, whose verified token Trino receives
-    # and verifies again (https only). An extension (`MCP_EXTENSIONS`) may add
-    # other modes; an unknown mode refuses to start.
+    # How the server reaches Trino. `jwt` (the default): every query runs as the
+    # verified caller, with a token for Trino the server obtains from the identity
+    # provider by OAuth 2.0 Token Exchange (RFC 8693); the caller's own token never
+    # leaves the server. `impersonation`: the server authenticates as its own
+    # Trino account and Trino runs the query as the verified caller, under an
+    # impersonation rule limited to that account. `service`, only when named: every
+    # query runs as `TRINO_USER`, whoever calls. https only for the first two. An
+    # extension (`MCP_EXTENSIONS`) may add other modes; an unknown mode refuses to start.
     trino_http_scheme: str = "http"
     trino_verify: str = "true"  # true, false, or a path to a CA bundle
     trino_request_timeout: float = 30.0
@@ -59,14 +61,14 @@ class Config:
     trino_source: str = ""
     # Time budget of one query, in seconds, enforced by this server: past it the
     # query is cancelled in Trino. 0 leaves the limit to Trino's own settings.
-    query_timeout_seconds: float = 0.0
-    trino_identity_mode: str = "service"
+    query_timeout_seconds: float = 60.0
+    trino_identity_mode: str = "jwt"
     # The configured identity's password (Basic authentication, https only); empty sends none.
     trino_password: str = ""
     # Time budget of one tool call, every Trino query of the call included: past
     # it no query starts, the one running is cancelled, and the agent gets an
     # error, never a partial answer. 0 sets none.
-    call_timeout_seconds: float = 0.0
+    call_timeout_seconds: float = 120.0
     # Tools another package adds (entry point group `akko_mcp_trino.tools`),
     # by plugin name, comma-separated. Empty serves the generic tools only.
     tool_plugins: str = ""
@@ -76,6 +78,61 @@ class Config:
     extensions: str = ""
     # Tolerance on exp/nbf/iat for clock drift between the issuer and this server.
     jwt_leeway_seconds: int = 30
+    # This server's canonical URI (RFC 8707, RFC 9728), such as https://mcp.example.com/mcp.
+    # Accepted as a token audience besides `MCP_OIDC_AUDIENCE`, named in the protected
+    # resource metadata the server then publishes, and in the challenge of a 401.
+    resource_url: str = ""
+    # `jwt` mode: the OAuth 2.0 Token Exchange (RFC 8693) that turns the caller's
+    # token, issued for this server, into a token for Trino. The endpoint (https),
+    # this server's client at the identity provider, the audience Trino accepts,
+    # optional scopes, and how the endpoint's certificate is checked.
+    token_exchange_url: str = ""
+    token_exchange_client_id: str = ""
+    token_exchange_client_secret: str = ""
+    token_exchange_audience: str = ""
+    token_exchange_scope: str = ""
+    token_exchange_verify: str = "true"
+    # A client certificate and its key (PEM paths) the server authenticates to
+    # Trino with (mTLS), in `service` and `impersonation` modes, instead of a password.
+    trino_client_cert: str = ""
+    trino_client_key: str = ""
+
+    def problems(self) -> list[str]:
+        """Settings no server can serve: the server refuses to start, ``--check`` says why."""
+        found = []
+        if self.auth_required and not self.auth_enabled:
+            found.append(
+                "MCP_AUTH_REQUIRED=true but MCP_AUTH_ENABLED=false: no token can be verified "
+                "and every request would be refused; enable MCP_AUTH_ENABLED, or set "
+                "MCP_AUTH_REQUIRED=false to serve without verifying callers"
+            )
+        if self.max_rows < 1:
+            found.append(f"TRINO_MAX_ROWS={self.max_rows}: the row cap must be 1 or more")
+        for name, value in (
+            ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
+            ("MCP_CALL_TIMEOUT_SECONDS", self.call_timeout_seconds),
+        ):
+            if value < 0:
+                found.append(f"{name}={value:g}: a time budget is 0 (none) or more")
+        return found
+
+    def warnings(self) -> list[str]:
+        """What this configuration leaves open, said at start, in ``--check`` and to every
+        MCP host in the initialization's instructions; empty for the default modes."""
+        found = []
+        if self.trino_identity_mode == "service":
+            found.append(
+                f"TRINO_IDENTITY_MODE=service: every query runs as the Trino user "
+                f"{self.trino_user!r}, whoever calls; Trino cannot tell callers apart"
+            )
+        if not self.auth_enabled:
+            found.append(
+                "MCP_AUTH_ENABLED=false: no caller is verified; anyone who reaches this "
+                "server queries Trino"
+            )
+        elif not self.auth_required:
+            found.append("MCP_AUTH_REQUIRED=false: a request without a valid token is served too")
+        return found
 
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
@@ -87,7 +144,7 @@ class Config:
             trino_catalog=os.environ.get("TRINO_CATALOG", "system"),
             max_rows=int(os.environ.get("TRINO_MAX_ROWS", "100")),
             read_only=os.environ.get("TRINO_READ_ONLY", "true").lower() == "true",
-            auth_enabled=os.environ.get("MCP_AUTH_ENABLED", "false").lower() == "true",
+            auth_enabled=os.environ.get("MCP_AUTH_ENABLED", "true").lower() == "true",
             server_name=os.environ.get("MCP_SERVER_NAME", server_name),
             health_port=int(os.environ.get("MCP_HEALTH_PORT", "3001")),
             jwks_url=os.environ.get("MCP_JWKS_URL", ""),
@@ -95,18 +152,27 @@ class Config:
             oidc_audience=os.environ.get("MCP_OIDC_AUDIENCE", ""),
             transport=os.environ.get("MCP_TRANSPORT", "streamable-http"),
             mcp_port=int(os.environ.get("MCP_PORT", "3000")),
-            auth_required=os.environ.get("MCP_AUTH_REQUIRED", "false").lower() == "true",
+            auth_required=os.environ.get("MCP_AUTH_REQUIRED", "true").lower() == "true",
             allowed_hosts=os.environ.get("MCP_ALLOWED_HOSTS", ""),
             user_token=os.environ.get("MCP_USER_TOKEN", ""),
             trino_http_scheme=os.environ.get("TRINO_HTTP_SCHEME", "http").lower(),
             trino_verify=os.environ.get("TRINO_VERIFY", "true"),
             trino_request_timeout=float(os.environ.get("TRINO_REQUEST_TIMEOUT_SECONDS", "30")),
             trino_source=os.environ.get("TRINO_SOURCE", ""),
-            query_timeout_seconds=float(os.environ.get("TRINO_QUERY_TIMEOUT_SECONDS", "0")),
-            trino_identity_mode=os.environ.get("TRINO_IDENTITY_MODE", "service").lower(),
+            query_timeout_seconds=float(os.environ.get("TRINO_QUERY_TIMEOUT_SECONDS", "60")),
+            trino_identity_mode=os.environ.get("TRINO_IDENTITY_MODE", "jwt").lower(),
             trino_password=os.environ.get("TRINO_PASSWORD", ""),
-            call_timeout_seconds=float(os.environ.get("MCP_CALL_TIMEOUT_SECONDS", "0")),
+            call_timeout_seconds=float(os.environ.get("MCP_CALL_TIMEOUT_SECONDS", "120")),
             tool_plugins=os.environ.get("MCP_TOOL_PLUGINS", ""),
             extensions=os.environ.get("MCP_EXTENSIONS", ""),
             jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
+            resource_url=os.environ.get("MCP_RESOURCE_URL", ""),
+            token_exchange_url=os.environ.get("TRINO_TOKEN_EXCHANGE_URL", ""),
+            token_exchange_client_id=os.environ.get("TRINO_TOKEN_EXCHANGE_CLIENT_ID", ""),
+            token_exchange_client_secret=os.environ.get("TRINO_TOKEN_EXCHANGE_CLIENT_SECRET", ""),
+            token_exchange_audience=os.environ.get("TRINO_TOKEN_EXCHANGE_AUDIENCE", ""),
+            token_exchange_scope=os.environ.get("TRINO_TOKEN_EXCHANGE_SCOPE", ""),
+            token_exchange_verify=os.environ.get("TRINO_TOKEN_EXCHANGE_VERIFY", "true"),
+            trino_client_cert=os.environ.get("TRINO_CLIENT_CERT", ""),
+            trino_client_key=os.environ.get("TRINO_CLIENT_KEY", ""),
         )

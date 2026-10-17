@@ -3,6 +3,7 @@
 from akko_mcp_trino.config import Config
 from akko_mcp_trino.identity import reset_current_bearer, set_current_bearer
 from akko_mcp_trino.trino_client import (
+    ImpersonationIdentity,
     JwtIdentity,
     ServiceIdentity,
     TrinoClient,
@@ -11,6 +12,9 @@ from akko_mcp_trino.trino_client import (
 
 _CFG = Config(
     trino_host="h",
+    trino_identity_mode="service",
+    query_timeout_seconds=0.0,
+    call_timeout_seconds=0.0,
     trino_port=8080,
     trino_user="svc",
     trino_catalog="cat",
@@ -155,13 +159,13 @@ def test_the_connection_carries_what_the_identity_mode_says(monkeypatch):
     assert seen["verify"] is True and seen["request_timeout"] == 30.0
 
 
-def test_the_core_has_two_modes_and_an_extension_may_add_or_replace_one():
+def test_the_core_has_three_modes_and_an_extension_may_add_or_replace_one():
     import pytest
 
     assert isinstance(resolve_identity(_cfg(trino_identity_mode="service")), ServiceIdentity)
-    jwt = _cfg(trino_identity_mode="jwt", trino_http_scheme="https")
-    assert isinstance(resolve_identity(jwt), JwtIdentity)
-    with pytest.raises(ValueError, match="expected one of \\('jwt', 'service'\\)"):
+    assert isinstance(resolve_identity(_jwt_cfg()), JwtIdentity)
+    assert isinstance(resolve_identity(_imp_cfg()), ImpersonationIdentity)
+    with pytest.raises(ValueError, match="expected one of \\('impersonation', 'jwt', 'service'\\)"):
         resolve_identity(_cfg(trino_identity_mode="per-user"))
 
     class _Ext:
@@ -260,17 +264,61 @@ def _as_bearer(token):
     return bound()
 
 
-def test_jwt_mode_sends_the_callers_own_token_to_trino(monkeypatch):
-    """Trino verifies the same token the door verified and runs the query as the caller:
-    no service account, no password, no right to act for another user."""
+class _Exchange:
+    """A stand-in for the token exchange: what it was asked, what it answers."""
+
+    def __init__(self, answer="for-trino"):
+        self.asked, self.answer = [], answer
+
+    def describe(self):
+        return ["token exchange: stand-in"]
+
+    def token_for(self, subject_token):
+        self.asked.append(subject_token)
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+def _jwt_cfg(**over):
+    base = dict(
+        trino_identity_mode="jwt",
+        trino_http_scheme="https",
+        auth_enabled=True,
+        auth_required=True,
+        token_exchange_url="https://idp/token",
+        token_exchange_client_id="mcp-server",
+        token_exchange_client_secret="s3cret",
+        token_exchange_audience="trino",
+    )
+    return _cfg(**{**base, **over})
+
+
+def _imp_cfg(**over):
+    base = dict(
+        trino_identity_mode="impersonation",
+        trino_http_scheme="https",
+        auth_enabled=True,
+        auth_required=True,
+        trino_password="s3cret",
+    )
+    return _cfg(**{**base, **over})
+
+
+def test_jwt_mode_sends_trino_an_exchanged_token_never_the_callers_own(monkeypatch):
+    """The MCP authorization specification forbids token passthrough: Trino receives the
+    token the identity provider issued for it in exchange for the caller's, and the query
+    runs as the caller."""
     import trino.auth
 
     seen = _capture(monkeypatch)
-    cfg = _cfg(trino_http_scheme="https", trino_identity_mode="jwt")
-    with _as_bearer("eyJ.token"):
-        TrinoClient(cfg).query("SELECT 1", user="alice")
+    exchange = _Exchange("eyJ.for-trino")
+    cfg = _jwt_cfg()
+    with _as_bearer("eyJ.for-mcp"):
+        TrinoClient(cfg, identity=JwtIdentity(cfg, exchange)).query("SELECT 1", user="alice")
     assert isinstance(seen["auth"], trino.auth.JWTAuthentication)
-    assert seen["auth"].token == "eyJ.token" and seen["user"] == "alice"
+    assert seen["auth"].token == "eyJ.for-trino" and seen["user"] == "alice"
+    assert exchange.asked == ["eyJ.for-mcp"], "the caller's token went to the exchange only"
 
 
 def test_jwt_mode_refuses_a_query_without_a_verified_bearer(monkeypatch):
@@ -279,32 +327,75 @@ def test_jwt_mode_refuses_a_query_without_a_verified_bearer(monkeypatch):
     import pytest
 
     seen = _capture(monkeypatch)
-    cfg = _cfg(trino_http_scheme="https", trino_identity_mode="jwt")
+    exchange = _Exchange()
+    cfg = _jwt_cfg()
     with pytest.raises(PermissionError, match="TRINO_USER"):
-        TrinoClient(cfg).query("SELECT 1", user="alice")
-    assert seen == {}, "nothing reached Trino"
+        TrinoClient(cfg, identity=JwtIdentity(cfg, exchange)).query("SELECT 1", user="alice")
+    assert seen == {} and exchange.asked == [], "nothing reached Trino nor the provider"
+
+
+def test_jwt_mode_refuses_a_bearer_without_a_verified_subject(monkeypatch):
+    import pytest
+
+    seen = _capture(monkeypatch)
+    cfg = _jwt_cfg()
+    with _as_bearer("eyJ.for-mcp"), pytest.raises(PermissionError, match="no verified caller"):
+        TrinoClient(cfg, identity=JwtIdentity(cfg, _Exchange())).query("SELECT 1", user=None)
+    assert seen == {}
+
+
+def test_jwt_mode_surfaces_a_refused_exchange_and_runs_nothing(monkeypatch):
+    import pytest
+
+    seen = _capture(monkeypatch)
+    cfg = _jwt_cfg()
+    mode = JwtIdentity(cfg, _Exchange(PermissionError("the identity provider refused")))
+    with _as_bearer("eyJ.for-mcp"), pytest.raises(PermissionError, match="refused"):
+        TrinoClient(cfg, identity=mode).query("SELECT 1", user="alice")
+    assert seen == {}
 
 
 def test_jwt_mode_refuses_plain_http_at_start_and_per_query():
     import pytest
 
-    cfg = _cfg(trino_identity_mode="jwt")
+    cfg = _jwt_cfg(trino_http_scheme="http")
     with pytest.raises(ValueError, match="TRINO_HTTP_SCHEME=https"):
         resolve_identity(cfg)
     with _as_bearer("eyJ.token"), pytest.raises(ValueError, match="TRINO_HTTP_SCHEME=https"):
-        JwtIdentity(cfg).connection("alice")
+        JwtIdentity(cfg, _Exchange()).connection("alice")
 
 
-def test_jwt_mode_says_what_it_sends_never_a_token():
-    mode = JwtIdentity(_cfg(trino_http_scheme="https"))
-    assert mode.describe() == [
-        "trino identity: the caller's own token (jwt), verified again by Trino"
+def test_modes_that_run_as_the_caller_refuse_to_start_behind_an_open_door():
+    """A request without a verified token must be refused at the door (401), not reach a
+    tool: both modes that run as the caller need MCP_AUTH_ENABLED and MCP_AUTH_REQUIRED."""
+    import pytest
+
+    for make in (_jwt_cfg, _imp_cfg):
+        for door in ({"auth_enabled": False}, {"auth_required": False}):
+            with pytest.raises(ValueError, match="MCP_AUTH_REQUIRED=true"):
+                resolve_identity(make(**door))
+
+
+def test_jwt_mode_refuses_to_start_without_the_token_exchange():
+    import pytest
+
+    with pytest.raises(ValueError, match="TRINO_TOKEN_EXCHANGE_URL.*impersonation"):
+        resolve_identity(_jwt_cfg(token_exchange_url=""))
+
+
+def test_jwt_mode_says_what_it_sends_never_a_token_nor_the_secret():
+    lines = JwtIdentity(_jwt_cfg()).describe()
+    assert lines == [
+        "trino identity: the verified caller, with a token for Trino obtained by token "
+        "exchange; the caller's own token never leaves the server",
+        "token exchange: https://idp/token as client mcp-server (secret set), audience trino",
     ]
+    assert "s3cret" not in " ".join(lines)
 
 
 def test_jwt_mode_sends_the_token_a_subclass_chooses_for_the_caller(monkeypatch):
-    """An extension may send Trino another token for the caller (one for Trino's own
-    audience, for example) by overriding ``trino_token``."""
+    """An extension may obtain the token for Trino another way by overriding
+    ``trino_token``."""
     import trino.auth
 
     class _ForTrino(JwtIdentity):
@@ -312,12 +403,75 @@ def test_jwt_mode_sends_the_token_a_subclass_chooses_for_the_caller(monkeypatch)
             return "for-trino:" + bearer
 
     seen = _capture(monkeypatch)
-    cfg = _cfg(trino_http_scheme="https", trino_identity_mode="jwt")
+    cfg = _jwt_cfg()
     mode = _ForTrino(cfg)
     with _as_bearer("for-mcp"):
         TrinoClient(cfg, identity=mode).query("SELECT 1", user="alice")
     assert isinstance(seen["auth"], trino.auth.JWTAuthentication)
     assert seen["auth"].token == "for-trino:for-mcp"
+
+
+def test_impersonation_runs_the_query_as_the_verified_caller_with_the_servers_account(
+    monkeypatch,
+):
+    """Trino authenticates the server's account and runs the query as the caller it names,
+    under an impersonation rule only that account has; the caller's token stays here."""
+    import trino.auth
+
+    seen = _capture(monkeypatch)
+    with _as_bearer("eyJ.for-mcp"):
+        TrinoClient(_imp_cfg()).query("SELECT 1", user="alice")
+    assert seen["user"] == "alice"
+    assert isinstance(seen["auth"], trino.auth.BasicAuthentication)
+    assert seen["auth"]._username == "svc"
+
+
+def test_impersonation_readiness_runs_as_the_servers_account_impersonating_no_one(monkeypatch):
+    """Found on the live integration run: readiness has no caller, and must not be refused
+    for it; it runs as the server's own account."""
+    seen = _capture(monkeypatch)
+    TrinoClient(_imp_cfg()).ping()
+    assert seen["user"] == "svc" and seen["auth"]._username == "svc"
+
+
+def test_impersonation_refuses_a_query_without_a_verified_caller(monkeypatch):
+    import pytest
+
+    seen = _capture(monkeypatch)
+    with pytest.raises(PermissionError, match="no verified caller"):
+        TrinoClient(_imp_cfg()).query("SELECT 1", user=None)
+    assert seen == {}
+
+
+def test_impersonation_needs_https_and_a_credential_for_the_servers_account():
+    import pytest
+
+    with pytest.raises(ValueError, match="TRINO_HTTP_SCHEME=https"):
+        resolve_identity(_imp_cfg(trino_http_scheme="http", trino_password=""))
+    with pytest.raises(ValueError, match="TRINO_PASSWORD, or TRINO_CLIENT_CERT"):
+        resolve_identity(_imp_cfg(trino_password=""))
+    assert resolve_identity(_imp_cfg()).describe() == [
+        "trino identity: the verified caller, impersonated by svc (password set); "
+        "Trino must allow only svc to impersonate"
+    ]
+
+
+def test_the_servers_account_may_authenticate_by_client_certificate(monkeypatch):
+    import pytest
+    import trino.auth
+
+    seen = _capture(monkeypatch)
+    cfg = _imp_cfg(trino_password="", trino_client_cert="/c.pem", trino_client_key="/k.pem")
+    TrinoClient(cfg).query("SELECT 1", user="alice")
+    assert isinstance(seen["auth"], trino.auth.CertificateAuthentication)
+    assert "client certificate" in resolve_identity(cfg).describe()[0]
+    svc = _cfg(trino_http_scheme="https", trino_client_cert="/c.pem", trino_client_key="/k.pem")
+    TrinoClient(svc).query("SELECT 1", user="alice")
+    assert seen["user"] == "svc" and isinstance(seen["auth"], trino.auth.CertificateAuthentication)
+    with pytest.raises(ValueError, match="go together"):
+        resolve_identity(_cfg(trino_http_scheme="https", trino_client_cert="/c.pem"))
+    with pytest.raises(ValueError, match="TRINO_HTTP_SCHEME"):
+        resolve_identity(_cfg(trino_client_cert="/c.pem", trino_client_key="/k.pem"))
 
 
 class _InfoResp:
@@ -339,9 +493,7 @@ def test_jwt_mode_readiness_asks_trinos_public_v1_info(monkeypatch):
         return _InfoResp(200, {"starting": False})
 
     monkeypatch.setattr(tc.httpx, "get", fake_get)
-    cfg = _cfg(
-        trino_identity_mode="jwt", trino_http_scheme="https", trino_port=8443, trino_verify="/ca"
-    )
+    cfg = _jwt_cfg(trino_port=8443, trino_verify="/ca")
     TrinoClient(cfg).ping()
     assert seen == {"url": "https://h:8443/v1/info", "verify": "/ca"}
 
@@ -351,7 +503,7 @@ def test_jwt_mode_is_not_ready_while_trino_starts_or_errors(monkeypatch):
 
     import akko_mcp_trino.trino_client as tc
 
-    cfg = _cfg(trino_identity_mode="jwt", trino_http_scheme="https")
+    cfg = _jwt_cfg()
     monkeypatch.setattr(tc.httpx, "get", lambda url, **kw: _InfoResp(200, {"starting": True}))
     with pytest.raises(RuntimeError, match="starting"):
         TrinoClient(cfg).ping()

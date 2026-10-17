@@ -18,7 +18,7 @@ from typing import Any, Sequence
 from .config import Config
 from .extensions import Admission, Extension
 from .identity import set_current_bearer, set_current_principal
-from .middleware import AuthIdentityMiddleware
+from .middleware import AuthIdentityMiddleware, protected_resource
 from .transport_security import transport_security_for
 
 _HTTP_TRANSPORTS = ("sse", "streamable-http")
@@ -94,10 +94,13 @@ def build_asgi_app(
         routes = ext.routes()
         if routes:
             app.routes.extend(routes)
+    documents, metadata_url = protected_resource(config.resource_url, config.oidc_issuer)
     app.add_middleware(
         AuthIdentityMiddleware,
         auth_provider=auth_provider,
         require_auth=config.auth_required,
         extensions=tuple(extensions),
+        documents=documents,
+        metadata_url=metadata_url,
     )
     return app

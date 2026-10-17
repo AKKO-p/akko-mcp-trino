@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ab2dridi/akko-mcp-trino",
   "title": "AKKO MCP server for Trino",
-  "description": "Read-only MCP server for Trino: queries run as the user, and Trino's own policies decide.",
-  "version": "0.5.3",
+  "description": "Read-only MCP server for Trino: queries run as the verified user, and Trino's own policies decide.",
+  "version": "0.6.0",
   "websiteUrl": "https://akko-ai.com/docs/akko-mcp-trino/",
   "repository": {
     "url": "https://github.com/AKKO-p/akko-mcp-trino",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "akko-mcp-trino",
-      "version": "0.5.3",
+      "version": "0.6.0",
       "transport": {
         "type": "stdio"
       },
@@ -21,6 +21,11 @@
         {
           "name": "TRINO_HOST",
           "description": "Trino coordinator host",
+          "isRequired": true
+        },
+        {
+          "name": "TRINO_HTTP_SCHEME",
+          "description": "https (required by the default identity mode)",
           "isRequired": true
         },
         {
@@ -34,8 +39,39 @@
           "isRequired": true
         },
         {
+          "name": "MCP_OIDC_AUDIENCE",
+          "description": "The audience of tokens issued for this server (never Trino's)",
+          "isRequired": true
+        },
+        {
+          "name": "TRINO_TOKEN_EXCHANGE_URL",
+          "description": "Token endpoint for OAuth 2.0 Token Exchange (jwt mode)",
+          "isRequired": false
+        },
+        {
+          "name": "TRINO_TOKEN_EXCHANGE_CLIENT_ID",
+          "description": "This server's client at the provider (jwt mode)",
+          "isRequired": false
+        },
+        {
+          "name": "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET",
+          "description": "Its secret (jwt mode)",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "TRINO_TOKEN_EXCHANGE_AUDIENCE",
+          "description": "The audience Trino accepts (jwt mode)",
+          "isRequired": false
+        },
+        {
+          "name": "TRINO_IDENTITY_MODE",
+          "description": "jwt (default), impersonation, or service",
+          "isRequired": false
+        },
+        {
           "name": "MCP_USER_TOKEN",
-          "description": "The user's bearer token (stdio transport)",
+          "description": "The user's bearer token, issued for this server (stdio transport)",
           "isRequired": true,
           "isSecret": true
         }

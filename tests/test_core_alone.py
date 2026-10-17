@@ -1,11 +1,13 @@
 """The core alone serves the basics, and nothing more slips into it unnoticed.
 
 The core is what anyone may read and run: six SQL tools, the read-only guard
-on the SQL tree, two Trino identities (the one the administrator configures, or
-the caller's own token, verified again by Trino), bounds on rows
-and time, one audit line per call. Every function beyond that lives in an extension and
-is loaded only when ``MCP_EXTENSIONS`` names it. These tests list what the core
-holds; they fail the day something is added without being listed here.
+on the SQL tree, three Trino identities (the caller, by a token for Trino
+obtained by token exchange; the caller, impersonated by the server's own
+account; or, when named, the one identity the administrator configures),
+bounds on rows and time, one audit line per call. Every function beyond that
+lives in an extension and is loaded only when ``MCP_EXTENSIONS`` names it.
+These tests list what the core holds; they fail the day something is added
+without being listed here.
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ CORE_MODULES = {
     "plugins",
     "server",
     "sql_guard",
+    "token_exchange",
     "tools",
     "transport_security",
     "trino_client",
@@ -61,6 +64,9 @@ CORE_GROUPS = {"akko_mcp_trino.tools", "akko_mcp_trino.extensions"}
 def _config(**over) -> Config:
     base = dict(
         trino_host="h",
+        trino_identity_mode="service",
+        query_timeout_seconds=0.0,
+        call_timeout_seconds=0.0,
         trino_port=8443,
         trino_user="svc",
         trino_catalog="c",
@@ -86,7 +92,7 @@ def _source() -> str:
 
 
 def test_the_core_serves_the_six_basic_tools_and_no_other():
-    mcp, _ = build_server(_config(), mcp_factory=lambda name: FakeMCP())
+    mcp, _ = build_server(_config(), mcp_factory=lambda name, **_: FakeMCP())
     assert set(mcp.tools) == BASIC_TOOLS
 
 
@@ -101,23 +107,48 @@ def test_every_setting_the_core_reads_is_documented():
     assert {name for name in read if f"`{name}`" not in readme} == set()
 
 
-def test_the_core_identity_modes_are_the_configured_one_and_the_callers_token():
-    """Without an extension, a query runs as ``TRINO_USER`` (``service``, the default) or as
-    the caller, whose own token Trino verifies (``jwt``); a mode the core does not know
-    refuses to start rather than fall back to either."""
+def test_the_core_identity_modes_are_the_caller_by_exchange_or_impersonation_or_one_named():
+    """Without an extension, a query runs as the caller, with a token for Trino obtained by
+    token exchange (``jwt``, the default) or impersonated by the server's account
+    (``impersonation``), or, when named, as ``TRINO_USER`` (``service``); a mode the core
+    does not know refuses to start rather than fall back to any of them."""
+    caller = dict(auth_enabled=True, auth_required=True)
+    jwt = _config(
+        trino_identity_mode="jwt",
+        token_exchange_url="https://idp/token",
+        token_exchange_client_id="mcp",
+        token_exchange_client_secret="s",
+        token_exchange_audience="trino",
+        **caller,
+    )
+    imp = _config(trino_identity_mode="impersonation", trino_password="s", **caller)
     assert type(resolve_identity(_config())).__name__ == "ServiceIdentity"
-    assert type(resolve_identity(_config(trino_identity_mode="jwt"))).__name__ == "JwtIdentity"
+    assert type(resolve_identity(jwt)).__name__ == "JwtIdentity"
+    assert type(resolve_identity(imp)).__name__ == "ImpersonationIdentity"
+    assert Config.__dataclass_fields__["trino_identity_mode"].default == "jwt"
     for mode in ("per-user", "token", "magic"):
-        with pytest.raises(ValueError, match="expected one of \\('jwt', 'service'\\)"):
+        with pytest.raises(
+            ValueError, match="expected one of \\('impersonation', 'jwt', 'service'\\)"
+        ):
             resolve_identity(_config(trino_identity_mode=mode))
     assert "trino_identity_mode" in {f.name for f in fields(Config)}
 
 
-def test_the_core_sends_trino_the_configured_password_or_the_callers_token_nothing_else():
+def test_the_core_sends_trino_its_accounts_credential_or_an_exchanged_token_nothing_else():
     assert set(re.findall(r"trino\.auth\.(\w+)", _source())) == {
         "BasicAuthentication",
+        "CertificateAuthentication",
         "JWTAuthentication",
     }
+
+
+def test_the_core_never_sends_trino_the_callers_own_token():
+    """Token passthrough is forbidden by the MCP authorization specification: the token
+    Trino receives in ``jwt`` mode is the one ``trino_token`` obtains by exchange."""
+    source = (CORE / "trino_client.py").read_text(encoding="utf-8")
+    assert "JWTAuthentication(self.trino_token(bearer))" in source
+    assert "JWTAuthentication(bearer)" not in source
+    assert "return bearer" not in source
 
 
 def test_the_core_audit_line_has_its_six_fields_and_trino_gets_no_client_tag():

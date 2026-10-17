@@ -140,3 +140,115 @@ def test_a_request_id_unfit_for_a_trino_client_tag_is_replaced():
     for good in ("edge-42", "0f6e.A_b:c", "x" * 128):
         r = _client_with_request_id().get("/whoami", headers={"X-Request-Id": good})
         assert r.json()["request_id"] == good
+
+
+# ---- a clear refusal, and where to get a token (RFC 9728)
+
+
+def test_a_refusal_says_what_the_client_should_send():
+    client = _client(_FakeAuth(None), require_auth=True)
+    no_token = client.get("/whoami")
+    assert no_token.json()["message"].startswith("this server requires a bearer token")
+    bad = client.get("/whoami", headers={"Authorization": "Bearer eyJ.forged"})
+    assert bad.status_code == 401
+    assert "invalid, expired, or not issued for this server" in bad.json()["message"]
+    assert "eyJ.forged" not in bad.text
+
+
+def test_protected_resource_metadata_names_the_server_and_its_provider():
+    from akko_mcp_trino.middleware import protected_resource
+
+    assert protected_resource("", "https://idp") == ({}, "")
+    paths, url = protected_resource("https://mcp.example.com/mcp", "https://idp/realms/r")
+    doc = {
+        "resource": "https://mcp.example.com/mcp",
+        "authorization_servers": ["https://idp/realms/r"],
+        "bearer_methods_supported": ["header"],
+    }
+    assert paths == {
+        "/.well-known/oauth-protected-resource": doc,
+        "/.well-known/oauth-protected-resource/mcp": doc,
+    }
+    assert url == "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
+    root, root_url = protected_resource("https://mcp.example.com/", "")
+    assert list(root) == ["/.well-known/oauth-protected-resource"]
+    assert root["/.well-known/oauth-protected-resource"]["authorization_servers"] == []
+    assert root_url == "https://mcp.example.com/.well-known/oauth-protected-resource"
+
+
+def test_the_core_serves_its_metadata_and_points_to_it_in_the_challenge():
+    from akko_mcp_trino.middleware import protected_resource
+
+    async def ok(_request):
+        return JSONResponse({})
+
+    paths, url = protected_resource("https://mcp.example.com/mcp", "https://idp")
+    app = Starlette(routes=[Route("/mcp", ok, methods=["POST"])])
+    app.add_middleware(
+        AuthIdentityMiddleware,
+        auth_provider=_FakeAuth(None),
+        require_auth=True,
+        documents=paths,
+        metadata_url=url,
+    )
+    client = TestClient(app)
+    meta = client.get("/.well-known/oauth-protected-resource/mcp")
+    assert meta.status_code == 200 and meta.json()["resource"] == "https://mcp.example.com/mcp"
+    assert client.post("/mcp").headers["www-authenticate"] == f'Bearer resource_metadata="{url}"'
+    bad = client.post("/mcp", headers={"Authorization": "Bearer x"})
+    assert bad.headers["www-authenticate"] == (
+        f'Bearer resource_metadata="{url}", error="invalid_token"'
+    )
+
+
+def test_an_extensions_challenge_and_documents_take_precedence_over_the_cores():
+    from akko_mcp_trino.extensions import Extension, Refusal
+
+    class _Ext(Extension):
+        def public_documents(self):
+            return {"/.well-known/oauth-protected-resource": {"resource": "theirs"}}
+
+        def challenge(self, refusal):
+            return 'Bearer realm="theirs"'
+
+        def after_auth(self, admission):
+            return Refusal("blocked", status=403)
+
+    async def ok(_request):
+        return JSONResponse({})
+
+    app = Starlette(routes=[Route("/mcp", ok)])
+    app.add_middleware(
+        AuthIdentityMiddleware,
+        auth_provider=_FakeAuth(None),
+        require_auth=True,
+        extensions=[_Ext()],
+        documents={"/.well-known/oauth-protected-resource": {"resource": "core"}},
+        metadata_url="https://mcp/.well-known/oauth-protected-resource",
+    )
+    client = TestClient(app)
+    assert client.get("/.well-known/oauth-protected-resource").json() == {"resource": "theirs"}
+    assert client.get("/mcp").headers["www-authenticate"] == 'Bearer realm="theirs"'
+
+
+def test_the_core_challenges_only_its_own_refusal():
+    from akko_mcp_trino.extensions import Extension, Refusal
+
+    class _Blocks(Extension):
+        def after_auth(self, admission):
+            return Refusal("blocked", status=403)
+
+    async def ok(_request):
+        return JSONResponse({})
+
+    app = Starlette(routes=[Route("/mcp", ok)])
+    app.add_middleware(
+        AuthIdentityMiddleware,
+        auth_provider=_FakeAuth(Principal(subject="u")),
+        require_auth=True,
+        extensions=[_Blocks()],
+        metadata_url="https://mcp/.well-known/oauth-protected-resource",
+    )
+    refused = TestClient(app).get("/mcp")
+    assert refused.status_code == 403 and "www-authenticate" not in refused.headers
+    assert refused.json() == {"error": "blocked"}

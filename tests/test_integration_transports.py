@@ -82,6 +82,9 @@ def _free_port() -> int:
 def _config(transport: str, port: int) -> Config:
     return Config(
         trino_host="h",
+        trino_identity_mode="service",
+        query_timeout_seconds=0.0,
+        call_timeout_seconds=0.0,
         trino_port=8080,
         trino_user="svc",
         trino_catalog="c",
@@ -179,11 +182,15 @@ def test_each_http_transport_lists_the_six_tools(served):
 
 def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
     """Claude Desktop, Cursor and Vibe launch a local server over stdio. The
-    user's token comes from the environment; strict mode still applies."""
+    user's token comes from the environment; strict mode still applies. Service mode
+    without a door, chosen explicitly here, is announced to the host in the instructions
+    of the initialization, by the real SDK."""
     env = {
         **os.environ,
         "MCP_TRANSPORT": "stdio",
         "MCP_AUTH_ENABLED": "false",
+        "MCP_AUTH_REQUIRED": "false",
+        "TRINO_IDENTITY_MODE": "service",
         "TRINO_HOST": "h",
     }
     params = StdioServerParameters(command=sys.executable, args=["-m", "akko_mcp_trino"], env=env)
@@ -191,10 +198,14 @@ def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
     async def go():
         async with stdio_client(params) as (r, w):
             async with ClientSession(r, w) as s:
-                await s.initialize()
-                return sorted(t.name for t in (await s.list_tools()).tools)
+                init = await s.initialize()
+                return init.instructions, sorted(t.name for t in (await s.list_tools()).tools)
 
-    assert "execute_query" in anyio.run(go)
+    instructions, tools = anyio.run(go)
+    assert "execute_query" in tools
+    assert instructions.startswith("WARNING")
+    assert "TRINO_IDENTITY_MODE=service" in instructions
+    assert "MCP_AUTH_ENABLED=false" in instructions
 
 
 def test_a_foreign_host_header_is_served_not_refused_with_421(served):
@@ -208,3 +219,97 @@ def test_a_foreign_host_header_is_served_not_refused_with_421(served):
     is_err, text = anyio.run(_call, transport, url, headers, "execute_query", {"sql": "SELECT 1"})
     assert not is_err
     assert json.loads(text)["rows"][0][0] == "svc"
+
+
+def _serve(cfg, provider):
+    mcp, _ = build_server(cfg)
+    app = build_asgi_app(cfg, mcp, auth_provider=provider)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=cfg.mcp_port, log_level="error")
+    )
+    threading.Thread(target=server.run, daemon=True).start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    return server
+
+
+def test_jwt_mode_on_the_real_sdk_sends_trino_the_exchanged_token_not_the_callers(monkeypatch):
+    """The whole chain on the real SDK: the caller's token is verified at the door,
+    exchanged at the identity provider (a stand-in here), and Trino receives the token
+    issued for it, never the caller's. The live proof against Keycloak and Trino is in
+    ``integration/``."""
+    import akko_mcp_trino.token_exchange as te
+    import akko_mcp_trino.trino_client as tc
+
+    trino_saw, idp_saw = [], []
+
+    def connect(**kw):
+        trino_saw.append((kw["user"], kw["auth"].token))
+        return _fake_connect(**kw)
+
+    def exchange(url, **kw):
+        idp_saw.append(kw["data"]["subject_token"])
+        body = {"access_token": "issued-for-trino", "expires_in": 300}
+        return type("R", (), {"status_code": 200, "json": lambda self: body})()
+
+    monkeypatch.setattr(tc.trino.dbapi, "connect", connect)
+    monkeypatch.setattr(te.httpx, "post", exchange)
+    port = _free_port()
+    cfg = Config(
+        **{
+            **_config("streamable-http", port).__dict__,
+            "trino_identity_mode": "jwt",
+            "token_exchange_url": "https://idp.test/token",
+            "token_exchange_client_id": "mcp",
+            "token_exchange_client_secret": "s",
+            "token_exchange_audience": "trino",
+        }
+    )
+    provider = auth.build_auth(cfg)
+    provider._client = _FakeJwks()
+    server = _serve(cfg, provider)
+    try:
+        caller = _token("alice")
+        headers = {"Authorization": f"Bearer {caller}"}
+        url = f"http://127.0.0.1:{port}/mcp"
+        is_err, text = anyio.run(
+            _call, "streamable-http", url, headers, "execute_query", {"sql": "SELECT 1"}
+        )
+    finally:
+        server.should_exit = True
+    assert not is_err, text
+    assert trino_saw == [("alice", "issued-for-trino")]
+    assert idp_saw == [caller], "the caller's token went to the identity provider only"
+
+
+@pytest.mark.parametrize("read_only", [True, False])
+def test_the_real_sdk_shows_hosts_the_annotation_the_read_only_setting_implies(
+    monkeypatch, read_only
+):
+    import akko_mcp_trino.trino_client as tc
+
+    monkeypatch.setattr(tc.trino.dbapi, "connect", _fake_connect)
+    port = _free_port()
+    cfg = Config(**{**_config("streamable-http", port).__dict__, "read_only": read_only})
+    provider = auth.JwksJwtAuth(
+        cfg.jwks_url, cfg.oidc_issuer, cfg.oidc_audience, jwks_client=_FakeJwks()
+    )
+    server = _serve(cfg, provider)
+    headers = {"Authorization": f"Bearer {_token('alice')}"}
+
+    async def annotations():
+        url = f"http://127.0.0.1:{port}/mcp"
+        async with _open("streamable-http", url, headers) as streams:
+            async with ClientSession(streams[0], streams[1]) as s:
+                await s.initialize()
+                return {t.name: t.annotations for t in (await s.list_tools()).tools}
+
+    try:
+        found = anyio.run(annotations)
+    finally:
+        server.should_exit = True
+    assert found["execute_query"].read_only_hint is read_only
+    assert found["execute_query"].destructive_hint is (not read_only)
+    assert found["list_tables"].read_only_hint is True

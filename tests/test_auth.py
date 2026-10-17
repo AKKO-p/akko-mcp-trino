@@ -128,6 +128,9 @@ def test_jwks_no_token_returns_none():
 def _cfg(auth_enabled, jwks_url=""):
     return Config(
         trino_host="h",
+        trino_identity_mode="service",
+        query_timeout_seconds=0.0,
+        call_timeout_seconds=0.0,
         trino_port=8080,
         trino_user="u",
         trino_catalog="c",
@@ -253,3 +256,57 @@ def test_no_accepted_audience_refuses_every_token():
     """Nothing configured is not "any audience": fail closed, as before."""
     provider = auth.JwksJwtAuth("https://kc/jwks", _ISS, [], jwks_client=_FakeJwks())
     assert provider.verify(_bearer(_sign({"sub": "u"}))) is None
+
+
+# ---- a token is accepted only when it was issued for this server (RFC 8707)
+
+
+def _built(**over):
+    cfg = Config(**{**_cfg(True, jwks_url="https://kc/jwks").__dict__, **over})
+    provider = auth.build_auth(cfg)
+    provider._client = _FakeJwks()
+    return provider
+
+
+def test_a_token_issued_for_trino_is_refused_by_this_server():
+    """The audience Trino accepts is never one this server accepts: a token issued for
+    Trino does not open this server, even when it also names this server."""
+    provider = _built(token_exchange_audience="trino")
+    assert provider.verify(_bearer(_sign({"sub": "u"}))) is not None
+    assert provider.verify(_bearer(_sign({"sub": "u"}, aud="trino"))) is None
+    assert provider.verify(_bearer(_sign({"sub": "u"}, aud=[_AUD, "trino"]))) is None
+
+
+def test_a_refused_audience_is_logged_without_the_token(caplog):
+    import logging
+
+    tok = _sign({"sub": "u"}, aud=[_AUD, "trino"])
+    with caplog.at_level(logging.INFO, logger="akko_mcp_trino.auth"):
+        assert _built(token_exchange_audience="trino").verify(_bearer(tok)) is None
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "issued for another resource" in joined and tok not in joined
+
+
+def test_the_servers_resource_url_is_an_accepted_audience():
+    provider = _built(oidc_audience="", resource_url="https://mcp.example.com/mcp")
+    assert provider.verify(_bearer(_sign({"sub": "u"}, aud="https://mcp.example.com/mcp")))
+    assert provider.verify(_bearer(_sign({"sub": "u"}))) is None
+
+
+def test_a_server_that_would_accept_a_trino_token_refuses_to_start():
+    with pytest.raises(ValueError, match="both accepted from callers and requested for Trino"):
+        auth.build_auth(
+            Config(
+                **{
+                    **_cfg(True, jwks_url="https://kc/jwks").__dict__,
+                    "token_exchange_audience": _AUD,
+                }
+            )
+        )
+
+
+def test_a_server_with_no_audience_of_its_own_refuses_to_start():
+    with pytest.raises(ValueError, match="no token audience is set"):
+        auth.build_auth(
+            Config(**{**_cfg(True, jwks_url="https://kc/jwks").__dict__, "oidc_audience": ""})
+        )
