@@ -55,9 +55,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - name: Pull the images
-        run: docker compose -f integration/compose.yaml pull --quiet --ignore-buildable
-      - name: Start, check, remove
+      - name: Build, start, check, remove
         run: bash integration/run.sh
   image:
     name: container image builds
