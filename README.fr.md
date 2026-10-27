@@ -90,6 +90,13 @@ Il faut Python 3.12 ou plus récent pour l'installation par pip.
 
 ## Démarrer
 
+| Mode | Identité dans Trino | Usage |
+|---|---|---|
+| `jwt` (par défaut) | l'appelant vérifié, par échange de jeton | fournisseur compatible avec OAuth 2.0 Token Exchange |
+| `impersonation` | l'appelant vérifié, via le compte du serveur | fournisseur sans échange de jeton |
+| `oauth2` | l'utilisateur local, vérifié par `SELECT current_user` | connexion navigateur native de Trino, en `stdio` uniquement |
+| `service` | `TRINO_USER`, identique pour tous | identité unique explicitement choisie, signalée au démarrage |
+
 ### Chaque personne avec ses droits (`jwt`, par défaut)
 
 ```bash
@@ -139,6 +146,15 @@ avec la règle `{"impersonation": [{"original_user": "mcp-service", "new_user": 
 à restreindre aux utilisateurs voulus. Le nom de l'appelant vient toujours de son jeton vérifié,
 jamais d'un en-tête.
 
+### Connexion navigateur native (`oauth2`, en stdio uniquement)
+
+Avec Trino OAuth2 configuré, utilisez l'[exemple de lancement](README.md#native-browser-login-oauth2-stdio-only)
+et votre nom Trino dans `TRINO_USER`. HTTPS et stdio sont obligatoires. Le navigateur s'ouvre,
+l'URL va uniquement sur stderr, et `SELECT current_user` doit réussir avant de servir ; son résultat
+nomme l'utilisateur dans l'admission et l'audit. `MCP_AUTH_REQUIRED=false` ne désactive jamais cette
+connexion ; `true` exige un `MCP_USER_TOKEN` vérifié en plus. Le pilote gère le cache en mémoire
+(ou `keyring` facultatif) et la réauthentification. `--check` ne se connecte pas.
+
 ### Une identité unique (`service`, seulement si on la nomme)
 
 Réglez `TRINO_IDENTITY_MODE=service`, `TRINO_USER=mcp-reader` et, si Trino demande un mot de
@@ -172,7 +188,8 @@ nomme l'appelant dans la ligne d'audit. Cursor, Claude Desktop, VS Code (`mcp.js
 
 `streamable-http` (`/mcp`) est le transport par défaut. Claude Desktop, Cursor et Mistral Vibe
 peuvent aussi lancer le serveur eux-mêmes en `stdio` : l'appelant est alors `MCP_USER_TOKEN`,
-vérifié comme un en-tête. Le [README](README.md#local-hosts-over-stdio) donne la configuration.
+vérifié comme un en-tête, ou l'identité confirmée par Trino en mode `oauth2`.
+Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 
 ## Les outils
 

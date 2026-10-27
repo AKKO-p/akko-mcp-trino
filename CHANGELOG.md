@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `TRINO_IDENTITY_MODE=oauth2`: native Trino browser/SSO login over HTTPS for stdio hosts, with driver-managed token caching and reauthentication. Startup verifies the user with `SELECT current_user` and uses that identity for admission and audit ([#15](https://github.com/AKKO-p/akko-mcp-trino/issues/15)).
+
 ## [0.6.0] - 2026-10-17
 
 Safe defaults, and no token passthrough. **Breaking changes**: read

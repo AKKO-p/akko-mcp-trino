@@ -1,7 +1,7 @@
 """Trino client: one connection per query, bounded execution, the identity of a mode.
 
 Who the server is for Trino is an identity mode, chosen by ``TRINO_IDENTITY_MODE``.
-The core has three:
+The core has four:
 
 * ``jwt``, the default: every query runs as the verified caller. The server
   exchanges the caller's token, issued for this server, for a token whose
@@ -18,9 +18,12 @@ The core has three:
   a header they wrote.
 * ``service``, only when named: every query runs as ``TRINO_USER``, the same for
   every caller. The server says so at start and in its instructions to hosts.
+* ``oauth2``, stdio only: Trino authenticates the local user through its browser
+  login. One authentication object reuses the driver's token cache and handles
+  reauthentication. Startup verifies the identity with ``SELECT current_user``.
 
-Both modes that run as the caller refuse to start unless the door requires a
-verified token, and refuse a query without a verified caller: never run as
+The ``jwt`` and ``impersonation`` modes refuse to start unless the door requires
+a verified token, and refuse a query without a verified caller: never run as
 anyone else. A password, a token or a certificate never travels over plain http.
 An extension may add other modes (see `akko_mcp_trino.extensions`); an unknown
 mode refuses to start.
@@ -37,8 +40,10 @@ and the one running is cancelled.
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import time
+import webbrowser
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, Sequence, Union
 
 import httpx
@@ -151,6 +156,37 @@ class ServiceIdentity:
         client.query("SELECT 1")
 
 
+class OAuth2Identity(ServiceIdentity):
+    """``oauth2``: one local user's native Trino browser login, cached by the driver."""
+
+    def __init__(self, config: Config) -> None:
+        """Keep one authentication object for all connections, created only on first use."""
+        super().__init__(config)
+        self._auth: Any = None
+
+    def describe(self) -> list[str]:
+        """Refuse shared HTTP transports and unencrypted authentication."""
+        if self._config.transport != "stdio":
+            raise ValueError("TRINO_IDENTITY_MODE=oauth2 requires MCP_TRANSPORT=stdio")
+        if self._config.trino_http_scheme != "https":
+            raise ValueError("TRINO_IDENTITY_MODE=oauth2 requires TRINO_HTTP_SCHEME=https")
+        return ["trino identity: native OAuth2 browser login, verified by SELECT current_user"]
+
+    def connection(self, user: Optional[str]) -> tuple[str, Any]:
+        """Use a stable connection user and authentication object so cached tokens are reused."""
+        if self._auth is None:
+            self._auth = trino.auth.OAuth2Authentication(
+                redirect_auth_url_handler=trino.auth.CompositeRedirectHandler([_oauth2_redirect])
+            )
+        return self._config.trino_user, self._auth
+
+
+def _oauth2_redirect(url: str) -> None:
+    """Open the login URL and log it to stderr, never the stdio protocol channel."""
+    logging.getLogger(__name__).warning("Open this URL to authenticate with Trino: %s", url)
+    webbrowser.open_new(url)
+
+
 class ImpersonationIdentity(ServiceIdentity):
     """``impersonation``: the server authenticates as ``TRINO_USER`` and Trino runs each
     query as the verified caller, under an impersonation rule only that account has."""
@@ -245,12 +281,13 @@ class JwtIdentity:
 
 def resolve_identity(config: Config, extensions: Sequence["Extension"] = ()) -> IdentityMode:
     """The identity mode ``TRINO_IDENTITY_MODE`` names, checked: the core's ``jwt``,
-    ``impersonation`` and ``service``, or an extension's. Raises ValueError, naming the
+    ``impersonation``, ``oauth2`` and ``service``, or an extension's. Raises ValueError, naming the
     modes on offer, when none matches."""
     modes: dict[str, IdentityMode] = {
         "service": ServiceIdentity(config),
         "jwt": JwtIdentity(config),
         "impersonation": ImpersonationIdentity(config),
+        "oauth2": OAuth2Identity(config),
     }
     for ext in extensions:
         modes.update(ext.identity_modes())

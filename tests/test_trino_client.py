@@ -1,5 +1,12 @@
 """akko_mcp_trino.trino_client with a mocked connection: no real Trino involved."""
 
+import logging
+from unittest.mock import Mock
+
+import pytest
+
+from akko_mcp_trino import trino_client as tc
+from akko_mcp_trino.__main__ import check_config
 from akko_mcp_trino.config import Config
 from akko_mcp_trino.identity import reset_current_bearer, set_current_bearer
 from akko_mcp_trino.trino_client import (
@@ -159,13 +166,15 @@ def test_the_connection_carries_what_the_identity_mode_says(monkeypatch):
     assert seen["verify"] is True and seen["request_timeout"] == 30.0
 
 
-def test_the_core_has_three_modes_and_an_extension_may_add_or_replace_one():
+def test_the_core_has_four_modes_and_an_extension_may_add_or_replace_one():
     import pytest
 
     assert isinstance(resolve_identity(_cfg(trino_identity_mode="service")), ServiceIdentity)
     assert isinstance(resolve_identity(_jwt_cfg()), JwtIdentity)
     assert isinstance(resolve_identity(_imp_cfg()), ImpersonationIdentity)
-    with pytest.raises(ValueError, match="expected one of \\('impersonation', 'jwt', 'service'\\)"):
+    with pytest.raises(
+        ValueError, match="expected one of \\('impersonation', 'jwt', 'oauth2', 'service'\\)"
+    ):
         resolve_identity(_cfg(trino_identity_mode="per-user"))
 
     class _Ext:
@@ -244,6 +253,43 @@ def test_ping_runs_a_bounded_select_1_as_the_configured_identity(monkeypatch):
     monkeypatch.setattr(tc.trino.dbapi, "connect", lambda **kw: cap.update(kw) or conn)
     TrinoClient(_CFG).ping()
     assert conn._cur.executed == ("SELECT 1", None) and cap["user"] == "svc"
+
+
+@pytest.mark.parametrize(
+    "transport, scheme, message",
+    [
+        ("sse", "https", "stdio"),
+        ("streamable-http", "https", "stdio"),
+        ("stdio", "http", "https"),
+    ],
+)
+def test_oauth2_refuses_http_transports_and_plain_http(transport, scheme, message):
+    cfg = _cfg(trino_identity_mode="oauth2", transport=transport, trino_http_scheme=scheme)
+    with pytest.raises(ValueError, match=message):
+        resolve_identity(cfg)
+
+
+def test_oauth2_reuses_auth_and_keeps_redirects_off_stdout(monkeypatch, capsys):
+    cfg = _cfg(trino_identity_mode="oauth2", transport="stdio", trino_http_scheme="https")
+    auth, browser, seen = Mock(), Mock(), {}
+    monkeypatch.setattr(tc.trino.auth, "OAuth2Authentication", auth)
+    monkeypatch.setattr(tc.webbrowser, "open_new", browser)
+    monkeypatch.setattr(logging.getLogger(tc.__name__), "handlers", [logging.StreamHandler()])
+    _patch_connect(monkeypatch, [], seen)
+    assert check_config(cfg) == 0
+    auth.assert_not_called()
+    client = TrinoClient(cfg)
+    client.query("SELECT 1", user="ignored")
+    client.ping()
+    auth.assert_called_once()
+    assert seen["auth"] is auth.return_value and seen["user"] == cfg.trino_user
+    capsys.readouterr()  # Discard --check's intentional stdout output.
+    redirect = auth.call_args.kwargs["redirect_auth_url_handler"]
+    assert isinstance(redirect, tc.trino.auth.CompositeRedirectHandler)
+    redirect("https://trino.example/login")
+    browser.assert_called_once_with("https://trino.example/login")
+    captured = capsys.readouterr()
+    assert captured.out == "" and "https://trino.example/login" in captured.err
 
 
 # ---- jwt: the caller's own token, verified again by Trino

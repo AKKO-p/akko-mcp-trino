@@ -148,7 +148,7 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
             config.auth_required,
             config.trino_identity_mode,
         )
-        run_stdio(config, mcp, auth_provider=auth_provider, extensions=extensions)
+        run_stdio(config, mcp, auth_provider=auth_provider, extensions=extensions, client=client)
         return
 
     threading.Thread(
