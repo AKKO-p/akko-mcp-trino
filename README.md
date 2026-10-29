@@ -286,10 +286,11 @@ With Trino OAuth2 configured, keep your coordinator settings and run:
 
 ```bash
 MCP_TRANSPORT=stdio TRINO_IDENTITY_MODE=oauth2 TRINO_HTTP_SCHEME=https \
-TRINO_USER=alice MCP_AUTH_ENABLED=false MCP_AUTH_REQUIRED=false python -m akko_mcp_trino
+MCP_AUTH_ENABLED=false MCP_AUTH_REQUIRED=false python -m akko_mcp_trino
 ```
 
-Set `TRINO_USER` to your mapped Trino username. Startup opens the browser, logs
+The server sends Trino no user name: Trino runs every query as the user who
+signed in, and `TRINO_USER` is ignored. Startup opens the browser, logs
 the URL to stderr only, and requires `SELECT current_user` to succeed; its result
 names the admission/audit principal. HTTP MCP transports are rejected.
 `MCP_AUTH_REQUIRED=true` requires a verified `MCP_USER_TOKEN` in addition;
@@ -658,7 +659,7 @@ reads its own variables from the same environment.
 | Variable | Meaning | Default |
 |---|---|---|
 | `TRINO_HOST`, `TRINO_PORT` | the coordinator | `localhost`, `8080` |
-| `TRINO_USER` | the server's own Trino account: every query runs as it in `service` mode; in `impersonation` mode it authenticates and impersonates the caller | `trino` |
+| `TRINO_USER` | the server's own Trino account: every query runs as it in `service` mode; in `impersonation` mode it authenticates and impersonates the caller; ignored in `oauth2` mode | `trino` |
 | `TRINO_PASSWORD` | its password, sent by Basic authentication; refused over `http`; `--check` says whether one is set, never which | none |
 | `TRINO_CLIENT_CERT`, `TRINO_CLIENT_KEY` | a client certificate and its key (PEM paths) the account authenticates with instead (mTLS); https only | none |
 | `TRINO_CATALOG` | session catalog, where a name without a catalog is read; set it to a data catalog (with `system`, such names are refused) | `system` |

@@ -19,8 +19,9 @@ The core has four:
 * ``service``, only when named: every query runs as ``TRINO_USER``, the same for
   every caller. The server says so at start and in its instructions to hosts.
 * ``oauth2``, stdio only: Trino authenticates the local user through its browser
-  login. One authentication object reuses the driver's token cache and handles
-  reauthentication. Startup verifies the identity with ``SELECT current_user``.
+  login and names the user, never ``TRINO_USER``. One authentication object reuses
+  the driver's token cache and handles reauthentication. Startup verifies the
+  identity with ``SELECT current_user``.
 
 The ``jwt`` and ``impersonation`` modes refuse to start unless the door requires
 a verified token, and refuse a query without a verified caller: never run as
@@ -81,10 +82,11 @@ class IdentityMode(Protocol):
         cannot serve its settings, so the server refuses to start."""
         ...
 
-    def connection(self, user: Optional[str]) -> tuple[str, Any]:
+    def connection(self, user: Optional[str]) -> tuple[Optional[str], Any]:
         """The Trino user and the authentication of one query run for ``user`` (the
-        verified caller's subject, or None); raises PermissionError when the mode
-        cannot run it."""
+        verified caller's subject, or None); a Trino user of None sends no user, and
+        Trino runs the query as the principal it authenticated. Raises PermissionError
+        when the mode cannot run it."""
         ...  # pragma: no cover - protocol
 
     def ping(self, client: "TrinoClient") -> None:  # pragma: no cover - protocol
@@ -156,12 +158,13 @@ class ServiceIdentity:
         client.query("SELECT 1")
 
 
-class OAuth2Identity(ServiceIdentity):
+class OAuth2Identity:
     """``oauth2``: one local user's native Trino browser login, cached by the driver."""
 
     def __init__(self, config: Config) -> None:
-        """Keep one authentication object for all connections, created only on first use."""
-        super().__init__(config)
+        """Keep the core's settings and one authentication object for all connections,
+        created only on first use."""
+        self._config = config
         self._auth: Any = None
 
     def describe(self) -> list[str]:
@@ -170,15 +173,23 @@ class OAuth2Identity(ServiceIdentity):
             raise ValueError("TRINO_IDENTITY_MODE=oauth2 requires MCP_TRANSPORT=stdio")
         if self._config.trino_http_scheme != "https":
             raise ValueError("TRINO_IDENTITY_MODE=oauth2 requires TRINO_HTTP_SCHEME=https")
-        return ["trino identity: native OAuth2 browser login, verified by SELECT current_user"]
+        return [
+            "trino identity: native OAuth2 browser login, verified by SELECT current_user "
+            "(TRINO_USER is ignored)"
+        ]
 
-    def connection(self, user: Optional[str]) -> tuple[str, Any]:
-        """Use a stable connection user and authentication object so cached tokens are reused."""
+    def connection(self, user: Optional[str]) -> tuple[Optional[str], Any]:
+        """No Trino user, so Trino names the user it authenticated, never ``TRINO_USER``;
+        one authentication object, so cached tokens are reused."""
         if self._auth is None:
             self._auth = trino.auth.OAuth2Authentication(
                 redirect_auth_url_handler=trino.auth.CompositeRedirectHandler([_oauth2_redirect])
             )
-        return self._config.trino_user, self._auth
+        return None, self._auth
+
+    def ping(self, client: "TrinoClient") -> None:
+        """A bounded ``SELECT 1`` as the user who signed in."""
+        client.query("SELECT 1")
 
 
 def _oauth2_redirect(url: str) -> None:

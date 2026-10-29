@@ -74,7 +74,7 @@ def run_stdio(
     for ext in extensions:
         refusal = ext.before_auth(admission) or ext.after_auth(admission)
         if refusal is not None:
-            raise PermissionError(f"MCP_USER_TOKEN refused: {refusal.reason}")
+            raise PermissionError(f"admission refused: {refusal.reason}")
     set_current_principal(principal)
     set_current_bearer(bearer)
     for var, value in admission.bindings:

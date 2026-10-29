@@ -282,7 +282,7 @@ def test_oauth2_reuses_auth_and_keeps_redirects_off_stdout(monkeypatch, capsys):
     client.query("SELECT 1", user="ignored")
     client.ping()
     auth.assert_called_once()
-    assert seen["auth"] is auth.return_value and seen["user"] == cfg.trino_user
+    assert seen["auth"] is auth.return_value and seen["user"] is None
     capsys.readouterr()  # Discard --check's intentional stdout output.
     redirect = auth.call_args.kwargs["redirect_auth_url_handler"]
     assert isinstance(redirect, tc.trino.auth.CompositeRedirectHandler)

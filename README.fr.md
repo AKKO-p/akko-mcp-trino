@@ -148,8 +148,9 @@ jamais d'un en-tête.
 
 ### Connexion navigateur native (`oauth2`, en stdio uniquement)
 
-Avec Trino OAuth2 configuré, utilisez l'[exemple de lancement](README.md#native-browser-login-oauth2-stdio-only)
-et votre nom Trino dans `TRINO_USER`. HTTPS et stdio sont obligatoires. Le navigateur s'ouvre,
+Avec Trino OAuth2 configuré, utilisez l'[exemple de lancement](README.md#native-browser-login-oauth2-stdio-only).
+Le serveur n'envoie aucun nom à Trino : Trino exécute chaque requête au nom de la personne
+connectée, et `TRINO_USER` est ignoré. HTTPS et stdio sont obligatoires. Le navigateur s'ouvre,
 l'URL va uniquement sur stderr, et `SELECT current_user` doit réussir avant de servir ; son résultat
 nomme l'utilisateur dans l'admission et l'audit. `MCP_AUTH_REQUIRED=false` ne désactive jamais cette
 connexion ; `true` exige un `MCP_USER_TOKEN` vérifié en plus. Le pilote gère le cache en mémoire
