@@ -48,6 +48,7 @@ from .audit import (
 )
 from .identity import current_principal, current_subject
 from .sql_guard import (
+    governed_catalog,
     is_read_only_sql,
     normalize_sql,
     referenced_tables,
@@ -359,12 +360,13 @@ def register_query_tools(
 
         Returns JSON {"catalogs": [...], "truncated": bool}. Start here, then
         list_schemas, list_tables and describe_table before writing SQL. Only
-        catalogs the user is allowed to see are listed; truncated is true when
-        the server's row cap cut the list.
+        catalogs the user is allowed to see are listed, never the engine's own
+        system catalog; truncated is true when the server's row cap cut the list.
         """
         try:
             res = run("SHOW CATALOGS")
-            return listing_reply("catalogs", [r[0] for r in res["rows"]], was_cut(res))
+            names = [r[0] for r in res["rows"] if str(r[0]).lower() != "system"]
+            return listing_reply("catalogs", names, was_cut(res))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
             return error_reply(e)
 
@@ -377,7 +379,7 @@ def register_query_tools(
         when the server's row cap cut the list.
         """
         try:
-            cat = validate_identifier(catalog, "catalog")
+            cat = governed_catalog(catalog)
             res = run(f"SHOW SCHEMAS FROM {cat}")
             return listing_reply("schemas", [r[0] for r in res["rows"]], was_cut(res))
         except Exception as e:  # noqa: BLE001
@@ -393,7 +395,7 @@ def register_query_tools(
         cap cut the list.
         """
         try:
-            cat = validate_identifier(catalog, "catalog")
+            cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
             res = run(f"SHOW TABLES FROM {cat}.{sch}")
             return listing_reply("tables", [r[0] for r in res["rows"]], was_cut(res))
@@ -411,7 +413,7 @@ def register_query_tools(
         when sample_rows > 0.
         """
         try:
-            cat = validate_identifier(catalog, "catalog")
+            cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
             tbl = validate_identifier(table, "table")
             fqn = f"{cat}.{sch}.{tbl}"
