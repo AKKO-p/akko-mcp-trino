@@ -9,14 +9,20 @@ must say so for each.
 
 from __future__ import annotations
 
+import contextvars
 import dataclasses
+from dataclasses import replace
+from unittest.mock import Mock
 
 import pytest
 from starlette.applications import Starlette
 
-from akko_mcp_trino.app import build_asgi_app, transports_supported
+from akko_mcp_trino.app import build_asgi_app, run_stdio, transports_supported
+from akko_mcp_trino.audit import InMemoryAudit
+from akko_mcp_trino.auth import Principal
 from akko_mcp_trino.config import Config
 from akko_mcp_trino.middleware import AuthIdentityMiddleware
+from akko_mcp_trino.tools import audited
 
 
 def _config(transport: str) -> Config:
@@ -182,6 +188,66 @@ def test_stdio_without_auth_runs_as_the_service_account():
     mcp = _FakeStdioMCP()
     run_stdio(_config("stdio"), mcp, auth_provider=None)
     assert mcp.ran_with == "stdio" and mcp.subject_seen is None
+
+
+@pytest.mark.parametrize("token, required", [("", False), ("valid", True), ("invalid", False)])
+def test_stdio_uses_trinos_identity_for_admission_and_audit(token, required):
+    mcp, audit = _FakeStdioMCP(), InMemoryAudit()
+    mcp.run = audited(audit, mcp.run)
+    client = Mock(query=Mock(return_value={"rows": [["trino-alice"]]}))
+    guard = Mock(before_auth=Mock(return_value=None), after_auth=Mock(return_value=None))
+    contextvars.copy_context().run(
+        run_stdio,
+        replace(
+            _config("stdio"),
+            trino_identity_mode="oauth2",
+            trino_http_scheme="https",
+            auth_enabled=required,
+            auth_required=required,
+            user_token=token,
+        ),
+        mcp,
+        auth_provider=_Auth(Principal("mcp-bob") if token == "valid" else None),
+        client=client,
+        extensions=[guard],
+    )
+    client.query.assert_called_once_with("SELECT current_user")
+    assert mcp.ran_with == "stdio"
+    assert mcp.subject_seen == audit.events[0].subject == "trino-alice"
+    assert mcp.bearer_seen == ("valid" if required else None)
+    assert guard.after_auth.call_args.args[0].principal.subject == "trino-alice"
+
+
+@pytest.mark.parametrize("rows", [[], [[]], [[None]], [[42]], [[""]], [[" "]]])
+def test_stdio_refuses_an_empty_or_invalid_trino_identity(rows):
+    cfg = replace(_config("stdio"), trino_identity_mode="oauth2", trino_http_scheme="https")
+    mcp, client = Mock(), Mock(query=Mock(return_value={"rows": rows}))
+    with pytest.raises(PermissionError, match="authenticated user"):
+        run_stdio(cfg, mcp, auth_provider=None, client=client)
+    mcp.run.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "client, required, error",
+    [
+        (None, False, ValueError),
+        (Mock(query=Mock(side_effect=RuntimeError)), False, RuntimeError),
+        (Mock(), True, PermissionError),
+    ],
+)
+def test_stdio_refuses_missing_client_failed_login_or_missing_required_token(
+    client, required, error
+):
+    cfg = replace(
+        _config("stdio"),
+        trino_identity_mode="oauth2",
+        trino_http_scheme="https",
+        auth_required=required,
+    )
+    mcp = Mock()
+    with pytest.raises(error):
+        run_stdio(cfg, mcp, auth_provider=None, client=client)
+    mcp.run.assert_not_called()
 
 
 def test_build_asgi_app_refuses_stdio():

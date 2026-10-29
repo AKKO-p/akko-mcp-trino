@@ -1,9 +1,10 @@
 """The core alone serves the basics, and nothing more slips into it unnoticed.
 
 The core is what anyone may read and run: six SQL tools, the read-only guard
-on the SQL tree, three Trino identities (the caller, by a token for Trino
+on the SQL tree, four Trino identities (the caller, by a token for Trino
 obtained by token exchange; the caller, impersonated by the server's own
-account; or, when named, the one identity the administrator configures),
+account; the local user by native OAuth2; or, when named, the one identity the
+administrator configures),
 bounds on rows and time, one audit line per call. Every function beyond that
 lives in an extension and is loaded only when ``MCP_EXTENSIONS`` names it.
 These tests list what the core holds; they fail the day something is added
@@ -107,10 +108,11 @@ def test_every_setting_the_core_reads_is_documented():
     assert {name for name in read if f"`{name}`" not in readme} == set()
 
 
-def test_the_core_identity_modes_are_the_caller_by_exchange_or_impersonation_or_one_named():
+def test_the_core_identity_modes_are_exchange_impersonation_oauth2_or_one_named():
     """Without an extension, a query runs as the caller, with a token for Trino obtained by
     token exchange (``jwt``, the default) or impersonated by the server's account
-    (``impersonation``), or, when named, as ``TRINO_USER`` (``service``); a mode the core
+    (``impersonation``), by browser login (``oauth2``, stdio only), or, when named,
+    as ``TRINO_USER`` (``service``); a mode the core
     does not know refuses to start rather than fall back to any of them."""
     caller = dict(auth_enabled=True, auth_required=True)
     jwt = _config(
@@ -122,23 +124,27 @@ def test_the_core_identity_modes_are_the_caller_by_exchange_or_impersonation_or_
         **caller,
     )
     imp = _config(trino_identity_mode="impersonation", trino_password="s", **caller)
+    oauth2 = _config(trino_identity_mode="oauth2", transport="stdio")
     assert type(resolve_identity(_config())).__name__ == "ServiceIdentity"
     assert type(resolve_identity(jwt)).__name__ == "JwtIdentity"
     assert type(resolve_identity(imp)).__name__ == "ImpersonationIdentity"
+    assert type(resolve_identity(oauth2)).__name__ == "OAuth2Identity"
     assert Config.__dataclass_fields__["trino_identity_mode"].default == "jwt"
     for mode in ("per-user", "token", "magic"):
         with pytest.raises(
-            ValueError, match="expected one of \\('impersonation', 'jwt', 'service'\\)"
+            ValueError, match="expected one of \\('impersonation', 'jwt', 'oauth2', 'service'\\)"
         ):
             resolve_identity(_config(trino_identity_mode=mode))
     assert "trino_identity_mode" in {f.name for f in fields(Config)}
 
 
-def test_the_core_sends_trino_its_accounts_credential_or_an_exchanged_token_nothing_else():
+def test_the_core_sends_trino_its_accounts_credential_or_an_exchanged_or_oauth2_token():
     assert set(re.findall(r"trino\.auth\.(\w+)", _source())) == {
         "BasicAuthentication",
         "CertificateAuthentication",
+        "CompositeRedirectHandler",
         "JWTAuthentication",
+        "OAuth2Authentication",
     }
 
 

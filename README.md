@@ -115,14 +115,15 @@ returns what that identity may read, bounded in rows and time.
 |---|---|---|---|
 | `jwt` (default) | the caller | a token for Trino the server obtained by token exchange (RFC 8693); Trino verifies it with its JWT authenticator | the identity provider supports OAuth 2.0 Token Exchange (RFC 8693); tested with Keycloak 26 |
 | `impersonation` | the caller | the server's own account (password or client certificate) asks Trino to run the query as the caller; Trino allows it under an impersonation rule only that account has | the identity provider cannot exchange tokens |
+| `oauth2` | the local user, checked with `SELECT current_user` | Trino's native OAuth2 browser login; the driver caches tokens and reauthenticates | local stdio hosts only, with a Trino coordinator configured for OAuth2 |
 | `service` | `TRINO_USER`, the same for every caller | a password, a client certificate, or nothing, locally | only when named: one identity for everyone, announced at start and to every host |
 
 The caller's own token never leaves the server, in any mode: the MCP
 authorization specification forbids passing it on ("token passthrough"). The
-caller's name always comes from their verified token, never from a header they
-wrote. Both modes that run as the caller refuse to start unless the door
-requires a valid token. An extension (see [Extensions](#extensions)) may add
-other identity modes.
+caller's name comes from their verified token, or from Trino's `SELECT current_user`
+in `oauth2`, never from an unverified header. The `jwt` and `impersonation` modes
+refuse to start unless the door requires a valid token. An extension (see
+[Extensions](#extensions)) may add other identity modes.
 
 ## Compatibility
 
@@ -278,6 +279,23 @@ server logs a warning at start, `--check` prints it, and every host receives it
 in the `instructions` of the MCP initialization. The door stays on by default;
 to run without one, locally, set `MCP_AUTH_ENABLED=false` and
 `MCP_AUTH_REQUIRED=false` too, and the warning says so.
+
+### Native browser login (`oauth2`, stdio only)
+
+With Trino OAuth2 configured, keep your coordinator settings and run:
+
+```bash
+MCP_TRANSPORT=stdio TRINO_IDENTITY_MODE=oauth2 TRINO_HTTP_SCHEME=https \
+MCP_AUTH_ENABLED=false MCP_AUTH_REQUIRED=false python -m akko_mcp_trino
+```
+
+The server sends Trino no user name: Trino runs every query as the user who
+signed in, and `TRINO_USER` is ignored. Startup opens the browser, logs
+the URL to stderr only, and requires `SELECT current_user` to succeed; its result
+names the admission/audit principal. HTTP MCP transports are rejected.
+`MCP_AUTH_REQUIRED=true` requires a verified `MCP_USER_TOKEN` in addition;
+`false` never skips Trino login. The driver reuses tokens and reauthenticates,
+with memory caching or optional `keyring`. `--check` does not log in.
 
 ### Container
 
@@ -564,7 +582,7 @@ hook does nothing, so an extension overrides only what it adds.
 | Hook | What it adds |
 |---|---|
 | `check_lines()` | lines `--check` prints, never a secret |
-| `identity_modes()` | identity modes by `TRINO_IDENTITY_MODE` name, each an `IdentityMode` (`describe`, `connection(user)`, `ping`); one named like a core mode (`jwt`, `impersonation`, `service`) replaces it |
+| `identity_modes()` | identity modes by `TRINO_IDENTITY_MODE` name, each an `IdentityMode` (`describe`, `connection(user)`, `ping`); one named like a core mode (`jwt`, `impersonation`, `oauth2`, `service`) replaces it |
 | `audiences()` | token audiences accepted besides `MCP_OIDC_AUDIENCE` and `MCP_RESOURCE_URL`; never Trino's |
 | `before_auth(admission)` | a refusal before the token is looked at, or `None` |
 | `after_auth(admission)` | a refusal once the core has verified the token (or found none), or `None` |
@@ -641,7 +659,7 @@ reads its own variables from the same environment.
 | Variable | Meaning | Default |
 |---|---|---|
 | `TRINO_HOST`, `TRINO_PORT` | the coordinator | `localhost`, `8080` |
-| `TRINO_USER` | the server's own Trino account: every query runs as it in `service` mode; in `impersonation` mode it authenticates and impersonates the caller | `trino` |
+| `TRINO_USER` | the server's own Trino account: every query runs as it in `service` mode; in `impersonation` mode it authenticates and impersonates the caller; ignored in `oauth2` mode | `trino` |
 | `TRINO_PASSWORD` | its password, sent by Basic authentication; refused over `http`; `--check` says whether one is set, never which | none |
 | `TRINO_CLIENT_CERT`, `TRINO_CLIENT_KEY` | a client certificate and its key (PEM paths) the account authenticates with instead (mTLS); https only | none |
 | `TRINO_CATALOG` | session catalog, where a name without a catalog is read; set it to a data catalog (with `system`, such names are refused) | `system` |
@@ -653,7 +671,7 @@ reads its own variables from the same environment.
 | `TRINO_HTTP_SCHEME` | `http` or `https`; a password is never sent over `http` | `http` |
 | `TRINO_VERIFY` | TLS verification: `true`, `false`, or a path to the CA bundle Trino's TLS chain is checked against | `true` |
 | `TRINO_REQUEST_TIMEOUT_SECONDS` | per-request timeout on the Trino client | `30` |
-| `TRINO_IDENTITY_MODE` | who the server is for Trino: `jwt` (every query as the caller, with a token for Trino obtained by token exchange), `impersonation` (every query as the caller, impersonated by `TRINO_USER`) or `service` (every query as `TRINO_USER`, announced as a warning); the first two need https and a door that requires a valid token; an extension may add others, and an unknown mode refuses to start | `jwt` |
+| `TRINO_IDENTITY_MODE` | who the server is for Trino: `jwt` (caller, by token exchange), `impersonation` (caller, impersonated by `TRINO_USER`), `oauth2` (native browser login, stdio only, checked at startup), or `service` (`TRINO_USER`, announced as a warning); all except `service` require https; `jwt` and `impersonation` also require a valid MCP token; an extension may add others, and an unknown mode refuses to start | `jwt` |
 | `TRINO_TOKEN_EXCHANGE_URL` | `jwt`: the provider's token endpoint (https only) | none (required in `jwt`) |
 | `TRINO_TOKEN_EXCHANGE_CLIENT_ID`, `TRINO_TOKEN_EXCHANGE_CLIENT_SECRET` | `jwt`: this server's confidential client at the provider, sent by Basic authentication; `--check` never prints the secret | none (required in `jwt`) |
 | `TRINO_TOKEN_EXCHANGE_AUDIENCE` | `jwt`: the audience of the token requested for Trino, the one Trino's `required-audience` names; never an audience this server accepts | none (required in `jwt`) |
@@ -665,7 +683,7 @@ reads its own variables from the same environment.
 | Variable | Meaning | Default |
 |---|---|---|
 | `MCP_AUTH_ENABLED` | verify the callers' bearer tokens (the door) | `true` |
-| `MCP_AUTH_REQUIRED` | refuse with `401` a request without a valid token; `jwt` and `impersonation` refuse to start without it | `true` |
+| `MCP_AUTH_REQUIRED` | refuse with `401` a request without a valid token; `jwt` and `impersonation` refuse to start without it; in `oauth2`, an additional MCP token gate, never a switch to disable Trino login | `true` |
 | `MCP_JWKS_URL` | the provider's JWKS endpoint | none (required when auth is enabled) |
 | `MCP_OIDC_ISSUER` | the issuer a token must carry | none |
 | `MCP_OIDC_AUDIENCE` | the audience a token must carry: the one the provider gives tokens issued for this server (RFC 8707); never Trino's | none (this or `MCP_RESOURCE_URL` is required when auth is enabled) |
@@ -788,7 +806,7 @@ Every module in `akko_mcp_trino/` has one responsibility and its tests, in
 | `audit.py` | the audit line, the request id, the record and the time budget of a call |
 | `sql_guard.py` | identifier validation, read-only decision on the AST |
 | `tools.py`, `plugins.py` | the six tools and the `ToolContext`, loading tool plugins |
-| `trino_client.py` | the Trino connection, the identity modes (`jwt`, `impersonation`, `service` in the core) and the time budgets |
+| `trino_client.py` | the Trino connection, the identity modes (`jwt`, `impersonation`, `oauth2`, `service` in the core) and the time budgets |
 | `token_exchange.py` | OAuth 2.0 Token Exchange (RFC 8693): a token for Trino in exchange for the caller's |
 | `health.py`, `metrics.py` | `/health`, `/ready` and `/metrics`; the Prometheus counters |
 | `server.py`, `app.py`, `__main__.py` | assembly, transport, entrypoint and `--check` |
