@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-29
+
 ### Fixed
 - `list_schemas`, `list_tables` and `describe_table` refuse the `system` catalog before reaching Trino, as `execute_query` and `explain_query` already did. `describe_table` with `sample_rows` could read `system.runtime.queries`. `list_catalogs` no longer lists `system`.
 

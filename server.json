@@ -3,7 +3,7 @@
   "name": "io.github.ab2dridi/akko-mcp-trino",
   "title": "AKKO MCP server for Trino",
   "description": "Read-only MCP server for Trino: queries run as the verified user, and Trino's own policies decide.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "websiteUrl": "https://akko-ai.com/docs/akko-mcp-trino/",
   "repository": {
     "url": "https://github.com/AKKO-p/akko-mcp-trino",
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "akko-mcp-trino",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "transport": {
         "type": "stdio"
       },

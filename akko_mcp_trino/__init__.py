@@ -6,4 +6,4 @@ the server's own account) or, when named, as one configured identity; Trino and
 its policy engine decide what that identity may read.
 """
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
