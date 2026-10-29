@@ -86,6 +86,31 @@ def test_list_catalogs_returns_the_names_and_whether_the_list_is_complete():
     }
 
 
+def test_list_catalogs_hides_the_system_catalog():
+    """The guard refuses `system` everywhere, so no tool points an agent at it."""
+    mcp, _ = _registered(
+        result={"columns": ["Catalog"], "rows": [["iceberg"], ["system"]], "row_count": 2}
+    )
+    assert json.loads(mcp.tools["list_catalogs"]()) == {"catalogs": ["iceberg"], "truncated": False}
+
+
+@pytest.mark.parametrize(
+    "tool, args",
+    [
+        ("list_schemas", ("system",)),
+        ("list_tables", ("SYSTEM", "runtime")),
+        ("describe_table", ("System", "runtime", "queries")),
+        ("describe_table", ("system", "runtime", "queries", 20)),
+    ],
+)
+def test_the_metadata_tools_refuse_the_system_catalog(tool, args):
+    """`system` exposes engine state, such as other users' SQL in `system.runtime.queries`:
+    the metadata tools refuse it before Trino, as execute_query does, sample rows included."""
+    mcp, client = _registered()
+    out = json.loads(mcp.tools[tool](*args))
+    assert "system catalog" in out["error"] and client.calls == []
+
+
 def test_list_schemas_validates_identifier():
     mcp, client = _registered(result={"columns": ["Schema"], "rows": [["fraud"]], "row_count": 1})
     assert json.loads(mcp.tools["list_schemas"]("iceberg")) == {

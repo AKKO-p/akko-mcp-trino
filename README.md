@@ -428,8 +428,9 @@ without a catalog is read in the session catalog (`TRINO_CATALOG`, `system` by
 default); when that is `system`, a table without a catalog is refused (a CTE
 is not a table), and only `SHOW CATALOGS` and a `SHOW SCHEMAS`, `SHOW TABLES`
 or `SHOW COLUMNS` whose `FROM` gives the full name, catalog included, get
-through. So set `TRINO_CATALOG` to a data catalog; the engine's policy must
-refuse `system` too, the guard being a second line.
+through. The metadata tools refuse `system` as a catalog name too, and
+`list_catalogs` does not list it. So set `TRINO_CATALOG` to a data catalog;
+the engine's policy must refuse `system` too, the guard being a second line.
 
 Results are capped at `TRINO_MAX_ROWS` (100 by default, 1 at least): one row
 more is read, so `truncated` says whether the answer was cut, and the rest of

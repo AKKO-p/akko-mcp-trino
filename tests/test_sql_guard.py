@@ -24,6 +24,15 @@ def test_validate_identifier_rejects_invalid(bad):
         sql_guard.validate_identifier(bad, "catalog")
 
 
+def test_governed_catalog_refuses_system_whatever_its_case():
+    assert sql_guard.governed_catalog("iceberg") == "iceberg"
+    for name in ("system", "SYSTEM", "System"):
+        with pytest.raises(ValueError, match="system catalog"):
+            sql_guard.governed_catalog(name)
+    with pytest.raises(ValueError, match="Invalid catalog"):
+        sql_guard.governed_catalog("a;b")
+
+
 @pytest.mark.parametrize(
     "sql",
     [

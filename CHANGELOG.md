@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `list_schemas`, `list_tables` and `describe_table` refuse the `system` catalog before reaching Trino, as `execute_query` and `explain_query` already did. `describe_table` with `sample_rows` could read `system.runtime.queries`. `list_catalogs` no longer lists `system`.
+
 ### Added
 - `TRINO_IDENTITY_MODE=oauth2`: native Trino browser/SSO login over HTTPS for stdio hosts, with driver-managed token caching and reauthentication. The server sends Trino no user name, so Trino runs every query as the user who signed in, never as `TRINO_USER`. Startup verifies the user with `SELECT current_user` and uses that identity for admission and audit ([#15](https://github.com/AKKO-p/akko-mcp-trino/issues/15)).
 

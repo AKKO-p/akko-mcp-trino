@@ -149,6 +149,19 @@ def validate_identifier(name: str, label: str = "identifier") -> str:
     return name
 
 
+def governed_catalog(name: str) -> str:
+    """A catalog name for the metadata tools, validated, or raise ValueError.
+
+    The ``system`` catalog exposes engine state, such as other users' SQL in
+    ``system.runtime.queries``, and the read-only guard refuses it in a statement;
+    a tool that builds its own statement from a catalog name refuses it too.
+    """
+    validate_identifier(name, "catalog")
+    if _is_system(name):
+        raise ValueError("The system catalog exposes engine state, not governed data: refused")
+    return name
+
+
 def parse_error(sql: str) -> str | None:
     """Why ``sql`` does not parse as Trino SQL (first line of the parser's message), or None."""
     try:
