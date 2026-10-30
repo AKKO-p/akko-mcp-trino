@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Every error a tool answers carries a `kind` that says what to do about it: `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type`, `permission`, `invalid_argument`, `read_only`, `time_budget`, `unavailable` or `other`. When Trino names the column, table, schema or catalog it could not resolve, the answer also carries `identifier`. `unavailable` (an internal error or a lost connection) says the statement is neither valid nor invalid. The `error` message and the audit codes are unchanged.
+
 ## [0.6.1] - 2026-10-29
 
 ### Fixed

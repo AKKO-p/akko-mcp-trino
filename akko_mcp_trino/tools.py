@@ -46,6 +46,7 @@ from .audit import (
     reset_current_request_id,
     set_current_request_id,
 )
+from .errors import INVALID_ARGUMENT, READ_ONLY, TIME_BUDGET, explain_error
 from .identity import current_principal, current_subject
 from .sql_guard import (
     governed_catalog,
@@ -103,7 +104,8 @@ class _Call:
             return dumps(
                 {
                     "error": f"{late}; nothing it gathered is returned: narrow the request "
-                    "(a catalog, more precise words) or try again"
+                    "(a catalog, more precise words) or try again",
+                    "kind": TIME_BUDGET,
                 }
             )
         if _error_of(out) is not None:
@@ -192,15 +194,17 @@ def dumps(obj: Any) -> str:
 
 
 def error_reply(exc: Exception) -> str:
-    """The error for the agent, whole; for the audit, its code only."""
+    """The error for the agent, whole, with its kind (see ``akko_mcp_trino.errors``); for the
+    audit, its code only."""
     note(error=error_code(exc))
-    return dumps({"error": str(exc)})
+    return dumps(explain_error(exc))
 
 
-def refusal_reply(code: str, message: str) -> str:
-    """A refusal of the tool itself: ``message`` for the agent, ``code`` for the audit."""
+def refusal_reply(code: str, message: str, kind: str = INVALID_ARGUMENT) -> str:
+    """A refusal of the tool itself: ``message`` and ``kind`` for the agent, ``code`` for
+    the audit."""
     note(error=code)
-    return dumps({"error": message})
+    return dumps({"error": message, "kind": kind})
 
 
 def was_cut(res: dict) -> bool:
@@ -224,7 +228,10 @@ _EXECUTE_DOC = """Run {what} on Trino and return the rows.
         truncated is true when more rows existed than were returned: add LIMIT,
         ORDER BY or an aggregate rather than reading everything. A query that
         runs past the server's time budget is cancelled. On failure returns
-        {{"error": "..."}} with Trino's message, which is usually enough to fix the SQL.
+        {{"error": "...", "kind": "..."}} with Trino's message, which is usually enough
+        to fix the SQL; kind says what to fix (syntax, column, table, schema, catalog,
+        permission, function, type, invalid_argument, read_only, time_budget, other),
+        and "unavailable" means Trino did not answer.
         """
 _READ_ONLY_RULE = (
     "Only SELECT, SHOW, DESCRIBE and EXPLAIN are accepted; INSERT, UPDATE, DELETE, "
@@ -452,13 +459,17 @@ def register_query_tools(
 
         Use it to check a query before execute_query and to see which connector
         receives which predicate. Args: sql, one read-only statement, no trailing semicolon needed.
-        Returns JSON {"plan": "..."} or {"error": "..."} (a syntax or
-        permission error from Trino).
+        Returns JSON {"plan": "..."} or {"error": "...", "kind": "..."} (a syntax or
+        permission error from Trino); kind says what to fix (syntax, column, table,
+        schema, catalog, permission, function, type), and "unavailable" means Trino
+        did not answer, so the query is neither valid nor invalid.
         """
         try:
             sql = normalize_sql(sql)
             if not is_read_only_sql(sql, session_catalog):
-                return refusal_reply("read_only", "Only a read-only statement can be explained")
+                return refusal_reply(
+                    "read_only", "Only a read-only statement can be explained", kind=READ_ONLY
+                )
             statement = f"EXPLAIN {sql}"
             note(sql=statement, tables=referenced_tables(sql))
             res = run(statement)
@@ -471,7 +482,9 @@ def register_query_tools(
         sql = normalize_sql(sql)
         if read_only and not is_read_only_sql(sql, session_catalog):
             return refusal_reply(
-                "read_only", "Read-only mode: only SELECT/SHOW/DESCRIBE/EXPLAIN queries allowed"
+                "read_only",
+                "Read-only mode: only SELECT/SHOW/DESCRIBE/EXPLAIN queries allowed",
+                kind=READ_ONLY,
             )
         note(sql=sql, tables=referenced_tables(sql))
         try:

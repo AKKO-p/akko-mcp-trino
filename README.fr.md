@@ -209,6 +209,22 @@ d'accès, pas une erreur à retenter, et les descriptions des outils le disent a
 `TRINO_READ_ONLY=false`, `execute_query` est annoté comme pouvant écrire, pour que l'hôte demande
 la confirmation qu'il sauterait pour un outil en lecture seule.
 
+Une erreur revient sous la forme `{"error": "...", "kind": "..."}`. `error` est le message entier de
+Trino ; `kind` dit quoi en faire, et `identifier` nomme la colonne, la table, le schéma ou le
+catalogue que Trino n'a pas su résoudre, quand il le nomme.
+
+| `kind` | Sens |
+|---|---|
+| `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino a refusé l'instruction : corriger cette partie |
+| `permission` | Trino ou le fournisseur d'identité a refusé le droit : le rapporter, ne pas réessayer |
+| `invalid_argument` | le serveur a refusé un argument (identifiant) avant d'atteindre Trino |
+| `read_only` | l'instruction écrit et le serveur est en lecture seule |
+| `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
+| `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue) : l'instruction n'est ni valide ni invalide, réessayer plus tard |
+| `other` | toute autre erreur |
+
+La ligne d'audit garde seulement le code de l'erreur, inchangé.
+
 ## Configuration, extensions, exploitation
 
 Toutes les variables, leurs valeurs par défaut, les points d'extension (identités, gardes, audit,

@@ -482,3 +482,48 @@ def test_the_description_of_execute_query_follows_the_read_only_setting():
     assert "The statement may write" in rw.tools["execute_query"].__doc__
     assert "refused" not in rw.tools["execute_query"].__doc__.split("max_rows")[0]
     assert rw.annotations["execute_query"].title == "Run a query (writes allowed)"
+
+
+class _TrinoUserError(Exception):
+    def __init__(self, name, message):
+        super().__init__(message)
+        self.error_name, self.error_type, self.message = name, "USER_ERROR", message
+
+
+def test_every_error_reply_keeps_error_and_adds_kind():
+    exc = _TrinoUserError("TABLE_NOT_FOUND", "line 1:15: Table 'c.s.t' does not exist")
+    mcp, _ = _registered(raises=exc)
+    out = json.loads(mcp.tools["execute_query"]("SELECT 1"))
+    assert out == {"error": str(exc), "kind": "table", "identifier": "c.s.t"}
+
+
+def test_a_refused_write_has_kind_read_only():
+    mcp, _ = _registered(read_only=True)
+    for tool, args in (("execute_query", ("DROP TABLE t",)), ("explain_query", ("DROP TABLE t",))):
+        assert json.loads(mcp.tools[tool](*args))["kind"] == "read_only"
+
+
+def test_an_invalid_identifier_has_kind_invalid_argument():
+    mcp, _ = _registered()
+    out = json.loads(mcp.tools["list_schemas"]("bad;name"))
+    assert out["kind"] == "invalid_argument" and "Invalid catalog" in out["error"]
+
+
+def test_a_call_past_its_budget_has_kind_time_budget(monkeypatch):
+    import akko_mcp_trino.audit as audit_module
+    from akko_mcp_trino.tools import audited
+
+    now = [0.0]
+    monkeypatch.setattr(audit_module.time, "monotonic", lambda: now[0])
+
+    def slow():
+        now[0] += 8
+        return json.dumps({"ok": 1})
+
+    out = json.loads(audited(None, slow, budget_seconds=7)())
+    assert out["kind"] == "time_budget" and "time budget" in out["error"]
+
+
+def test_explain_query_says_it_checks_a_query_before_running_it():
+    mcp, _ = _registered()
+    assert "check a query before execute_query" in mcp.tools["explain_query"].__doc__
