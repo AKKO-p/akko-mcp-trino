@@ -171,6 +171,7 @@ def test_each_http_transport_announces_the_package_version_in_initialize(served)
 
     server_info = anyio.run(info)
     assert server_info.version == akko_mcp_trino.__version__
+    assert server_info.name == "t", "the configured server name"
 
 
 def test_each_http_transport_lists_the_eight_tools(served):
@@ -218,9 +219,12 @@ def test_stdio_transport_runs_as_a_subprocess_with_the_users_token(identity):
         async with stdio_client(params) as (r, w):
             async with ClientSession(r, w) as s:
                 init = await s.initialize()
-                return init.instructions, sorted(t.name for t in (await s.list_tools()).tools)
+                tools = sorted(t.name for t in (await s.list_tools()).tools)
+                return init.instructions, tools, init.server_info
 
-    instructions, tools = anyio.run(go)
+    instructions, tools, server_info = anyio.run(go)
+    assert server_info.version == akko_mcp_trino.__version__
+    assert server_info.name == "trino-mcp"
     assert "execute_query" in tools
     assert instructions.startswith("WARNING")
     if identity == "service":
