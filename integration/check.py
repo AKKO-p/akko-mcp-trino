@@ -23,6 +23,10 @@ JWT, IMPERSONATION, SERVICE = (
     "http://mcp-impersonation:3000/mcp",
     "http://mcp-service:3000/mcp",
 )
+PAGED = "http://mcp-paged:3000/mcp"  # the jwt server with pages of three rows
+TPCH_TINY_TABLES = {
+    "customer", "lineitem", "nation", "orders", "part", "partsupp", "region", "supplier",
+}  # fmt: skip
 NATIONS = "SELECT name FROM tpch.tiny.nation ORDER BY nationkey"
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -75,6 +79,59 @@ def ask(url: str, bearer: str | None, extra: dict | None = None) -> dict:
     return anyio.run(session, url, bearer, extra)
 
 
+async def tool_calls(url: str, bearer: str, fn) -> object:
+    """Open a session as the bearer's owner and hand `fn` a `call(tool, **args) -> dict`."""
+    http = create_mcp_http_client(headers={"Authorization": f"Bearer {bearer}"})
+    async with streamable_http_client(url, http_client=http) as (read, write, *_):
+        async with ClientSession(read, write) as s:
+            await s.initialize()
+
+            async def call(tool: str, **args: object) -> dict:
+                res = await s.call_tool(tool, args)
+                text = res.content[0].text if res.content else ""
+                try:
+                    return json.loads(text)
+                except ValueError:  # a tool this server does not have answers in prose
+                    return {"error": text}
+
+            return await fn(call)
+
+
+def use(url: str, bearer: str, fn) -> object:
+    return anyio.run(tool_calls, url, bearer, fn)
+
+
+async def walk(call, tool: str, key: str) -> tuple[list[str], int]:
+    """A listing tool page after page, by next_offset, until it is null (at most 20 pages).
+
+    Returns the table names it gave and the number of pages read.
+    """
+    names: list[str] = []
+    pages, offset = 0, 0
+    while offset is not None and pages < 20:
+        page = await call(tool, catalog="tpch", schema="tiny", offset=offset)
+        pages += 1
+        names += [t if isinstance(t, str) else t[key] for t in page.get("tables", [])]
+        offset = page.get("next_offset")
+    return names, pages
+
+
+async def discovery(call) -> dict:
+    """The 0.7 tools, as one caller."""
+    quote = "o'b\\c"
+    return {
+        "search": await call("search_columns", text="name", catalog="tpch", schema="tiny"),
+        "describe": await call("describe_schema", catalog="tpch", schema="tiny"),
+        "wild": await call("search_columns", text="%%%", catalog="tpch", schema="tiny"),
+        "quote": await call("search_columns", text=quote, catalog="tpch", schema="tiny"),
+        "quote_schema": await call("describe_schema", catalog="tpch", schema=quote),
+        "column": await call("execute_query", sql="SELECT nosuch FROM tpch.tiny.nation"),
+        "system": await call("execute_query", sql="SELECT * FROM system.jdbc.columns"),
+        "tables": await walk(call, "list_tables", "table"),
+        "described": await walk(call, "describe_schema", "table"),
+    }
+
+
 def trino_direct(bearer: str, user: str | None = None) -> httpx.Response:
     headers = {"Authorization": f"Bearer {bearer}"}
     if user:
@@ -113,6 +170,70 @@ def main() -> int:
         a["tools"]["execute_query"],
     )
     check("jwt: no warning in the instructions", a["instructions"] == "", a["instructions"])
+
+    # 1b. the 0.7 tools, against the real tpch and the real policy.
+    d_alice, d_bob = use(JWT, alice, discovery), use(JWT, bob, discovery)
+    found = {(m["table"], m["column"]) for m in d_alice["search"].get("matches", [])}
+    check(
+        "discovery: alice finds tpch.tiny.nation.name with search_columns",
+        ("nation", "name") in found and d_alice["search"].get("complete") is True,
+        d_alice["search"],
+    )
+    check(
+        "discovery: bob's search finds columns of nation only",
+        {m["table"] for m in d_bob["search"].get("matches", [])} == {"nation"}
+        and ("nation", "name") in {(m["table"], m["column"]) for m in d_bob["search"]["matches"]},
+        d_bob["search"],
+    )
+    check(
+        "discovery: describe_schema shows bob the table nation and no other",
+        {t["table"] for t in d_bob["describe"].get("tables", [])} == {"nation"},
+        d_bob["describe"],
+    )
+    check(
+        "discovery: describe_schema shows alice the eight tables of tiny",
+        {t["table"] for t in d_alice["describe"].get("tables", [])} == TPCH_TINY_TABLES
+        and d_alice["describe"].get("next_offset") is None,
+        d_alice["describe"],
+    )
+    check(
+        "discovery: a search for %%% matches no column (the wildcard is literal)",
+        d_alice["wild"].get("matches") == [] and "error" not in d_alice["wild"],
+        d_alice["wild"],
+    )
+    check(
+        "discovery: a text with a quote and a backslash answers without error, no match",
+        d_alice["quote"].get("matches") == [] and "error" not in d_alice["quote"],
+        d_alice["quote"],
+    )
+    check(
+        "discovery: a schema name with a quote and a backslash is refused before SQL",
+        d_alice["quote_schema"].get("kind") == "invalid_argument",
+        d_alice["quote_schema"],
+    )
+    check(
+        "discovery: an unknown column is explained (kind column, its identifier)",
+        d_alice["column"].get("kind") == "column"
+        and d_alice["column"].get("identifier") == "nosuch",
+        d_alice["column"],
+    )
+    check(
+        "discovery: the agent's own SQL on system.jdbc.columns stays refused (read_only)",
+        d_alice["system"].get("kind") == "read_only",
+        d_alice["system"],
+    )
+    paged = use(PAGED, alice, discovery)
+    check(
+        "discovery: list_tables walked by offset gives the eight tables in three pages, no duplicate",
+        sorted(paged["tables"][0]) == sorted(TPCH_TINY_TABLES) and paged["tables"][1] == 3,
+        paged["tables"],
+    )
+    check(
+        "discovery: describe_schema walked by offset gives the eight tables in three pages, no duplicate",
+        sorted(paged["described"][0]) == sorted(TPCH_TINY_TABLES)
+        and paged["described"][1] == 3,
+        paged["described"],
+    )
 
     # 2. The door: no token, a forged one, one issued for Trino.
     no_token = httpx.post(JWT, json={}, timeout=10)
