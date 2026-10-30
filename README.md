@@ -462,9 +462,22 @@ is true. With `TRINO_READ_ONLY=false`, its annotations say it may write
 that a host asks for the confirmation it would skip for a read-only tool. The
 five other tools only read, whatever the setting.
 
-Errors come back to the agent as `{"error": "..."}` with Trino's whole message;
-a permission refusal from Trino is an ordinary error, not a crash. The audit
-line keeps only the error's code (see [Audit](#audit)).
+Errors come back to the agent as `{"error": "...", "kind": "..."}`. `error` is
+Trino's whole message; a permission refusal from Trino is an ordinary error, not a
+crash. `kind` says what to do about it, and `identifier` names the column, table,
+schema or catalog when Trino names the one it could not resolve:
+
+| `kind` | Meaning |
+|---|---|
+| `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino refused the statement; fix that part of it |
+| `permission` | Trino refused the right; report it, do not retry |
+| `invalid_argument` | the server refused an argument (an identifier, a cursor) before reaching Trino |
+| `read_only` | the statement writes and the server is read-only |
+| `time_budget` | the call ran out of its time budget; narrow the request |
+| `unavailable` | Trino could not answer (internal error, connection lost): the statement is neither valid nor invalid, try again later |
+| `other` | any other error |
+
+The audit line keeps only the error's code (see [Audit](#audit)); it is unchanged.
 
 ### Adding tools from another package
 

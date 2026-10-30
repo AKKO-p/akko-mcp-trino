@@ -1,5 +1,12 @@
 # Migrating
 
+## From 0.6 to 0.7
+
+Nothing is removed or renamed.
+
+- Every error reply gains a `kind` key, and an `identifier` key when Trino names the object it could not resolve. `error` is exactly the string it was, and the audit codes are the same. A client that reads only `error` keeps working; one that wants to act on the failure can read `kind` (`syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type`, `permission`, `invalid_argument`, `read_only`, `time_budget`, `unavailable`, `other`).
+- A plugin that builds its error with `akko_mcp_trino.tools.error_reply` gets the `kind` for free. `refusal_reply(code, message)` takes an optional `kind`, `invalid_argument` by default.
+
 ## From 0.5 to 0.6
 
 0.6.0 makes the defaults safe and stops passing the caller's token on to Trino.

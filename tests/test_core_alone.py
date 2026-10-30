@@ -44,6 +44,7 @@ CORE_MODULES = {
     "audit",
     "auth",
     "config",
+    "errors",
     "extensions",
     "health",
     "identity",

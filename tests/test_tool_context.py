@@ -338,10 +338,25 @@ def test_a_plugin_answer_that_comes_past_the_calls_deadline_is_an_error(monkeypa
     late = json.loads(_as("alice_analyst", lambda: mcp.tools["slow_backend"]()))
     assert late == {
         "error": "the tool call exceeded its time budget of 7 s; nothing it gathered is "
-        "returned: narrow the request (a catalog, more precise words) or try again"
+        "returned: narrow the request (a catalog, more precise words) or try again",
+        "kind": "time_budget",
     }
     assert json.loads(_as("alice_analyst", lambda: mcp.tools["quick_backend"]())) == {"answer": 42}
     assert [(e.tool, e.ok, e.error) for e in audit.events] == [
         ("slow_backend", False, "CallTimeout"),
         ("quick_backend", True, ""),
     ]
+
+
+def test_a_plugin_error_reply_gets_the_kind_too(monkeypatch):
+    from akko_mcp_trino.tools import error_reply
+
+    def registrar(mcp, client, tools):
+        @tools.tool("Fails")
+        def fails() -> str:
+            return error_reply(ValueError("Invalid schema"))
+
+    mcp, _, _, audit = _server(monkeypatch, [registrar])
+    out = json.loads(_as("alice_analyst", lambda: mcp.tools["fails"]()))
+    assert out == {"error": "Invalid schema", "kind": "invalid_argument"}
+    assert audit.events[0].error == "ValueError"
