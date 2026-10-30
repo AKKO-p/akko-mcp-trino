@@ -36,7 +36,9 @@ ROW_CAP = "row_cap"
 # reads as a bigint.
 MAX_NAME_LENGTH = 1024
 MAX_ROW_OFFSET = 2**63 - 1
-_INVALID_CURSOR = "Invalid cursor: pass back next_cursor unchanged"
+_INVALID_CURSOR = (
+    "Invalid cursor: pass back next_cursor unchanged, or start the search again without a cursor"
+)
 
 
 def like_contains(text: str) -> str:
@@ -170,6 +172,16 @@ def search(
             return False
         return True
 
+    def stalled(cat: str, sch: str, offset: int) -> bool:
+        """Whether a stop here is exactly where this call resumed, so it moved nothing: with
+        every read bounded by the call (no query timeout of its own, or one as long as the
+        call), resuming here again would stop every later call at the same place."""
+        return start is not None and (cat, sch, offset) == (
+            start.catalog,
+            start.schema,
+            start.row_offset,
+        )
+
     def allowed() -> float:
         """Seconds the next query may take (0: no budget of the call), or a plain
         TimeoutError when only the reserve is left."""
@@ -238,7 +250,8 @@ def search(
             except CallTimeout:
                 raise
             except TimeoutError:
-                if time_remains():  # slower than one query may be: resuming would not help
+                # Slower than one query may be, or than a whole call: resuming would not help.
+                if time_remains() or stalled(cat, *here[1:]):
                     gaps.append(_not_searched(cat, None, TIME_BUDGET))
                     continue
                 stop = (*here, TIME_BUDGET)
@@ -257,9 +270,10 @@ def search(
             except CallTimeout:
                 raise
             except TimeoutError:
-                # Slower than one query may be: named and skipped, or every resumed call would
-                # stop here again. Stopped by what was left of the call: resumed here.
-                if time_remains():
+                # Slower than one query may be, or than a whole call: named and skipped, or
+                # every resumed call would stop here again. Stopped by what was left of the
+                # call after some progress: resumed here.
+                if time_remains() or stalled(cat, sch, offset):
                     gaps.append(_not_searched(cat, sch, TIME_BUDGET))
                     continue
                 stop = (index, sch, offset, TIME_BUDGET)

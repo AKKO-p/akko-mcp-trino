@@ -504,7 +504,10 @@ not opened), inside a schema when the row cap stopped it there. A schema, or the
 schema list of a catalog, that takes longer than one query may
 (`TRINO_QUERY_TIMEOUT_SECONDS`) while the call still has time is named
 (`time_budget`) and skipped: resuming it would stop every later call at the same
-place. A cursor is refused (`invalid_argument`) for another text or scope, for a
+place. So is one that takes longer than a whole call, when Trino's own limit is
+left in place (`TRINO_QUERY_TIMEOUT_SECONDS=0`) or is as long as the call: a call
+that runs out of time exactly where it resumed, having moved nothing, skips it, so
+every call advances. A cursor is refused (`invalid_argument`) for another text or scope, for a
 catalog the caller does not see, or when it was altered; every cursor the server
 gives resumes, a schema such as Hive's `2024_sales` included, since a schema in a
 cursor only ever enters a string literal. Without a call budget

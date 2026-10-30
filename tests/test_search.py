@@ -16,6 +16,10 @@ from akko_mcp_trino.audit import InMemoryAudit, bind_call, reset_call, time_allo
 from akko_mcp_trino.search import Cursor, decode_cursor, encode_cursor, like_contains, search
 from akko_mcp_trino.tools import register_query_tools
 
+_INVALID = (
+    "Invalid cursor: pass back next_cursor unchanged, or start the search again without a cursor"
+)
+
 
 class FakeMCP:
     """Captures the tools so a test calls them directly."""
@@ -350,7 +354,7 @@ def test_a_forged_cursor_is_invalid_argument_and_nothing_reaches_trino(clock, to
     trino = Trino(_DEMO, _COLUMNS)
     out = _ask(trino, clock, "email", cursor=token)
     assert out == {
-        "error": "Invalid cursor: pass back next_cursor unchanged",
+        "error": _INVALID,
         "kind": "invalid_argument",
     }
     assert trino.calls == []
@@ -438,6 +442,50 @@ def test_a_schema_stopped_by_the_calls_remaining_time_is_resumed_not_skipped(clo
     again = _ask(trino, clock, "email", budget=10, cursor=out["next_cursor"])
     assert [m["schema"] for m in again["matches"]] == ["crm", "sales"]
     assert again["complete"] is True
+
+
+def test_a_schema_that_always_outlasts_the_call_is_skipped_by_the_next_call(clock):
+    """With no query timeout of its own (TRINO_QUERY_TIMEOUT_SECONDS=0), every read is bounded
+    by what is left of the call: a schema slower than a whole call would stop every resumed
+    call at the same place. A call that stops exactly where it resumed, having moved nothing,
+    skips that schema, so each call advances."""
+    trino = Trino({"demo": ["crm", "sales"]}, _COLUMNS, cost={("demo", "crm"): 50.0})
+    first = _ask(trino, clock, "email", budget=10)
+    assert decode_cursor(first["next_cursor"]).schema == "crm"
+    second = _ask(trino, clock, "email", budget=10, cursor=first["next_cursor"])
+    assert second["not_searched"] == [
+        {"catalog": "demo", "schema": "crm", "reason": "time_budget"},
+        {"catalog": "demo", "schema": "sales", "reason": "time_budget"},
+    ]
+    resume = decode_cursor(second["next_cursor"])
+    assert (resume.schema, resume.row_offset, resume.gaps) == ("sales", 0, True)
+    third = _ask(trino, clock, "email", budget=10, cursor=second["next_cursor"])
+    assert [m["schema"] for m in third["matches"]] == ["sales"]
+    assert third["next_cursor"] is None and third["complete"] is False
+
+
+def test_a_catalog_whose_schema_list_always_outlasts_the_call_is_skipped_next_call(clock):
+    trino = Trino({"a": ["s"], "b": ["s"]}, {("b", "s"): [("t", "email", "int", None)]})
+    trino.cost = {"a": 50.0}
+    first = _ask(trino, clock, "email", budget=10)
+    assert decode_cursor(first["next_cursor"]).catalog == "a"
+    second = _ask(trino, clock, "email", budget=10, cursor=first["next_cursor"])
+    assert second["not_searched"][0] == {"catalog": "a", "schema": None, "reason": "time_budget"}
+    assert decode_cursor(second["next_cursor"]).catalog == "b"
+    third = _ask(trino, clock, "email", budget=10, cursor=second["next_cursor"])
+    assert len(third["matches"]) == 1 and third["complete"] is False
+
+
+def test_a_call_that_moved_on_still_resumes_at_the_schema_it_stopped_in(clock):
+    """Only a call that made no progress skips: one that searched a schema first and then
+    ran out of time resumes the next call at the schema it stopped in."""
+    trino = Trino({"a": ["s1", "s2", "s3"]}, {}, cost={("a", "s1"): 50.0})
+    first = _ask(trino, clock, "email", budget=10)
+    trino.cost = {("a", "s2"): 50.0}
+    second = _ask(trino, clock, "email", budget=10, cursor=first["next_cursor"])
+    assert second["schemas_searched"] == 1
+    assert second["not_searched"] == [{"catalog": "a", "schema": "s2", "reason": "time_budget"}]
+    assert decode_cursor(second["next_cursor"]).gaps is False
 
 
 def test_the_search_ends_before_the_call_budget_so_the_call_never_times_out(clock):
@@ -606,7 +654,7 @@ def test_a_cursor_naming_a_catalog_the_caller_does_not_see_is_refused(clock, cat
     token = encode_cursor(Cursor(catalog, "x", 5, query=query_digest("email", "", "")))
     out = _ask(trino, clock, "email", cursor=token)
     assert out == {
-        "error": "Invalid cursor: pass back next_cursor unchanged",
+        "error": _INVALID,
         "kind": "invalid_argument",
     }
     assert [sql for sql, _ in trino.calls] == ["SHOW CATALOGS"], "only the catalog listing"

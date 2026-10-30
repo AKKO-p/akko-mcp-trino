@@ -263,7 +263,10 @@ recherche. `next_cursor` reprend la même recherche là où elle s'est arrêtée
 de son catalogue, puis chaque catalogue non ouvert), à l'intérieur d'un schéma quand le plafond de
 lignes l'y a arrêtée. Un schéma, ou la liste des schémas d'un catalogue, qui prend plus de temps
 qu'une requête n'en a droit (`TRINO_QUERY_TIMEOUT_SECONDS`) alors que l'appel a encore du temps est
-nommé (`time_budget`) et sauté : le reprendre arrêterait chaque appel suivant au même endroit. Un
+nommé (`time_budget`) et sauté : le reprendre arrêterait chaque appel suivant au même endroit. De
+même pour celui qui prend plus de temps qu'un appel entier, quand la limite est laissée à Trino
+(`TRINO_QUERY_TIMEOUT_SECONDS=0`) ou vaut celle de l'appel : un appel qui manque de temps
+exactement là où il a repris, sans avoir avancé, le saute, si bien que chaque appel avance. Un
 curseur est refusé (`invalid_argument`) pour un autre texte ou un autre périmètre, pour un catalogue
 que l'appelant ne voit pas, ou s'il a été modifié ; tout curseur rendu par le serveur reprend, même
 pour un schéma Hive comme `2024_sales`, car le schéma d'un curseur n'entre que dans un littéral.
