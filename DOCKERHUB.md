@@ -25,7 +25,7 @@ Source, documentation and issues: **[github.com/AKKO-p/akko-mcp-trino](https://g
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.6.0`) | one release |
+| `X.Y.Z` (e.g. `0.7.0`) | one release |
 | `X.Y` (e.g. `0.6`) | the latest release of that minor line |
 | `latest` | the latest release |
 
