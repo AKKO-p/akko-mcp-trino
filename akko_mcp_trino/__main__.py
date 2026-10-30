@@ -93,6 +93,8 @@ def check_config(config: Config) -> int:
             if config.call_timeout_seconds > 0
             else "none"
         ),
+        f"listings: {config.max_rows} names a page; list_catalogs reads up to "
+        f"{config.max_catalogs} catalogs",
         f"tool plugins: {config.tool_plugins or 'none'}",
         f"extensions: {', '.join(extension_names(config.extensions)) or 'none'}",
         *[line for ext in extensions for line in ext.check_lines()],

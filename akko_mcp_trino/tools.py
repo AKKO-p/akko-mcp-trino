@@ -212,10 +212,29 @@ def was_cut(res: dict) -> bool:
     return bool(res.get("truncated", False))
 
 
-def listing_reply(key: str, items: list, truncated: bool) -> str:
-    """A list for the agent, and whether the row cap cut it; the audit is told the same."""
+def listing_reply(key: str, items: list, next_offset: Optional[int]) -> str:
+    """One page of a list for the agent: the ``offset`` of the next page, or None on the last
+    one, and ``truncated``, true exactly when there is a next page; the audit is told the same.
+
+    Before 0.7 the third argument was ``truncated``: a bool is refused, so a plugin written
+    for that never answers that a complete list was cut, or the reverse."""
+    if isinstance(next_offset, bool):
+        raise TypeError("listing_reply takes the next page's offset, or None, not a bool")
+    truncated = next_offset is not None
     note(rows=len(items), truncated=truncated)
-    return dumps({key: items, "truncated": truncated})
+    return dumps({key: items, "next_offset": next_offset, "truncated": truncated})
+
+
+def check_offset(offset: int) -> int:
+    """``offset`` as the start of a page: a whole number from 0, or raise ValueError."""
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise ValueError(f"Invalid offset: {offset!r}. An offset is a whole number from 0.")
+    return offset
+
+
+def _next_offset(offset: int, items: list, more: bool) -> Optional[int]:
+    """Where the page after ``items``, read from ``offset``, starts; None when none follows."""
+    return offset + len(items) if more else None
 
 
 # The description of execute_query, written for a model; ``rule`` says whether it may write.
@@ -256,6 +275,9 @@ class ToolContext:
 
     * ``tool(title, …)`` registers a tool with MCP annotations and the audit;
     * ``run(sql)`` queries Trino through the identity mode, for the verified caller;
+    * ``run_whole(sql, bound=…, what=…)`` reads every row of a statement the tool builds
+      itself, past the row cap, up to ``bound`` rows;
+    * ``page_size`` is the size of one page of a list, the server's row cap;
     * ``note(...)`` adds what the call did to its audit record;
     * ``add_describer(fn)`` adds to what ``describe_table`` answers;
     * ``audit`` is the sink, or None; ``read_only`` the server's mode.
@@ -269,13 +291,16 @@ class ToolContext:
         audit: Any,
         read_only: bool,
         call_timeout_seconds: float = 0.0,
+        page_size: int = 100,
     ) -> None:
         """Bind the server, the client and the shared machinery; every tool registered
-        here is due within ``call_timeout_seconds`` when above 0."""
+        here is due within ``call_timeout_seconds`` when above 0, and a page of a list
+        holds ``page_size`` entries (``TRINO_MAX_ROWS``)."""
         self._mcp, self._client = mcp, client
         self.audit = audit
         self.read_only = read_only
         self.call_timeout_seconds = call_timeout_seconds
+        self.page_size = page_size
         self.note = note
         self.describers: list[Describer] = []
 
@@ -284,14 +309,25 @@ class ToolContext:
         answer. One that raises never hides the columns."""
         self.describers.append(describer)
 
-    def run(self, sql: str, *, max_rows: int = 0) -> dict:
-        """Run ``sql`` in Trino for the verified caller; ``max_rows`` lowers the row cap."""
+    def run(self, sql: str, *, max_rows: int = 0, row_limit: int = 0, timeout: float = 0.0) -> dict:
+        """Run ``sql`` in Trino for the verified caller; ``max_rows`` lowers the row cap,
+        ``row_limit`` replaces it (for a statement the tool builds, never the agent's SQL),
+        ``timeout`` lowers the query's time budget (see ``TrinoClient.query``)."""
         # The caller comes from the VERIFIED principal, never from a parameter the
         # agent supplies, which would be forgeable; the identity mode decides what
-        # Trino sees of it. A client without a row cap of its own is asked only for
-        # what it knows.
-        lower = {"max_rows": max_rows} if max_rows > 0 else {}
-        return self._client.query(sql, user=current_subject(), **lower)
+        # Trino sees of it. A client that knows only ``query(sql, user, params)`` is
+        # asked only for what it knows: a keyword left at 0 is not passed.
+        given = {"max_rows": max_rows, "row_limit": row_limit, "timeout": timeout}
+        keywords = {name: value for name, value in given.items() if value > 0}
+        return self._client.query(sql, user=current_subject(), **keywords)
+
+    def run_whole(self, sql: str, *, bound: int, what: str) -> list:
+        """Every row of ``sql``, read past the row cap up to ``bound`` rows; more than
+        ``bound`` raises ValueError naming ``what``: never a list cut in silence."""
+        res = self.run(sql, row_limit=bound)
+        if was_cut(res):
+            raise ValueError(f"more than {bound} {what} are visible; raise the server's limit")
+        return res["rows"]
 
     def tool(
         self,
@@ -337,6 +373,8 @@ def register_query_tools(
     call_timeout_seconds: float = 0.0,
     session_catalog: str | None = None,
     describe_notes: Sequence[str] = (),
+    max_rows: int = 100,
+    max_catalogs: int = 10000,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -346,13 +384,16 @@ def register_query_tools(
     queries included. `session_catalog` is the catalog Trino reads a name without
     catalog in (`TRINO_CATALOG`): the read-only guard refuses such names when it is
     `system`. `describe_notes` are appended to the description of `describe_table`,
-    one per describer an extension will add (see `ToolContext.add_describer`)."""
+    one per describer an extension will add (see `ToolContext.add_describer`).
+    `max_rows` is the server's row cap (`TRINO_MAX_ROWS`), the size of one page of a
+    list; `max_catalogs` bounds what `list_catalogs` reads (`MCP_MAX_CATALOGS`)."""
     tools = ToolContext(
         mcp,
         client,
         audit=audit,
         read_only=read_only,
         call_timeout_seconds=call_timeout_seconds,
+        page_size=max_rows,
     )
     # MCP tool annotations: the listing, describing and explaining tools only read,
     # whatever the settings; execute_query reads only while TRINO_READ_ONLY is true,
@@ -362,50 +403,74 @@ def register_query_tools(
     run = tools.run
 
     @tool("List catalogs")
-    def list_catalogs() -> str:
-        """List the Trino catalogs (data sources) the current user can see.
+    def list_catalogs(offset: int = 0) -> str:
+        """List the Trino catalogs (data sources) the current user can see, one page at a time.
 
-        Returns JSON {"catalogs": [...], "truncated": bool}. Start here, then
-        list_schemas, list_tables and describe_table before writing SQL. Only
-        catalogs the user is allowed to see are listed, never the engine's own
-        system catalog; truncated is true when the server's row cap cut the list.
+        Args: offset, optional, where the page starts (0, the default, is the first page).
+        Returns JSON {"catalogs": [...], "next_offset": n or null, "truncated": bool},
+        sorted by name. When next_offset is not null, more catalogs follow: call again
+        with offset=next_offset for the next page; truncated is true exactly then.
+        Start here, then list_schemas, list_tables and describe_table before writing
+        SQL. Only catalogs the user is allowed to see are listed, never the engine's
+        own system catalog.
         """
         try:
-            res = run("SHOW CATALOGS")
-            names = [r[0] for r in res["rows"] if str(r[0]).lower() != "system"]
-            return listing_reply("catalogs", names, was_cut(res))
+            start = check_offset(offset)
+            # SHOW CATALOGS works under a policy that refuses all of `system`: it is read
+            # whole, up to its own bound, and paged here.
+            rows = tools.run_whole("SHOW CATALOGS", bound=max_catalogs, what="catalogs")
+            names = sorted(str(r[0]) for r in rows if str(r[0]).lower() != "system")
+            page = names[start : start + tools.page_size]
+            more = start + len(page) < len(names)
+            return listing_reply("catalogs", page, _next_offset(start, page, more))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
             return error_reply(e)
 
     @tool("List schemas")
-    def list_schemas(catalog: str) -> str:
-        """List the schemas of a catalog the current user can see.
+    def list_schemas(catalog: str, offset: int = 0) -> str:
+        """List the schemas of a catalog the current user can see, one page at a time.
 
-        Args: catalog, a bare name from list_catalogs (no quotes, no dots).
-        Returns JSON {"schemas": [...], "truncated": bool}; truncated is true
-        when the server's row cap cut the list.
+        Args: catalog, a bare name from list_catalogs (no quotes, no dots); offset,
+        optional, where the page starts (0, the default, is the first page).
+        Returns JSON {"schemas": [...], "next_offset": n or null, "truncated": bool},
+        sorted by name. When next_offset is not null, more schemas follow: call again
+        with offset=next_offset for the next page; truncated is true exactly then.
         """
         try:
             cat = governed_catalog(catalog)
-            res = run(f"SHOW SCHEMAS FROM {cat}")
-            return listing_reply("schemas", [r[0] for r in res["rows"]], was_cut(res))
+            start = check_offset(offset)
+            res = run(
+                f"SELECT schema_name FROM {cat}.information_schema.schemata "
+                f"ORDER BY schema_name OFFSET {start}"
+            )
+            names = [r[0] for r in res["rows"]]
+            return listing_reply("schemas", names, _next_offset(start, names, was_cut(res)))
         except Exception as e:  # noqa: BLE001
             return error_reply(e)
 
     @tool("List tables")
-    def list_tables(catalog: str, schema: str) -> str:
-        """List the tables and views of a schema the current user can see.
+    def list_tables(catalog: str, schema: str, offset: int = 0) -> str:
+        """List the tables and views of a schema the current user can see, one page at a time.
 
-        Args: catalog and schema, bare names (no quotes, no dots).
-        Returns JSON {"tables": [...], "truncated": bool}. Fully qualify them
-        as catalog.schema.table in SQL. truncated is true when the server's row
-        cap cut the list.
+        Args: catalog and schema, bare names (no quotes, no dots); offset, optional,
+        where the page starts (0, the default, is the first page).
+        Returns JSON {"tables": [...], "next_offset": n or null, "truncated": bool},
+        sorted by name. When next_offset is not null, more tables follow: call again
+        with offset=next_offset for the next page; truncated is true exactly then.
+        Fully qualify them as catalog.schema.table in SQL.
         """
         try:
             cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
-            res = run(f"SHOW TABLES FROM {cat}.{sch}")
-            return listing_reply("tables", [r[0] for r in res["rows"]], was_cut(res))
+            start = check_offset(offset)
+            # A validated name carries no quote. Trino folds an unquoted name to lower
+            # case, as SHOW TABLES FROM did: the schema is compared folded the same way.
+            res = run(
+                f"SELECT table_name FROM {cat}.information_schema.tables "
+                f"WHERE table_schema = '{sch.lower()}' ORDER BY table_name OFFSET {start}"
+            )
+            names = [r[0] for r in res["rows"]]
+            return listing_reply("tables", names, _next_offset(start, names, was_cut(res)))
         except Exception as e:  # noqa: BLE001
             return error_reply(e)
 

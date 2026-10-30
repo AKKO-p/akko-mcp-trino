@@ -380,11 +380,14 @@ class TrinoClient:
             client_tags=tags or None,
         )
 
-    def _time_budget(self) -> tuple[float, Optional[ToolCall]]:
+    def _time_budget(self, timeout: float = 0.0) -> tuple[float, Optional[ToolCall]]:
         """Seconds the next query may run (0: Trino's own limit), and the tool call whose
-        deadline sets them when what is left of it is shorter than the query budget.
-        Past the call's deadline, no query starts."""
+        deadline sets them when what is left of it is shorter than the query's own budget:
+        ``TRINO_QUERY_TIMEOUT_SECONDS``, lowered by ``timeout`` when above 0. Past the
+        call's deadline, no query starts."""
         budget = self._config.query_timeout_seconds
+        if timeout > 0:
+            budget = min(budget, timeout) if budget > 0 else timeout
         allowed = time_allowed(budget)
         return allowed, (current_call() if allowed != budget else None)
 
@@ -447,8 +450,8 @@ class TrinoClient:
             raise over()
         return rows
 
-    def _run(self, sql: str, user: Optional[str], params: Any, limit: int) -> dict:
-        budget, call = self._time_budget()
+    def _run(self, sql: str, user: Optional[str], params: Any, limit: int, timeout: float) -> dict:
+        budget, call = self._time_budget(timeout)
         conn = self._connect(user)
         cursor = conn.cursor()
         rows = self._fetch(cursor, sql, params, limit + 1, budget, call)
@@ -473,18 +476,27 @@ class TrinoClient:
         params: Any = None,
         *,
         max_rows: int = 0,
+        row_limit: int = 0,
+        timeout: float = 0.0,
     ) -> dict:
         """Run ``sql`` for ``user`` through the identity mode: columns, rows, row_count,
         and truncated when more rows existed. ``max_rows`` lowers the server's cap, never raises it.
+
+        ``row_limit``, above 0, replaces the server's cap for this query: it is meant for
+        the metadata reads the server builds itself, never for an agent's SQL. ``timeout``,
+        above 0, lowers this query's time budget: the shortest of it,
+        ``TRINO_QUERY_TIMEOUT_SECONDS`` and what is left of the call wins. A query stopped
+        by its own ``timeout`` raises a plain ``TimeoutError`` and leaves the call alive; one
+        stopped by the call's deadline raises the call's ``CallTimeout``.
         """
-        cap = self._config.max_rows
+        cap = row_limit if row_limit > 0 else self._config.max_rows
         limit = min(max_rows, cap) if max_rows > 0 else cap
         if self._metrics is None:
-            return self._run(sql, user, params, limit)
+            return self._run(sql, user, params, limit, timeout)
         self._metrics.queries.inc()
         start = time.perf_counter()
         try:
-            return self._run(sql, user, params, limit)
+            return self._run(sql, user, params, limit, timeout)
         except Exception:
             self._metrics.errors.inc()
             raise

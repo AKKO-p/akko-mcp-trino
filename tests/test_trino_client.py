@@ -643,6 +643,24 @@ def test_a_caller_may_ask_for_fewer_rows_never_more(monkeypatch):
     assert _client(cfg).query("SELECT 1", max_rows=0)["row_count"] == 5
 
 
+def test_row_limit_replaces_the_cap_for_this_query_only(monkeypatch):
+    """A metadata read the server builds may read past TRINO_MAX_ROWS, up to its own bound;
+    the next query has the server's cap again, and max_rows still lowers the bound."""
+    cur = _Cancellable([(i, i) for i in range(10)])
+    _patch_cursor(monkeypatch, cur)
+    client = _client(_cfg(max_rows=2))
+    wide = client.query("SHOW CATALOGS", row_limit=5)
+    assert wide["row_count"] == 5 and wide["truncated"] is True
+    assert client.query("SHOW CATALOGS", row_limit=20) == {
+        "columns": ["a", "b"],
+        "rows": [[i, i] for i in range(10)],
+        "row_count": 10,
+        "truncated": False,
+    }
+    assert client.query("SELECT 1")["row_count"] == 2
+    assert client.query("SELECT 1", row_limit=5, max_rows=3)["row_count"] == 3
+
+
 def test_a_failed_cancel_of_a_cut_answer_does_not_hide_the_rows(monkeypatch):
     class _BadCancel(_Cancellable):
         def cancel(self):
@@ -760,6 +778,52 @@ def test_the_query_budget_holds_when_it_is_the_shorter_one(monkeypatch):
     finally:
         reset_call(token)
     assert not isinstance(e.value, CallTimeout) and call.expired is False
+
+
+def test_a_query_stopped_by_its_own_timeout_leaves_the_call_alive(monkeypatch):
+    """A query's own timeout, shorter than both budgets, stops that query only: a plain
+    TimeoutError, and the call goes on with what is left of its budget."""
+    from akko_mcp_trino.audit import CallTimeout, bind_call, reset_call
+
+    cur = _Slow()
+    _patch_cursor(monkeypatch, cur)
+    call, token = bind_call("search", budget_seconds=600)
+    try:
+        with pytest.raises(TimeoutError, match=r"query exceeded its time budget of 0\.05 s") as e:
+            _client(_cfg(query_timeout_seconds=30)).query("SELECT 1", timeout=0.05)
+    finally:
+        reset_call(token)
+    assert not isinstance(e.value, CallTimeout) and call.expired is False
+    assert cur.cancelled == 1
+
+
+def test_a_query_timeout_applies_without_a_query_budget_and_never_lengthens_one(monkeypatch):
+    cur = _Slow()
+    _patch_cursor(monkeypatch, cur)
+    with pytest.raises(TimeoutError, match=r"time budget of 0\.05 s"):
+        _client(_cfg(query_timeout_seconds=0)).query("SELECT 1", timeout=0.05)
+    cur = _Slow()
+    _patch_cursor(monkeypatch, cur)
+    with pytest.raises(TimeoutError, match=r"time budget of 0\.05 s"):
+        _client(_cfg(query_timeout_seconds=0.05)).query("SELECT 1", timeout=30)
+
+
+def test_a_query_timeout_past_the_calls_deadline_is_the_calls_timeout(monkeypatch):
+    import akko_mcp_trino.audit as audit
+    from akko_mcp_trino.audit import CallTimeout, bind_call, reset_call
+
+    now = [0.0]
+    monkeypatch.setattr(audit.time, "monotonic", lambda: now[0])
+    cur = _Slow()
+    _patch_cursor(monkeypatch, cur)
+    call, token = bind_call("search", budget_seconds=30)
+    try:
+        now[0] = 29.95  # 0.05 s left of the call, the query asks for 10 s
+        with pytest.raises(CallTimeout, match="tool call exceeded its time budget of 30 s"):
+            _client(_cfg(query_timeout_seconds=30)).query("SELECT 1", timeout=10)
+    finally:
+        reset_call(token)
+    assert call.expired is True and cur.cancelled == 1
 
 
 def test_without_a_query_budget_the_calls_deadline_still_cancels(monkeypatch):

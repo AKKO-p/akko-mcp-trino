@@ -403,9 +403,9 @@ The [examples](examples/README.md) folder has the details.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `list_catalogs` | none | `{"catalogs": [...], "truncated": bool}`: the catalogs Trino shows |
-| `list_schemas` | `catalog` | `{"schemas": [...], "truncated": bool}`: schemas in that catalog |
-| `list_tables` | `catalog`, `schema` | `{"tables": [...], "truncated": bool}`: tables and views in that schema |
+| `list_catalogs` | `offset` (optional, 0 by default) | `{"catalogs": [...], "next_offset": n or null, "truncated": bool}`: one page of the catalogs Trino shows |
+| `list_schemas` | `catalog`, `offset` (optional) | `{"schemas": [...], "next_offset": n or null, "truncated": bool}`: one page of the schemas in that catalog |
+| `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add |
 | `explain_query` | `sql` | `{"plan": "..."}`: how Trino would run a read-only statement, without running it |
 | `execute_query` | `sql`, `max_rows` (optional, lower than the server cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
@@ -434,7 +434,7 @@ the engine's policy must refuse `system` too, the guard being a second line.
 
 Results are capped at `TRINO_MAX_ROWS` (100 by default, 1 at least): one row
 more is read, so `truncated` says whether the answer was cut, and the rest of
-the query is cancelled in Trino. Every listing says it too. With
+the query is cancelled in Trino. With
 `TRINO_QUERY_TIMEOUT_SECONDS` (60 s by default), a query that runs longer is
 cancelled in Trino and the agent is told so. The budget is
 enforced by the server, not set as a session property: a policy engine that
@@ -447,6 +447,18 @@ gathered so far, nor an answer that came past the deadline. A plugin that calls
 its own backend bounds that request with
 `akko_mcp_trino.audit.time_allowed(timeout)`: its own timeout, or what is left
 of the call's budget when that is shorter.
+
+The three listing tools page their answer: a page holds `TRINO_MAX_ROWS` names,
+sorted by name, and `next_offset` says where the next page starts, or is `null`
+on the last one. The agent calls again with `offset=next_offset` to read on;
+`truncated` is true exactly when `next_offset` is not `null`. Schemas and tables
+are paged in Trino (`ORDER BY` with `OFFSET` on `information_schema.schemata`
+and `information_schema.tables`), so Trino decides what each page holds. Catalogs
+are read with `SHOW CATALOGS`, which works even under a policy that refuses all
+of `system`, whole, past the row cap, up to `MCP_MAX_CATALOGS` (10000 by default),
+then paged by the server. Above that bound `list_catalogs` answers an error, never
+a cut list. An `offset` that is not a whole number from 0 is refused
+(`invalid_argument`) before Trino.
 
 The defaults are chosen for an agent, not for a batch job. A question an agent
 asks should come back within a minute; a query that needs longer is usually a
@@ -471,7 +483,7 @@ schema or catalog when Trino names the one it could not resolve:
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino refused the statement; fix that part of it |
 | `permission` | Trino or the identity provider refused the right; report it, do not retry |
-| `invalid_argument` | the server refused an argument (an identifier) before reaching Trino |
+| `invalid_argument` | the server refused an argument (an identifier, an `offset`) before reaching Trino |
 | `read_only` | the statement writes and the server is read-only |
 | `time_budget` | the call ran out of its time budget; narrow the request |
 | `unavailable` | Trino could not answer (internal error, connection lost): the statement is neither valid nor invalid, try again later |
@@ -678,7 +690,8 @@ reads its own variables from the same environment.
 | `TRINO_CLIENT_CERT`, `TRINO_CLIENT_KEY` | a client certificate and its key (PEM paths) the account authenticates with instead (mTLS); https only | none |
 | `TRINO_CATALOG` | session catalog, where a name without a catalog is read; set it to a data catalog (with `system`, such names are refused) | `system` |
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
-| `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated` | `100` |
+| `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated`; also the size of one page of a listing | `100` |
+| `MCP_MAX_CATALOGS` | the most catalogs `list_catalogs` reads before it pages them, 1 at least; above it the tool answers an error, never a cut list | `10000` |
 | `TRINO_QUERY_TIMEOUT_SECONDS` | time budget of one query: past it, the server cancels the query in Trino; `0` leaves the limit to Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | time budget of one tool call, every query of the call included: past it, no query starts, the one running is cancelled and the agent gets an error; `0` sets none | `120` |
 | `TRINO_SOURCE` | the source Trino records for every query (`X-Trino-Source`) | the server name |

@@ -430,6 +430,18 @@ def test_cli_check_reports_tool_plugins_and_refuses_an_unknown_one(monkeypatch, 
     assert "tool plugins: nope" in out and "unknown tool plugin 'nope'" in out
 
 
+def test_cli_check_reports_the_page_of_a_listing_and_the_catalog_bound(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("TRINO_MAX_ROWS", "40")
+    monkeypatch.setenv("MCP_MAX_CATALOGS", "0")
+    assert check_config(Config.from_env()) == 2
+    out = capsys.readouterr().out
+    assert "listings: 40 names a page; list_catalogs reads up to 0 catalogs" in out
+    assert "MCP_MAX_CATALOGS=0: list_catalogs must be allowed 1 catalog or more" in out
+
+
 def test_cli_check_reports_the_query_source_and_budget(monkeypatch, capsys):
     from akko_mcp_trino.__main__ import check_config
     from akko_mcp_trino.config import Config
