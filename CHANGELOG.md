@@ -20,12 +20,12 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - The advice on the engine's policy: refuse the `system` catalog **except** reading `system.jdbc` and `system.metadata`, which Trino filters for each user; without them `describe_schema` and `search_columns` answer an error that says so. The agent's SQL stays refused on all of `system`.
 - `listing_reply(key, items, next_offset)` takes the next page's offset, or `None`, instead of `truncated`, and answers both keys; a bool is refused with `TypeError`.
+- For extension authors: with `TRINO_IDENTITY_MODE=oauth2` over stdio, the guards (`before_auth`, `after_auth`) no longer run once at start. They run on every request that is not discovery, after Trino named the user, so `before_auth` already sees the `principal`, and a binding lasts one request. Discovery (`initialize`, `ping`, the `*/list` methods, notifications) runs no guard. A guard that refuses at start no longer keeps the server from starting and listing its tools: it refuses each call. A refusal, or Trino naming no user, answers the request an `INVALID_REQUEST` error with the guard's reason and its `message`, instead of a bare error.
+- `TRINO_IDENTITY_MODE=oauth2` refuses a query without an admitted user, like `jwt` and `impersonation`. Only the identity check, `TrinoClient.current_user()` (`SELECT current_user`), runs before one; it also answers the mode's `ping`.
 
 ### Fixed
 - `akko_mcp_trino.sql_guard.safe_sql_string` no longer doubles a backslash: Trino reads no backslash escape in a string literal, so `a\b` became `a\\b`, another value. It still doubles quotes and drops NUL bytes.
-
-### Fixed
-- Trino OAuth2 no longer opens the browser when the MCP host starts; login is deferred until the first tool call.
+- Trino OAuth2 no longer opens the browser when the MCP host starts: startup and discovery never log in, and the login waits for the first request that needs Trino. Every request that is not discovery (a tool call, a resource read, any method a later SDK adds) logs in and is admitted before it runs.
 
 ## [0.6.1] - 2026-10-29
 

@@ -156,12 +156,23 @@ jamais d'un en-tête.
 
 Avec Trino OAuth2 configuré, utilisez l'[exemple de lancement](README.md#native-browser-login-oauth2-stdio-only).
 Le serveur n'envoie aucun nom à Trino : Trino exécute chaque requête au nom de la personne
-connectée, et `TRINO_USER` est ignoré. HTTPS et stdio sont obligatoires. La connexion navigateur
-commence au premier appel d'outil, pas au démarrage. L'URL va uniquement sur stderr, et
-`SELECT current_user` doit réussir avant l'exécution de l'outil ; son résultat nomme l'utilisateur
-dans l'admission et l'audit. `MCP_AUTH_REQUIRED=false` ne désactive jamais cette
-connexion ; `true` exige un `MCP_USER_TOKEN` vérifié en plus. Le pilote gère le cache en mémoire
-(ou `keyring` facultatif) et la réauthentification. `--check` ne se connecte pas.
+connectée, et `TRINO_USER` est ignoré. HTTPS et stdio sont obligatoires. Le démarrage et la
+découverte (`initialize`, `ping`, `tools/list`, `resources/list`, `resources/templates/list`,
+`prompts/list`, les notifications) ne se connectent jamais : l'hôte n'attend pas le navigateur.
+Toute autre requête, un appel d'outil ou une lecture de ressource, se connecte d'abord. L'URL va
+uniquement sur stderr, et `SELECT current_user` doit réussir avant la requête ; son résultat nomme
+l'utilisateur dans l'admission et l'audit. C'est la seule requête qui atteint Trino sans
+utilisateur admis. Une requête refusée par les gardes des extensions, ou pour laquelle Trino ne
+nomme personne, reçoit une erreur `INVALID_REQUEST` qui dit pourquoi. Le premier appel peut
+expirer côté hôte pendant la connexion navigateur : une fois connecté, relancez-le. L'utilisateur
+que Trino nomme en premier reste celui du processus jusqu'à son arrêt : une réauthentification du
+pilote ne change pas le nom de l'admission et de l'audit. Reconnectez-vous avec le même compte, ou
+redémarrez le serveur pour en changer. Dans ce mode, les gardes des extensions tournent à chaque
+requête qui n'est pas de la découverte, jamais au démarrage ni pour la découverte, et toujours
+après que Trino a nommé l'utilisateur : `before_auth` voit déjà ce `principal`, et une liaison
+dure une requête. `MCP_AUTH_REQUIRED=false` ne désactive jamais cette connexion ; `true` exige un
+`MCP_USER_TOKEN` vérifié en plus. Le pilote gère le cache en mémoire (ou `keyring` facultatif) et
+la réauthentification. `--check` ne se connecte pas.
 
 ### Une identité unique (`service`, seulement si on la nomme)
 
