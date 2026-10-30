@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-609%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-621%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -55,7 +55,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 609 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
+- **Small and proven.** 621 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
 
 ## Documentation
 
@@ -923,7 +923,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 609 tests; line or branch coverage below 100 % fails the run
+pytest                        # 621 tests; line or branch coverage below 100 % fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start
