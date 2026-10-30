@@ -51,7 +51,7 @@ ERROR_KINDS: Mapping[str, str] = {
 _NAMED = re.compile(r"\b(column|table|schema|catalog) '([^']+)'", re.I)
 _CONNECTION_ERRORS = (OSError, HttpError, TrinoConnectionError)
 # The kinds of an error on a metadata view that its access control can be the cause of.
-_VIEW_REFUSED = (PERMISSION, "catalog", "table")
+VIEW_REFUSED = (PERMISSION, "catalog", "table")
 METADATA_VIEWS_HINT = (
     "This tool reads system.jdbc.columns and system.metadata.table_comments, which Trino "
     "filters for each user; the access control must allow reading them."
@@ -87,7 +87,7 @@ def metadata_view_error(exc: BaseException) -> dict:
     ``permission``), or a view Trino does not show (``catalog``, ``table``), says what the
     access control must allow. No other way is tried: the error says why."""
     out = explain_error(exc)
-    if out["kind"] in _VIEW_REFUSED:
+    if out["kind"] in VIEW_REFUSED:
         said = out["error"] if out["error"].endswith(".") else out["error"] + "."
         out["error"] = f"{said} {METADATA_VIEWS_HINT}"
     return out

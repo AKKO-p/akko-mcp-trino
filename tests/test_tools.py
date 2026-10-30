@@ -1,4 +1,4 @@
-"""The seven core tools, characterised through a fake MCPServer.
+"""The eight core tools, characterised through a fake MCPServer.
 
 Same outputs, same read-only guard; the caller comes from the verified principal, never
 from an argument.
@@ -81,7 +81,7 @@ def test_tool_annotations_are_classes_not_strings():
             )
 
 
-def test_exactly_the_seven_tools_are_registered():
+def test_exactly_the_eight_tools_are_registered():
     mcp, _ = _registered()
     assert set(mcp.tools) == {
         "list_catalogs",
@@ -91,6 +91,7 @@ def test_exactly_the_seven_tools_are_registered():
         "describe_table",
         "explain_query",
         "execute_query",
+        "search_columns",
     }
 
 

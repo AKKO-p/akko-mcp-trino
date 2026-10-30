@@ -16,6 +16,8 @@ DEFAULT_MAX_ROWS = 100
 DEFAULT_MAX_CATALOGS = 10000
 DEFAULT_DESCRIBE_SCHEMA_TABLES = 20
 DEFAULT_DESCRIBE_SCHEMA_COLUMNS = 1000
+DEFAULT_SEARCH_MIN_LENGTH = 3
+DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -110,6 +112,11 @@ class Config:
     # however wide, and the answer says when a page was shortened.
     describe_schema_tables: int = DEFAULT_DESCRIBE_SCHEMA_TABLES
     describe_schema_columns: int = DEFAULT_DESCRIBE_SCHEMA_COLUMNS
+    # `search_columns`: the shortest text it searches, so that a letter or two does not
+    # read every column, and the seconds of the call's budget it keeps in reserve, so that
+    # it stops early enough to answer what it searched rather than the call's own error.
+    search_min_length: int = DEFAULT_SEARCH_MIN_LENGTH
+    search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -137,6 +144,22 @@ class Config:
                 f"MCP_DESCRIBE_SCHEMA_COLUMNS={self.describe_schema_columns}: "
                 "describe_schema must be allowed 1 column or more"
             )
+        if self.search_min_length < 1:
+            found.append(
+                f"MCP_SEARCH_MIN_LENGTH={self.search_min_length}: "
+                "search_columns must ask for 1 character or more"
+            )
+        if self.search_reserve_seconds < 0:
+            found.append(
+                f"MCP_SEARCH_RESERVE_SECONDS={self.search_reserve_seconds:g}: "
+                "a reserve is 0 seconds or more"
+            )
+        elif 0 < self.call_timeout_seconds <= self.search_reserve_seconds:
+            found.append(
+                f"MCP_SEARCH_RESERVE_SECONDS={self.search_reserve_seconds:g} is not below "
+                f"MCP_CALL_TIMEOUT_SECONDS={self.call_timeout_seconds:g}: "
+                "search_columns would have no time left to search"
+            )
         for name, value in (
             ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
             ("MCP_CALL_TIMEOUT_SECONDS", self.call_timeout_seconds),
@@ -161,6 +184,11 @@ class Config:
             )
         elif not self.auth_required:
             found.append("MCP_AUTH_REQUIRED=false: a request without a valid token is served too")
+        if self.call_timeout_seconds == 0:
+            found.append(
+                "MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns "
+                "refuses to search every catalog and searches a named catalog only"
+            )
         return found
 
     @staticmethod
@@ -210,5 +238,11 @@ class Config:
             ),
             describe_schema_columns=int(
                 os.environ.get("MCP_DESCRIBE_SCHEMA_COLUMNS", str(DEFAULT_DESCRIBE_SCHEMA_COLUMNS))
+            ),
+            search_min_length=int(
+                os.environ.get("MCP_SEARCH_MIN_LENGTH", str(DEFAULT_SEARCH_MIN_LENGTH))
+            ),
+            search_reserve_seconds=float(
+                os.environ.get("MCP_SEARCH_RESERVE_SECONDS", str(DEFAULT_SEARCH_RESERVE_SECONDS))
             ),
         )
