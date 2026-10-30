@@ -44,3 +44,11 @@ def test_examples_import_only_what_the_sdk_has():
                     if not hasattr(module, a.name)
                 ]
     assert missing == []
+
+
+def test_the_example_agent_follows_the_path_the_tools_describe():
+    """search_columns first when the data's place is unknown, then describe_schema, then
+    execute_query: the example teaches the same path as the tool descriptions."""
+    source = (ROOT / "examples" / "agent.py").read_text(encoding="utf-8")
+    path = [source.find(tool) for tool in ("search_columns", "describe_schema", "execute_query")]
+    assert -1 not in path and path == sorted(path), path

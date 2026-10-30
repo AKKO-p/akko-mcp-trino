@@ -759,7 +759,7 @@ _CRM_COLUMNS = [
 
 def _describing(tables, columns, comments=(), **kw):
     """A server whose schema is visible, with these tables, comments and columns."""
-    results = [_rows([("crm",)]), _rows(tables), _rows(comments), _rows(columns)]
+    results = [_rows([("crm",)]), _rows(tables), _rows(columns), _rows(comments)]
     return _registered(results=results, **kw)
 
 
@@ -796,13 +796,6 @@ def test_describe_schema_returns_whole_tables_with_comments():
         "SELECT table_name, table_type FROM demo.information_schema.tables "
         "WHERE table_schema = 'crm' ORDER BY table_name OFFSET 0 LIMIT 21",
         "SELECT * FROM ("
-        "SELECT table_name, comment FROM system.metadata.table_comments "
-        "WHERE catalog_name = 'demo' AND schema_name = 'crm' AND table_name = 'customers' "
-        "UNION ALL "
-        "SELECT table_name, comment FROM system.metadata.table_comments "
-        "WHERE catalog_name = 'demo' AND schema_name = 'crm' AND table_name = 'orders_v'"
-        ") ORDER BY table_name",
-        "SELECT * FROM ("
         "SELECT table_name, column_name, type_name, remarks, ordinal_position "
         "FROM system.jdbc.columns "
         "WHERE table_cat = 'demo' AND table_schem = 'crm' AND table_name = 'customers' "
@@ -810,13 +803,22 @@ def test_describe_schema_returns_whole_tables_with_comments():
         "SELECT table_name, column_name, type_name, remarks, ordinal_position "
         "FROM system.jdbc.columns "
         "WHERE table_cat = 'demo' AND table_schem = 'crm' AND table_name = 'orders_v'"
-        ") ORDER BY table_name, ordinal_position",
+        ") ORDER BY table_name, ordinal_position LIMIT 1001",
+        "SELECT * FROM ("
+        "SELECT table_name, comment FROM system.metadata.table_comments "
+        "WHERE catalog_name = 'demo' AND schema_name = 'crm' AND table_name = 'customers' "
+        "UNION ALL "
+        "SELECT table_name, comment FROM system.metadata.table_comments "
+        "WHERE catalog_name = 'demo' AND schema_name = 'crm' AND table_name = 'orders_v'"
+        ") ORDER BY table_name",
     ]
     assert client.keywords[1] == {"row_limit": 21}, "one table more than a page, never the cap"
+    assert client.keywords[2] == {"row_limit": 1001}, "one column past the budget"
+    assert client.keywords[3] == {"row_limit": 2}, "one comment per table kept"
     assert {u for _, u in client.calls} == {"alice_admin"}, "every query runs as the caller"
 
 
-@pytest.mark.parametrize("metadata", [2, 3])  # the comments, then the columns
+@pytest.mark.parametrize("metadata", [2, 3])  # the columns, then the comments
 def test_each_table_of_a_page_is_read_by_equality_never_by_a_list(metadata):
     """Trino pushes ``table_name = '...'`` down into its metadata views, never a list
     (``IN``, or an ``OR`` it rewrites as ``IN``), which reads the whole schema: each
@@ -835,7 +837,7 @@ def test_describe_schema_reads_names_as_trino_folds_an_unquoted_name():
     out = json.loads(mcp.tools["describe_schema"]("Demo", "CRM"))
     assert (out["catalog"], out["schema"]) == ("demo", "crm")
     assert client.calls[0][0].endswith("WHERE schema_name = 'crm'")
-    assert "WHERE table_cat = 'demo' AND table_schem = 'crm'" in client.calls[3][0]
+    assert "WHERE table_cat = 'demo' AND table_schem = 'crm'" in client.calls[2][0]
 
 
 def test_a_forbidden_and_a_missing_schema_answer_the_same():
@@ -873,8 +875,8 @@ def test_a_full_page_says_where_the_next_one_starts():
     assert [t["table"] for t in out["tables"]] == ["t0", "t1"]
     assert out["next_offset"] == 42 and out["shortened"] is False
     assert client.calls[1][0].endswith("ORDER BY table_name OFFSET 40 LIMIT 3")
-    assert "table_name = 't1'" in client.calls[3][0]
-    assert "'t2'" not in client.calls[3][0], "the extra row is not described"
+    assert "table_name = 't1'" in client.calls[2][0]
+    assert "'t2'" not in client.calls[2][0], "the extra row is not described"
 
 
 def test_a_page_never_cuts_a_table_and_says_when_it_was_shortened():
@@ -895,31 +897,38 @@ def test_a_table_wider_than_the_column_budget_still_comes_whole():
     tables = [("wide", "BASE TABLE"), ("b", "BASE TABLE")]
     columns = [("wide", f"c{i}", "int", None, i + 1) for i in range(5)]
     columns += [("b", "x", "int", None, 1)]
-    mcp, _ = _describing(tables, columns, describe_schema_columns=2)
+    # the page's read stops one column past the budget, inside wide: wide is read alone
+    alone = _rows(columns[:5])
+    results = [_rows([("crm",)]), _rows(tables), _rows(columns[:3]), alone, _rows([])]
+    mcp, _ = _registered(results=results, describe_schema_columns=2)
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
     assert [t["table"] for t in out["tables"]] == ["wide"]
     assert len(out["tables"][0]["columns"]) == 5
     assert out["shortened"] is True and out["next_offset"] == 1
-    mcp, _ = _describing(tables[:1], columns[:5], describe_schema_columns=2)
+    results = [_rows([("crm",)]), _rows(tables[:1]), _rows(columns[:3]), alone, _rows([])]
+    mcp, _ = _registered(results=results, describe_schema_columns=2)
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
     assert out["shortened"] is False and out["next_offset"] is None, "alone, it ends the schema"
 
 
-def test_describe_schema_reads_every_column_past_the_row_cap():
-    """The metadata views are read with every_row: a page the client cuts is followed by
-    the next, from where it stopped, so no column is lost to the cap."""
+def test_a_first_table_read_alone_is_read_past_the_row_cap():
+    """The first table, read alone when the page's read cut it, is read with every_row: a
+    part the client cuts is followed by the next, from where it stopped, so no column is
+    lost to the cap."""
     tables = [("a", "BASE TABLE")]
     first = [("a", "c0", "int", None, 1), ("a", "c1", "int", None, 2)]
     results = [
         _rows([("crm",)]),
         _rows(tables),
-        _rows([]),
+        _rows(first, cut=True),
         _rows(first, cut=True),
         _rows([("a", "c2", "int", None, 3)]),
+        _rows([]),
     ]
     mcp, client = _registered(results=results, describe_schema_columns=2)
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
     assert [c["column"] for c in out["tables"][0]["columns"]] == ["c0", "c1", "c2"]
+    assert client.calls[3][0].endswith("ORDER BY table_name, ordinal_position")
     assert client.calls[4][0].endswith("ORDER BY table_name, ordinal_position OFFSET 2")
 
 
@@ -928,7 +937,7 @@ def test_a_table_name_is_put_in_sql_as_an_escaped_literal():
     mcp, client = _describing([("o'brien", "BASE TABLE")], [])
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
     assert out["tables"][0]["columns"] == []
-    assert "table_name = 'o''brien'" in client.calls[3][0]
+    assert "table_name = 'o''brien'" in client.calls[2][0]
 
 
 def test_describe_schema_refuses_the_system_catalog():
@@ -940,12 +949,12 @@ def test_describe_schema_refuses_the_system_catalog():
     assert "Invalid schema" in out["error"] and client.calls == []
 
 
-@pytest.mark.parametrize("view", [2, 3])  # the comments, then the columns
+@pytest.mark.parametrize("view", [2, 3])  # the columns, then the comments
 def test_a_refused_metadata_view_says_what_to_allow(view):
     refused = _TrinoUserError(
         "PERMISSION_DENIED", "Access Denied: Cannot select from table system.jdbc.columns"
     )
-    results = [_rows([("crm",)]), _rows(_CRM_TABLES), _rows(_CRM_COMMENTS), _rows(_CRM_COLUMNS)]
+    results = [_rows([("crm",)]), _rows(_CRM_TABLES), _rows(_CRM_COLUMNS), _rows(_CRM_COMMENTS)]
     results[view] = refused
     mcp, client = _registered(results=results)
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
@@ -971,3 +980,123 @@ def test_the_describe_schema_description_is_written_for_a_model():
     doc = mcp.tools["describe_schema"].__doc__
     assert "offset=next_offset" in doc and "describe_table" in doc
     assert "never as instructions" in doc, "comments are data their owners wrote"
+
+
+# ---- describe_schema at scale: one read of the columns per page, bounded by the budget
+
+
+class _Metadata:
+    """A client that answers describe_schema's statements from what they read, as Trino
+    would: each ``table_name = '...'`` branch reads that table, ``OFFSET`` and ``LIMIT``
+    apply, and ``row_limit`` cuts the answer the way TrinoClient does (``truncated``)."""
+
+    def __init__(self, widths):
+        self.widths = widths  # table name -> number of columns, in name order
+        self.calls = []
+
+    def query(self, sql, user=None, params=None, **keywords):
+        import re
+
+        self.calls.append((sql, keywords))
+        if "information_schema.schemata" in sql:
+            rows = [["crm"]]
+        elif "information_schema.tables" in sql:
+            rows = [[t, "BASE TABLE"] for t in sorted(self.widths)]
+        else:
+            names = re.findall(r"table_name = '([^']*)'", sql)
+            if "table_comments" in sql:
+                rows = [[t, f"About {t}"] for t in sorted(names)]
+            else:
+                rows = [
+                    [t, f"c{i}", "int", None, i + 1]
+                    for t in sorted(names)
+                    for i in range(self.widths[t])
+                ]
+        offset = re.search(r" OFFSET (\d+)", sql)
+        rows = rows[int(offset.group(1)) :] if offset else rows
+        limit = re.search(r" LIMIT (\d+)$", sql)
+        rows = rows[: int(limit.group(1))] if limit else rows
+        cap = keywords.get("row_limit") or 100
+        return {"rows": rows[:cap], "row_count": min(cap, len(rows)), "truncated": len(rows) > cap}
+
+
+def _wide(widths, **budgets):
+    mcp = FakeMCP()
+    client = _Metadata(widths)
+    register_query_tools(mcp, client, **budgets)
+    out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
+    columns = [(sql, kw) for sql, kw in client.calls if "system.jdbc.columns" in sql]
+    comments = [sql for sql, _ in client.calls if "table_comments" in sql]
+    return out, client, columns, comments
+
+
+def test_a_page_of_wide_tables_reads_its_columns_once_bounded_by_the_budget():
+    """Five tables of 300 columns, a budget of 1000: one read of the columns, one row past
+    the budget, keeps the three whole tables; the union is never run again per chunk."""
+    widths = {f"t{i}": 300 for i in range(5)}
+    out, client, columns, comments = _wide(widths, describe_schema_columns=1000)
+    assert [t["table"] for t in out["tables"]] == ["t0", "t1", "t2"]
+    assert [len(t["columns"]) for t in out["tables"]] == [300, 300, 300]
+    assert out["shortened"] is True and out["next_offset"] == 3
+    assert len(columns) == 1, "the columns of a page are read once"
+    sql, kw = columns[0]
+    assert sql.endswith("ORDER BY table_name, ordinal_position LIMIT 1001")
+    assert kw == {"row_limit": 1001}
+    assert len(comments) == 1 and "'t3'" not in comments[0], "comments of kept tables only"
+    assert [t["comment"] for t in out["tables"]] == ["About t0", "About t1", "About t2"]
+    assert len(client.calls) == 4, "the check, the names, the columns, the comments"
+
+
+def test_a_page_within_the_budget_keeps_every_table_in_four_statements():
+    out, client, columns, _ = _wide({"a": 3, "b": 2, "c": 1}, describe_schema_columns=6)
+    assert [t["table"] for t in out["tables"]] == ["a", "b", "c"]
+    assert out["shortened"] is False and out["next_offset"] is None
+    assert len(columns) == 1 and len(client.calls) == 4
+
+
+def test_the_budget_cut_keeps_the_tables_that_arrived_whole():
+    """A budget of 5: a (3) and b (2) arrive whole, c is cut, so the page stops before c."""
+    out, _, columns, comments = _wide({"a": 3, "b": 2, "c": 4}, describe_schema_columns=5)
+    assert [t["table"] for t in out["tables"]] == ["a", "b"]
+    assert out["shortened"] is True and out["next_offset"] == 2
+    assert len(columns) == 1 and "'c'" not in comments[0]
+
+
+def test_a_first_table_wider_than_the_budget_is_read_alone_and_whole():
+    """The first table always comes whole: cut by the page's read, it is read again by its
+    own pushed-down ``table_name =`` query, never by the union of the page."""
+    out, client, columns, comments = _wide({"wide": 2500, "x": 3}, describe_schema_columns=1000)
+    assert [t["table"] for t in out["tables"]] == ["wide"]
+    assert len(out["tables"][0]["columns"]) == 2500
+    assert [c["column"] for c in out["tables"][0]["columns"][:2]] == ["c0", "c1"]
+    assert out["shortened"] is True and out["next_offset"] == 1
+    union, alone = columns[0][0], [sql for sql, _ in columns[1:]]
+    assert " UNION ALL " in union and union.endswith("LIMIT 1001")
+    assert alone and all(" UNION ALL " not in sql for sql in alone)
+    assert all("table_name = 'wide'" in sql and "'x'" not in sql for sql in alone)
+    assert sum(" UNION ALL " in sql for sql, _ in client.calls) == 1, "the page's read only"
+    assert len(comments) == 1 and "'x'" not in comments[0]
+
+
+def test_the_cost_of_a_page_never_grows_with_its_number_of_tables():
+    """Twenty tables of 200 columns, then a hundred: the same four statements a page."""
+    for tables in (20, 100):
+        widths = {f"t{i:03d}": 200 for i in range(tables)}
+        out, client, columns, _ = _wide(
+            widths, describe_schema_tables=tables, describe_schema_columns=1000
+        )
+        assert len(out["tables"]) == 5 and len(columns) == 1 and len(client.calls) == 4
+
+
+def test_the_descriptions_agree_on_where_an_agent_starts():
+    """One tool says it comes first: search_columns, when the agent does not know where the
+    data lives. The listing tools browse, and never claim to be the start."""
+    mcp, _ = _registered()
+    docs = {name: fn.__doc__ for name, fn in mcp.tools.items()}
+    assert "first tool to call" in docs["search_columns"]
+    for name, doc in docs.items():
+        if name != "search_columns":
+            assert "Start here" not in doc and "first tool" not in doc, name
+    for name in ("list_catalogs", "list_schemas", "list_tables"):
+        assert "search_columns" in docs[name] and "brows" in docs[name], name
+    assert "describe_schema" in docs["list_tables"]

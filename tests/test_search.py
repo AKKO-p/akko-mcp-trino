@@ -125,6 +125,10 @@ class Trino:
             cat = found.group(1)
             self._spend(cat, timeout)
             self._fail(cat)
+            only = re.search(r"schema_name = '([^']*)'", sql)
+            if only:  # the check that a named schema is visible
+                names = [s for s in self.schemas.get(cat, []) if s == only.group(1)]
+                return {"rows": [[s] for s in names], "row_count": len(names), "truncated": False}
             first = re.search(r"schema_name >= '([^']*)'", sql).group(1)
             names = sorted(s for s in self.schemas.get(cat, []) if s >= first)
             assert "information_schema" not in names or "<> 'information_schema'" in sql
@@ -257,7 +261,48 @@ def test_catalog_and_schema_names_are_folded_as_trino_folds_them(clock):
     trino = Trino({"demo": ["crm"]}, _COLUMNS)
     out = _ask(trino, clock, "email", catalog="Demo", schema="CRM")
     assert [(m["catalog"], m["schema"]) for m in out["matches"]] == [("demo", "crm")]
-    assert all("information_schema" not in sql for sql, _ in trino.calls)
+    assert all("schema_name >=" not in sql for sql, _ in trino.calls), "no schema is listed"
+    assert "WHERE schema_name = 'crm'" in trino.calls[0][0]
+
+
+@pytest.mark.parametrize("schema", ["crm_missing", "hidden"])
+def test_a_named_schema_missing_or_hidden_answers_kind_schema_never_complete(clock, schema):
+    """information_schema.schemata, filtered by Trino, shows neither a schema that does not
+    exist nor one the policy hides; system.jdbc.columns filtered on either answers no row
+    and no error. The search checks the schema first, as list_tables and describe_schema
+    do, and answers the same for both, never an empty search taken as complete."""
+    trino = Trino({"demo": ["crm"]}, {**_COLUMNS, ("demo", "hidden"): _COLUMNS[("demo", "crm")]})
+    out = _ask(trino, clock, "email", catalog="demo", schema=schema)
+    assert out == {"error": f"Schema demo.{schema} not found or not visible", "kind": "schema"}
+    assert all("system.jdbc.columns" not in sql for sql, _ in trino.calls)
+
+
+def test_a_named_schema_refusal_is_audited_as_a_failure(clock):
+    trino = Trino({"demo": ["crm"]}, _COLUMNS)
+    audit = InMemoryAudit()
+    _ask(trino, clock, "email", catalog="demo", schema="nosuch", audit=audit)
+    assert audit.events[0].ok is False and audit.events[0].error == "schema_not_found"
+
+
+def test_a_named_schema_check_keeps_the_error_of_a_missing_or_forbidden_catalog(clock):
+    """The check reads the catalog's information_schema: a catalog that does not exist or
+    that the caller may not access answers Trino's own error and kind, as describe_schema."""
+    denied = _UserError("PERMISSION_DENIED", "Access Denied: Cannot access catalog tpcds")
+    missing = _UserError("CATALOG_NOT_FOUND", "Catalog 'nosuchcat' not found")
+    trino = Trino({"demo": ["crm"]}, _COLUMNS, fail={"tpcds": denied, "nosuchcat": missing})
+    out = _ask(trino, clock, "email", catalog="tpcds", schema="tiny")
+    assert out == {"error": "Access Denied: Cannot access catalog tpcds", "kind": "permission"}
+    out = _ask(trino, clock, "email", catalog="nosuchcat", schema="x")
+    assert out["kind"] == "catalog" and "nosuchcat" in out["error"]
+    assert all("system.jdbc.columns" not in sql for sql, _ in trino.calls)
+
+
+def test_a_named_catalog_alone_that_is_missing_is_a_gap_never_complete(clock):
+    missing = _UserError("CATALOG_NOT_FOUND", "Catalog 'nosuchcat' not found")
+    trino = Trino({"demo": ["crm"]}, _COLUMNS, fail={"nosuchcat": missing})
+    out = _ask(trino, clock, "email", catalog="nosuchcat")
+    assert out["not_searched"] == [{"catalog": "nosuchcat", "schema": None, "reason": "catalog"}]
+    assert out["complete"] is False and out["schemas_searched"] == 0
 
 
 def test_a_named_catalog_searches_only_its_schemas(clock):
