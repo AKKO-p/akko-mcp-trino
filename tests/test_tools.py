@@ -751,9 +751,9 @@ def _rows(rows, cut=False):
 _CRM_TABLES = [("customers", "BASE TABLE"), ("orders_v", "VIEW")]
 _CRM_COMMENTS = [("customers", "One row per customer"), ("orders_v", None)]
 _CRM_COLUMNS = [
-    ("customers", "id", "bigint", "Customer key"),
-    ("customers", "email", "varchar", None),
-    ("orders_v", "total", "decimal(12,2)", "Order total, euros"),
+    ("customers", "id", "bigint", "Customer key", 1),
+    ("customers", "email", "varchar", None, 2),
+    ("orders_v", "total", "decimal(12,2)", "Order total, euros", 1),
 ]
 
 
@@ -795,15 +795,39 @@ def test_describe_schema_returns_whole_tables_with_comments():
         "SELECT schema_name FROM demo.information_schema.schemata WHERE schema_name = 'crm'",
         "SELECT table_name, table_type FROM demo.information_schema.tables "
         "WHERE table_schema = 'crm' ORDER BY table_name OFFSET 0 LIMIT 21",
+        "SELECT * FROM ("
         "SELECT table_name, comment FROM system.metadata.table_comments "
-        "WHERE catalog_name = 'demo' AND schema_name = 'crm' "
-        "AND table_name IN ('customers', 'orders_v') ORDER BY table_name",
-        "SELECT table_name, column_name, type_name, remarks FROM system.jdbc.columns "
-        "WHERE table_cat = 'demo' AND table_schem = 'crm' "
-        "AND table_name IN ('customers', 'orders_v') ORDER BY table_name, ordinal_position",
+        "WHERE catalog_name = 'demo' AND schema_name = 'crm' AND table_name = 'customers' "
+        "UNION ALL "
+        "SELECT table_name, comment FROM system.metadata.table_comments "
+        "WHERE catalog_name = 'demo' AND schema_name = 'crm' AND table_name = 'orders_v'"
+        ") ORDER BY table_name",
+        "SELECT * FROM ("
+        "SELECT table_name, column_name, type_name, remarks, ordinal_position "
+        "FROM system.jdbc.columns "
+        "WHERE table_cat = 'demo' AND table_schem = 'crm' AND table_name = 'customers' "
+        "UNION ALL "
+        "SELECT table_name, column_name, type_name, remarks, ordinal_position "
+        "FROM system.jdbc.columns "
+        "WHERE table_cat = 'demo' AND table_schem = 'crm' AND table_name = 'orders_v'"
+        ") ORDER BY table_name, ordinal_position",
     ]
     assert client.keywords[1] == {"row_limit": 21}, "one table more than a page, never the cap"
     assert {u for _, u in client.calls} == {"alice_admin"}, "every query runs as the caller"
+
+
+@pytest.mark.parametrize("metadata", [2, 3])  # the comments, then the columns
+def test_each_table_of_a_page_is_read_by_equality_never_by_a_list(metadata):
+    """Trino pushes ``table_name = '...'`` down into its metadata views, never a list
+    (``IN``, or an ``OR`` it rewrites as ``IN``), which reads the whole schema: each
+    table of the page has its own branch, so a page reads only its own tables."""
+    tables = [(f"t{i}", "BASE TABLE") for i in range(3)]
+    mcp, client = _describing(tables, [], describe_schema_tables=3)
+    mcp.tools["describe_schema"]("demo", "crm")
+    sql = client.calls[metadata][0]
+    assert " IN (" not in sql and " OR " not in sql
+    assert sql.count(" UNION ALL ") == 2
+    assert [f"table_name = 't{i}'" in sql for i in range(3)] == [True] * 3
 
 
 def test_describe_schema_reads_names_as_trino_folds_an_unquoted_name():
@@ -843,22 +867,23 @@ def test_an_empty_visible_schema_is_an_empty_list():
 
 def test_a_full_page_says_where_the_next_one_starts():
     tables = [(f"t{i}", "BASE TABLE") for i in range(3)]
-    columns = [(f"t{i}", "c", "bigint", None) for i in range(2)]
+    columns = [(f"t{i}", "c", "bigint", None, 1) for i in range(2)]
     mcp, client = _describing(tables, columns, describe_schema_tables=2)
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm", offset=40))
     assert [t["table"] for t in out["tables"]] == ["t0", "t1"]
     assert out["next_offset"] == 42 and out["shortened"] is False
     assert client.calls[1][0].endswith("ORDER BY table_name OFFSET 40 LIMIT 3")
-    assert "table_name IN ('t0', 't1')" in client.calls[3][0], "the extra row is not described"
+    assert "table_name = 't1'" in client.calls[3][0]
+    assert "'t2'" not in client.calls[3][0], "the extra row is not described"
 
 
 def test_a_page_never_cuts_a_table_and_says_when_it_was_shortened():
     """Whole tables only: the page stops before the table that would pass the column
     budget, says it was shortened, and the next page starts at that table."""
     tables = [("a", "BASE TABLE"), ("b", "BASE TABLE"), ("c", "BASE TABLE")]
-    columns = [("a", f"a{i}", "int", None) for i in range(3)]
-    columns += [("b", f"b{i}", "int", None) for i in range(3)]
-    columns += [("c", "c0", "int", None)]
+    columns = [("a", f"a{i}", "int", None, i + 1) for i in range(3)]
+    columns += [("b", f"b{i}", "int", None, i + 1) for i in range(3)]
+    columns += [("c", "c0", "int", None, 1)]
     mcp, _ = _describing(tables, columns, describe_schema_tables=3, describe_schema_columns=5)
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm", offset=6))
     assert [t["table"] for t in out["tables"]] == ["a"]
@@ -868,7 +893,8 @@ def test_a_page_never_cuts_a_table_and_says_when_it_was_shortened():
 
 def test_a_table_wider_than_the_column_budget_still_comes_whole():
     tables = [("wide", "BASE TABLE"), ("b", "BASE TABLE")]
-    columns = [("wide", f"c{i}", "int", None) for i in range(5)] + [("b", "x", "int", None)]
+    columns = [("wide", f"c{i}", "int", None, i + 1) for i in range(5)]
+    columns += [("b", "x", "int", None, 1)]
     mcp, _ = _describing(tables, columns, describe_schema_columns=2)
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
     assert [t["table"] for t in out["tables"]] == ["wide"]
@@ -883,13 +909,13 @@ def test_describe_schema_reads_every_column_past_the_row_cap():
     """The metadata views are read with every_row: a page the client cuts is followed by
     the next, from where it stopped, so no column is lost to the cap."""
     tables = [("a", "BASE TABLE")]
-    first = [("a", "c0", "int", None), ("a", "c1", "int", None)]
+    first = [("a", "c0", "int", None, 1), ("a", "c1", "int", None, 2)]
     results = [
         _rows([("crm",)]),
         _rows(tables),
         _rows([]),
         _rows(first, cut=True),
-        _rows([("a", "c2", "int", None)]),
+        _rows([("a", "c2", "int", None, 3)]),
     ]
     mcp, client = _registered(results=results, describe_schema_columns=2)
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
@@ -902,7 +928,7 @@ def test_a_table_name_is_put_in_sql_as_an_escaped_literal():
     mcp, client = _describing([("o'brien", "BASE TABLE")], [])
     out = json.loads(mcp.tools["describe_schema"]("demo", "crm"))
     assert out["tables"][0]["columns"] == []
-    assert "table_name IN ('o''brien')" in client.calls[3][0]
+    assert "table_name = 'o''brien'" in client.calls[3][0]
 
 
 def test_describe_schema_refuses_the_system_catalog():

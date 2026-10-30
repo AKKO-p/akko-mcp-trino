@@ -478,15 +478,20 @@ or not visible", the same for both), never an empty list. An `offset` that is no
 SQL: its tables and views, each with its type, its comment and all its columns
 (name, type, comment). It pages by tables, in Trino (`ORDER BY` with `OFFSET` on
 `information_schema.tables`): a page holds up to `MCP_DESCRIBE_SCHEMA_TABLES`
-tables (20 by default), always whole, and only while their columns add up to
+tables (20 by default, 100 at most), always whole, and only while their columns add up to
 `MCP_DESCRIBE_SCHEMA_COLUMNS` at most (1000 by default). The first table of a page
 always comes whole, however wide; a page that holds fewer tables for the column
 budget says so (`shortened: true`), and `next_offset` starts the next page at the
 table left out. The comments come from `system.metadata.table_comments` and the
 columns from `system.jdbc.columns`, two views of Trino's `system` catalog that Trino
 filters for each user, read by statements the server builds, never by the agent's
-SQL (see [What read-only covers](#what-read-only-covers)). A schema that does not
-exist and one the caller may not see answer the same error, `kind` `schema`; a
+SQL (see [What read-only covers](#what-read-only-covers)). A page costs four
+statements: the schema check, the page of table names, the comments and the columns.
+The last two hold one `UNION ALL` branch per table of the page, each filtered by
+equality on the table's name, which Trino pushes down into these views: a page reads
+the comments and columns of its own tables, never those of the whole schema (a list,
+`IN` or `OR`, is not pushed down and would read every table of the schema). A schema
+that does not exist and one the caller may not see answer the same error, `kind` `schema`; a
 visible empty schema answers an empty list. Comments are text the owners of the
 data wrote: the tool's description tells the model to read them as data, never as
 instructions, and the server never places them in its own MCP instructions.
@@ -778,7 +783,7 @@ reads its own variables from the same environment.
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
 | `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated`; also the size of one page of a listing | `100` |
 | `MCP_MAX_CATALOGS` | the most catalogs `list_catalogs` reads before it pages them, `system` aside, 1 at least; above it the tool answers an error, never a cut list | `10000` |
-| `MCP_DESCRIBE_SCHEMA_TABLES` | the most tables in one page of `describe_schema`, 1 at least | `20` |
+| `MCP_DESCRIBE_SCHEMA_TABLES` | the most tables in one page of `describe_schema`, from 1 to 100: a page reads each of its tables by its own branch, so its cost grows with the page | `20` |
 | `MCP_DESCRIBE_SCHEMA_COLUMNS` | the most columns one page of `describe_schema` holds in all, 1 at least; the first table of a page comes whole however wide, and a page shortened for this budget says so | `1000` |
 | `MCP_SEARCH_MIN_LENGTH` | the shortest text `search_columns` searches, spaces at the ends aside, 1 at least | `3` |
 | `MCP_SEARCH_RESERVE_SECONDS` | the seconds of the call's budget `search_columns` keeps in reserve, so that it answers what it searched before the call runs out; 0 or more, below `MCP_CALL_TIMEOUT_SECONDS` when that is set; 0 is warned of | `2` |

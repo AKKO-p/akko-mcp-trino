@@ -254,6 +254,18 @@ def _next_offset(offset: int, items: list, more: bool) -> Optional[int]:
     return offset + len(items) if more else None
 
 
+def each_table(select: str, names: Sequence[str], order: str) -> str:
+    """One statement that reads ``select`` (a SELECT on a metadata view, its WHERE ending
+    on the catalog and the schema) for each table of ``names``, ordered by ``order``.
+
+    Trino pushes an equality on ``table_name`` down into its metadata views, never a list:
+    ``IN``, or an ``OR`` it rewrites as ``IN``, reads every table of the schema, then
+    filters. Each table has its own branch of a ``UNION ALL``, filtered by its name, so
+    the statement reads the tables of ``names`` and nothing else."""
+    branches = " UNION ALL ".join(f"{select} AND table_name = {sql_literal(n)}" for n in names)
+    return f"SELECT * FROM ({branches}) ORDER BY {order}"
+
+
 # The description of execute_query, written for a model; ``rule`` says whether it may write.
 _EXECUTE_DOC = """Run {what} on Trino and return the rows.
 
@@ -626,7 +638,7 @@ def register_query_tools(
             comments: dict[str, Any] = {}
             columns: dict[str, list] = {}
             if page:
-                names = ", ".join(sql_literal(name) for name, _ in page)
+                names = [name for name, _ in page]
 
                 def read(sql: str) -> dict:
                     return run(sql, row_limit=describe_schema_columns)
@@ -634,23 +646,29 @@ def register_query_tools(
                 try:
                     comment_rows = every_row(
                         read,
-                        f"SELECT table_name, comment FROM {TABLE_COMMENTS} "
-                        f"WHERE catalog_name = {sql_literal(folded_cat)} "
-                        f"AND schema_name = {sql_literal(folded)} "
-                        f"AND table_name IN ({names}) ORDER BY table_name",
+                        each_table(
+                            f"SELECT table_name, comment FROM {TABLE_COMMENTS} "
+                            f"WHERE catalog_name = {sql_literal(folded_cat)} "
+                            f"AND schema_name = {sql_literal(folded)}",
+                            names,
+                            "table_name",
+                        ),
                     )
                     column_rows = every_row(
                         read,
-                        f"SELECT table_name, column_name, type_name, remarks FROM {JDBC_COLUMNS} "
-                        f"WHERE table_cat = {sql_literal(folded_cat)} "
-                        f"AND table_schem = {sql_literal(folded)} "
-                        f"AND table_name IN ({names}) ORDER BY table_name, ordinal_position",
+                        each_table(
+                            "SELECT table_name, column_name, type_name, remarks, ordinal_position "
+                            f"FROM {JDBC_COLUMNS} WHERE table_cat = {sql_literal(folded_cat)} "
+                            f"AND table_schem = {sql_literal(folded)}",
+                            names,
+                            "table_name, ordinal_position",
+                        ),
                     )
                 except Exception as e:  # noqa: BLE001 - no other way: the error says why
                     note(error=error_code(e))
                     return dumps(metadata_view_error(e))
                 comments = {str(r[0]): r[1] for r in comment_rows}
-                for t, column, kind, remark in column_rows:
+                for t, column, kind, remark, _ in column_rows:
                     columns.setdefault(str(t), []).append(
                         {"column": column, "type": kind, "comment": remark}
                     )

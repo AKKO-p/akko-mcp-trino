@@ -243,13 +243,18 @@ liste coupée. `list_tables` sur un schéma inexistant ou invisible pour l'appel
 `describe_schema` donne à l'agent, en un appel, le contexte d'un schéma avant d'écrire du SQL : ses
 tables et vues, chacune avec son type, son commentaire et toutes ses colonnes. Il pagine par tables,
 dans Trino (`ORDER BY` et `OFFSET` sur `information_schema.tables`) : une page compte au plus
-`MCP_DESCRIBE_SCHEMA_TABLES` tables (20 par défaut), toujours entières, tant que leurs colonnes ne
+`MCP_DESCRIBE_SCHEMA_TABLES` tables (20 par défaut, 100 au plus), toujours entières, tant que leurs colonnes ne
 dépassent pas `MCP_DESCRIBE_SCHEMA_COLUMNS` au total (1000 par défaut). La première table d'une page
 vient toujours entière, si large soit-elle ; une page qui compte moins de tables à cause de ce budget
 le dit (`shortened: true`), et `next_offset` fait commencer la page suivante à la table laissée de
 côté. Les commentaires viennent de `system.metadata.table_comments` et les colonnes de
 `system.jdbc.columns`, deux vues que Trino filtre pour chaque utilisateur, lues par des requêtes que
-le serveur construit, jamais par le SQL de l'agent. Un schéma inexistant et un schéma invisible pour
+le serveur construit, jamais par le SQL de l'agent. Une page coûte quatre requêtes : la vérification
+du schéma, la page des noms de tables, les commentaires et les colonnes. Les deux dernières ont une
+branche `UNION ALL` par table de la page, chacune filtrée par égalité sur le nom de la table, que
+Trino pousse dans ces vues : une page lit les commentaires et les colonnes de ses propres tables,
+jamais ceux du schéma entier (une liste, `IN` ou `OR`, n'est pas poussée et lirait toutes les tables
+du schéma). Un schéma inexistant et un schéma invisible pour
 l'appelant rendent la même erreur, `kind` `schema` ; un schéma visible et vide rend une liste vide.
 Les commentaires sont du texte écrit par les propriétaires des données : la description de l'outil
 demande au modèle de les lire comme des données, jamais comme des instructions, et le serveur ne les

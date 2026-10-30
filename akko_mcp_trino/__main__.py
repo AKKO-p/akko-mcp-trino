@@ -27,7 +27,7 @@ from . import __version__
 from .app import build_asgi_app, run_stdio, transports_supported
 from .audit import LoggingAudit
 from .auth import accepted_audiences, build_auth
-from .config import Config
+from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config
 from .extensions import Extension, extension_names, load_extensions
 from .health import build_health_app
 from .metrics import Metrics
@@ -95,7 +95,8 @@ def check_config(config: Config) -> int:
         ),
         f"listings: {config.max_rows} names a page; list_catalogs reads up to "
         f"{config.max_catalogs} catalogs",
-        f"describe_schema: up to {config.describe_schema_tables} tables a page, "
+        f"describe_schema: up to {config.describe_schema_tables} tables a page "
+        f"({MAX_DESCRIBE_SCHEMA_TABLES} at most), "
         f"{config.describe_schema_columns} columns in all, a wider table whole",
         f"search_columns: a text of {config.search_min_length} characters at least, "
         f"{config.search_reserve_seconds:g} s of the call's budget kept in reserve",
