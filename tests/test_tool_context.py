@@ -285,6 +285,12 @@ def test_list_catalogs_reads_up_to_the_configured_bound(monkeypatch):
     assert trino.keywords == {"row_limit": 251}, "system aside, 250 catalogs are read"
 
 
+def test_describe_schema_pages_by_the_configured_budgets(monkeypatch):
+    mcp, _, trino, _ = _server(monkeypatch, [], describe_schema_tables=7)
+    _as("alice_analyst", lambda: mcp.tools["describe_schema"]("c", "s"))
+    assert trino.calls[1][0].endswith("ORDER BY table_name OFFSET 0 LIMIT 8")
+
+
 def test_a_registrar_whose_third_argument_has_a_default_receives_the_context(monkeypatch):
     seen = {}
 

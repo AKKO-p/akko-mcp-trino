@@ -110,16 +110,26 @@ def _show_is_governed(rest: str, session_catalog: str | None) -> bool:
     return parts >= wanted
 
 
+# The two views of Trino's own `system` catalog the metadata tools read, by statements the
+# server builds: names of Trino's protocol, not settings. Trino filters both for each user,
+# as it does information_schema. The agent's own SQL never reaches `system`.
+JDBC_COLUMNS = "system.jdbc.columns"
+TABLE_COMMENTS = "system.metadata.table_comments"
+
+
 def safe_sql_string(text: str) -> str:
     """Escape a user string for safe inclusion in a Trino SQL literal.
 
-    Handles quotes, backslashes and NUL bytes. The caller wraps the result in
-    single quotes: ``f"'{safe_sql_string(val)}'"``.
+    Doubles the quotes and drops NUL bytes; a backslash stays as it is, since Trino
+    reads no backslash escape in a string literal. The caller wraps the result in
+    single quotes: ``f"'{safe_sql_string(val)}'"``, which ``sql_literal`` does.
     """
-    text = text.replace("\0", "")
-    text = text.replace("\\", "\\\\")
-    text = text.replace("'", "''")
-    return text
+    return text.replace("\0", "").replace("'", "''")
+
+
+def sql_literal(text: str) -> str:
+    """``text`` as a whole Trino string literal, quotes included: never more than a value."""
+    return f"'{safe_sql_string(text)}'"
 
 
 def normalize_sql(sql: str) -> str:

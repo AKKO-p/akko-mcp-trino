@@ -12,6 +12,9 @@ message is Trino's, whole; the kind is what an agent can act on:
 * an engine that could not answer (internal error, connection lost) is ``unavailable``,
   which says nothing about the statement: it is neither valid nor invalid.
 
+A tool that reads Trino's metadata views answers ``metadata_view_error``: the same
+explanation, which names what the access control must allow when it refused them.
+
 The audit is not affected: it keeps ``akko_mcp_trino.audit.error_code``.
 """
 
@@ -47,6 +50,12 @@ ERROR_KINDS: Mapping[str, str] = {
 }
 _NAMED = re.compile(r"\b(column|table|schema|catalog) '([^']+)'", re.I)
 _CONNECTION_ERRORS = (OSError, HttpError, TrinoConnectionError)
+# The kinds of an error on a metadata view that its access control can be the cause of.
+_VIEW_REFUSED = (PERMISSION, "catalog", "table")
+METADATA_VIEWS_HINT = (
+    "This tool reads system.jdbc.columns and system.metadata.table_comments, which Trino "
+    "filters for each user; the access control must allow reading them."
+)
 
 
 def explain_error(exc: BaseException) -> dict:
@@ -70,4 +79,15 @@ def explain_error(exc: BaseException) -> dict:
         out["kind"] = INVALID_ARGUMENT
     else:
         out["kind"] = OTHER
+    return out
+
+
+def metadata_view_error(exc: BaseException) -> dict:
+    """``explain_error(exc)`` for a tool that reads Trino's metadata views: a refusal (kind
+    ``permission``), or a view Trino does not show (``catalog``, ``table``), says what the
+    access control must allow. No other way is tried: the error says why."""
+    out = explain_error(exc)
+    if out["kind"] in _VIEW_REFUSED:
+        said = out["error"] if out["error"].endswith(".") else out["error"] + "."
+        out["error"] = f"{said} {METADATA_VIEWS_HINT}"
     return out

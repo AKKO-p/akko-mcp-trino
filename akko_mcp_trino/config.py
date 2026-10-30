@@ -14,6 +14,8 @@ from dataclasses import dataclass
 # Defaults shared with the tools' registration, so a page and a bound never drift apart.
 DEFAULT_MAX_ROWS = 100
 DEFAULT_MAX_CATALOGS = 10000
+DEFAULT_DESCRIBE_SCHEMA_TABLES = 20
+DEFAULT_DESCRIBE_SCHEMA_COLUMNS = 1000
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,11 @@ class Config:
     # The most catalogs `list_catalogs` reads, past the row cap, before it pages them:
     # above it the tool answers an error, never a cut list.
     max_catalogs: int = DEFAULT_MAX_CATALOGS
+    # A page of `describe_schema`: at most this many tables, and whole tables only while
+    # their columns add up to this many at most; the first table of a page comes whole,
+    # however wide, and the answer says when a page was shortened.
+    describe_schema_tables: int = DEFAULT_DESCRIBE_SCHEMA_TABLES
+    describe_schema_columns: int = DEFAULT_DESCRIBE_SCHEMA_COLUMNS
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -119,6 +126,16 @@ class Config:
             found.append(
                 f"MCP_MAX_CATALOGS={self.max_catalogs}: "
                 "list_catalogs must be allowed 1 catalog or more"
+            )
+        if self.describe_schema_tables < 1:
+            found.append(
+                f"MCP_DESCRIBE_SCHEMA_TABLES={self.describe_schema_tables}: "
+                "a page of describe_schema must hold 1 table or more"
+            )
+        if self.describe_schema_columns < 1:
+            found.append(
+                f"MCP_DESCRIBE_SCHEMA_COLUMNS={self.describe_schema_columns}: "
+                "describe_schema must be allowed 1 column or more"
             )
         for name, value in (
             ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
@@ -188,4 +205,10 @@ class Config:
             trino_client_cert=os.environ.get("TRINO_CLIENT_CERT", ""),
             trino_client_key=os.environ.get("TRINO_CLIENT_KEY", ""),
             max_catalogs=int(os.environ.get("MCP_MAX_CATALOGS", str(DEFAULT_MAX_CATALOGS))),
+            describe_schema_tables=int(
+                os.environ.get("MCP_DESCRIBE_SCHEMA_TABLES", str(DEFAULT_DESCRIBE_SCHEMA_TABLES))
+            ),
+            describe_schema_columns=int(
+                os.environ.get("MCP_DESCRIBE_SCHEMA_COLUMNS", str(DEFAULT_DESCRIBE_SCHEMA_COLUMNS))
+            ),
         )

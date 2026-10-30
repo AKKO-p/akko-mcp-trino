@@ -38,6 +38,7 @@ def test_build_server_returns_mcp_and_client():
         "list_catalogs",
         "list_schemas",
         "list_tables",
+        "describe_schema",
         "describe_table",
         "explain_query",
         "execute_query",
@@ -56,7 +57,7 @@ def test_build_server_applies_extra_registrars():
     mcp, _ = build_server(
         _CFG, extra_tool_registrars=[registrar], mcp_factory=lambda name, **_: FakeMCP()
     )
-    assert len(mcp.tools) == 7
+    assert len(mcp.tools) == 8
     assert "outil_maison" in mcp.tools
 
 

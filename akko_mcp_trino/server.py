@@ -135,6 +135,8 @@ def build_server(
         describe_notes=[ext.describe_table_doc() for ext in exts],
         max_rows=config.max_rows,
         max_catalogs=config.max_catalogs,
+        describe_schema_tables=config.describe_schema_tables,
+        describe_schema_columns=config.describe_schema_columns,
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)
     registrars = [r for ext in exts for r in ext.tool_registrars()]

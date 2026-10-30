@@ -5,12 +5,24 @@ import pytest
 from akko_mcp_trino import sql_guard
 
 
-def test_safe_sql_string_escapes_quotes_backslashes_nulls():
+def test_safe_sql_string_doubles_quotes_drops_nuls_and_keeps_backslashes():
+    """Trino reads no backslash escape in a string literal: a backslash is itself."""
     assert sql_guard.safe_sql_string("O'Brien") == "O''Brien"
-    assert sql_guard.safe_sql_string("a\\b") == "a\\\\b"
+    assert sql_guard.safe_sql_string("a\\b") == "a\\b"
     assert sql_guard.safe_sql_string("x\0y") == "xy"
     # quote and backslash combined
-    assert sql_guard.safe_sql_string("a\\'b") == "a\\\\''b"
+    assert sql_guard.safe_sql_string("a\\'b") == "a\\''b"
+
+
+def test_sql_literal_keeps_backslashes_and_doubles_quotes():
+    assert sql_guard.sql_literal("a\\b'c") == "'a\\b''c'"
+    assert sql_guard.sql_literal("x\0y") == "'xy'"
+    assert sql_guard.sql_literal("") == "''"
+
+
+def test_the_metadata_views_are_trinos_own_names():
+    assert sql_guard.JDBC_COLUMNS == "system.jdbc.columns"
+    assert sql_guard.TABLE_COMMENTS == "system.metadata.table_comments"
 
 
 @pytest.mark.parametrize("name", ["iceberg", "fraud_scores", "a-b", "_x", "A1"])

@@ -51,7 +51,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **One identity, only when named.** In `service` mode every query runs as `TRINO_USER`. It is never chosen by default, and the server says so at start and to every host in its initialization instructions.
 - **Bounded by default.** A row cap with a `truncated` flag (100), a time budget per query cancelled in Trino (60 s), a time budget per tool call (120 s).
 - **One audit line per call.** Keyed by `X-Request-Id`, never the token, never the SQL text: who called which tool, with which outcome, for how long.
-- **Six tools, no more,** annotated with what they can really do: `execute_query` is annotated read-only only while `TRINO_READ_ONLY` is true.
+- **Seven tools,** annotated with what they can really do: `execute_query` is annotated read-only only while `TRINO_READ_ONLY` is true.
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
@@ -406,6 +406,7 @@ The [examples](examples/README.md) folder has the details.
 | `list_catalogs` | `offset` (optional, 0 by default) | `{"catalogs": [...], "next_offset": n or null, "truncated": bool}`: one page of the catalogs Trino shows |
 | `list_schemas` | `catalog`, `offset` (optional) | `{"schemas": [...], "next_offset": n or null, "truncated": bool}`: one page of the schemas in that catalog |
 | `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
+| `describe_schema` | `catalog`, `schema`, `offset` (optional) | `{"catalog", "schema", "tables": [{"table", "type", "comment", "columns": [{"column", "type", "comment"}]}], "next_offset": n or null, "shortened": bool}`: one page of whole tables, with their comments and columns |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add |
 | `explain_query` | `sql` | `{"plan": "..."}`: how Trino would run a read-only statement, without running it |
 | `execute_query` | `sql`, `max_rows` (optional, lower than the server cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
@@ -461,6 +462,24 @@ then paged by the server; `system` does not count against the bound. Above it
 does not exist, or that the caller may not see, answers `kind` `schema` ("not found
 or not visible", the same for both), never an empty list. An `offset` that is not a whole number from 0 is refused
 (`invalid_argument`) before Trino.
+
+`describe_schema` gives an agent a schema's context in one call before it writes
+SQL: its tables and views, each with its type, its comment and all its columns
+(name, type, comment). It pages by tables, in Trino (`ORDER BY` with `OFFSET` on
+`information_schema.tables`): a page holds up to `MCP_DESCRIBE_SCHEMA_TABLES`
+tables (20 by default), always whole, and only while their columns add up to
+`MCP_DESCRIBE_SCHEMA_COLUMNS` at most (1000 by default). The first table of a page
+always comes whole, however wide; a page that holds fewer tables for the column
+budget says so (`shortened: true`), and `next_offset` starts the next page at the
+table left out. The comments come from `system.metadata.table_comments` and the
+columns from `system.jdbc.columns`, two views of Trino's `system` catalog that Trino
+filters for each user, read by statements the server builds, never by the agent's
+SQL (see [What read-only covers](#what-read-only-covers)). A schema that does not
+exist and one the caller may not see answer the same error, `kind` `schema`; a
+visible empty schema answers an empty list. Comments are text the owners of the
+data wrote: the tool's description tells the model to read them as data, never as
+instructions, and the server never places them in its own MCP instructions.
+`describe_table` stays the tool for sample rows and what extensions add.
 
 The defaults are chosen for an agent, not for a batch job. A question an agent
 asks should come back within a minute; a query that needs longer is usually a
@@ -571,7 +590,13 @@ For read-only end to end, make the engine hold the line too:
 
 The guard stays a second line, not the only one: the engine's policy must
 refuse table functions and the `system` catalog too (see
-[Design notes](#design-notes)).
+[Design notes](#design-notes)), **except** reading `system.jdbc` and
+`system.metadata`, which Trino filters for each user, as it does
+`information_schema`: a user sees there only the tables and columns they may see
+elsewhere. `describe_schema` reads `system.jdbc.columns` and
+`system.metadata.table_comments` by statements the server builds; a policy that
+refuses them makes it answer an error that says so, with no other way tried. The
+agent's own SQL stays refused on all of `system`, these views included.
 
 ## Extensions
 
@@ -694,6 +719,8 @@ reads its own variables from the same environment.
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
 | `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated`; also the size of one page of a listing | `100` |
 | `MCP_MAX_CATALOGS` | the most catalogs `list_catalogs` reads before it pages them, `system` aside, 1 at least; above it the tool answers an error, never a cut list | `10000` |
+| `MCP_DESCRIBE_SCHEMA_TABLES` | the most tables in one page of `describe_schema`, 1 at least | `20` |
+| `MCP_DESCRIBE_SCHEMA_COLUMNS` | the most columns one page of `describe_schema` holds in all, 1 at least; the first table of a page comes whole however wide, and a page shortened for this budget says so | `1000` |
 | `TRINO_QUERY_TIMEOUT_SECONDS` | time budget of one query: past it, the server cancels the query in Trino; `0` leaves the limit to Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | time budget of one tool call, every query of the call included: past it, no query starts, the one running is cancelled and the agent gets an error; `0` sets none | `120` |
 | `TRINO_SOURCE` | the source Trino records for every query (`X-Trino-Source`) | the server name |
@@ -834,7 +861,7 @@ Every module in `akko_mcp_trino/` has one responsibility and its tests, in
 | `transport_security.py` | the Host header filter (`MCP_ALLOWED_HOSTS`) |
 | `audit.py` | the audit line, the request id, the record and the time budget of a call |
 | `sql_guard.py` | identifier validation, read-only decision on the AST |
-| `tools.py`, `plugins.py` | the six tools and the `ToolContext`, loading tool plugins |
+| `tools.py`, `plugins.py` | the seven tools and the `ToolContext`, loading tool plugins |
 | `trino_client.py` | the Trino connection, the identity modes (`jwt`, `impersonation`, `oauth2`, `service` in the core) and the time budgets |
 | `token_exchange.py` | OAuth 2.0 Token Exchange (RFC 8693): a token for Trino in exchange for the caller's |
 | `health.py`, `metrics.py` | `/health`, `/ready` and `/metrics`; the Prometheus counters |
@@ -867,7 +894,8 @@ as a plain `SELECT`, yet it sends raw SQL to the source under the connector's
 own account, so the engine applies neither row filters nor column masks. The
 guard refuses every table function and the `system` catalog (which shows other
 users' SQL in `system.runtime.queries`). The engine policy must refuse them as
-well; the guard is a second line, not the only one.
+well, `system.jdbc` and `system.metadata` aside; the guard is a second line, not
+the only one.
 
 **No token passthrough.** Up to 0.5, `jwt` mode sent Trino the caller's own
 token, once verified. The MCP authorization specification forbids it: a token
