@@ -442,6 +442,18 @@ def test_cli_check_reports_the_page_of_a_listing_and_the_catalog_bound(monkeypat
     assert "MCP_MAX_CATALOGS=0: list_catalogs must be allowed 1 catalog or more" in out
 
 
+def test_cli_check_reports_the_describe_schema_page(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("MCP_DESCRIBE_SCHEMA_TABLES", "8")
+    monkeypatch.setenv("MCP_DESCRIBE_SCHEMA_COLUMNS", "0")
+    assert check_config(Config.from_env()) == 2
+    out = capsys.readouterr().out
+    assert "describe_schema: up to 8 tables a page, 0 columns in all, a wider table whole" in out
+    assert "MCP_DESCRIBE_SCHEMA_COLUMNS=0: describe_schema must be allowed 1 column" in out
+
+
 def test_cli_check_reports_the_query_source_and_budget(monkeypatch, capsys):
     from akko_mcp_trino.__main__ import check_config
     from akko_mcp_trino.config import Config

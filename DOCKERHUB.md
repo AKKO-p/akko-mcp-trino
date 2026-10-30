@@ -17,7 +17,7 @@ and a write anywhere in it is refused before Trino.
   to every host.
 - **Bounded and audited.** 100 rows, 60 s per query, 120 s per tool call by default, one audit
   line per call, and no token ever written to the logs.
-- **Six tools, no more**, for any MCP host and any model.
+- **Seven tools**, for any MCP host and any model.
 
 Source, documentation and issues: **[github.com/AKKO-p/akko-mcp-trino](https://github.com/AKKO-p/akko-mcp-trino)**
 

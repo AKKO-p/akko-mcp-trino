@@ -35,6 +35,8 @@ _ENV_KEYS = [
     "TRINO_CLIENT_CERT",
     "TRINO_CLIENT_KEY",
     "MCP_MAX_CATALOGS",
+    "MCP_DESCRIBE_SCHEMA_TABLES",
+    "MCP_DESCRIBE_SCHEMA_COLUMNS",
 ]
 
 
@@ -113,6 +115,24 @@ def test_max_catalogs_below_one_is_refused_at_start(monkeypatch):
     monkeypatch.setenv("MCP_MAX_CATALOGS", "0")
     assert Config.from_env().problems() == [
         "MCP_MAX_CATALOGS=0: list_catalogs must be allowed 1 catalog or more"
+    ]
+
+
+def test_describe_schema_budgets_default_and_are_read_from_the_environment(monkeypatch):
+    c = Config.from_env()
+    assert (c.describe_schema_tables, c.describe_schema_columns) == (20, 1000)
+    monkeypatch.setenv("MCP_DESCRIBE_SCHEMA_TABLES", "5")
+    monkeypatch.setenv("MCP_DESCRIBE_SCHEMA_COLUMNS", "300")
+    c = Config.from_env()
+    assert (c.describe_schema_tables, c.describe_schema_columns) == (5, 300)
+
+
+def test_describe_schema_budgets_below_one_are_refused_at_start(monkeypatch):
+    monkeypatch.setenv("MCP_DESCRIBE_SCHEMA_TABLES", "0")
+    monkeypatch.setenv("MCP_DESCRIBE_SCHEMA_COLUMNS", "-1")
+    assert Config.from_env().problems() == [
+        "MCP_DESCRIBE_SCHEMA_TABLES=0: a page of describe_schema must hold 1 table or more",
+        "MCP_DESCRIBE_SCHEMA_COLUMNS=-1: describe_schema must be allowed 1 column or more",
     ]
 
 

@@ -12,8 +12,15 @@ All notable changes to this project are documented here. The format follows
 - `MCP_MAX_CATALOGS` (10000 by default, 1 at least): `list_catalogs` reads `SHOW CATALOGS` whole, past the row cap, up to this bound (`system` aside), and pages it in the server; above the bound it answers an error, never a cut list. `--check` prints the page size and the bound.
 - For plugins: `ToolContext.run` takes `row_limit` (replaces the row cap for a statement the tool builds itself) and `timeout` (lowers one query's time budget; a query stopped by it raises a plain `TimeoutError` and the call goes on). `ToolContext.run_whole(sql, bound=…, what=…)` reads every row up to a bound, or raises `ValueError`. `ToolContext.page_size` is the row cap. `check_offset(offset)` validates an offset. `TrinoClient.query` takes the same `row_limit` and `timeout`.
 
+- `describe_schema(catalog, schema, offset)`: a schema's tables and views in one call, each with its type, its comment and all its columns (name, type, comment), paged by whole tables in Trino. `MCP_DESCRIBE_SCHEMA_TABLES` (20 by default) bounds the tables of a page and `MCP_DESCRIBE_SCHEMA_COLUMNS` (1000 by default) their columns in all; the first table of a page comes whole however wide, and `shortened` says when a page holds fewer tables for the column budget. Comments and columns are read from `system.metadata.table_comments` and `system.jdbc.columns`, which Trino filters for each user; a policy that refuses them gets an error that names what to allow. A missing schema and a hidden one answer the same `kind` `schema` error. `--check` prints both bounds.
+- For plugins: `akko_mcp_trino.sql_guard.sql_literal(text)` makes a whole Trino string literal; `akko_mcp_trino.errors.metadata_view_error(exc)` explains an error on Trino's metadata views.
+
 ### Changed
+- The advice on the engine's policy: refuse the `system` catalog **except** reading `system.jdbc` and `system.metadata`, which Trino filters for each user; without them `describe_schema` answers an error that says so. The agent's SQL stays refused on all of `system`.
 - `listing_reply(key, items, next_offset)` takes the next page's offset, or `None`, instead of `truncated`, and answers both keys; a bool is refused with `TypeError`.
+
+### Fixed
+- `akko_mcp_trino.sql_guard.safe_sql_string` no longer doubles a backslash: Trino reads no backslash escape in a string literal, so `a\b` became `a\\b`, another value. It still doubles quotes and drops NUL bytes.
 
 ## [0.6.1] - 2026-10-29
 

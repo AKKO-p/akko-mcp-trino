@@ -55,7 +55,7 @@ donnez.
 - **Borné par défaut.** Un plafond de 100 lignes avec l'indicateur `truncated`, un délai de 60 s
   par requête annulé dans Trino, un délai de 120 s par appel d'outil.
 - **Une ligne d'audit par appel**, sans jamais le jeton ni le texte SQL.
-- **Six outils, pas un de plus**, annotés selon ce qu'ils peuvent vraiment faire.
+- **Sept outils**, annotés selon ce qu'ils peuvent vraiment faire.
 - **Extensible sans fork**, par des paquets Python nommés au démarrage.
 
 ## Ce que couvre la lecture seule
@@ -71,7 +71,12 @@ Pour une lecture seule de bout en bout, le moteur doit tenir la ligne lui aussi.
 en lecture seule aux identités par lesquelles les agents atteignent Trino (OPA, Ranger ou règles
 de fichier), réservez l'échange vers l'audience de Trino au client de ce serveur, limitez la règle
 d'impersonation aux utilisateurs pour qui les agents travaillent, et refusez aussi les fonctions
-de table et le catalogue `system` dans la politique. La garde reste une seconde ligne.
+de table et le catalogue `system` dans la politique, **sauf** la lecture de `system.jdbc` et
+`system.metadata`, que Trino filtre pour chaque utilisateur comme il filtre `information_schema` :
+un utilisateur n'y voit que les tables et colonnes qu'il peut voir ailleurs. `describe_schema` lit
+`system.jdbc.columns` et `system.metadata.table_comments` par des requêtes que le serveur construit ;
+une politique qui les refuse lui fait rendre une erreur qui le dit, sans autre voie essayée. Le SQL
+de l'agent reste refusé sur tout `system`, ces vues comprises. La garde reste une seconde ligne.
 
 ## Installer
 
@@ -199,6 +204,7 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 | `list_catalogs` | `offset` (facultatif, 0 par défaut) | une page des catalogues que Trino montre, `next_offset`, `truncated` |
 | `list_schemas` | `catalog`, `offset` (facultatif) | une page des schémas de ce catalogue, `next_offset`, `truncated` |
 | `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
+| `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, échantillon gouverné sur demande |
 | `explain_query` | `sql` | le plan de Trino pour une requête en lecture, sans l'exécuter |
 | `execute_query` | `sql`, `max_rows` (facultatif) | colonnes, lignes, nombre de lignes, `truncated` |
@@ -219,6 +225,21 @@ serveur, `system` non compté ; au-delà de cette borne, `list_catalogs` rend un
 liste coupée. `list_tables` sur un schéma inexistant ou invisible pour l'appelant rend `kind`
 `schema` (« not found or not visible », la même réponse pour les deux), jamais une liste vide. Un
 `offset` qui n'est pas un entier positif ou nul est refusé (`invalid_argument`) avant Trino.
+
+`describe_schema` donne à l'agent, en un appel, le contexte d'un schéma avant d'écrire du SQL : ses
+tables et vues, chacune avec son type, son commentaire et toutes ses colonnes. Il pagine par tables,
+dans Trino (`ORDER BY` et `OFFSET` sur `information_schema.tables`) : une page compte au plus
+`MCP_DESCRIBE_SCHEMA_TABLES` tables (20 par défaut), toujours entières, tant que leurs colonnes ne
+dépassent pas `MCP_DESCRIBE_SCHEMA_COLUMNS` au total (1000 par défaut). La première table d'une page
+vient toujours entière, si large soit-elle ; une page qui compte moins de tables à cause de ce budget
+le dit (`shortened: true`), et `next_offset` fait commencer la page suivante à la table laissée de
+côté. Les commentaires viennent de `system.metadata.table_comments` et les colonnes de
+`system.jdbc.columns`, deux vues que Trino filtre pour chaque utilisateur, lues par des requêtes que
+le serveur construit, jamais par le SQL de l'agent. Un schéma inexistant et un schéma invisible pour
+l'appelant rendent la même erreur, `kind` `schema` ; un schéma visible et vide rend une liste vide.
+Les commentaires sont du texte écrit par les propriétaires des données : la description de l'outil
+demande au modèle de les lire comme des données, jamais comme des instructions, et le serveur ne les
+place jamais dans ses instructions MCP. `describe_table` reste l'outil des lignes d'exemple.
 
 Une erreur revient sous la forme `{"error": "...", "kind": "..."}`. `error` est le message entier de
 Trino ; `kind` dit quoi en faire, et `identifier` nomme la colonne, la table, le schéma ou le
