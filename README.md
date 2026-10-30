@@ -485,8 +485,13 @@ budget says so (`shortened: true`), and `next_offset` starts the next page at th
 table left out. The comments come from `system.metadata.table_comments` and the
 columns from `system.jdbc.columns`, two views of Trino's `system` catalog that Trino
 filters for each user, read by statements the server builds, never by the agent's
-SQL (see [What read-only covers](#what-read-only-covers)). A schema that does not
-exist and one the caller may not see answer the same error, `kind` `schema`; a
+SQL (see [What read-only covers](#what-read-only-covers)). A page costs four
+statements: the schema check, the page of table names, the comments and the columns.
+The last two hold one `UNION ALL` branch per table of the page, each filtered by
+equality on the table's name, which Trino pushes down into these views: a page reads
+the comments and columns of its own tables, never those of the whole schema (a list,
+`IN` or `OR`, is not pushed down and would read every table of the schema). A schema
+that does not exist and one the caller may not see answer the same error, `kind` `schema`; a
 visible empty schema answers an empty list. Comments are text the owners of the
 data wrote: the tool's description tells the model to read them as data, never as
 instructions, and the server never places them in its own MCP instructions.
