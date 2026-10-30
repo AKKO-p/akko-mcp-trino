@@ -13,7 +13,10 @@ choosing a transport never decides whether the guard is present.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from functools import partial
+from typing import Any, Callable, Sequence
+
+import anyio
 
 from .auth import Principal
 from .config import Config
@@ -46,8 +49,9 @@ def run_stdio(
     whole process; once verified, the token is also the bearer the ``jwt``
     identity mode sends to Trino. In strict mode a missing or invalid token
     refuses to start, which is the stdio equivalent of a 401. The extensions'
-    guards hold here too, once, for the whole process. Nothing here writes to
-    stdout: stdout is the protocol channel.
+    guards hold here too. In ``oauth2`` mode Trino verifies the user on first
+    tool use, and the guards run on each tool call, never during startup or
+    discovery. Nothing here writes to stdout: stdout is the protocol channel.
     """
     principal = None
     if auth_provider is not None and config.user_token:
@@ -58,27 +62,14 @@ def run_stdio(
             "refusing to serve over stdio without a verified identity"
         )
 
-    bearer = config.user_token if principal is not None else None
     if config.trino_identity_mode == "oauth2":
         if client is None:
             raise ValueError("TRINO_IDENTITY_MODE=oauth2 requires the Trino client before serving")
-        rows = client.query("SELECT current_user")["rows"]
-        subject = rows[0][0] if rows and rows[0] else None
-        if not isinstance(subject, str) or not subject.strip():
-            raise PermissionError("Trino OAuth2 returned no authenticated user")
-        principal = Principal(subject=subject)
-
-    admission = Admission(
-        headers={}, bearer=config.user_token or None, principal=principal, stdio=True
-    )
-    for ext in extensions:
-        refusal = ext.before_auth(admission) or ext.after_auth(admission)
-        if refusal is not None:
-            raise PermissionError(f"admission refused: {refusal.reason}")
-    set_current_principal(principal)
-    set_current_bearer(bearer)
-    for var, value in admission.bindings:
-        var.set(value)
+        set_current_principal(None)
+        mcp.middleware.append(_oauth2_stdio_middleware(client, partial(_admit, config, extensions)))
+    else:
+        _admit(config, extensions, principal)
+    set_current_bearer(config.user_token if principal is not None else None)
     mcp.run(transport="stdio")
 
 
@@ -121,3 +112,39 @@ def build_asgi_app(
         metadata_url=metadata_url,
     )
     return app
+
+
+def _admit(config: Config, extensions: Sequence[Extension], user: Principal | None) -> None:
+    """Apply the stdio admission guards and bind the caller and extension context."""
+    admission = Admission(headers={}, bearer=config.user_token or None, principal=user, stdio=True)
+    for ext in extensions:
+        refusal = ext.before_auth(admission) or ext.after_auth(admission)
+        if refusal is not None:
+            raise PermissionError(f"admission refused: {refusal.reason}")
+    set_current_principal(admission.principal)
+    for var, value in admission.bindings:
+        var.set(value)
+
+
+def _oauth2_stdio_middleware(client: Any, admit: Callable[[Principal], None]) -> Callable:
+    """Verify the Trino identity on first tool use; admit that user on every call."""
+    principal: Principal | None = None
+    lock = anyio.Lock()
+
+    async def authenticate_on_call(ctx, call_next):
+        nonlocal principal
+        if ctx.method == "tools/call":
+            async with lock:
+                if principal is None:
+                    result = await anyio.to_thread.run_sync(
+                        partial(client.query, "SELECT current_user")
+                    )
+                    rows = result["rows"]
+                    subject = rows[0][0] if rows and rows[0] else None
+                    if not isinstance(subject, str) or not subject.strip():
+                        raise PermissionError("Trino OAuth2 returned no authenticated user")
+                    principal = Principal(subject=subject)
+            admit(principal)
+        return await call_next(ctx)
+
+    return authenticate_on_call

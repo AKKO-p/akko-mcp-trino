@@ -290,9 +290,10 @@ MCP_AUTH_ENABLED=false MCP_AUTH_REQUIRED=false python -m akko_mcp_trino
 ```
 
 The server sends Trino no user name: Trino runs every query as the user who
-signed in, and `TRINO_USER` is ignored. Startup opens the browser, logs
-the URL to stderr only, and requires `SELECT current_user` to succeed; its result
-names the admission/audit principal. HTTP MCP transports are rejected.
+signed in, and `TRINO_USER` is ignored. Browser login starts on the first tool call,
+not at startup. The URL is logged to stderr only, and `SELECT current_user` must
+succeed before the tool runs; its result names the admission/audit principal.
+HTTP MCP transports are rejected.
 `MCP_AUTH_REQUIRED=true` requires a verified `MCP_USER_TOKEN` in addition;
 `false` never skips Trino login. The driver reuses tokens and reauthenticates,
 with memory caching or optional `keyring`. `--check` does not log in.
@@ -685,7 +686,7 @@ reads its own variables from the same environment.
 | `TRINO_HTTP_SCHEME` | `http` or `https`; a password is never sent over `http` | `http` |
 | `TRINO_VERIFY` | TLS verification: `true`, `false`, or a path to the CA bundle Trino's TLS chain is checked against | `true` |
 | `TRINO_REQUEST_TIMEOUT_SECONDS` | per-request timeout on the Trino client | `30` |
-| `TRINO_IDENTITY_MODE` | who the server is for Trino: `jwt` (caller, by token exchange), `impersonation` (caller, impersonated by `TRINO_USER`), `oauth2` (native browser login, stdio only, checked at startup), or `service` (`TRINO_USER`, announced as a warning); all except `service` require https; `jwt` and `impersonation` also require a valid MCP token; an extension may add others, and an unknown mode refuses to start | `jwt` |
+| `TRINO_IDENTITY_MODE` | who the server is for Trino: `jwt` (caller, by token exchange), `impersonation` (caller, impersonated by `TRINO_USER`), `oauth2` (native browser login, stdio only, checked on first tool call), or `service` (`TRINO_USER`, announced as a warning); all except `service` require https; `jwt` and `impersonation` also require a valid MCP token; an extension may add others, and an unknown mode refuses to start | `jwt` |
 | `TRINO_TOKEN_EXCHANGE_URL` | `jwt`: the provider's token endpoint (https only) | none (required in `jwt`) |
 | `TRINO_TOKEN_EXCHANGE_CLIENT_ID`, `TRINO_TOKEN_EXCHANGE_CLIENT_SECRET` | `jwt`: this server's confidential client at the provider, sent by Basic authentication; `--check` never prints the secret | none (required in `jwt`) |
 | `TRINO_TOKEN_EXCHANGE_AUDIENCE` | `jwt`: the audience of the token requested for Trino, the one Trino's `required-audience` names; never an audience this server accepts | none (required in `jwt`) |

@@ -12,8 +12,10 @@ from __future__ import annotations
 import contextvars
 import dataclasses
 from dataclasses import replace
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
+import anyio
 import pytest
 from starlette.applications import Starlette
 
@@ -193,9 +195,31 @@ def test_stdio_without_auth_runs_as_the_service_account():
 @pytest.mark.parametrize("token, required", [("", False), ("valid", True), ("invalid", False)])
 def test_stdio_uses_trinos_identity_for_admission_and_audit(token, required):
     mcp, audit = _FakeStdioMCP(), InMemoryAudit()
-    mcp.run = audited(audit, mcp.run)
+    mcp.middleware = []
     client = Mock(query=Mock(return_value={"rows": [["trino-alice"]]}))
     guard = Mock(before_auth=Mock(return_value=None), after_auth=Mock(return_value=None))
+    binding = contextvars.ContextVar("oauth2_binding", default=None)
+    guard.after_auth.side_effect = lambda admission: admission.bind(binding, "bound")
+    tool = audited(audit, mcp.run)
+
+    async def call_next(ctx):
+        assert binding.get() == "bound"
+        tool("stdio")
+
+    async def calls():
+        middleware = mcp.middleware[0]
+        await middleware(SimpleNamespace(method="initialize"), lambda ctx: anyio.sleep(0))
+        await middleware(SimpleNamespace(method="tools/list"), lambda ctx: anyio.sleep(0))
+        client.query.assert_not_called()
+        guard.before_auth.assert_not_called()
+        async with anyio.create_task_group() as group:
+            for _ in range(2):
+                group.start_soon(middleware, SimpleNamespace(method="tools/call"), call_next)
+
+    def run(transport):
+        anyio.run(calls)
+
+    mcp.run = run
     contextvars.copy_context().run(
         run_stdio,
         replace(
@@ -213,31 +237,51 @@ def test_stdio_uses_trinos_identity_for_admission_and_audit(token, required):
     )
     client.query.assert_called_once_with("SELECT current_user")
     assert mcp.ran_with == "stdio"
-    assert mcp.subject_seen == audit.events[0].subject == "trino-alice"
+    assert mcp.subject_seen == "trino-alice"
+    assert [event.subject for event in audit.events] == ["trino-alice", "trino-alice"]
     assert mcp.bearer_seen == ("valid" if required else None)
     assert guard.after_auth.call_args.args[0].principal.subject == "trino-alice"
+    assert guard.before_auth.call_count == guard.after_auth.call_count == 2
 
 
 @pytest.mark.parametrize("rows", [[], [[]], [[None]], [[42]], [[""]], [[" "]]])
 def test_stdio_refuses_an_empty_or_invalid_trino_identity(rows):
     cfg = replace(_config("stdio"), trino_identity_mode="oauth2", trino_http_scheme="https")
-    mcp, client = Mock(), Mock(query=Mock(return_value={"rows": rows}))
+    mcp, client = Mock(middleware=[]), Mock(query=Mock(return_value={"rows": rows}))
+    run_stdio(cfg, mcp, auth_provider=None, client=client)
+    client.query.assert_not_called()
     with pytest.raises(PermissionError, match="authenticated user"):
-        run_stdio(cfg, mcp, auth_provider=None, client=client)
-    mcp.run.assert_not_called()
+        anyio.run(mcp.middleware[0], SimpleNamespace(method="tools/call"), Mock())
+
+
+def test_stdio_login_failure_is_deferred_to_the_tool_call():
+    cfg = replace(_config("stdio"), trino_identity_mode="oauth2", trino_http_scheme="https")
+    mcp = Mock(middleware=[])
+    client = Mock(query=Mock(side_effect=[RuntimeError("login failed"), {"rows": [["alice"]]}]))
+    run_stdio(cfg, mcp, auth_provider=None, client=client)
+    client.query.assert_not_called()
+    tool = AsyncMock()
+
+    async def calls():
+        ctx = SimpleNamespace(method="tools/call")
+        with pytest.raises(RuntimeError, match="login failed"):
+            await mcp.middleware[0](ctx, tool)
+        tool.assert_not_called()
+        await mcp.middleware[0](ctx, tool)
+
+    anyio.run(calls)
+    assert client.query.call_count == 2
+    tool.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
     "client, required, error",
     [
         (None, False, ValueError),
-        (Mock(query=Mock(side_effect=RuntimeError)), False, RuntimeError),
         (Mock(), True, PermissionError),
     ],
 )
-def test_stdio_refuses_missing_client_failed_login_or_missing_required_token(
-    client, required, error
-):
+def test_stdio_refuses_missing_client_or_missing_required_token(client, required, error):
     cfg = replace(
         _config("stdio"),
         trino_identity_mode="oauth2",

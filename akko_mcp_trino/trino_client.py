@@ -20,8 +20,8 @@ The core has four:
   every caller. The server says so at start and in its instructions to hosts.
 * ``oauth2``, stdio only: Trino authenticates the local user through its browser
   login and names the user, never ``TRINO_USER``. One authentication object reuses
-  the driver's token cache and handles reauthentication. Startup verifies the
-  identity with ``SELECT current_user``.
+  the driver's token cache and handles reauthentication. The first tool call
+  verifies the identity with ``SELECT current_user``.
 
 The ``jwt`` and ``impersonation`` modes refuse to start unless the door requires
 a verified token, and refuse a query without a verified caller: never run as

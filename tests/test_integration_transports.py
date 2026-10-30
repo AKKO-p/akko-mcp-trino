@@ -180,7 +180,8 @@ def test_each_http_transport_lists_the_six_tools(served):
     )
 
 
-def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
+@pytest.mark.parametrize("identity", ["service", "oauth2"])
+def test_stdio_transport_runs_as_a_subprocess_with_the_users_token(identity):
     """Claude Desktop, Cursor and Vibe launch a local server over stdio. The
     user's token comes from the environment; strict mode still applies. Service mode
     without a door, chosen explicitly here, is announced to the host in the instructions
@@ -190,7 +191,8 @@ def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
         "MCP_TRANSPORT": "stdio",
         "MCP_AUTH_ENABLED": "false",
         "MCP_AUTH_REQUIRED": "false",
-        "TRINO_IDENTITY_MODE": "service",
+        "TRINO_IDENTITY_MODE": identity,
+        "TRINO_HTTP_SCHEME": "https",
         "TRINO_HOST": "h",
     }
     params = StdioServerParameters(command=sys.executable, args=["-m", "akko_mcp_trino"], env=env)
@@ -204,7 +206,8 @@ def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
     instructions, tools = anyio.run(go)
     assert "execute_query" in tools
     assert instructions.startswith("WARNING")
-    assert "TRINO_IDENTITY_MODE=service" in instructions
+    if identity == "service":
+        assert "TRINO_IDENTITY_MODE=service" in instructions
     assert "MCP_AUTH_ENABLED=false" in instructions
 
 
