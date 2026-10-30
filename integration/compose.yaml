@@ -94,7 +94,7 @@ services:
   mcp-jwt:
     <<: *mcp
     build: {context: .., dockerfile: Dockerfile}
-    environment:
+    environment: &jwt-environment
       TRINO_HOST: trino
       TRINO_PORT: "8443"
       TRINO_HTTP_SCHEME: https
@@ -109,6 +109,14 @@ services:
       TRINO_TOKEN_EXCHANGE_CLIENT_SECRET: ${MCP_CLIENT_SECRET}
       TRINO_TOKEN_EXCHANGE_AUDIENCE: trino
       TRINO_TOKEN_EXCHANGE_VERIFY: /certs/ca.crt
+
+  # The same server with pages of three rows, so that the listing tools have more than one page.
+  mcp-paged:
+    <<: *mcp
+    environment:
+      <<: *jwt-environment
+      TRINO_MAX_ROWS: "3"
+      MCP_RESOURCE_URL: http://mcp-paged:3000/mcp
 
   # The fallback for an identity provider without token exchange: the server's own
   # account (a client certificate) and Trino's impersonation, limited to that account.
