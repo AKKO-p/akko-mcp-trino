@@ -28,6 +28,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from mcp.types import INVALID_REQUEST
 
+import akko_mcp_trino
 from akko_mcp_trino import auth
 from akko_mcp_trino.app import build_asgi_app
 from akko_mcp_trino.config import Config
@@ -159,6 +160,20 @@ def test_each_http_transport_refuses_without_a_token(served):
         anyio.run(_call, transport, url, {}, "list_catalogs", {})
 
 
+def test_each_http_transport_announces_the_package_version_in_initialize(served):
+    transport, url = served
+    headers = {"Authorization": f"Bearer {_token('alice')}"}
+
+    async def info():
+        async with _open(transport, url, headers) as streams:
+            async with ClientSession(streams[0], streams[1]) as s:
+                return (await s.initialize()).server_info
+
+    server_info = anyio.run(info)
+    assert server_info.version == akko_mcp_trino.__version__
+    assert server_info.name == "t", "the configured server name"
+
+
 def test_each_http_transport_lists_the_eight_tools(served):
     transport, url = served
     headers = {"Authorization": f"Bearer {_token('alice')}"}
@@ -204,9 +219,12 @@ def test_stdio_transport_runs_as_a_subprocess_with_the_users_token(identity):
         async with stdio_client(params) as (r, w):
             async with ClientSession(r, w) as s:
                 init = await s.initialize()
-                return init.instructions, sorted(t.name for t in (await s.list_tools()).tools)
+                tools = sorted(t.name for t in (await s.list_tools()).tools)
+                return init.instructions, tools, init.server_info
 
-    instructions, tools = anyio.run(go)
+    instructions, tools, server_info = anyio.run(go)
+    assert server_info.version == akko_mcp_trino.__version__
+    assert server_info.name == "trino-mcp"
     assert "execute_query" in tools
     assert instructions.startswith("WARNING")
     if identity == "service":

@@ -24,6 +24,7 @@ All notable changes to this project are documented here. The format follows
 - `TRINO_IDENTITY_MODE=oauth2` refuses a query without an admitted user, like `jwt` and `impersonation`. Only the identity check, `TrinoClient.current_user()` (`SELECT current_user`), runs before one; it also answers the mode's `ping`.
 
 ### Fixed
+- The `initialize` result announces the package version (`akko_mcp_trino.__version__`) as the server's version; it was empty, so a client or an audit could not tell which release answered. The server name is unchanged.
 - `akko_mcp_trino.sql_guard.safe_sql_string` no longer doubles a backslash: Trino reads no backslash escape in a string literal, so `a\b` became `a\\b`, another value. It still doubles quotes and drops NUL bytes.
 - Trino OAuth2 no longer opens the browser when the MCP host starts: startup and discovery never log in, and the login waits for the first request that needs Trino. Every request that is not discovery (a tool call, a resource read, any method a later SDK adds) logs in and is admitted before it runs.
 

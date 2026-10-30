@@ -19,6 +19,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, Iterable, Sequence, Tuple
 
+from . import __version__
 from .config import Config
 from .extensions import Extension
 from .tools import audited, register_query_tools
@@ -36,7 +37,7 @@ def _default_mcp_factory(
     # build_server testable through an injected mcp_factory.
     from mcp.server.mcpserver import MCPServer
 
-    return MCPServer(name, instructions=instructions)
+    return MCPServer(name, instructions=instructions, version=__version__)
 
 
 def instructions_for(config: Config) -> str:
