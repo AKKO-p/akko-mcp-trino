@@ -110,12 +110,13 @@ services:
       TRINO_TOKEN_EXCHANGE_AUDIENCE: trino
       TRINO_TOKEN_EXCHANGE_VERIFY: /certs/ca.crt
 
-  # The same server with pages of three rows, so that the listing tools have more than one page.
+  # The same server with pages of three rows and three tables, so that the paged tools have more than one page.
   mcp-paged:
     <<: *mcp
     environment:
       <<: *jwt-environment
       TRINO_MAX_ROWS: "3"
+      MCP_DESCRIBE_SCHEMA_TABLES: "3"
       MCP_RESOURCE_URL: http://mcp-paged:3000/mcp
 
   # The fallback for an identity provider without token exchange: the server's own

@@ -101,30 +101,19 @@ def use(url: str, bearer: str, fn) -> object:
     return anyio.run(tool_calls, url, bearer, fn)
 
 
-async def walk_tables(call) -> list[str]:
-    """list_tables page after page, by next_offset, until it is null (at most 20 pages)."""
-    names: list[str] = []
-    offset: int | None = 0
-    for _ in range(20):
-        page = await call("list_tables", catalog="tpch", schema="tiny", offset=offset)
-        names += page.get("tables", [])
-        offset = page.get("next_offset")
-        if offset is None:
-            break
-    return names
+async def walk(call, tool: str, key: str) -> tuple[list[str], int]:
+    """A listing tool page after page, by next_offset, until it is null (at most 20 pages).
 
-
-async def walk_described(call) -> list[str]:
-    """describe_schema page after page, the table names it gave."""
+    Returns the table names it gave and the number of pages read.
+    """
     names: list[str] = []
-    offset: int | None = 0
-    for _ in range(20):
-        page = await call("describe_schema", catalog="tpch", schema="tiny", offset=offset)
-        names += [t["table"] for t in page.get("tables", [])]
+    pages, offset = 0, 0
+    while offset is not None and pages < 20:
+        page = await call(tool, catalog="tpch", schema="tiny", offset=offset)
+        pages += 1
+        names += [t if isinstance(t, str) else t[key] for t in page.get("tables", [])]
         offset = page.get("next_offset")
-        if offset is None:
-            break
-    return names
+    return names, pages
 
 
 async def discovery(call) -> dict:
@@ -137,8 +126,9 @@ async def discovery(call) -> dict:
         "quote": await call("search_columns", text=quote, catalog="tpch", schema="tiny"),
         "quote_schema": await call("describe_schema", catalog="tpch", schema=quote),
         "column": await call("execute_query", sql="SELECT nosuch FROM tpch.tiny.nation"),
-        "tables": await walk_tables(call),
-        "described": await walk_described(call),
+        "system": await call("execute_query", sql="SELECT * FROM system.jdbc.columns"),
+        "tables": await walk(call, "list_tables", "table"),
+        "described": await walk(call, "describe_schema", "table"),
     }
 
 
@@ -224,18 +214,24 @@ def main() -> int:
     check(
         "discovery: an unknown column is explained (kind column, its identifier)",
         d_alice["column"].get("kind") == "column"
-        and "nosuch" in str(d_alice["column"].get("identifier")),
+        and d_alice["column"].get("identifier") == "nosuch",
         d_alice["column"],
+    )
+    check(
+        "discovery: the agent's own SQL on system.jdbc.columns stays refused (read_only)",
+        d_alice["system"].get("kind") == "read_only",
+        d_alice["system"],
     )
     paged = use(PAGED, alice, discovery)
     check(
-        "discovery: list_tables walked by offset gives the eight tables, no duplicate",
-        sorted(paged["tables"]) == sorted(TPCH_TINY_TABLES),
+        "discovery: list_tables walked by offset gives the eight tables in three pages, no duplicate",
+        sorted(paged["tables"][0]) == sorted(TPCH_TINY_TABLES) and paged["tables"][1] == 3,
         paged["tables"],
     )
     check(
-        "discovery: describe_schema walked by offset gives the eight tables, no duplicate",
-        sorted(paged["described"]) == sorted(TPCH_TINY_TABLES),
+        "discovery: describe_schema walked by offset gives the eight tables in three pages, no duplicate",
+        sorted(paged["described"][0]) == sorted(TPCH_TINY_TABLES)
+        and paged["described"][1] == 3,
         paged["described"],
     )
 
