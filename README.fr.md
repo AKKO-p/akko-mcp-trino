@@ -79,6 +79,10 @@ un utilisateur n'y voit que les tables et colonnes qu'il peut voir ailleurs. `de
 fait rendre une erreur qui le dit, sans autre voie essayée. Le SQL
 de l'agent reste refusé sur tout `system`, ces vues comprises. La garde reste une seconde ligne.
 
+Posez aussi `hide-inaccessible-columns=true` dans le `config.properties` de Trino. Sans cela, un
+`SELECT *` sur une table dont la politique masque une colonne est refusé, et le refus nomme cette
+colonne ; avec cela, la colonne cachée disparaît du résultat et n'est nommée nulle part.
+
 ## Installer
 
 ```bash

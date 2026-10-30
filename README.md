@@ -655,6 +655,11 @@ by statements the server builds; a policy that refuses them makes them answer an
 error that says so, with no other way tried. The
 agent's own SQL stays refused on all of `system`, these views included.
 
+Set `hide-inaccessible-columns=true` in Trino's `config.properties` too. Without it, a
+`SELECT *` over a table with a column the policy hides is refused, and the refusal
+names that column; with it, the hidden column is dropped from the result and named
+nowhere.
+
 ## Extensions
 
 A tool plugin adds tools. An extension may add more, around the core and never
