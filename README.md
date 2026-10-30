@@ -471,8 +471,9 @@ of `system`, whole, past the row cap, up to `MCP_MAX_CATALOGS` (10000 by default
 then paged by the server; `system` does not count against the bound. Above it
 `list_catalogs` answers an error, never a cut list. `list_tables` on a schema that
 does not exist, or that the caller may not see, answers `kind` `schema` ("not found
-or not visible", the same for both), never an empty list. An `offset` that is not a whole number from 0 is refused
-(`invalid_argument`) before Trino.
+or not visible", the same for both), never an empty list for a missing or hidden
+schema. An `offset` that is not a whole number from 0 is refused (`invalid_argument`)
+before Trino.
 
 `describe_schema` gives an agent a schema's context in one call before it writes
 SQL: its tables and views, each with its type, its comment and all its columns
@@ -486,11 +487,18 @@ table left out. The comments come from `system.metadata.table_comments` and the
 columns from `system.jdbc.columns`, two views of Trino's `system` catalog that Trino
 filters for each user, read by statements the server builds, never by the agent's
 SQL (see [What read-only covers](#what-read-only-covers)). A page costs four
-statements: the schema check, the page of table names, the comments and the columns.
-The last two hold one `UNION ALL` branch per table of the page, each filtered by
-equality on the table's name, which Trino pushes down into these views: a page reads
-the comments and columns of its own tables, never those of the whole schema (a list,
-`IN` or `OR`, is not pushed down and would read every table of the schema). A schema
+statements: the schema check, the page of table names, one read of the columns, and
+the comments of the tables the page keeps. The columns are read once, at most
+`MCP_DESCRIBE_SCHEMA_COLUMNS` plus one rows: the tables that arrive whole within the
+budget are kept, the table the budget cuts starts the next page. A first table wider
+than the budget is read again alone, by its own query, in parts of
+`MCP_DESCRIBE_SCHEMA_COLUMNS` columns: one statement more per part. The read of the
+columns and that of the comments hold one `UNION ALL` branch per table, each filtered
+by equality on the table's name, which Trino pushes down into these views: a page
+reads the comments and columns of its own tables, never those of the whole schema (a
+list, `IN` or `OR`, is not pushed down and would read every table of the schema).
+Trino loads the metadata of every table of the page for that read, so a page costs
+about the same whether its tables are narrow or wide. A schema
 that does not exist and one the caller may not see answer the same error, `kind` `schema`; a
 visible empty schema answers an empty list. Comments are text the owners of the
 data wrote: the tool's description tells the model to read them as data, never as
@@ -500,7 +508,10 @@ instructions, and the server never places them in its own MCP instructions.
 `search_columns` is where an agent starts when it does not know which table holds
 what it needs: it finds the columns whose name or comment contains a text,
 ignoring case, in every catalog the caller sees (`system` never), in one catalog,
-or in one schema. The text is one escaped `LIKE` literal: its quotes cannot end the
+or in one schema. A named schema is checked first: one that does not exist and one
+the caller may not see answer the same error, `kind` `schema`, never an empty search
+said to be complete; a catalog Trino does not know or refuses answers Trino's error.
+The text is one escaped `LIKE` literal: its quotes cannot end the
 statement, and its `%`, `_` and `!` are plain characters. A text shorter than
 `MCP_SEARCH_MIN_LENGTH` (3 by default) is refused, so a letter or two does not read
 every column. The search reads `system.jdbc.columns`, which Trino filters for each
@@ -535,7 +546,9 @@ instructions, as for `describe_schema`.
 
 The path an agent is told to follow: `search_columns` to find where the data
 lives, `describe_schema` (or `describe_table` for sample rows) to learn the tables
-it found, then `execute_query`.
+it found, then `execute_query`. `list_catalogs`, `list_schemas` and `list_tables`
+are for browsing, when the agent wants to see what there is rather than find
+something; the tool descriptions and `examples/agent.py` say the same.
 
 The defaults are chosen for an agent, not for a batch job. A question an agent
 asks should come back within a minute; a query that needs longer is usually a
@@ -549,7 +562,7 @@ prints both.
 is true. With `TRINO_READ_ONLY=false`, its annotations say it may write
 (`readOnlyHint: false`, `destructiveHint: true`) and so does its description, so
 that a host asks for the confirmation it would skip for a read-only tool. The
-five other tools only read, whatever the setting.
+seven other tools only read, whatever the setting.
 
 Errors come back to the agent as `{"error": "...", "kind": "..."}`. `error` is
 Trino's whole message; a permission refusal from Trino is an ordinary error, not a

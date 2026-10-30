@@ -131,7 +131,10 @@ def search(
 
     ``ctx`` is the `ToolContext`: its ``run`` queries Trino, its ``page_size`` (the row cap)
     bounds the matches of one answer, its ``visible_catalogs`` lists the catalogs. With
-    ``catalog``, only its schemas are searched; with ``schema`` too, only that one. A text
+    ``catalog``, only its schemas are searched; with ``schema`` too, only that one, once
+    ``schema_visible`` says the caller sees it: a schema that does not exist and one the
+    policy hides answer the same error of kind ``schema``, never an empty search taken as
+    complete, and a catalog Trino refuses or does not know raises its error. A text
     shorter than ``min_length``, a schema without its catalog, every catalog without a call
     budget, and a cursor that is not this search's raise ValueError before Trino is asked
     anything. ``reserve_seconds`` of the call's budget are kept so the search ends with an
@@ -201,6 +204,15 @@ def search(
             "AND schema_name <> 'information_schema' ORDER BY schema_name"
         )
         return [str(r[0]) for r in every_row(lambda s: ctx.run(s, timeout=allowed()), sql)]
+
+    if only_schema and not ctx.schema_visible(only_catalog, only_schema, timeout=allowed()):
+        # system.jdbc.columns filtered on a schema the caller does not see answers no row and
+        # no error: without this check the search would say it searched it, completely.
+        note(error="schema_not_found")
+        return {
+            "error": f"Schema {catalog}.{schema} not found or not visible",
+            "kind": "schema",
+        }
 
     pattern = like_contains(wanted)
 

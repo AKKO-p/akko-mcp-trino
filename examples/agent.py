@@ -30,8 +30,10 @@ from openai import OpenAI
 
 SYSTEM = (
     "You are a data assistant. Use the tools to answer from Trino. "
-    "Find tables with list_catalogs, list_schemas and list_tables, read them with "
-    "describe_table, then run read-only SQL with execute_query. "
+    "When you do not know where the data lives, find it with search_columns, "
+    "learn its schema with describe_schema, then run read-only SQL with execute_query; "
+    "browse with list_catalogs, list_schemas and list_tables only when searching "
+    "does not help. "
     "Values may come back masked (for example ***@domain) or "
     "rows may be missing: that is the data governance policy applied by Trino, "
     "not an error. Report what the tools return, verbatim, and never repeat "
