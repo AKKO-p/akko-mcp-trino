@@ -216,8 +216,8 @@ catalogue que Trino n'a pas su résoudre, quand il le nomme.
 | `kind` | Sens |
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino a refusé l'instruction : corriger cette partie |
-| `permission` | Trino a refusé le droit : le rapporter, ne pas réessayer |
-| `invalid_argument` | le serveur a refusé un argument (identifiant, curseur) avant d'atteindre Trino |
+| `permission` | Trino ou le fournisseur d'identité a refusé le droit : le rapporter, ne pas réessayer |
+| `invalid_argument` | le serveur a refusé un argument (identifiant) avant d'atteindre Trino |
 | `read_only` | l'instruction écrit et le serveur est en lecture seule |
 | `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
 | `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue) : l'instruction n'est ni valide ni invalide, réessayer plus tard |

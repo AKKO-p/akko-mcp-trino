@@ -66,3 +66,28 @@ def test_any_other_exception_is_other():
 def test_every_listed_error_name_maps_to_a_kind(name):
     exc = FakeTrinoError(name, "USER_ERROR", "x")
     assert explain_error(exc)["kind"] == ERROR_KINDS[name]
+
+
+def test_a_right_refused_by_the_server_or_the_identity_provider_is_permission():
+    # PermissionError is an OSError, but a refusal is not a lost connection.
+    assert explain_error(PermissionError("refused"))["kind"] == "permission"
+
+
+def test_a_real_trino_user_error_is_explained_whole():
+    from trino.exceptions import TrinoUserError
+
+    exc = TrinoUserError(
+        {
+            "errorName": "COLUMN_NOT_FOUND",
+            "errorType": "USER_ERROR",
+            "message": "line 1:8: Column 'revnue' cannot be resolved",
+        },
+        query_id="q",
+    )
+    out = explain_error(exc)
+    assert out["error"] == str(exc)
+    assert out["kind"] == "column" and out["identifier"] == "revnue"
+
+
+def test_an_error_name_without_a_type_is_unavailable():
+    assert explain_error(FakeTrinoError("COLUMN_NOT_FOUND", None, "x"))["kind"] == "unavailable"

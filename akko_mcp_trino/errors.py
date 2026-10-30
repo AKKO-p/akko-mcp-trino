@@ -6,6 +6,8 @@ message is Trino's, whole; the kind is what an agent can act on:
 
 * a Trino user error keeps a kind of its own (``syntax``, ``column``, ``table``,
   ``schema``, ``catalog``, ``permission``, ``function``, ``type``) or ``other``;
+* a right refused by the identity provider or the server (``PermissionError``) is
+  ``permission`` too;
 * the server's own refusals are ``invalid_argument``, ``read_only`` and ``time_budget``;
 * an engine that could not answer (internal error, connection lost) is ``unavailable``,
   which says nothing about the statement: it is neither valid nor invalid.
@@ -23,6 +25,7 @@ READ_ONLY = "read_only"
 TIME_BUDGET = "time_budget"
 UNAVAILABLE = "unavailable"
 OTHER = "other"
+PERMISSION = "permission"
 
 # Trino's error names (the error codes of its StandardErrorCode) to what an agent can act
 # on. A user error outside this table is "other".
@@ -59,6 +62,8 @@ def explain_error(exc: BaseException) -> dict:
         named = _NAMED.search(str(getattr(exc, "message", "") or exc))
         if named and named.group(1).lower() == kind:
             out["identifier"] = named.group(2)
+    elif isinstance(exc, PermissionError):  # an OSError, but a refusal, not a lost connection
+        out["kind"] = PERMISSION
     elif name or isinstance(exc, _CONNECTION_ERRORS):
         out["kind"] = UNAVAILABLE
     elif isinstance(exc, ValueError):

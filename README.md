@@ -470,8 +470,8 @@ schema or catalog when Trino names the one it could not resolve:
 | `kind` | Meaning |
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino refused the statement; fix that part of it |
-| `permission` | Trino refused the right; report it, do not retry |
-| `invalid_argument` | the server refused an argument (an identifier, a cursor) before reaching Trino |
+| `permission` | Trino or the identity provider refused the right; report it, do not retry |
+| `invalid_argument` | the server refused an argument (an identifier) before reaching Trino |
 | `read_only` | the statement writes and the server is read-only |
 | `time_budget` | the call ran out of its time budget; narrow the request |
 | `unavailable` | Trino could not answer (internal error, connection lost): the statement is neither valid nor invalid, try again later |

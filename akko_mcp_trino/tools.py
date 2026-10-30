@@ -230,8 +230,8 @@ _EXECUTE_DOC = """Run {what} on Trino and return the rows.
         runs past the server's time budget is cancelled. On failure returns
         {{"error": "...", "kind": "..."}} with Trino's message, which is usually enough
         to fix the SQL; kind says what to fix (syntax, column, table, schema, catalog,
-        permission, function, type, read_only, time_budget, other), and "unavailable"
-        means Trino did not answer.
+        permission, function, type, invalid_argument, read_only, time_budget, other),
+        and "unavailable" means Trino did not answer.
         """
 _READ_ONLY_RULE = (
     "Only SELECT, SHOW, DESCRIBE and EXPLAIN are accepted; INSERT, UPDATE, DELETE, "
