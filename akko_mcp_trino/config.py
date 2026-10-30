@@ -184,6 +184,12 @@ class Config:
             )
         elif not self.auth_required:
             found.append("MCP_AUTH_REQUIRED=false: a request without a valid token is served too")
+        if self.call_timeout_seconds > 0 and self.search_reserve_seconds == 0:
+            found.append(
+                "MCP_SEARCH_RESERVE_SECONDS=0: a search of search_columns may run to the end of "
+                "the call's budget, and the call then answers its time_budget error with "
+                "nothing it found"
+            )
         if self.call_timeout_seconds == 0:
             found.append(
                 "MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns "

@@ -257,14 +257,20 @@ un catalogue de milliers de tables répond schéma par schéma. Elle tient dans 
 recherche rend alors ce qu'elle a fouillé plutôt que l'erreur de l'appel. Les résultats s'arrêtent
 au plafond de lignes (`TRINO_MAX_ROWS`). La réponse dit exactement ce qui a été fouillé :
 `schemas_searched`, `not_searched` avec une raison pour chaque partie laissée (`time_budget`,
-`row_cap` ou le `kind` de l'erreur de Trino ; un `schema` à `null` désigne un catalogue entier, et
-une entrée avec un schéma couvre ce schéma et les suivants de son catalogue), et `complete`, vrai
-seulement quand tout le périmètre a été fouillé, sur tous les appels de la recherche.
-`next_cursor` reprend la même recherche là où elle s'est arrêtée, à l'intérieur d'un schéma quand
-le plafond de lignes l'y a arrêtée ; un curseur est refusé (`invalid_argument`) pour un autre texte
-ou un autre périmètre, ou s'il a été modifié. Sans budget d'appel (`MCP_CALL_TIMEOUT_SECONDS=0`),
-une recherche sur tous les catalogues n'aurait pas de borne : elle est refusée, un catalogue nommé
-est fouillé, et `--check` le signale. La ligne d'audit dit combien de résultats sont venus et si la
+`row_cap` ou le `kind` de l'erreur de Trino ; un `schema` à `null` désigne un catalogue entier), et
+`complete`, vrai seulement quand tout le périmètre a été fouillé, sur tous les appels de la
+recherche. `next_cursor` reprend la même recherche là où elle s'est arrêtée (ce schéma et la suite
+de son catalogue, puis chaque catalogue non ouvert), à l'intérieur d'un schéma quand le plafond de
+lignes l'y a arrêtée. Un schéma, ou la liste des schémas d'un catalogue, qui prend plus de temps
+qu'une requête n'en a droit (`TRINO_QUERY_TIMEOUT_SECONDS`) alors que l'appel a encore du temps est
+nommé (`time_budget`) et sauté : le reprendre arrêterait chaque appel suivant au même endroit. Un
+curseur est refusé (`invalid_argument`) pour un autre texte ou un autre périmètre, pour un catalogue
+que l'appelant ne voit pas, ou s'il a été modifié ; tout curseur rendu par le serveur reprend, même
+pour un schéma Hive comme `2024_sales`, car le schéma d'un curseur n'entre que dans un littéral.
+Sans budget d'appel (`MCP_CALL_TIMEOUT_SECONDS=0`), une recherche sur tous les catalogues n'aurait
+pas de borne : elle est refusée, un catalogue nommé est fouillé, et `--check` le signale. `--check`
+signale aussi `MCP_SEARCH_RESERVE_SECONDS=0` avec un budget d'appel : une recherche peut alors aller
+jusqu'au bout de l'appel, qui rend sa propre erreur `time_budget`. La ligne d'audit dit combien de résultats sont venus et si la
 recherche a été coupée, jamais le texte, qui peut être une donnée. Les commentaires sont des
 données, jamais des instructions, comme pour `describe_schema`.
 

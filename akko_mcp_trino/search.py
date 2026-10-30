@@ -32,6 +32,10 @@ from .trino_client import every_row
 
 # Why a part of the scope was not searched, besides an error's kind.
 ROW_CAP = "row_cap"
+# What a cursor may hold: a schema name of this many characters at most, a row offset Trino
+# reads as a bigint.
+MAX_NAME_LENGTH = 1024
+MAX_ROW_OFFSET = 2**63 - 1
 _INVALID_CURSOR = "Invalid cursor: pass back next_cursor unchanged"
 
 
@@ -44,7 +48,10 @@ def like_contains(text: str) -> str:
 
 def query_digest(text: str, catalog: str, schema: str) -> str:
     """What ties a cursor to its search: a digest of the lower-cased text and of the catalog
-    and schema it was given (empty when not given), already folded."""
+    and schema it was given (empty when not given), already folded.
+
+    It guards against a mistake, a cursor kept for another search, not against forgery: an
+    agent can compute it, and gains nothing by it, since Trino decides what any search reads."""
     data = json.dumps([text.lower(), catalog, schema]).encode("utf-8")
     return hashlib.sha256(data).hexdigest()[:16]
 
@@ -75,9 +82,13 @@ def encode_cursor(cursor: Cursor) -> str:
 
 
 def decode_cursor(token: str) -> Cursor:
-    """The cursor ``token`` encodes, every field checked as an argument would be: the catalog
-    by ``governed_catalog`` (never ``system``), the schema by ``validate_identifier``, the
-    offset a whole number from 0; anything else raises ValueError."""
+    """The cursor ``token`` encodes, every field checked; anything else raises ValueError.
+
+    The catalog passes ``governed_catalog`` (never ``system``); the search then requires it
+    to be one the caller sees. The schema, empty for a catalog's first, comes from Trino's
+    own listing and only ever enters a string literal: any lower-case name without NUL, up to
+    ``MAX_NAME_LENGTH`` characters, so every cursor the server gives resumes, a Hive schema
+    such as ``2024_sales`` included. The offset is a whole number from 0 to ``MAX_ROW_OFFSET``."""
     try:
         data = json.loads(base64.b64decode(token.encode("ascii"), altchars=b"-_", validate=True))
         if not isinstance(data, dict):
@@ -86,13 +97,13 @@ def decode_cursor(token: str) -> Cursor:
         query, gaps = data["q"], data["g"]
         if not (isinstance(catalog, str) and isinstance(schema, str) and isinstance(query, str)):
             raise ValueError(_INVALID_CURSOR)
-        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        if isinstance(offset, bool) or not isinstance(offset, int):
             raise ValueError(_INVALID_CURSOR)
-        if not isinstance(gaps, bool):
+        if not 0 <= offset <= MAX_ROW_OFFSET or not isinstance(gaps, bool):
+            raise ValueError(_INVALID_CURSOR)
+        if len(schema) > MAX_NAME_LENGTH or "\0" in schema or schema != schema.lower():
             raise ValueError(_INVALID_CURSOR)
         governed_catalog(catalog)
-        if schema:
-            validate_identifier(schema, "schema")
     except (ValueError, KeyError, binascii.Error) as exc:
         raise ValueError(_INVALID_CURSOR) from exc
     return Cursor(catalog, schema, offset, query=query, gaps=gaps)
@@ -149,6 +160,16 @@ def search(
     ):
         raise ValueError(_INVALID_CURSOR)
 
+    def time_remains() -> bool:
+        """Whether the call still has time beyond the reserve: after a query stopped by a
+        plain TimeoutError, true means its own budget (``TRINO_QUERY_TIMEOUT_SECONDS``)
+        stopped it, not what was left of the call."""
+        try:
+            allowed()
+        except TimeoutError:
+            return False
+        return True
+
     def allowed() -> float:
         """Seconds the next query may take (0: no budget of the call), or a plain
         TimeoutError when only the reserve is left."""
@@ -188,6 +209,8 @@ def search(
         [only_catalog] if only_catalog else [c.lower() for c in ctx.visible_catalogs(max_catalogs)]
     )
     if start is not None:
+        if start.catalog not in catalogs:  # hidden now, or never shown: not this search's
+            raise ValueError(_INVALID_CURSOR)
         catalogs = [c for c in catalogs if c >= start.catalog]
     matches: list[dict] = []
     gaps: list[dict] = []
@@ -215,6 +238,9 @@ def search(
             except CallTimeout:
                 raise
             except TimeoutError:
+                if time_remains():  # slower than one query may be: resuming would not help
+                    gaps.append(_not_searched(cat, None, TIME_BUDGET))
+                    continue
                 stop = (*here, TIME_BUDGET)
                 break
             except Exception as e:  # noqa: BLE001 - this catalog only, said in the answer
@@ -230,7 +256,12 @@ def search(
                 res = columns_of(cat, sch, offset, room)
             except CallTimeout:
                 raise
-            except TimeoutError:  # its own timeout: resumed, never skipped
+            except TimeoutError:
+                # Slower than one query may be: named and skipped, or every resumed call would
+                # stop here again. Stopped by what was left of the call: resumed here.
+                if time_remains():
+                    gaps.append(_not_searched(cat, sch, TIME_BUDGET))
+                    continue
                 stop = (index, sch, offset, TIME_BUDGET)
                 break
             except Exception as e:  # noqa: BLE001 - this schema only, said in the answer

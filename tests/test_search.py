@@ -74,24 +74,30 @@ class Trino:
     (table, column, type, comment) rows; ``fail`` maps a catalog or a (catalog, schema) to the
     exception its read raises; ``cost`` maps the same keys to the seconds a read takes (1 s by
     default). A read longer than the time it is allowed stops like the real client: a plain
-    TimeoutError when its own timeout stopped it, the call's CallTimeout when the call did."""
+    TimeoutError when its own budget stopped it (the ``timeout`` it was given, or
+    ``query_timeout``, TRINO_QUERY_TIMEOUT_SECONDS, when shorter), the call's CallTimeout when
+    the call did."""
 
-    def __init__(self, schemas, columns=None, fail=None, cost=None, catalogs=None):
+    def __init__(self, schemas, columns=None, fail=None, cost=None, catalogs=None, query_timeout=0):
         self.schemas = schemas
         self.columns = columns or {}
         self.fail = fail or {}
         self.cost = cost or {}
         self.catalogs = list(schemas) + ["system"] if catalogs is None else catalogs
+        self.query_timeout = query_timeout
         self.now = 0.0
         self.calls = []
 
     def _spend(self, key, timeout):
         seconds = self.cost.get(key, 1.0)
         call = audit_module.current_call()
-        allowed = time_allowed(timeout)
+        budget = timeout
+        if self.query_timeout > 0:
+            budget = min(self.query_timeout, timeout) if timeout > 0 else self.query_timeout
+        allowed = time_allowed(budget)
         if allowed > 0 and seconds > allowed:
             self.now += allowed
-            if allowed == timeout:
+            if allowed == budget:
                 raise TimeoutError(f"the query exceeded its time budget of {timeout:g} s")
             raise call.timed_out()
         self.now += seconds
@@ -326,7 +332,10 @@ def _query_of(trino, clock):
         _forge({"c": "demo", "s": "crm", "o": -1, "q": "x", "g": False}),
         _forge({"c": "demo", "s": "crm", "o": True, "q": "x", "g": False}),
         _forge({"c": "demo", "s": "crm", "o": 1.5, "q": "x", "g": False}),
-        _forge({"c": "demo", "s": "crm; DROP", "o": 0, "q": "x", "g": False}),
+        _forge({"c": "demo", "s": "CRM", "o": 0, "q": "x", "g": False}),
+        _forge({"c": "demo", "s": "c\u0000rm", "o": 0, "q": "x", "g": False}),
+        _forge({"c": "demo", "s": "s" * 1025, "o": 0, "q": "x", "g": False}),
+        _forge({"c": "demo", "s": "crm", "o": 2**63, "q": "x", "g": False}),
         _forge({"c": "de'mo", "s": "crm", "o": 0, "q": "x", "g": False}),
         _forge({"c": 7, "s": "crm", "o": 0, "q": "x", "g": False}),
         _forge({"c": "demo", "s": "crm", "o": 0, "q": 1, "g": False}),
@@ -336,6 +345,8 @@ def _query_of(trino, clock):
     ],
 )
 def test_a_forged_cursor_is_invalid_argument_and_nothing_reaches_trino(clock, token):
+    with pytest.raises(ValueError, match="Invalid cursor"):
+        decode_cursor(token)  # refused by its own checks, not only by its search's digest
     trino = Trino(_DEMO, _COLUMNS)
     out = _ask(trino, clock, "email", cursor=token)
     assert out == {
@@ -414,7 +425,7 @@ def test_out_of_time_inside_a_catalog_names_the_schema_and_the_unopened_catalogs
     assert [m["schema"] for m in again["matches"]] == ["s2"] and again["complete"] is True
 
 
-def test_a_schema_stopped_by_its_own_timeout_is_resumed_not_skipped(clock):
+def test_a_schema_stopped_by_the_calls_remaining_time_is_resumed_not_skipped(clock):
     trino = Trino({"demo": ["crm", "sales"]}, _COLUMNS, cost={("demo", "crm"): 50.0})
     out = _ask(trino, clock, "email", budget=10)
     assert out["matches"] == [] and out["schemas_searched"] == 0
@@ -484,7 +495,39 @@ def test_without_a_call_budget_a_named_catalog_is_bounded_by_the_query_timeout(c
     trino.query = stopped
     out = _ask(trino, clock, "email", catalog="demo", budget=0)
     assert out["not_searched"] == [{"catalog": "demo", "schema": "crm", "reason": "time_budget"}]
+    assert out["next_cursor"] is None and out["complete"] is False
     assert "timeout" not in trino.calls[-1][1], "no call budget: the query keeps its own"
+
+
+def test_a_schema_slower_than_the_query_budget_is_skipped_and_named(clock):
+    """A schema stopped by TRINO_QUERY_TIMEOUT_SECONDS while the call has time left would
+    stop every resumed call at the same place: it is named and skipped, never resumed."""
+    trino = Trino(_DEMO, _COLUMNS, cost={("demo", "crm"): 50.0}, query_timeout=3)
+    out = _ask(trino, clock, "email", budget=60)
+    assert out["not_searched"] == [{"catalog": "demo", "schema": "crm", "reason": "time_budget"}]
+    assert [m["schema"] for m in out["matches"]] == ["sales", "raw"]
+    assert out["schemas_searched"] == 2
+    assert out["next_cursor"] is None and out["complete"] is False
+
+
+def test_a_catalog_whose_schemas_are_slower_than_the_query_budget_is_skipped(clock):
+    trino = Trino(_DEMO, _COLUMNS, cost={"demo": 50.0}, query_timeout=3)
+    out = _ask(trino, clock, "email", budget=60)
+    assert out["not_searched"] == [{"catalog": "demo", "schema": None, "reason": "time_budget"}]
+    assert [m["catalog"] for m in out["matches"]] == ["lake"]
+    assert out["next_cursor"] is None and out["complete"] is False
+
+
+def test_a_skip_in_one_call_keeps_the_rest_of_the_chain_incomplete(clock):
+    trino = Trino(
+        _DEMO, _COLUMNS, cost={("demo", "crm"): 4.0, ("demo", "sales"): 3.0}, query_timeout=3.5
+    )
+    # crm is skipped by the query budget (3.5 s), sales takes 3 s, then lake is out of time
+    out = _ask(trino, clock, "email", budget=10)
+    assert out["not_searched"][0] == {"catalog": "demo", "schema": "crm", "reason": "time_budget"}
+    assert out["next_cursor"] is not None
+    again = _ask(trino, clock, "email", budget=10, cursor=out["next_cursor"])
+    assert again["not_searched"] == [] and again["complete"] is False
 
 
 # ---- the row cap: stop inside a schema, the cursor moves past what was read
@@ -533,9 +576,40 @@ def test_a_cursor_whose_schema_is_gone_starts_the_next_one_from_its_first_row(cl
     out = _ask(trino, clock, "email", cursor=gone)
     assert [m["schema"] for m in out["matches"]] == ["sales"]
     assert "OFFSET 0 " in trino.calls[-1][0]
-    hidden = encode_cursor(Cursor("data", "x", 5, query=query_digest("email", "", "")))
-    out = _ask(trino, clock, "email", cursor=hidden)
-    assert out["schemas_searched"] == 2 and "OFFSET 0 " in trino.calls[-1][0]
+
+
+def test_a_search_stopped_in_a_schema_that_is_not_an_identifier_resumes(clock):
+    """Hive accepts a schema named 2024_sales: the cursor the server gave must resume it."""
+    columns = {("demo", "2024_sales"): [("t", "email", "varchar", None)]}
+    trino = Trino({"demo": ["2024_sales", "crm"]}, {**_COLUMNS, **columns})
+    trino.cost = {("demo", "2024_sales"): 50.0}
+    out = _ask(trino, clock, "email", budget=10)
+    assert out["not_searched"] == [
+        {"catalog": "demo", "schema": "2024_sales", "reason": "time_budget"}
+    ]
+    trino.cost = {}
+    again = _ask(trino, clock, "email", budget=10, cursor=out["next_cursor"])
+    assert [m["schema"] for m in again["matches"]] == ["2024_sales", "crm"]
+    assert again["complete"] is True
+
+
+def test_a_schema_in_a_cursor_only_ever_enters_a_literal():
+    token = _forge({"c": "demo", "s": "it's", "o": 0, "q": "x", "g": False})
+    assert decode_cursor(token).schema == "it's"
+
+
+@pytest.mark.parametrize("catalog", ["data", "hidden"])
+def test_a_cursor_naming_a_catalog_the_caller_does_not_see_is_refused(clock, catalog):
+    from akko_mcp_trino.search import query_digest
+
+    trino = Trino({"demo": ["crm", "sales"]}, _COLUMNS)
+    token = encode_cursor(Cursor(catalog, "x", 5, query=query_digest("email", "", "")))
+    out = _ask(trino, clock, "email", cursor=token)
+    assert out == {
+        "error": "Invalid cursor: pass back next_cursor unchanged",
+        "kind": "invalid_argument",
+    }
+    assert [sql for sql, _ in trino.calls] == ["SHOW CATALOGS"], "only the catalog listing"
 
 
 # ---- failures: one schema does not stop the others, and nothing is complete with a gap

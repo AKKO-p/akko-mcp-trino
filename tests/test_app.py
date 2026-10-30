@@ -466,6 +466,9 @@ def test_cli_check_reports_the_search_settings(monkeypatch, capsys):
         "search_columns: a text of 4 characters at least, 1.5 s of the call's budget kept "
         "in reserve" in out
     )
+    monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "0")
+    check_config(Config.from_env())
+    assert "WARNING: MCP_SEARCH_RESERVE_SECONDS=0" in capsys.readouterr().out
 
 
 def test_cli_check_reports_the_query_source_and_budget(monkeypatch, capsys):

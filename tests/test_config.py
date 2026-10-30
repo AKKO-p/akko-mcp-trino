@@ -330,3 +330,15 @@ def test_no_call_budget_is_warned_of_since_a_search_of_every_catalog_is_refused(
         "MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns "
         "refuses to search every catalog and searches a named catalog only"
     ]
+
+
+def test_a_reserve_of_zero_with_a_call_budget_is_warned_of(monkeypatch):
+    """Without a reserve, a search's last read may reach the call's deadline: the call then
+    answers its own time_budget error, with nothing of what the search found."""
+    monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "0")
+    assert Config.from_env().warnings() == [
+        "MCP_SEARCH_RESERVE_SECONDS=0: a search of search_columns may run to the end of the "
+        "call's budget, and the call then answers its time_budget error with nothing it found"
+    ]
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    assert "MCP_SEARCH_RESERVE_SECONDS" not in " ".join(Config.from_env().warnings())
