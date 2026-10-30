@@ -282,7 +282,7 @@ def test_list_catalogs_reads_up_to_the_configured_bound(monkeypatch):
     mcp, _, trino, _ = _server(monkeypatch, [], max_catalogs=250)
     out = json.loads(_as("alice_analyst", lambda: mcp.tools["list_catalogs"]()))
     assert out == {"catalogs": ["v"], "next_offset": None, "truncated": False}
-    assert trino.keywords == {"row_limit": 250}
+    assert trino.keywords == {"row_limit": 251}, "system aside, 250 catalogs are read"
 
 
 def test_a_registrar_whose_third_argument_has_a_default_receives_the_context(monkeypatch):

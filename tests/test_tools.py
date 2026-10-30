@@ -28,8 +28,9 @@ class FakeMCP:
 
 
 class FakeClient:
-    def __init__(self, result=None, raises=None):
+    def __init__(self, result=None, raises=None, results=None):
         self._result = result or {"columns": ["c"], "rows": [["v"]], "row_count": 1}
+        self._results = list(results or [])  # answered in order, before ``result``
         self._raises = raises
         self.calls = []
         self.keywords = []  # the keywords of each query: row_limit, max_rows, timeout
@@ -39,7 +40,7 @@ class FakeClient:
         self.keywords.append(keywords)
         if self._raises:
             raise self._raises
-        return self._result
+        return self._results.pop(0) if self._results else self._result
 
     def ping(self):
         if self._raises:
@@ -132,7 +133,8 @@ def test_list_schemas_validates_identifier():
         "truncated": False,
     }
     assert client.calls[-1][0] == (
-        "SELECT schema_name FROM iceberg.information_schema.schemata ORDER BY schema_name OFFSET 0"
+        "SELECT schema_name FROM iceberg.information_schema.schemata "
+        "ORDER BY schema_name OFFSET 0 LIMIT 101"
     )
     out = json.loads(mcp.tools["list_schemas"]("bad;name"))
     assert "Invalid catalog" in out["error"] and len(client.calls) == 1, "nothing must reach Trino"
@@ -149,7 +151,7 @@ def test_list_tables_validates_both_identifiers():
     }
     assert client.calls[-1][0] == (
         "SELECT table_name FROM iceberg.information_schema.tables "
-        "WHERE table_schema = 'fraud' ORDER BY table_name OFFSET 0"
+        "WHERE table_schema = 'fraud' ORDER BY table_name OFFSET 0 LIMIT 101"
     )
     out = json.loads(mcp.tools["list_tables"]("iceberg", "bad schema"))
     assert "Invalid schema" in out["error"] and len(client.calls) == 1
@@ -163,7 +165,7 @@ def test_list_tables_gives_the_next_page_and_says_where_it_starts():
     out = json.loads(mcp.tools["list_tables"]("demo", "crm"))
     assert out["tables"] == [r[0] for r in _names(100)]
     assert out["next_offset"] == 100 and out["truncated"] is True
-    assert client.calls[-1][0].endswith("ORDER BY table_name OFFSET 0")
+    assert client.calls[-1][0].endswith("ORDER BY table_name OFFSET 0 LIMIT 101")
     assert client.keywords[-1] == {}, "a page is the server's own row cap"
 
 
@@ -171,7 +173,7 @@ def test_the_next_page_starts_where_the_last_one_ended():
     mcp, client = _registered(result={"rows": _names(100), "row_count": 100, "truncated": True})
     out = json.loads(mcp.tools["list_tables"]("demo", "crm", offset=100))
     assert out["next_offset"] == 200
-    assert client.calls[-1][0].endswith("ORDER BY table_name OFFSET 100")
+    assert client.calls[-1][0].endswith("ORDER BY table_name OFFSET 100 LIMIT 101")
 
 
 def test_the_last_page_has_no_next_offset():
@@ -179,7 +181,40 @@ def test_the_last_page_has_no_next_offset():
     out = json.loads(mcp.tools["list_tables"]("demo", "crm", offset=200))
     assert out["next_offset"] is None and out["truncated"] is False
     assert len(out["tables"]) == 7
-    assert client.calls[-1][0].endswith("ORDER BY table_name OFFSET 200")
+    assert client.calls[-1][0].endswith("ORDER BY table_name OFFSET 200 LIMIT 101")
+
+
+def test_a_page_holds_the_page_size_even_from_a_client_without_a_cap():
+    """LIMIT asks Trino for one name more than a page: a client that applies no cap of its
+    own still gives a page of page_size names and a next page."""
+    mcp, client = _registered(
+        max_rows=3, result={"rows": _names(4), "row_count": 4, "truncated": False}
+    )
+    out = json.loads(mcp.tools["list_tables"]("demo", "crm"))
+    assert out["tables"] == ["t000", "t001", "t002"] and out["next_offset"] == 3
+    assert client.calls[-1][0].endswith("OFFSET 0 LIMIT 4")
+    out = json.loads(mcp.tools["list_schemas"]("demo", offset=6))
+    assert out["schemas"] == ["t000", "t001", "t002"] and out["next_offset"] == 9
+
+
+def test_list_tables_on_a_missing_or_hidden_schema_says_so_never_an_empty_list():
+    """information_schema shows no row for a schema that does not exist or that the policy
+    hides: an empty page is checked against the schemata the caller sees."""
+    empty = {"rows": [], "row_count": 0, "truncated": False}
+    mcp, client = _registered(results=[empty, empty])
+    out = json.loads(mcp.tools["list_tables"]("demo", "CRMM"))
+    assert out == {"error": "Schema demo.CRMM not found or not visible", "kind": "schema"}
+    assert client.calls[-1][0] == (
+        "SELECT schema_name FROM demo.information_schema.schemata WHERE schema_name = 'crmm'"
+    )
+
+
+def test_list_tables_on_a_visible_empty_schema_is_an_empty_last_page():
+    empty = {"rows": [], "row_count": 0, "truncated": False}
+    mcp, client = _registered(results=[empty, {"rows": [["crm"]], "row_count": 1}])
+    out = json.loads(mcp.tools["list_tables"]("demo", "crm"))
+    assert out == {"tables": [], "next_offset": None, "truncated": False}
+    assert len(client.calls) == 2
 
 
 def test_list_tables_reads_the_schema_as_trino_reads_an_unquoted_name():
@@ -196,7 +231,7 @@ def test_list_schemas_pages_the_same_way():
     )
     out = json.loads(mcp.tools["list_schemas"]("demo", offset=300))
     assert out["next_offset"] == 400 and out["truncated"] is True
-    assert client.calls[-1][0].endswith("ORDER BY schema_name OFFSET 300")
+    assert client.calls[-1][0].endswith("ORDER BY schema_name OFFSET 300 LIMIT 101")
 
 
 @pytest.mark.parametrize("bad", [-1, "1; DROP", 1.5, True, None])
@@ -233,7 +268,7 @@ def test_list_catalogs_reads_every_catalog_past_the_row_cap_and_pages_them():
     assert [p["next_offset"] for p in pages] == [2, 4, None]
     assert [p["truncated"] for p in pages] == [True, True, False]
     assert client.calls[-1][0] == "SHOW CATALOGS"
-    assert client.keywords[-1] == {"row_limit": 50}, "the bound replaces the row cap"
+    assert client.keywords[-1] == {"row_limit": 51}, "the bound, system aside, replaces the cap"
 
 
 def test_an_offset_past_the_last_catalog_is_an_empty_last_page():
@@ -242,15 +277,30 @@ def test_an_offset_past_the_last_catalog_is_an_empty_last_page():
     assert out == {"catalogs": [], "next_offset": None, "truncated": False}
 
 
-def test_list_catalogs_above_its_bound_is_an_error_never_a_cut_list():
+@pytest.mark.parametrize(
+    "rows, cut",
+    [
+        (_names(4, "c"), False),  # one catalog more than the bound, system not among them
+        (_names(4, "c"), True),  # SHOW CATALOGS itself goes past the bound and system
+    ],
+)
+def test_list_catalogs_above_its_bound_is_an_error_never_a_cut_list(rows, cut):
     mcp, _ = _registered(
-        max_catalogs=3, result={"rows": _names(3, "c"), "row_count": 3, "truncated": True}
+        max_catalogs=3, result={"rows": rows, "row_count": len(rows), "truncated": cut}
     )
     out = json.loads(mcp.tools["list_catalogs"]())
     assert out == {
         "error": "more than 3 catalogs are visible; raise the server's limit",
         "kind": "invalid_argument",
     }
+
+
+def test_the_system_catalog_does_not_count_against_the_bound():
+    rows = [*_names(3, "c"), ["system"]]
+    mcp, client = _registered(max_catalogs=3, result={"rows": rows, "row_count": 4})
+    out = json.loads(mcp.tools["list_catalogs"]())
+    assert out["catalogs"] == ["c000", "c001", "c002"] and out["next_offset"] is None
+    assert client.keywords[-1] == {"row_limit": 4}, "one row more than the bound, for system"
 
 
 def test_listing_reply_refuses_the_truncated_flag_it_took_before():

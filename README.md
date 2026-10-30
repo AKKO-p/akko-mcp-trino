@@ -456,8 +456,10 @@ are paged in Trino (`ORDER BY` with `OFFSET` on `information_schema.schemata`
 and `information_schema.tables`), so Trino decides what each page holds. Catalogs
 are read with `SHOW CATALOGS`, which works even under a policy that refuses all
 of `system`, whole, past the row cap, up to `MCP_MAX_CATALOGS` (10000 by default),
-then paged by the server. Above that bound `list_catalogs` answers an error, never
-a cut list. An `offset` that is not a whole number from 0 is refused
+then paged by the server; `system` does not count against the bound. Above it
+`list_catalogs` answers an error, never a cut list. `list_tables` on a schema that
+does not exist, or that the caller may not see, answers `kind` `schema` ("not found
+or not visible", the same for both), never an empty list. An `offset` that is not a whole number from 0 is refused
 (`invalid_argument`) before Trino.
 
 The defaults are chosen for an agent, not for a batch job. A question an agent
@@ -691,7 +693,7 @@ reads its own variables from the same environment.
 | `TRINO_CATALOG` | session catalog, where a name without a catalog is read; set it to a data catalog (with `system`, such names are refused) | `system` |
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
 | `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated`; also the size of one page of a listing | `100` |
-| `MCP_MAX_CATALOGS` | the most catalogs `list_catalogs` reads before it pages them, 1 at least; above it the tool answers an error, never a cut list | `10000` |
+| `MCP_MAX_CATALOGS` | the most catalogs `list_catalogs` reads before it pages them, `system` aside, 1 at least; above it the tool answers an error, never a cut list | `10000` |
 | `TRINO_QUERY_TIMEOUT_SECONDS` | time budget of one query: past it, the server cancels the query in Trino; `0` leaves the limit to Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | time budget of one tool call, every query of the call included: past it, no query starts, the one running is cancelled and the agent gets an error; `0` sets none | `120` |
 | `TRINO_SOURCE` | the source Trino records for every query (`X-Trino-Source`) | the server name |

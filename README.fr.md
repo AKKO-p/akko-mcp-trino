@@ -215,7 +215,9 @@ rappelle l'outil avec `offset=next_offset` pour lire la suite ; `truncated` est 
 quand `next_offset` n'est pas `null`. Les schémas et les tables sont paginés dans Trino (`ORDER BY`
 et `OFFSET` sur `information_schema`). Les catalogues sont lus en entier par `SHOW CATALOGS`,
 au-delà du plafond de lignes, jusqu'à `MCP_MAX_CATALOGS` (10000 par défaut), puis paginés par le
-serveur ; au-delà de cette borne, `list_catalogs` rend une erreur, jamais une liste coupée. Un
+serveur, `system` non compté ; au-delà de cette borne, `list_catalogs` rend une erreur, jamais une
+liste coupée. `list_tables` sur un schéma inexistant ou invisible pour l'appelant rend `kind`
+`schema` (« not found or not visible », la même réponse pour les deux), jamais une liste vide. Un
 `offset` qui n'est pas un entier positif ou nul est refusé (`invalid_argument`) avant Trino.
 
 Une erreur revient sous la forme `{"error": "...", "kind": "..."}`. `error` est le message entier de

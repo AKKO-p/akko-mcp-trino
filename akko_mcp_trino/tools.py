@@ -46,6 +46,7 @@ from .audit import (
     reset_current_request_id,
     set_current_request_id,
 )
+from .config import DEFAULT_MAX_CATALOGS, DEFAULT_MAX_ROWS
 from .errors import INVALID_ARGUMENT, READ_ONLY, TIME_BUDGET, explain_error
 from .identity import current_principal, current_subject
 from .sql_guard import (
@@ -232,6 +233,11 @@ def check_offset(offset: int) -> int:
     return offset
 
 
+def _too_many(bound: int, what: str) -> ValueError:
+    """The error of a list read whole that holds more than ``bound`` ``what``."""
+    return ValueError(f"more than {bound} {what} are visible; raise the server's limit")
+
+
 def _next_offset(offset: int, items: list, more: bool) -> Optional[int]:
     """Where the page after ``items``, read from ``offset``, starts; None when none follows."""
     return offset + len(items) if more else None
@@ -291,7 +297,7 @@ class ToolContext:
         audit: Any,
         read_only: bool,
         call_timeout_seconds: float = 0.0,
-        page_size: int = 100,
+        page_size: int = DEFAULT_MAX_ROWS,
     ) -> None:
         """Bind the server, the client and the shared machinery; every tool registered
         here is due within ``call_timeout_seconds`` when above 0, and a page of a list
@@ -323,10 +329,14 @@ class ToolContext:
 
     def run_whole(self, sql: str, *, bound: int, what: str) -> list:
         """Every row of ``sql``, read past the row cap up to ``bound`` rows; more than
-        ``bound`` raises ValueError naming ``what``: never a list cut in silence."""
+        ``bound`` raises ValueError naming ``what``: never a list cut in silence.
+
+        The client must say when it cut an answer (``truncated``, as ``TrinoClient.query``
+        does by reading one row more than its limit): a client that cuts without saying so
+        would hand back a cut list as whole."""
         res = self.run(sql, row_limit=bound)
         if was_cut(res):
-            raise ValueError(f"more than {bound} {what} are visible; raise the server's limit")
+            raise _too_many(bound, what)
         return res["rows"]
 
     def tool(
@@ -373,8 +383,8 @@ def register_query_tools(
     call_timeout_seconds: float = 0.0,
     session_catalog: str | None = None,
     describe_notes: Sequence[str] = (),
-    max_rows: int = 100,
-    max_catalogs: int = 10000,
+    max_rows: int = DEFAULT_MAX_ROWS,
+    max_catalogs: int = DEFAULT_MAX_CATALOGS,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -402,6 +412,23 @@ def register_query_tools(
     tool = tools.tool
     run = tools.run
 
+    def schema_visible(cat: str, folded: str) -> bool:
+        """Whether the caller sees the schema ``folded`` (already lower-cased) in ``cat``."""
+        res = run(
+            f"SELECT schema_name FROM {cat}.information_schema.schemata "
+            f"WHERE schema_name = '{folded}'"
+        )
+        return bool(res["rows"])
+
+    def page_of(ordered_sql: str, start: int) -> tuple[list, bool]:
+        """The page of ``ordered_sql`` from row ``start``, and whether more rows follow.
+        One row more than a page is asked of Trino, so the answer says it even from a
+        client that applies no row cap of its own."""
+        size = tools.page_size
+        res = run(f"{ordered_sql} OFFSET {start} LIMIT {size + 1}")
+        names = [r[0] for r in res["rows"]]
+        return names[:size], was_cut(res) or len(names) > size
+
     @tool("List catalogs")
     def list_catalogs(offset: int = 0) -> str:
         """List the Trino catalogs (data sources) the current user can see, one page at a time.
@@ -417,9 +444,12 @@ def register_query_tools(
         try:
             start = check_offset(offset)
             # SHOW CATALOGS works under a policy that refuses all of `system`: it is read
-            # whole, up to its own bound, and paged here.
-            rows = tools.run_whole("SHOW CATALOGS", bound=max_catalogs, what="catalogs")
-            names = sorted(str(r[0]) for r in rows if str(r[0]).lower() != "system")
+            # whole, up to its own bound, and paged here. `system` is listed by Trino but
+            # never here: one row more is read for it, and the bound counts the others.
+            res = run("SHOW CATALOGS", row_limit=max_catalogs + 1)
+            names = sorted(str(r[0]) for r in res["rows"] if str(r[0]).lower() != "system")
+            if was_cut(res) or len(names) > max_catalogs:
+                raise _too_many(max_catalogs, "catalogs")
             page = names[start : start + tools.page_size]
             more = start + len(page) < len(names)
             return listing_reply("catalogs", page, _next_offset(start, page, more))
@@ -439,12 +469,11 @@ def register_query_tools(
         try:
             cat = governed_catalog(catalog)
             start = check_offset(offset)
-            res = run(
-                f"SELECT schema_name FROM {cat}.information_schema.schemata "
-                f"ORDER BY schema_name OFFSET {start}"
+            names, more = page_of(
+                f"SELECT schema_name FROM {cat}.information_schema.schemata ORDER BY schema_name",
+                start,
             )
-            names = [r[0] for r in res["rows"]]
-            return listing_reply("schemas", names, _next_offset(start, names, was_cut(res)))
+            return listing_reply("schemas", names, _next_offset(start, names, more))
         except Exception as e:  # noqa: BLE001
             return error_reply(e)
 
@@ -465,12 +494,22 @@ def register_query_tools(
             start = check_offset(offset)
             # A validated name carries no quote. Trino folds an unquoted name to lower
             # case, as SHOW TABLES FROM did: the schema is compared folded the same way.
-            res = run(
+            folded = sch.lower()
+            names, more = page_of(
                 f"SELECT table_name FROM {cat}.information_schema.tables "
-                f"WHERE table_schema = '{sch.lower()}' ORDER BY table_name OFFSET {start}"
+                f"WHERE table_schema = '{folded}' ORDER BY table_name",
+                start,
             )
-            names = [r[0] for r in res["rows"]]
-            return listing_reply("tables", names, _next_offset(start, names, was_cut(res)))
+            # information_schema shows no row for a schema that does not exist or that the
+            # policy hides: an empty page says which, never an empty list taken as whole.
+            # Missing and hidden answer the same, so the answer reveals nothing.
+            if not names and not schema_visible(cat, folded):
+                return refusal_reply(
+                    "schema_not_found",
+                    f"Schema {cat}.{sch} not found or not visible",
+                    kind="schema",
+                )
+            return listing_reply("tables", names, _next_offset(start, names, more))
         except Exception as e:  # noqa: BLE001
             return error_reply(e)
 
