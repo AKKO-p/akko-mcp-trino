@@ -116,9 +116,10 @@ class Config:
     # however wide, and the answer says when a page was shortened.
     describe_schema_tables: int = DEFAULT_DESCRIBE_SCHEMA_TABLES
     describe_schema_columns: int = DEFAULT_DESCRIBE_SCHEMA_COLUMNS
-    # `search_columns`: the shortest text it searches, so that a letter or two does not
-    # read every column, and the seconds of the call's budget it keeps in reserve, so that
-    # it stops early enough to answer what it searched rather than the call's own error.
+    # `search_columns`: the shortest word it searches (shorter words are ignored), so that
+    # a letter or two does not read every column, and the seconds of the call's budget it
+    # keeps in reserve, so that it stops early enough to answer what it searched rather
+    # than the call's own error.
     search_min_length: int = DEFAULT_SEARCH_MIN_LENGTH
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
 

@@ -98,7 +98,7 @@ def check_config(config: Config) -> int:
         f"describe_schema: up to {config.describe_schema_tables} tables a page "
         f"({MAX_DESCRIBE_SCHEMA_TABLES} at most), "
         f"{config.describe_schema_columns} columns in all, a wider table whole",
-        f"search_columns: a text of {config.search_min_length} characters at least, "
+        f"search_columns: words of {config.search_min_length} characters at least, "
         f"{config.search_reserve_seconds:g} s of the call's budget kept in reserve",
         f"tool plugins: {config.tool_plugins or 'none'}",
         f"extensions: {', '.join(extension_names(config.extensions)) or 'none'}",
