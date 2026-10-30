@@ -13,10 +13,12 @@ choosing a transport never decides whether the guard is present.
 
 from __future__ import annotations
 
+import asyncio
 from functools import partial
-from typing import Any, Callable, Sequence
+from typing import Any, Awaitable, Callable, Sequence
 
-import anyio
+from mcp import MCPError
+from mcp.types import INVALID_REQUEST
 
 from .auth import Principal
 from .config import Config
@@ -27,6 +29,24 @@ from .transport_security import transport_security_for
 
 _HTTP_TRANSPORTS = ("sse", "streamable-http")
 _TRANSPORTS = _HTTP_TRANSPORTS + ("stdio",)
+
+# The handshake and discovery: the only methods an ``oauth2`` stdio server answers
+# without a login, because none of them reaches Trino. Notifications pass too. Every
+# other method, ``tools/call`` and any a later SDK or an extension adds, is admitted
+# first: a method missing here is refused a login, never served without one.
+_DISCOVERY = frozenset(
+    {
+        "initialize",
+        "ping",
+        "server/discover",
+        "tools/list",
+        "resources/list",
+        "resources/templates/list",
+        "prompts/list",
+    }
+)
+
+_CallNext = Callable[[Any], Awaitable[Any]]
 
 
 def transports_supported() -> tuple[str, ...]:
@@ -49,9 +69,11 @@ def run_stdio(
     whole process; once verified, the token is also the bearer the ``jwt``
     identity mode sends to Trino. In strict mode a missing or invalid token
     refuses to start, which is the stdio equivalent of a 401. The extensions'
-    guards hold here too. In ``oauth2`` mode Trino verifies the user on first
-    tool use, and the guards run on each tool call, never during startup or
-    discovery. Nothing here writes to stdout: stdout is the protocol channel.
+    guards hold here too, once, for the whole process. In ``oauth2`` mode Trino
+    names the user on the first call that is not discovery (see
+    `_oauth2_stdio_middleware`), and the guards run on every such call, never at
+    start or for discovery. Nothing here writes to stdout: stdout is the protocol
+    channel.
     """
     principal = None
     if auth_provider is not None and config.user_token:
@@ -120,31 +142,40 @@ def _admit(config: Config, extensions: Sequence[Extension], user: Principal | No
     for ext in extensions:
         refusal = ext.before_auth(admission) or ext.after_auth(admission)
         if refusal is not None:
-            raise PermissionError(f"admission refused: {refusal.reason}")
+            detail = f": {refusal.message}" if refusal.message else ""
+            raise PermissionError(f"admission refused: {refusal.reason}{detail}")
     set_current_principal(admission.principal)
     for var, value in admission.bindings:
         var.set(value)
 
 
-def _oauth2_stdio_middleware(client: Any, admit: Callable[[Principal], None]) -> Callable:
-    """Verify the Trino identity on first tool use; admit that user on every call."""
-    principal: Principal | None = None
-    lock = anyio.Lock()
+def _oauth2_stdio_middleware(
+    client: Any, admit: Callable[[Principal], None]
+) -> Callable[[Any, _CallNext], Awaitable[Any]]:
+    """The SDK middleware of ``oauth2`` over stdio: discovery passes; any other method
+    signs in to Trino once (``SELECT current_user``), then admits that user and binds the
+    guards' context for this call alone.
 
-    async def authenticate_on_call(ctx, call_next):
+    MCP hosts give up on ``initialize`` while a browser login waits, so the login waits
+    for the first call that needs Trino. The SDK runs each request in a task of its own,
+    from a copy of the context: what the admission binds lives as long as the call. A
+    refusal, or Trino naming nobody, answers the request with an ``INVALID_REQUEST``
+    error that says why; the call does not run. The user Trino named first stays the
+    user of the process, as the user who started it.
+    """
+    principal: Principal | None = None
+    lock = asyncio.Lock()
+
+    async def admit_on_call(ctx: Any, call_next: _CallNext) -> Any:
         nonlocal principal
-        if ctx.method == "tools/call":
-            async with lock:
-                if principal is None:
-                    result = await anyio.to_thread.run_sync(
-                        partial(client.query, "SELECT current_user")
-                    )
-                    rows = result["rows"]
-                    subject = rows[0][0] if rows and rows[0] else None
-                    if not isinstance(subject, str) or not subject.strip():
-                        raise PermissionError("Trino OAuth2 returned no authenticated user")
-                    principal = Principal(subject=subject)
-            admit(principal)
+        if ctx.method not in _DISCOVERY and not ctx.method.startswith("notifications/"):
+            try:
+                async with lock:
+                    if principal is None:
+                        principal = Principal(subject=await asyncio.to_thread(client.current_user))
+                admit(principal)
+            except PermissionError as exc:
+                raise MCPError(INVALID_REQUEST, str(exc)) from None
         return await call_next(ctx)
 
-    return authenticate_on_call
+    return admit_on_call
