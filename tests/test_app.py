@@ -212,13 +212,13 @@ def test_stdio_uses_trinos_identity_for_admission_and_audit(token, required):
 
     async def calls():
         middleware = mcp.middleware[0]
-        await middleware(SimpleNamespace(method="initialize"), lambda ctx: anyio.sleep(0))
-        await middleware(SimpleNamespace(method="tools/list"), lambda ctx: anyio.sleep(0))
+        await middleware(_request("initialize"), lambda ctx: anyio.sleep(0))
+        await middleware(_request("tools/list"), lambda ctx: anyio.sleep(0))
         client.current_user.assert_not_called()
         guard.before_auth.assert_not_called()
         async with anyio.create_task_group() as group:
             for _ in range(2):
-                group.start_soon(middleware, SimpleNamespace(method="tools/call"), call_next)
+                group.start_soon(middleware, _request("tools/call"), call_next)
 
     def run(transport):
         anyio.run(calls)
@@ -248,6 +248,11 @@ def test_stdio_uses_trinos_identity_for_admission_and_audit(token, required):
     assert guard.before_auth.call_count == guard.after_auth.call_count == 2
 
 
+def _request(method, request_id=1):
+    """The SDK's context of a message: a request has an id, a notification has none."""
+    return SimpleNamespace(method=method, request_id=request_id)
+
+
 def _oauth2_middleware(client, extensions=()):
     """The middleware ``run_stdio`` installs in ``oauth2`` mode, and nothing served."""
     cfg = replace(_config("stdio"), trino_identity_mode="oauth2", trino_http_scheme="https")
@@ -257,23 +262,24 @@ def _oauth2_middleware(client, extensions=()):
 
 
 @pytest.mark.parametrize(
-    "method",
+    "method, request_id",
     [
-        "initialize",
-        "ping",
-        "server/discover",
-        "tools/list",
-        "resources/list",
-        "resources/templates/list",
-        "prompts/list",
-        "notifications/initialized",
-        "notifications/cancelled",
+        ("initialize", 1),
+        ("ping", 1),
+        ("server/discover", 1),
+        ("tools/list", 1),
+        ("resources/list", 1),
+        ("resources/templates/list", 1),
+        ("prompts/list", 1),
+        ("notifications/initialized", None),
+        ("notifications/cancelled", None),
+        ("an/extensions/notification", None),
     ],
 )
-def test_oauth2_discovery_passes_without_login_or_admission(method):
+def test_oauth2_discovery_passes_without_login_or_admission(method, request_id):
     client, guard, call_next = Mock(), Mock(), AsyncMock(return_value="answer")
     middleware = _oauth2_middleware(client, [guard])
-    assert anyio.run(middleware, SimpleNamespace(method=method), call_next) == "answer"
+    assert anyio.run(middleware, _request(method, request_id), call_next) == "answer"
     client.current_user.assert_not_called()
     guard.before_auth.assert_not_called()
     guard.after_auth.assert_not_called()
@@ -289,12 +295,15 @@ def test_oauth2_discovery_passes_without_login_or_admission(method):
         "logging/setLevel",
         "resources/subscribe",
         "a/method/of/a/later/sdk",
+        "notifications/named/like/one",
     ],
 )
 def test_oauth2_admits_every_other_method_before_it_runs(method):
     """Deny by default: only the listed discovery methods skip the login. A resource or a
     prompt an extension adds, or a method a later SDK adds, signs in and is admitted
-    like a tool call, so it never reaches Trino without the user it runs for."""
+    like a tool call, so it never reaches Trino without the user it runs for. A
+    notification is told by its missing request id, never by its name: a request an
+    extension names ``notifications/...`` is admitted too."""
     seen = {}
     client = Mock(current_user=Mock(return_value="alice"))
     guard = Mock(before_auth=Mock(return_value=None), after_auth=Mock(return_value=None))
@@ -303,7 +312,7 @@ def test_oauth2_admits_every_other_method_before_it_runs(method):
         seen["subject"] = current_subject()
 
     contextvars.copy_context().run(
-        anyio.run, _oauth2_middleware(client, [guard]), SimpleNamespace(method=method), call_next
+        anyio.run, _oauth2_middleware(client, [guard]), _request(method), call_next
     )
     client.current_user.assert_called_once_with()
     guard.after_auth.assert_called_once()
@@ -325,7 +334,7 @@ def test_oauth2_refusal_answers_an_invalid_request_and_never_runs_the_call(refus
     call_next = AsyncMock()
     middleware = _oauth2_middleware(client, [guard])
     with pytest.raises(MCPError) as raised:
-        anyio.run(middleware, SimpleNamespace(method="tools/call"), call_next)
+        anyio.run(middleware, _request("tools/call"), call_next)
     assert (raised.value.code, raised.value.message) == (INVALID_REQUEST, message)
     call_next.assert_not_called()
 
@@ -334,7 +343,7 @@ def test_oauth2_trino_naming_nobody_answers_an_invalid_request():
     client = Mock(current_user=Mock(side_effect=PermissionError("no authenticated user")))
     call_next = AsyncMock()
     with pytest.raises(MCPError, match="no authenticated user") as raised:
-        anyio.run(_oauth2_middleware(client), SimpleNamespace(method="tools/call"), call_next)
+        anyio.run(_oauth2_middleware(client), _request("tools/call"), call_next)
     assert raised.value.code == INVALID_REQUEST
     call_next.assert_not_called()
 
@@ -346,7 +355,7 @@ def test_stdio_login_failure_is_deferred_to_the_tool_call():
     tool = AsyncMock()
 
     async def calls():
-        ctx = SimpleNamespace(method="tools/call")
+        ctx = _request("tools/call")
         with pytest.raises(RuntimeError, match="login failed"):
             await middleware(ctx, tool)
         tool.assert_not_called()

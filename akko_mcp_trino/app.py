@@ -31,7 +31,8 @@ _HTTP_TRANSPORTS = ("sse", "streamable-http")
 _TRANSPORTS = _HTTP_TRANSPORTS + ("stdio",)
 
 # The handshake and discovery: the only methods an ``oauth2`` stdio server answers
-# without a login, because none of them reaches Trino. Notifications pass too. Every
+# without a login, because none of them reaches Trino. Notifications pass too, told
+# by their missing request id, never by a name a request could take. Every
 # other method, ``tools/call`` and any a later SDK or an extension adds, is admitted
 # first: a method missing here is refused a login, never served without one.
 _DISCOVERY = frozenset(
@@ -168,7 +169,8 @@ def _oauth2_stdio_middleware(
 
     async def admit_on_call(ctx: Any, call_next: _CallNext) -> Any:
         nonlocal principal
-        if ctx.method not in _DISCOVERY and not ctx.method.startswith("notifications/"):
+        # A notification has no request id (the SDK's own test), whatever its name.
+        if ctx.request_id is not None and ctx.method not in _DISCOVERY:
             try:
                 async with lock:
                     if principal is None:
