@@ -602,7 +602,7 @@ def test_cli_check_reports_the_search_settings(monkeypatch, capsys):
     check_config(Config.from_env())
     out = capsys.readouterr().out
     assert (
-        "search_columns: a text of 4 characters at least, 1.5 s of the call's budget kept "
+        "search_columns: words of 4 characters at least, 1.5 s of the call's budget kept "
         "in reserve" in out
     )
     monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "0")

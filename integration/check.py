@@ -119,11 +119,20 @@ async def walk(call, tool: str, key: str) -> tuple[list[str], int]:
 async def discovery(call) -> dict:
     """The 0.7 tools, as one caller."""
     quote = "o'b\\c"
+
+    async def search(text: str) -> dict:
+        return await call("search_columns", text=text, catalog="tpch", schema="tiny")
+
     return {
-        "search": await call("search_columns", text="name", catalog="tpch", schema="tiny"),
+        "search": await search("name"),
         "describe": await call("describe_schema", catalog="tpch", schema="tiny"),
-        "wild": await call("search_columns", text="%%%", catalog="tpch", schema="tiny"),
-        "quote": await call("search_columns", text=quote, catalog="tpch", schema="tiny"),
+        "wild": await search("na_e"),
+        "quote": await search("o'brien\\x"),
+        "words": await search("Nation, NAME"),
+        "table": await search("nation"),
+        "hidden_table": await search("supplier"),
+        "empty": await search("zzqqzz"),
+        "short": await search("ab %"),
         "quote_schema": await call("describe_schema", catalog="tpch", schema=quote),
         "column": await call("execute_query", sql="SELECT nosuch FROM tpch.tiny.nation"),
         "system": await call("execute_query", sql="SELECT * FROM system.jdbc.columns"),
@@ -197,7 +206,7 @@ def main() -> int:
         d_alice["describe"],
     )
     check(
-        "discovery: a search for %%% matches no column (the wildcard is literal)",
+        "discovery: a search for na_e matches no column (the _ is literal)",
         d_alice["wild"].get("matches") == [] and "error" not in d_alice["wild"],
         d_alice["wild"],
     )
@@ -205,6 +214,40 @@ def main() -> int:
         "discovery: a text with a quote and a backslash answers without error, no match",
         d_alice["quote"].get("matches") == [] and "error" not in d_alice["quote"],
         d_alice["quote"],
+    )
+    check(
+        "discovery: two words match a column by its name and its table's name",
+        [(m["table"], m["column"]) for m in d_alice["words"].get("matches", [])]
+        == [("nation", "name")]
+        and d_alice["words"].get("complete") is True,
+        d_alice["words"],
+    )
+    check(
+        "discovery: a search lists the table whose name holds the word, for both users",
+        [t["table"] for t in d_alice["table"].get("tables", [])] == ["nation"]
+        and [t["table"] for t in d_bob["table"].get("tables", [])] == ["nation"],
+        (d_alice["table"], d_bob["table"]),
+    )
+    check(
+        "discovery: a table bob may not see is listed for alice only",
+        [t["table"] for t in d_alice["hidden_table"].get("tables", [])] == ["supplier"]
+        and d_bob["hidden_table"].get("tables") == []
+        and d_bob["hidden_table"].get("matches") == [],
+        (d_alice["hidden_table"], d_bob["hidden_table"]),
+    )
+    check(
+        "discovery: a complete search with no result gives the hint",
+        d_alice["empty"].get("complete") is True
+        and d_alice["empty"].get("matches") == []
+        and d_alice["empty"].get("tables") == []
+        and "list_tables" in d_alice["empty"].get("hint", ""),
+        d_alice["empty"],
+    )
+    check(
+        "discovery: a text with no word long enough is refused and says so",
+        d_alice["short"].get("kind") == "invalid_argument"
+        and "no word" in d_alice["short"].get("error", ""),
+        d_alice["short"],
     )
     check(
         "discovery: a schema name with a quote and a backslash is refused before SQL",
