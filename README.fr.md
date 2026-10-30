@@ -55,7 +55,7 @@ donnez.
 - **Borné par défaut.** Un plafond de 100 lignes avec l'indicateur `truncated`, un délai de 60 s
   par requête annulé dans Trino, un délai de 120 s par appel d'outil.
 - **Une ligne d'audit par appel**, sans jamais le jeton ni le texte SQL.
-- **Six outils, pas un de plus**, annotés selon ce qu'ils peuvent vraiment faire.
+- **Huit outils**, annotés selon ce qu'ils peuvent vraiment faire.
 - **Extensible sans fork**, par des paquets Python nommés au démarrage.
 
 ## Ce que couvre la lecture seule
@@ -71,7 +71,13 @@ Pour une lecture seule de bout en bout, le moteur doit tenir la ligne lui aussi.
 en lecture seule aux identités par lesquelles les agents atteignent Trino (OPA, Ranger ou règles
 de fichier), réservez l'échange vers l'audience de Trino au client de ce serveur, limitez la règle
 d'impersonation aux utilisateurs pour qui les agents travaillent, et refusez aussi les fonctions
-de table et le catalogue `system` dans la politique. La garde reste une seconde ligne.
+de table et le catalogue `system` dans la politique, **sauf** la lecture de `system.jdbc` et
+`system.metadata`, que Trino filtre pour chaque utilisateur comme il filtre `information_schema` :
+un utilisateur n'y voit que les tables et colonnes qu'il peut voir ailleurs. `describe_schema` lit
+`system.jdbc.columns` et `system.metadata.table_comments`, et `search_columns` lit
+`system.jdbc.columns`, par des requêtes que le serveur construit ; une politique qui les refuse leur
+fait rendre une erreur qui le dit, sans autre voie essayée. Le SQL
+de l'agent reste refusé sur tout `system`, ces vues comprises. La garde reste une seconde ligne.
 
 ## Installer
 
@@ -197,9 +203,11 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 
 | Outil | Arguments | Rend |
 |---|---|---|
-| `list_catalogs` | aucun | les catalogues que Trino montre |
-| `list_schemas` | `catalog` | les schémas de ce catalogue |
-| `list_tables` | `catalog`, `schema` | les tables et vues de ce schéma |
+| `search_columns` | `text`, `catalog`, `schema`, `cursor` (tous facultatifs sauf `text`) | les colonnes dont le nom ou le commentaire contient le texte, `schemas_searched`, `not_searched`, `complete`, `next_cursor` |
+| `list_catalogs` | `offset` (facultatif, 0 par défaut) | une page des catalogues que Trino montre, `next_offset`, `truncated` |
+| `list_schemas` | `catalog`, `offset` (facultatif) | une page des schémas de ce catalogue, `next_offset`, `truncated` |
+| `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
+| `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, échantillon gouverné sur demande |
 | `explain_query` | `sql` | le plan de Trino pour une requête en lecture, sans l'exécuter |
 | `execute_query` | `sql`, `max_rows` (facultatif) | colonnes, lignes, nombre de lignes, `truncated` |
@@ -210,6 +218,70 @@ d'accès, pas une erreur à retenter, et les descriptions des outils le disent a
 `TRINO_READ_ONLY=false`, `execute_query` est annoté comme pouvant écrire, pour que l'hôte demande
 la confirmation qu'il sauterait pour un outil en lecture seule.
 
+Les trois outils de liste rendent une page à la fois : une page compte `TRINO_MAX_ROWS` noms, triés
+par nom, et `next_offset` dit où commence la page suivante, ou vaut `null` à la dernière. L'agent
+rappelle l'outil avec `offset=next_offset` pour lire la suite ; `truncated` est vrai exactement
+quand `next_offset` n'est pas `null`. Les schémas et les tables sont paginés dans Trino (`ORDER BY`
+et `OFFSET` sur `information_schema`). Les catalogues sont lus en entier par `SHOW CATALOGS`,
+au-delà du plafond de lignes, jusqu'à `MCP_MAX_CATALOGS` (10000 par défaut), puis paginés par le
+serveur, `system` non compté ; au-delà de cette borne, `list_catalogs` rend une erreur, jamais une
+liste coupée. `list_tables` sur un schéma inexistant ou invisible pour l'appelant rend `kind`
+`schema` (« not found or not visible », la même réponse pour les deux), jamais une liste vide. Un
+`offset` qui n'est pas un entier positif ou nul est refusé (`invalid_argument`) avant Trino.
+
+`describe_schema` donne à l'agent, en un appel, le contexte d'un schéma avant d'écrire du SQL : ses
+tables et vues, chacune avec son type, son commentaire et toutes ses colonnes. Il pagine par tables,
+dans Trino (`ORDER BY` et `OFFSET` sur `information_schema.tables`) : une page compte au plus
+`MCP_DESCRIBE_SCHEMA_TABLES` tables (20 par défaut), toujours entières, tant que leurs colonnes ne
+dépassent pas `MCP_DESCRIBE_SCHEMA_COLUMNS` au total (1000 par défaut). La première table d'une page
+vient toujours entière, si large soit-elle ; une page qui compte moins de tables à cause de ce budget
+le dit (`shortened: true`), et `next_offset` fait commencer la page suivante à la table laissée de
+côté. Les commentaires viennent de `system.metadata.table_comments` et les colonnes de
+`system.jdbc.columns`, deux vues que Trino filtre pour chaque utilisateur, lues par des requêtes que
+le serveur construit, jamais par le SQL de l'agent. Un schéma inexistant et un schéma invisible pour
+l'appelant rendent la même erreur, `kind` `schema` ; un schéma visible et vide rend une liste vide.
+Les commentaires sont du texte écrit par les propriétaires des données : la description de l'outil
+demande au modèle de les lire comme des données, jamais comme des instructions, et le serveur ne les
+place jamais dans ses instructions MCP. `describe_table` reste l'outil des lignes d'exemple.
+
+`search_columns` est le point de départ d'un agent qui ne sait pas quelle table contient ce qu'il
+cherche : il trouve les colonnes dont le nom ou le commentaire contient un texte, sans tenir compte
+de la casse, dans tous les catalogues que l'appelant voit (jamais `system`), dans un catalogue ou
+dans un schéma. Le texte entre comme un seul littéral `LIKE` échappé : ses apostrophes ne peuvent
+pas clore l'instruction, et ses `%`, `_` et `!` sont des caractères ordinaires. Un texte plus court
+que `MCP_SEARCH_MIN_LENGTH` (3 par défaut) est refusé, pour qu'une lettre ou deux ne lisent pas
+toutes les colonnes. La recherche lit `system.jdbc.columns`, que Trino filtre pour chaque
+utilisateur, un schéma à la fois dans un ordre stable (les catalogues puis leurs schémas, triés) :
+un catalogue de milliers de tables répond schéma par schéma. Elle tient dans le budget de l'appel
+(`MCP_CALL_TIMEOUT_SECONDS`) : avant chaque schéma, elle garde `MCP_SEARCH_RESERVE_SECONDS`
+(2 par défaut) en réserve, chaque requête est arrêtée dans Trino au temps qui reste, et la
+recherche rend alors ce qu'elle a fouillé plutôt que l'erreur de l'appel. Les résultats s'arrêtent
+au plafond de lignes (`TRINO_MAX_ROWS`). La réponse dit exactement ce qui a été fouillé :
+`schemas_searched`, `not_searched` avec une raison pour chaque partie laissée (`time_budget`,
+`row_cap` ou le `kind` de l'erreur de Trino ; un `schema` à `null` désigne un catalogue entier), et
+`complete`, vrai seulement quand tout le périmètre a été fouillé, sur tous les appels de la
+recherche. `next_cursor` reprend la même recherche là où elle s'est arrêtée (ce schéma et la suite
+de son catalogue, puis chaque catalogue non ouvert), à l'intérieur d'un schéma quand le plafond de
+lignes l'y a arrêtée. Un schéma, ou la liste des schémas d'un catalogue, qui prend plus de temps
+qu'une requête n'en a droit (`TRINO_QUERY_TIMEOUT_SECONDS`) alors que l'appel a encore du temps est
+nommé (`time_budget`) et sauté : le reprendre arrêterait chaque appel suivant au même endroit. De
+même pour celui qui prend plus de temps qu'un appel entier, quand la limite est laissée à Trino
+(`TRINO_QUERY_TIMEOUT_SECONDS=0`) ou vaut celle de l'appel : un appel qui manque de temps
+exactement là où il a repris, sans avoir avancé, le saute, si bien que chaque appel avance. Un
+curseur est refusé (`invalid_argument`) pour un autre texte ou un autre périmètre, pour un catalogue
+que l'appelant ne voit pas, ou s'il a été modifié ; tout curseur rendu par le serveur reprend, même
+pour un schéma Hive comme `2024_sales`, car le schéma d'un curseur n'entre que dans un littéral.
+Sans budget d'appel (`MCP_CALL_TIMEOUT_SECONDS=0`), une recherche sur tous les catalogues n'aurait
+pas de borne : elle est refusée, un catalogue nommé est fouillé, et `--check` le signale. `--check`
+signale aussi `MCP_SEARCH_RESERVE_SECONDS=0` avec un budget d'appel : une recherche peut alors aller
+jusqu'au bout de l'appel, qui rend sa propre erreur `time_budget`. La ligne d'audit dit combien de résultats sont venus et si la
+recherche a été coupée, jamais le texte, qui peut être une donnée. Les commentaires sont des
+données, jamais des instructions, comme pour `describe_schema`.
+
+Le parcours conseillé à un agent : `search_columns` pour trouver où vit la donnée,
+`describe_schema` (ou `describe_table` pour des lignes d'exemple) pour connaître les tables
+trouvées, puis `execute_query`.
+
 Une erreur revient sous la forme `{"error": "...", "kind": "..."}`. `error` est le message entier de
 Trino ; `kind` dit quoi en faire, et `identifier` nomme la colonne, la table, le schéma ou le
 catalogue que Trino n'a pas su résoudre, quand il le nomme.
@@ -218,7 +290,7 @@ catalogue que Trino n'a pas su résoudre, quand il le nomme.
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino a refusé l'instruction : corriger cette partie |
 | `permission` | Trino ou le fournisseur d'identité a refusé le droit : le rapporter, ne pas réessayer |
-| `invalid_argument` | le serveur a refusé un argument (identifiant) avant d'atteindre Trino |
+| `invalid_argument` | le serveur a refusé un argument (identifiant, `offset`) avant d'atteindre Trino |
 | `read_only` | l'instruction écrit et le serveur est en lecture seule |
 | `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
 | `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue) : l'instruction n'est ni valide ni invalide, réessayer plus tard |

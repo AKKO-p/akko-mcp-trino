@@ -51,7 +51,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **One identity, only when named.** In `service` mode every query runs as `TRINO_USER`. It is never chosen by default, and the server says so at start and to every host in its initialization instructions.
 - **Bounded by default.** A row cap with a `truncated` flag (100), a time budget per query cancelled in Trino (60 s), a time budget per tool call (120 s).
 - **One audit line per call.** Keyed by `X-Request-Id`, never the token, never the SQL text: who called which tool, with which outcome, for how long.
-- **Six tools, no more,** annotated with what they can really do: `execute_query` is annotated read-only only while `TRINO_READ_ONLY` is true.
+- **Eight tools,** annotated with what they can really do: `execute_query` is annotated read-only only while `TRINO_READ_ONLY` is true.
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
@@ -404,9 +404,11 @@ The [examples](examples/README.md) folder has the details.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `list_catalogs` | none | `{"catalogs": [...], "truncated": bool}`: the catalogs Trino shows |
-| `list_schemas` | `catalog` | `{"schemas": [...], "truncated": bool}`: schemas in that catalog |
-| `list_tables` | `catalog`, `schema` | `{"tables": [...], "truncated": bool}`: tables and views in that schema |
+| `search_columns` | `text`, `catalog`, `schema`, `cursor` (all but `text` optional) | `{"matches": [{"catalog", "schema", "table", "column", "type", "comment"}], "schemas_searched": n, "not_searched": [{"catalog", "schema", "reason"}], "complete": bool, "next_cursor": token or null}`: the columns whose name or comment contains the text |
+| `list_catalogs` | `offset` (optional, 0 by default) | `{"catalogs": [...], "next_offset": n or null, "truncated": bool}`: one page of the catalogs Trino shows |
+| `list_schemas` | `catalog`, `offset` (optional) | `{"schemas": [...], "next_offset": n or null, "truncated": bool}`: one page of the schemas in that catalog |
+| `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
+| `describe_schema` | `catalog`, `schema`, `offset` (optional) | `{"catalog", "schema", "tables": [{"table", "type", "comment", "columns": [{"column", "type", "comment"}]}], "next_offset": n or null, "shortened": bool}`: one page of whole tables, with their comments and columns |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add |
 | `explain_query` | `sql` | `{"plan": "..."}`: how Trino would run a read-only statement, without running it |
 | `execute_query` | `sql`, `max_rows` (optional, lower than the server cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
@@ -435,7 +437,7 @@ the engine's policy must refuse `system` too, the guard being a second line.
 
 Results are capped at `TRINO_MAX_ROWS` (100 by default, 1 at least): one row
 more is read, so `truncated` says whether the answer was cut, and the rest of
-the query is cancelled in Trino. Every listing says it too. With
+the query is cancelled in Trino. With
 `TRINO_QUERY_TIMEOUT_SECONDS` (60 s by default), a query that runs longer is
 cancelled in Trino and the agent is told so. The budget is
 enforced by the server, not set as a session property: a policy engine that
@@ -448,6 +450,78 @@ gathered so far, nor an answer that came past the deadline. A plugin that calls
 its own backend bounds that request with
 `akko_mcp_trino.audit.time_allowed(timeout)`: its own timeout, or what is left
 of the call's budget when that is shorter.
+
+The three listing tools page their answer: a page holds `TRINO_MAX_ROWS` names,
+sorted by name, and `next_offset` says where the next page starts, or is `null`
+on the last one. The agent calls again with `offset=next_offset` to read on;
+`truncated` is true exactly when `next_offset` is not `null`. Schemas and tables
+are paged in Trino (`ORDER BY` with `OFFSET` on `information_schema.schemata`
+and `information_schema.tables`), so Trino decides what each page holds. Catalogs
+are read with `SHOW CATALOGS`, which works even under a policy that refuses all
+of `system`, whole, past the row cap, up to `MCP_MAX_CATALOGS` (10000 by default),
+then paged by the server; `system` does not count against the bound. Above it
+`list_catalogs` answers an error, never a cut list. `list_tables` on a schema that
+does not exist, or that the caller may not see, answers `kind` `schema` ("not found
+or not visible", the same for both), never an empty list. An `offset` that is not a whole number from 0 is refused
+(`invalid_argument`) before Trino.
+
+`describe_schema` gives an agent a schema's context in one call before it writes
+SQL: its tables and views, each with its type, its comment and all its columns
+(name, type, comment). It pages by tables, in Trino (`ORDER BY` with `OFFSET` on
+`information_schema.tables`): a page holds up to `MCP_DESCRIBE_SCHEMA_TABLES`
+tables (20 by default), always whole, and only while their columns add up to
+`MCP_DESCRIBE_SCHEMA_COLUMNS` at most (1000 by default). The first table of a page
+always comes whole, however wide; a page that holds fewer tables for the column
+budget says so (`shortened: true`), and `next_offset` starts the next page at the
+table left out. The comments come from `system.metadata.table_comments` and the
+columns from `system.jdbc.columns`, two views of Trino's `system` catalog that Trino
+filters for each user, read by statements the server builds, never by the agent's
+SQL (see [What read-only covers](#what-read-only-covers)). A schema that does not
+exist and one the caller may not see answer the same error, `kind` `schema`; a
+visible empty schema answers an empty list. Comments are text the owners of the
+data wrote: the tool's description tells the model to read them as data, never as
+instructions, and the server never places them in its own MCP instructions.
+`describe_table` stays the tool for sample rows and what extensions add.
+
+`search_columns` is where an agent starts when it does not know which table holds
+what it needs: it finds the columns whose name or comment contains a text,
+ignoring case, in every catalog the caller sees (`system` never), in one catalog,
+or in one schema. The text is one escaped `LIKE` literal: its quotes cannot end the
+statement, and its `%`, `_` and `!` are plain characters. A text shorter than
+`MCP_SEARCH_MIN_LENGTH` (3 by default) is refused, so a letter or two does not read
+every column. The search reads `system.jdbc.columns`, which Trino filters for each
+user, one schema at a time in a stable order (catalogs, then their schemas, sorted),
+so a catalog of many thousand tables answers schema by schema. It stays within the
+call's budget (`MCP_CALL_TIMEOUT_SECONDS`): before each schema it keeps
+`MCP_SEARCH_RESERVE_SECONDS` (2 by default) in reserve, each query is stopped in
+Trino at what is left, and the search then answers what it searched rather than the
+call's own error. The matches stop at the row cap (`TRINO_MAX_ROWS`). The answer
+says exactly what was searched: `schemas_searched`, `not_searched` with a reason
+for each part left (`time_budget`, `row_cap`, or the `kind` of Trino's error; a
+`schema` of `null` is a whole catalog), and `complete`, true only when everything in
+scope was searched, over every call of the search. `next_cursor` resumes the same
+search where it stopped (that schema and the rest of its catalog, then every catalog
+not opened), inside a schema when the row cap stopped it there. A schema, or the
+schema list of a catalog, that takes longer than one query may
+(`TRINO_QUERY_TIMEOUT_SECONDS`) while the call still has time is named
+(`time_budget`) and skipped: resuming it would stop every later call at the same
+place. So is one that takes longer than a whole call, when Trino's own limit is
+left in place (`TRINO_QUERY_TIMEOUT_SECONDS=0`) or is as long as the call: a call
+that runs out of time exactly where it resumed, having moved nothing, skips it, so
+every call advances. A cursor is refused (`invalid_argument`) for another text or scope, for a
+catalog the caller does not see, or when it was altered; every cursor the server
+gives resumes, a schema such as Hive's `2024_sales` included, since a schema in a
+cursor only ever enters a string literal. Without a call budget
+(`MCP_CALL_TIMEOUT_SECONDS=0`) a search of every catalog would have no bound: it is
+refused, a named catalog is searched, and `--check` warns of it. `--check` also
+warns of `MCP_SEARCH_RESERVE_SECONDS=0` with a call budget: a search may then run
+to the end of the call, which answers its own `time_budget` error. The audit line says how many matches came and whether the
+search was cut, never the text, which may be a value. Comments are data, never
+instructions, as for `describe_schema`.
+
+The path an agent is told to follow: `search_columns` to find where the data
+lives, `describe_schema` (or `describe_table` for sample rows) to learn the tables
+it found, then `execute_query`.
 
 The defaults are chosen for an agent, not for a batch job. A question an agent
 asks should come back within a minute; a query that needs longer is usually a
@@ -472,7 +546,7 @@ schema or catalog when Trino names the one it could not resolve:
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino refused the statement; fix that part of it |
 | `permission` | Trino or the identity provider refused the right; report it, do not retry |
-| `invalid_argument` | the server refused an argument (an identifier) before reaching Trino |
+| `invalid_argument` | the server refused an argument (an identifier, an `offset`) before reaching Trino |
 | `read_only` | the statement writes and the server is read-only |
 | `time_budget` | the call ran out of its time budget; narrow the request |
 | `unavailable` | Trino could not answer (internal error, connection lost): the statement is neither valid nor invalid, try again later |
@@ -558,7 +632,14 @@ For read-only end to end, make the engine hold the line too:
 
 The guard stays a second line, not the only one: the engine's policy must
 refuse table functions and the `system` catalog too (see
-[Design notes](#design-notes)).
+[Design notes](#design-notes)), **except** reading `system.jdbc` and
+`system.metadata`, which Trino filters for each user, as it does
+`information_schema`: a user sees there only the tables and columns they may see
+elsewhere. `describe_schema` reads `system.jdbc.columns` and
+`system.metadata.table_comments`, and `search_columns` reads `system.jdbc.columns`,
+by statements the server builds; a policy that refuses them makes them answer an
+error that says so, with no other way tried. The
+agent's own SQL stays refused on all of `system`, these views included.
 
 ## Extensions
 
@@ -679,7 +760,12 @@ reads its own variables from the same environment.
 | `TRINO_CLIENT_CERT`, `TRINO_CLIENT_KEY` | a client certificate and its key (PEM paths) the account authenticates with instead (mTLS); https only | none |
 | `TRINO_CATALOG` | session catalog, where a name without a catalog is read; set it to a data catalog (with `system`, such names are refused) | `system` |
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
-| `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated` | `100` |
+| `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated`; also the size of one page of a listing | `100` |
+| `MCP_MAX_CATALOGS` | the most catalogs `list_catalogs` reads before it pages them, `system` aside, 1 at least; above it the tool answers an error, never a cut list | `10000` |
+| `MCP_DESCRIBE_SCHEMA_TABLES` | the most tables in one page of `describe_schema`, 1 at least | `20` |
+| `MCP_DESCRIBE_SCHEMA_COLUMNS` | the most columns one page of `describe_schema` holds in all, 1 at least; the first table of a page comes whole however wide, and a page shortened for this budget says so | `1000` |
+| `MCP_SEARCH_MIN_LENGTH` | the shortest text `search_columns` searches, spaces at the ends aside, 1 at least | `3` |
+| `MCP_SEARCH_RESERVE_SECONDS` | the seconds of the call's budget `search_columns` keeps in reserve, so that it answers what it searched before the call runs out; 0 or more, below `MCP_CALL_TIMEOUT_SECONDS` when that is set; 0 is warned of | `2` |
 | `TRINO_QUERY_TIMEOUT_SECONDS` | time budget of one query: past it, the server cancels the query in Trino; `0` leaves the limit to Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | time budget of one tool call, every query of the call included: past it, no query starts, the one running is cancelled and the agent gets an error; `0` sets none | `120` |
 | `TRINO_SOURCE` | the source Trino records for every query (`X-Trino-Source`) | the server name |
@@ -820,7 +906,7 @@ Every module in `akko_mcp_trino/` has one responsibility and its tests, in
 | `transport_security.py` | the Host header filter (`MCP_ALLOWED_HOSTS`) |
 | `audit.py` | the audit line, the request id, the record and the time budget of a call |
 | `sql_guard.py` | identifier validation, read-only decision on the AST |
-| `tools.py`, `plugins.py` | the six tools and the `ToolContext`, loading tool plugins |
+| `tools.py`, `plugins.py` | the eight tools and the `ToolContext`, loading tool plugins |
 | `trino_client.py` | the Trino connection, the identity modes (`jwt`, `impersonation`, `oauth2`, `service` in the core) and the time budgets |
 | `token_exchange.py` | OAuth 2.0 Token Exchange (RFC 8693): a token for Trino in exchange for the caller's |
 | `health.py`, `metrics.py` | `/health`, `/ready` and `/metrics`; the Prometheus counters |
@@ -853,7 +939,8 @@ as a plain `SELECT`, yet it sends raw SQL to the source under the connector's
 own account, so the engine applies neither row filters nor column masks. The
 guard refuses every table function and the `system` catalog (which shows other
 users' SQL in `system.runtime.queries`). The engine policy must refuse them as
-well; the guard is a second line, not the only one.
+well, `system.jdbc` and `system.metadata` aside; the guard is a second line, not
+the only one.
 
 **No token passthrough.** Up to 0.5, `jwt` mode sent Trino the caller's own
 token, once verified. The MCP authorization specification forbids it: a token

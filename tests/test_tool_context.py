@@ -34,9 +34,10 @@ class FakeTrino:
     def __init__(self):
         self.calls: list[tuple] = []  # (sql, user, request id, tool, max_rows)
 
-    def query(self, sql, user=None, params=None, max_rows=0):
+    def query(self, sql, user=None, params=None, max_rows=0, **keywords):
         call = current_call()
         self.calls.append((sql, user, current_request_id(), call.tool if call else None, max_rows))
+        self.keywords = keywords
         return {"columns": ["c"], "rows": [["v"]], "row_count": 1, "truncated": False}
 
 
@@ -88,8 +89,8 @@ def _server(monkeypatch, registrars, **config):
     monkeypatch.setattr(
         trino_client.TrinoClient,
         "query",
-        lambda self, sql, user=None, params=None, max_rows=0: trino.query(
-            sql, user=user, max_rows=max_rows
+        lambda self, sql, user=None, params=None, max_rows=0, **kw: trino.query(
+            sql, user=user, max_rows=max_rows, **kw
         ),
     )
     audit = InMemoryAudit()
@@ -216,6 +217,78 @@ def test_run_queries_under_the_callers_identity_and_may_lower_the_row_cap(monkey
     first, second = trino.calls
     assert (first[0], first[1], first[4]) == ("SELECT 1", "carol_analyst", 0)
     assert (second[0], second[1], second[3], second[4]) == ("SELECT 2", "carol_analyst", "count", 5)
+
+
+class _PlainClient:
+    """A client that knows only ``query(sql, user, params)``, as a plugin's own may."""
+
+    def __init__(self, result):
+        self.result, self.calls = result, []
+
+    def query(self, sql, user=None, params=None):
+        self.calls.append(sql)
+        return self.result
+
+
+class _FullClient:
+    def __init__(self, result):
+        self.result, self.keywords = result, []
+
+    def query(self, sql, user=None, params=None, **keywords):
+        self.keywords.append(keywords)
+        return self.result
+
+
+_ROWS = {"columns": ["c"], "rows": [["a"], ["b"]], "row_count": 2, "truncated": False}
+
+
+def test_run_passes_only_the_keywords_a_plugin_client_knows():
+    plain = _PlainClient(_ROWS)
+    tools = ToolContext(SdkLikeMCP(), plain, audit=None, read_only=True)
+    assert tools.run("SELECT 1") == _ROWS and plain.calls == ["SELECT 1"]
+    full = _FullClient(_ROWS)
+    tools = ToolContext(SdkLikeMCP(), full, audit=None, read_only=True)
+    tools.run("SELECT 1")
+    tools.run("SELECT 2", max_rows=3, row_limit=500, timeout=1.5)
+    assert full.keywords == [{}, {"max_rows": 3, "row_limit": 500, "timeout": 1.5}]
+
+
+def test_run_whole_reads_past_the_row_cap_up_to_its_bound():
+    full = _FullClient(_ROWS)
+    tools = ToolContext(SdkLikeMCP(), full, audit=None, read_only=True)
+    assert tools.run_whole("SHOW CATALOGS", bound=40, what="catalogs") == [["a"], ["b"]]
+    assert full.keywords == [{"row_limit": 40}]
+
+
+def test_run_whole_above_its_bound_is_an_error_never_a_cut_list():
+    full = _FullClient({**_ROWS, "truncated": True})
+    tools = ToolContext(SdkLikeMCP(), full, audit=None, read_only=True)
+    with pytest.raises(ValueError, match=r"^more than 2 tables are visible; raise the server's"):
+        tools.run_whole("SELECT t FROM x ORDER BY t", bound=2, what="tables")
+
+
+def test_the_page_size_is_the_servers_row_cap(monkeypatch):
+    seen = {}
+
+    def registrar(mcp, client, tools):
+        seen["tools"] = tools
+
+    _server(monkeypatch, [registrar], max_rows=37)
+    assert seen["tools"].page_size == 37
+    assert ToolContext(SdkLikeMCP(), None, audit=None, read_only=True, page_size=5).page_size == 5
+
+
+def test_list_catalogs_reads_up_to_the_configured_bound(monkeypatch):
+    mcp, _, trino, _ = _server(monkeypatch, [], max_catalogs=250)
+    out = json.loads(_as("alice_analyst", lambda: mcp.tools["list_catalogs"]()))
+    assert out == {"catalogs": ["v"], "next_offset": None, "truncated": False}
+    assert trino.keywords == {"row_limit": 251}, "system aside, 250 catalogs are read"
+
+
+def test_describe_schema_pages_by_the_configured_budgets(monkeypatch):
+    mcp, _, trino, _ = _server(monkeypatch, [], describe_schema_tables=7)
+    _as("alice_analyst", lambda: mcp.tools["describe_schema"]("c", "s"))
+    assert trino.calls[1][0].endswith("ORDER BY table_name OFFSET 0 LIMIT 8")
 
 
 def test_a_registrar_whose_third_argument_has_a_default_receives_the_context(monkeypatch):

@@ -11,6 +11,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Defaults shared with the tools' registration, so a page and a bound never drift apart.
+DEFAULT_MAX_ROWS = 100
+DEFAULT_MAX_CATALOGS = 10000
+DEFAULT_DESCRIBE_SCHEMA_TABLES = 20
+DEFAULT_DESCRIBE_SCHEMA_COLUMNS = 1000
+DEFAULT_SEARCH_MIN_LENGTH = 3
+DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
+
 
 @dataclass(frozen=True)
 class Config:
@@ -96,6 +104,19 @@ class Config:
     # Trino with (mTLS), in `service` and `impersonation` modes, instead of a password.
     trino_client_cert: str = ""
     trino_client_key: str = ""
+    # The most catalogs `list_catalogs` reads, past the row cap, before it pages them:
+    # above it the tool answers an error, never a cut list.
+    max_catalogs: int = DEFAULT_MAX_CATALOGS
+    # A page of `describe_schema`: at most this many tables, and whole tables only while
+    # their columns add up to this many at most; the first table of a page comes whole,
+    # however wide, and the answer says when a page was shortened.
+    describe_schema_tables: int = DEFAULT_DESCRIBE_SCHEMA_TABLES
+    describe_schema_columns: int = DEFAULT_DESCRIBE_SCHEMA_COLUMNS
+    # `search_columns`: the shortest text it searches, so that a letter or two does not
+    # read every column, and the seconds of the call's budget it keeps in reserve, so that
+    # it stops early enough to answer what it searched rather than the call's own error.
+    search_min_length: int = DEFAULT_SEARCH_MIN_LENGTH
+    search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -108,6 +129,37 @@ class Config:
             )
         if self.max_rows < 1:
             found.append(f"TRINO_MAX_ROWS={self.max_rows}: the row cap must be 1 or more")
+        if self.max_catalogs < 1:
+            found.append(
+                f"MCP_MAX_CATALOGS={self.max_catalogs}: "
+                "list_catalogs must be allowed 1 catalog or more"
+            )
+        if self.describe_schema_tables < 1:
+            found.append(
+                f"MCP_DESCRIBE_SCHEMA_TABLES={self.describe_schema_tables}: "
+                "a page of describe_schema must hold 1 table or more"
+            )
+        if self.describe_schema_columns < 1:
+            found.append(
+                f"MCP_DESCRIBE_SCHEMA_COLUMNS={self.describe_schema_columns}: "
+                "describe_schema must be allowed 1 column or more"
+            )
+        if self.search_min_length < 1:
+            found.append(
+                f"MCP_SEARCH_MIN_LENGTH={self.search_min_length}: "
+                "search_columns must ask for 1 character or more"
+            )
+        if self.search_reserve_seconds < 0:
+            found.append(
+                f"MCP_SEARCH_RESERVE_SECONDS={self.search_reserve_seconds:g}: "
+                "a reserve is 0 seconds or more"
+            )
+        elif 0 < self.call_timeout_seconds <= self.search_reserve_seconds:
+            found.append(
+                f"MCP_SEARCH_RESERVE_SECONDS={self.search_reserve_seconds:g} is not below "
+                f"MCP_CALL_TIMEOUT_SECONDS={self.call_timeout_seconds:g}: "
+                "search_columns would have no time left to search"
+            )
         for name, value in (
             ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
             ("MCP_CALL_TIMEOUT_SECONDS", self.call_timeout_seconds),
@@ -132,6 +184,17 @@ class Config:
             )
         elif not self.auth_required:
             found.append("MCP_AUTH_REQUIRED=false: a request without a valid token is served too")
+        if self.call_timeout_seconds > 0 and self.search_reserve_seconds == 0:
+            found.append(
+                "MCP_SEARCH_RESERVE_SECONDS=0: a search of search_columns may run to the end of "
+                "the call's budget, and the call then answers its time_budget error with "
+                "nothing it found"
+            )
+        if self.call_timeout_seconds == 0:
+            found.append(
+                "MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns "
+                "refuses to search every catalog and searches a named catalog only"
+            )
         return found
 
     @staticmethod
@@ -142,7 +205,7 @@ class Config:
             trino_port=int(os.environ.get("TRINO_PORT", "8080")),
             trino_user=os.environ.get("TRINO_USER", "trino"),
             trino_catalog=os.environ.get("TRINO_CATALOG", "system"),
-            max_rows=int(os.environ.get("TRINO_MAX_ROWS", "100")),
+            max_rows=int(os.environ.get("TRINO_MAX_ROWS", str(DEFAULT_MAX_ROWS))),
             read_only=os.environ.get("TRINO_READ_ONLY", "true").lower() == "true",
             auth_enabled=os.environ.get("MCP_AUTH_ENABLED", "true").lower() == "true",
             server_name=os.environ.get("MCP_SERVER_NAME", server_name),
@@ -175,4 +238,17 @@ class Config:
             token_exchange_verify=os.environ.get("TRINO_TOKEN_EXCHANGE_VERIFY", "true"),
             trino_client_cert=os.environ.get("TRINO_CLIENT_CERT", ""),
             trino_client_key=os.environ.get("TRINO_CLIENT_KEY", ""),
+            max_catalogs=int(os.environ.get("MCP_MAX_CATALOGS", str(DEFAULT_MAX_CATALOGS))),
+            describe_schema_tables=int(
+                os.environ.get("MCP_DESCRIBE_SCHEMA_TABLES", str(DEFAULT_DESCRIBE_SCHEMA_TABLES))
+            ),
+            describe_schema_columns=int(
+                os.environ.get("MCP_DESCRIBE_SCHEMA_COLUMNS", str(DEFAULT_DESCRIBE_SCHEMA_COLUMNS))
+            ),
+            search_min_length=int(
+                os.environ.get("MCP_SEARCH_MIN_LENGTH", str(DEFAULT_SEARCH_MIN_LENGTH))
+            ),
+            search_reserve_seconds=float(
+                os.environ.get("MCP_SEARCH_RESERVE_SECONDS", str(DEFAULT_SEARCH_RESERVE_SECONDS))
+            ),
         )

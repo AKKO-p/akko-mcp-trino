@@ -93,6 +93,12 @@ def check_config(config: Config) -> int:
             if config.call_timeout_seconds > 0
             else "none"
         ),
+        f"listings: {config.max_rows} names a page; list_catalogs reads up to "
+        f"{config.max_catalogs} catalogs",
+        f"describe_schema: up to {config.describe_schema_tables} tables a page, "
+        f"{config.describe_schema_columns} columns in all, a wider table whole",
+        f"search_columns: a text of {config.search_min_length} characters at least, "
+        f"{config.search_reserve_seconds:g} s of the call's budget kept in reserve",
         f"tool plugins: {config.tool_plugins or 'none'}",
         f"extensions: {', '.join(extension_names(config.extensions)) or 'none'}",
         *[line for ext in extensions for line in ext.check_lines()],

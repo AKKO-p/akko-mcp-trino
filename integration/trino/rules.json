@@ -6,6 +6,8 @@
     {"user": "(alice|bob|mcp-service)", "catalog": "(tpch|system)", "allow": "read-only"}
   ],
   "tables": [
+    {"user": "(alice|bob)", "catalog": "system", "schema": "(jdbc|metadata)", "table": "(columns|table_comments)",
+     "privileges": ["SELECT"]},
     {"user": "alice", "catalog": "tpch", "privileges": ["SELECT"]},
     {"user": "bob", "catalog": "tpch", "schema": "tiny", "table": "nation",
      "privileges": ["SELECT"], "filter": "regionkey = 3"}

@@ -2,10 +2,17 @@
 
 ## From 0.6 to 0.7
 
-Nothing is removed or renamed.
+Nothing is removed or renamed. One helper for plugins changes its third argument.
 
 - Every error reply gains a `kind` key, and an `identifier` key when Trino names the object it could not resolve. `error` is exactly the string it was, and the audit codes are the same. A client that reads only `error` keeps working; one that wants to act on the failure can read `kind` (`syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type`, `permission`, `invalid_argument`, `read_only`, `time_budget`, `unavailable`, `other`).
 - A plugin that builds its error with `akko_mcp_trino.tools.error_reply` gets the `kind` for free. `refusal_reply(code, message)` takes an optional `kind`, `invalid_argument` by default.
+- `list_catalogs`, `list_schemas` and `list_tables` answer one page at a time and gain a `next_offset` key: the `offset` to call again with for the next page, or `null` on the last one. `truncated` is kept, and is true exactly when `next_offset` is not `null`. A client that read only the first page keeps working; one that wants the rest calls again with `offset=next_offset`. The advice changes: a `truncated` list is no longer the end, read on with `next_offset`.
+- `list_schemas` and `list_tables` read `information_schema.schemata` and `information_schema.tables` instead of `SHOW SCHEMAS` and `SHOW TABLES`. Trino filters `information_schema` by the caller's rights, so a schema the caller may not see shows no row, as a schema that does not exist. `list_tables` checks an empty page against the schemas the caller sees and answers `{"error": "Schema <catalog>.<schema> not found or not visible", "kind": "schema"}` for both, as `SHOW TABLES` failed before; a visible empty schema answers an empty list.
+- `list_catalogs` reads at most `MCP_MAX_CATALOGS` catalogs (10000 by default) and answers an error above it: raise the bound if a deployment shows more.
+- A new tool, `describe_schema`, reads `system.jdbc.columns` and `system.metadata.table_comments`, by statements the server builds. The advice on the engine's policy changes: refuse the `system` catalog **except** reading `system.jdbc` and `system.metadata`, which Trino filters for each user as it does `information_schema`. A policy that refuses them keeps every other tool working; `describe_schema` then answers an error that names what to allow. The agent's SQL is still refused on all of `system`.
+- A new tool, `search_columns`, reads `system.jdbc.columns` the same way, and is the first tool an agent is told to call: `search_columns` to find where the data lives, then `describe_schema`, then `execute_query`. Its answer is complete only when `complete` is true; otherwise `not_searched` says what was left and why, and `next_cursor` resumes the search. It needs a call budget (`MCP_CALL_TIMEOUT_SECONDS` above 0, the default) to search every catalog; without one it searches a named catalog only, and the server warns of it at start, in `--check` and in its initialization instructions. `MCP_SEARCH_RESERVE_SECONDS` must stay below `MCP_CALL_TIMEOUT_SECONDS`, or the server refuses to start; set to 0 it is warned of, since a search may then end in the call's own `time_budget` error.
+- `safe_sql_string` keeps a backslash as it is: a plugin that relied on it being doubled built a different value than the one it meant.
+- A plugin that called `listing_reply(key, items, truncated)` passes the next page's offset, or `None`, instead: `listing_reply(key, items, None)` for a complete list. A bool is refused with `TypeError`, so an old call fails loudly rather than answer a wrong `truncated`.
 
 ## From 0.5 to 0.6
 

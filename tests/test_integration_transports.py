@@ -158,7 +158,7 @@ def test_each_http_transport_refuses_without_a_token(served):
         anyio.run(_call, transport, url, {}, "list_catalogs", {})
 
 
-def test_each_http_transport_lists_the_six_tools(served):
+def test_each_http_transport_lists_the_eight_tools(served):
     transport, url = served
     headers = {"Authorization": f"Bearer {_token('alice')}"}
 
@@ -173,9 +173,11 @@ def test_each_http_transport_lists_the_six_tools(served):
             "list_catalogs",
             "list_schemas",
             "list_tables",
+            "describe_schema",
             "describe_table",
             "explain_query",
             "execute_query",
+            "search_columns",
         ]
     )
 

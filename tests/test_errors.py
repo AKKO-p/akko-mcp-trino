@@ -3,7 +3,7 @@
 import pytest
 
 from akko_mcp_trino.audit import CallTimeout
-from akko_mcp_trino.errors import ERROR_KINDS, explain_error
+from akko_mcp_trino.errors import ERROR_KINDS, explain_error, metadata_view_error
 
 
 class FakeTrinoError(Exception):
@@ -91,3 +91,40 @@ def test_a_real_trino_user_error_is_explained_whole():
 
 def test_an_error_name_without_a_type_is_unavailable():
     assert explain_error(FakeTrinoError("COLUMN_NOT_FOUND", None, "x"))["kind"] == "unavailable"
+
+
+_VIEWS_HINT = (
+    "This tool reads system.jdbc.columns and system.metadata.table_comments, which Trino "
+    "filters for each user; the access control must allow reading them."
+)
+
+
+@pytest.mark.parametrize(
+    "name, message",
+    [
+        ("PERMISSION_DENIED", "Access Denied: Cannot select from table system.jdbc.columns"),
+        ("CATALOG_NOT_FOUND", "line 1:15: Catalog 'system' does not exist."),
+        ("TABLE_NOT_FOUND", "line 1:15: Table 'system.jdbc.columns' does not exist"),
+    ],
+)
+def test_a_refused_metadata_view_says_what_the_access_control_must_allow(name, message):
+    exc = FakeTrinoError(name, "USER_ERROR", message)
+    out = metadata_view_error(exc)
+    expected = message if message.endswith(".") else message + "."
+    assert out["error"] == f"{expected} {_VIEWS_HINT}"
+    assert {k: v for k, v in out.items() if k != "error"} == {
+        k: v for k, v in explain_error(exc).items() if k != "error"
+    }
+
+
+def test_a_refusal_by_the_server_or_the_identity_provider_says_it_too():
+    assert metadata_view_error(PermissionError("refused"))["error"] == f"refused. {_VIEWS_HINT}"
+
+
+def test_any_other_error_on_a_metadata_view_is_explained_as_usual():
+    for exc in (
+        FakeTrinoError("GENERIC_INTERNAL_ERROR", "INTERNAL_ERROR", "x"),
+        FakeTrinoError("SYNTAX_ERROR", "USER_ERROR", "line 1:1: mismatched input"),
+        CallTimeout("budget"),
+    ):
+        assert metadata_view_error(exc) == explain_error(exc)

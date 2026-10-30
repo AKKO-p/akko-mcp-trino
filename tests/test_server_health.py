@@ -38,9 +38,11 @@ def test_build_server_returns_mcp_and_client():
         "list_catalogs",
         "list_schemas",
         "list_tables",
+        "describe_schema",
         "describe_table",
         "explain_query",
         "execute_query",
+        "search_columns",
     }
     assert isinstance(client, TrinoClient)
 
@@ -56,7 +58,7 @@ def test_build_server_applies_extra_registrars():
     mcp, _ = build_server(
         _CFG, extra_tool_registrars=[registrar], mcp_factory=lambda name, **_: FakeMCP()
     )
-    assert len(mcp.tools) == 7
+    assert len(mcp.tools) == 9
     assert "outil_maison" in mcp.tools
 
 
@@ -96,7 +98,15 @@ def test_a_mode_that_runs_as_the_caller_sends_no_instructions(monkeypatch):
         seen["call"] = (args, kwargs)
         return FakeMCP()
 
-    cfg = Config(**{**_CFG.__dict__, "auth_enabled": True, "auth_required": True})
+    # A call budget too: without one, search_columns is limited, which the warnings say.
+    cfg = Config(
+        **{
+            **_CFG.__dict__,
+            "auth_enabled": True,
+            "auth_required": True,
+            "call_timeout_seconds": 120.0,
+        }
+    )
     monkeypatch.setattr(server, "resolve_identity", lambda config, exts: object())
     jwt_cfg = Config(**{**cfg.__dict__, "trino_identity_mode": "jwt"})
     build_server(jwt_cfg, mcp_factory=factory)

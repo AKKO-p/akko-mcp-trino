@@ -133,6 +133,12 @@ def build_server(
         call_timeout_seconds=config.call_timeout_seconds,
         session_catalog=config.trino_catalog,
         describe_notes=[ext.describe_table_doc() for ext in exts],
+        max_rows=config.max_rows,
+        max_catalogs=config.max_catalogs,
+        describe_schema_tables=config.describe_schema_tables,
+        describe_schema_columns=config.describe_schema_columns,
+        search_min_length=config.search_min_length,
+        search_reserve_seconds=config.search_reserve_seconds,
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)
     registrars = [r for ext in exts for r in ext.tool_registrars()]
