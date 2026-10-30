@@ -34,6 +34,7 @@ _ENV_KEYS = [
     "TRINO_TOKEN_EXCHANGE_VERIFY",
     "TRINO_CLIENT_CERT",
     "TRINO_CLIENT_KEY",
+    "MCP_MAX_CATALOGS",
 ]
 
 
@@ -99,6 +100,19 @@ def test_bounds_no_server_can_serve_are_problems(monkeypatch):
         "TRINO_MAX_ROWS=0: the row cap must be 1 or more",
         "TRINO_QUERY_TIMEOUT_SECONDS=-1: a time budget is 0 (none) or more",
         "MCP_CALL_TIMEOUT_SECONDS=-2: a time budget is 0 (none) or more",
+    ]
+
+
+def test_max_catalogs_defaults_to_ten_thousand_and_is_read_from_the_environment(monkeypatch):
+    assert Config.from_env().max_catalogs == 10000
+    monkeypatch.setenv("MCP_MAX_CATALOGS", "250")
+    assert Config.from_env().max_catalogs == 250
+
+
+def test_max_catalogs_below_one_is_refused_at_start(monkeypatch):
+    monkeypatch.setenv("MCP_MAX_CATALOGS", "0")
+    assert Config.from_env().problems() == [
+        "MCP_MAX_CATALOGS=0: list_catalogs must be allowed 1 catalog or more"
     ]
 
 

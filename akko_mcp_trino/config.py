@@ -11,6 +11,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Defaults shared with the tools' registration, so a page and a bound never drift apart.
+DEFAULT_MAX_ROWS = 100
+DEFAULT_MAX_CATALOGS = 10000
+
 
 @dataclass(frozen=True)
 class Config:
@@ -96,6 +100,9 @@ class Config:
     # Trino with (mTLS), in `service` and `impersonation` modes, instead of a password.
     trino_client_cert: str = ""
     trino_client_key: str = ""
+    # The most catalogs `list_catalogs` reads, past the row cap, before it pages them:
+    # above it the tool answers an error, never a cut list.
+    max_catalogs: int = DEFAULT_MAX_CATALOGS
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -108,6 +115,11 @@ class Config:
             )
         if self.max_rows < 1:
             found.append(f"TRINO_MAX_ROWS={self.max_rows}: the row cap must be 1 or more")
+        if self.max_catalogs < 1:
+            found.append(
+                f"MCP_MAX_CATALOGS={self.max_catalogs}: "
+                "list_catalogs must be allowed 1 catalog or more"
+            )
         for name, value in (
             ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
             ("MCP_CALL_TIMEOUT_SECONDS", self.call_timeout_seconds),
@@ -142,7 +154,7 @@ class Config:
             trino_port=int(os.environ.get("TRINO_PORT", "8080")),
             trino_user=os.environ.get("TRINO_USER", "trino"),
             trino_catalog=os.environ.get("TRINO_CATALOG", "system"),
-            max_rows=int(os.environ.get("TRINO_MAX_ROWS", "100")),
+            max_rows=int(os.environ.get("TRINO_MAX_ROWS", str(DEFAULT_MAX_ROWS))),
             read_only=os.environ.get("TRINO_READ_ONLY", "true").lower() == "true",
             auth_enabled=os.environ.get("MCP_AUTH_ENABLED", "true").lower() == "true",
             server_name=os.environ.get("MCP_SERVER_NAME", server_name),
@@ -175,4 +187,5 @@ class Config:
             token_exchange_verify=os.environ.get("TRINO_TOKEN_EXCHANGE_VERIFY", "true"),
             trino_client_cert=os.environ.get("TRINO_CLIENT_CERT", ""),
             trino_client_key=os.environ.get("TRINO_CLIENT_KEY", ""),
+            max_catalogs=int(os.environ.get("MCP_MAX_CATALOGS", str(DEFAULT_MAX_CATALOGS))),
         )

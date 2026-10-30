@@ -196,9 +196,9 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 
 | Outil | Arguments | Rend |
 |---|---|---|
-| `list_catalogs` | aucun | les catalogues que Trino montre |
-| `list_schemas` | `catalog` | les schémas de ce catalogue |
-| `list_tables` | `catalog`, `schema` | les tables et vues de ce schéma |
+| `list_catalogs` | `offset` (facultatif, 0 par défaut) | une page des catalogues que Trino montre, `next_offset`, `truncated` |
+| `list_schemas` | `catalog`, `offset` (facultatif) | une page des schémas de ce catalogue, `next_offset`, `truncated` |
+| `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, échantillon gouverné sur demande |
 | `explain_query` | `sql` | le plan de Trino pour une requête en lecture, sans l'exécuter |
 | `execute_query` | `sql`, `max_rows` (facultatif) | colonnes, lignes, nombre de lignes, `truncated` |
@@ -209,6 +209,17 @@ d'accès, pas une erreur à retenter, et les descriptions des outils le disent a
 `TRINO_READ_ONLY=false`, `execute_query` est annoté comme pouvant écrire, pour que l'hôte demande
 la confirmation qu'il sauterait pour un outil en lecture seule.
 
+Les trois outils de liste rendent une page à la fois : une page compte `TRINO_MAX_ROWS` noms, triés
+par nom, et `next_offset` dit où commence la page suivante, ou vaut `null` à la dernière. L'agent
+rappelle l'outil avec `offset=next_offset` pour lire la suite ; `truncated` est vrai exactement
+quand `next_offset` n'est pas `null`. Les schémas et les tables sont paginés dans Trino (`ORDER BY`
+et `OFFSET` sur `information_schema`). Les catalogues sont lus en entier par `SHOW CATALOGS`,
+au-delà du plafond de lignes, jusqu'à `MCP_MAX_CATALOGS` (10000 par défaut), puis paginés par le
+serveur, `system` non compté ; au-delà de cette borne, `list_catalogs` rend une erreur, jamais une
+liste coupée. `list_tables` sur un schéma inexistant ou invisible pour l'appelant rend `kind`
+`schema` (« not found or not visible », la même réponse pour les deux), jamais une liste vide. Un
+`offset` qui n'est pas un entier positif ou nul est refusé (`invalid_argument`) avant Trino.
+
 Une erreur revient sous la forme `{"error": "...", "kind": "..."}`. `error` est le message entier de
 Trino ; `kind` dit quoi en faire, et `identifier` nomme la colonne, la table, le schéma ou le
 catalogue que Trino n'a pas su résoudre, quand il le nomme.
@@ -217,7 +228,7 @@ catalogue que Trino n'a pas su résoudre, quand il le nomme.
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino a refusé l'instruction : corriger cette partie |
 | `permission` | Trino ou le fournisseur d'identité a refusé le droit : le rapporter, ne pas réessayer |
-| `invalid_argument` | le serveur a refusé un argument (identifiant) avant d'atteindre Trino |
+| `invalid_argument` | le serveur a refusé un argument (identifiant, `offset`) avant d'atteindre Trino |
 | `read_only` | l'instruction écrit et le serveur est en lecture seule |
 | `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
 | `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue) : l'instruction n'est ni valide ni invalide, réessayer plus tard |

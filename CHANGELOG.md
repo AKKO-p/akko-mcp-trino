@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - Every error a tool answers carries a `kind` that says what to do about it: `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type`, `permission`, `invalid_argument`, `read_only`, `time_budget`, `unavailable` or `other`. When Trino names the column, table, schema or catalog it could not resolve, the answer also carries `identifier`. `unavailable` (an internal error or a lost connection) says the statement is neither valid nor invalid. The `error` message and the audit codes are unchanged.
+- `list_catalogs`, `list_schemas` and `list_tables` page their answer: an optional `offset` argument (0 by default) and a `next_offset` key in the answer, the offset of the next page or `null` on the last one. A page holds `TRINO_MAX_ROWS` names, sorted by name. Before, a list longer than the row cap was cut with `truncated: true` and no way to read the rest. `truncated` stays, true exactly when `next_offset` is not `null`. Schemas and tables are paged in Trino, on `information_schema.schemata` and `information_schema.tables` (was `SHOW SCHEMAS` and `SHOW TABLES`). An `offset` that is not a whole number from 0 is refused (`invalid_argument`) before Trino. `list_tables` on a schema that does not exist or that the caller may not see answers `kind` `schema`, "not found or not visible", the same for both, never an empty list.
+- `MCP_MAX_CATALOGS` (10000 by default, 1 at least): `list_catalogs` reads `SHOW CATALOGS` whole, past the row cap, up to this bound (`system` aside), and pages it in the server; above the bound it answers an error, never a cut list. `--check` prints the page size and the bound.
+- For plugins: `ToolContext.run` takes `row_limit` (replaces the row cap for a statement the tool builds itself) and `timeout` (lowers one query's time budget; a query stopped by it raises a plain `TimeoutError` and the call goes on). `ToolContext.run_whole(sql, bound=…, what=…)` reads every row up to a bound, or raises `ValueError`. `ToolContext.page_size` is the row cap. `check_offset(offset)` validates an offset. `TrinoClient.query` takes the same `row_limit` and `timeout`.
+
+### Changed
+- `listing_reply(key, items, next_offset)` takes the next page's offset, or `None`, instead of `truncated`, and answers both keys; a bool is refused with `TypeError`.
 
 ## [0.6.1] - 2026-10-29
 
