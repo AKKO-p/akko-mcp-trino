@@ -237,8 +237,9 @@ et `OFFSET` sur `information_schema`). Les catalogues sont lus en entier par `SH
 au-delà du plafond de lignes, jusqu'à `MCP_MAX_CATALOGS` (10000 par défaut), puis paginés par le
 serveur, `system` non compté ; au-delà de cette borne, `list_catalogs` rend une erreur, jamais une
 liste coupée. `list_tables` sur un schéma inexistant ou invisible pour l'appelant rend `kind`
-`schema` (« not found or not visible », la même réponse pour les deux), jamais une liste vide. Un
-`offset` qui n'est pas un entier positif ou nul est refusé (`invalid_argument`) avant Trino.
+`schema` (« not found or not visible », la même réponse pour les deux), jamais une liste vide pour
+un schéma inexistant ou invisible. Un `offset` qui n'est pas un entier positif ou nul est refusé
+(`invalid_argument`) avant Trino.
 
 `describe_schema` donne à l'agent, en un appel, le contexte d'un schéma avant d'écrire du SQL : ses
 tables et vues, chacune avec son type, son commentaire et toutes ses colonnes. Il pagine par tables,
@@ -250,11 +251,17 @@ le dit (`shortened: true`), et `next_offset` fait commencer la page suivante à 
 côté. Les commentaires viennent de `system.metadata.table_comments` et les colonnes de
 `system.jdbc.columns`, deux vues que Trino filtre pour chaque utilisateur, lues par des requêtes que
 le serveur construit, jamais par le SQL de l'agent. Une page coûte quatre requêtes : la vérification
-du schéma, la page des noms de tables, les commentaires et les colonnes. Les deux dernières ont une
-branche `UNION ALL` par table de la page, chacune filtrée par égalité sur le nom de la table, que
-Trino pousse dans ces vues : une page lit les commentaires et les colonnes de ses propres tables,
-jamais ceux du schéma entier (une liste, `IN` ou `OR`, n'est pas poussée et lirait toutes les tables
-du schéma). Un schéma inexistant et un schéma invisible pour
+du schéma, la page des noms de tables, une lecture des colonnes et les commentaires des tables que
+la page garde. Les colonnes sont lues une seule fois, `MCP_DESCRIBE_SCHEMA_COLUMNS` lignes plus une
+au plus : les tables arrivées entières dans le budget sont gardées, la table que le budget coupe
+ouvre la page suivante. Une première table plus large que le budget est relue seule, par sa propre
+requête, en parts de `MCP_DESCRIBE_SCHEMA_COLUMNS` colonnes : une requête de plus par part. La
+lecture des colonnes et celle des commentaires ont une branche `UNION ALL` par table, chacune
+filtrée par égalité sur le nom de la table, que Trino pousse dans ces vues : une page lit les
+commentaires et les colonnes de ses propres tables, jamais ceux du schéma entier (une liste, `IN`
+ou `OR`, n'est pas poussée et lirait toutes les tables du schéma). Trino charge pour cette lecture
+les métadonnées de chaque table de la page : une page coûte à peu près autant que ses tables soient
+étroites ou larges. Un schéma inexistant et un schéma invisible pour
 l'appelant rendent la même erreur, `kind` `schema` ; un schéma visible et vide rend une liste vide.
 Les commentaires sont du texte écrit par les propriétaires des données : la description de l'outil
 demande au modèle de les lire comme des données, jamais comme des instructions, et le serveur ne les
@@ -263,7 +270,9 @@ place jamais dans ses instructions MCP. `describe_table` reste l'outil des ligne
 `search_columns` est le point de départ d'un agent qui ne sait pas quelle table contient ce qu'il
 cherche : il trouve les colonnes dont le nom ou le commentaire contient un texte, sans tenir compte
 de la casse, dans tous les catalogues que l'appelant voit (jamais `system`), dans un catalogue ou
-dans un schéma. Le texte entre comme un seul littéral `LIKE` échappé : ses apostrophes ne peuvent
+dans un schéma. Un schéma nommé est vérifié d'abord : un schéma inexistant et un schéma invisible
+pour l'appelant rendent la même erreur, `kind` `schema`, jamais une recherche vide dite complète ;
+un catalogue que Trino ne connaît pas ou refuse rend l'erreur de Trino. Le texte entre comme un seul littéral `LIKE` échappé : ses apostrophes ne peuvent
 pas clore l'instruction, et ses `%`, `_` et `!` sont des caractères ordinaires. Un texte plus court
 que `MCP_SEARCH_MIN_LENGTH` (3 par défaut) est refusé, pour qu'une lettre ou deux ne lisent pas
 toutes les colonnes. La recherche lit `system.jdbc.columns`, que Trino filtre pour chaque
@@ -296,7 +305,9 @@ données, jamais des instructions, comme pour `describe_schema`.
 
 Le parcours conseillé à un agent : `search_columns` pour trouver où vit la donnée,
 `describe_schema` (ou `describe_table` pour des lignes d'exemple) pour connaître les tables
-trouvées, puis `execute_query`.
+trouvées, puis `execute_query`. `list_catalogs`, `list_schemas` et `list_tables` servent à
+parcourir, quand l'agent veut voir ce qu'il y a plutôt que trouver quelque chose ; les descriptions
+des outils et `examples/agent.py` disent la même chose.
 
 Une erreur revient sous la forme `{"error": "...", "kind": "..."}`. `error` est le message entier de
 Trino ; `kind` dit quoi en faire, et `identifier` nomme la colonne, la table, le schéma ou le
