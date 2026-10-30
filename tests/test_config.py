@@ -138,6 +138,20 @@ def test_describe_schema_budgets_below_one_are_refused_at_start(monkeypatch):
     ]
 
 
+def test_a_describe_schema_page_above_the_maximum_is_refused_at_start(monkeypatch):
+    """A page is one UNION ALL branch per table, twice: its cost grows with the page, and
+    a page far too large breaks Trino's analyzer. The maximum itself is served."""
+    from akko_mcp_trino.config import MAX_DESCRIBE_SCHEMA_TABLES
+
+    assert MAX_DESCRIBE_SCHEMA_TABLES == 100
+    monkeypatch.setenv("MCP_DESCRIBE_SCHEMA_TABLES", "100")
+    assert Config.from_env().problems() == []
+    monkeypatch.setenv("MCP_DESCRIBE_SCHEMA_TABLES", "101")
+    assert Config.from_env().problems() == [
+        "MCP_DESCRIBE_SCHEMA_TABLES=101: a page of describe_schema holds 100 tables at most"
+    ]
+
+
 def test_token_exchange_resource_and_client_certificate_env(monkeypatch):
     c = Config.from_env()
     assert (c.resource_url, c.token_exchange_url, c.token_exchange_verify) == ("", "", "true")

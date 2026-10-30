@@ -243,7 +243,7 @@ liste coupée. `list_tables` sur un schéma inexistant ou invisible pour l'appel
 `describe_schema` donne à l'agent, en un appel, le contexte d'un schéma avant d'écrire du SQL : ses
 tables et vues, chacune avec son type, son commentaire et toutes ses colonnes. Il pagine par tables,
 dans Trino (`ORDER BY` et `OFFSET` sur `information_schema.tables`) : une page compte au plus
-`MCP_DESCRIBE_SCHEMA_TABLES` tables (20 par défaut), toujours entières, tant que leurs colonnes ne
+`MCP_DESCRIBE_SCHEMA_TABLES` tables (20 par défaut, 100 au plus), toujours entières, tant que leurs colonnes ne
 dépassent pas `MCP_DESCRIBE_SCHEMA_COLUMNS` au total (1000 par défaut). La première table d'une page
 vient toujours entière, si large soit-elle ; une page qui compte moins de tables à cause de ce budget
 le dit (`shortened: true`), et `next_offset` fait commencer la page suivante à la table laissée de

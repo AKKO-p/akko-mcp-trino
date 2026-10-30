@@ -16,6 +16,10 @@ DEFAULT_MAX_ROWS = 100
 DEFAULT_MAX_CATALOGS = 10000
 DEFAULT_DESCRIBE_SCHEMA_TABLES = 20
 DEFAULT_DESCRIBE_SCHEMA_COLUMNS = 1000
+# The most tables a page of `describe_schema` may hold: a page reads each of its tables by
+# its own UNION ALL branch, twice, so its cost grows with the page, and Trino's analyzer
+# fails on a statement of thousands of branches.
+MAX_DESCRIBE_SCHEMA_TABLES = 100
 DEFAULT_SEARCH_MIN_LENGTH = 3
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
 
@@ -138,6 +142,11 @@ class Config:
             found.append(
                 f"MCP_DESCRIBE_SCHEMA_TABLES={self.describe_schema_tables}: "
                 "a page of describe_schema must hold 1 table or more"
+            )
+        elif self.describe_schema_tables > MAX_DESCRIBE_SCHEMA_TABLES:
+            found.append(
+                f"MCP_DESCRIBE_SCHEMA_TABLES={self.describe_schema_tables}: "
+                f"a page of describe_schema holds {MAX_DESCRIBE_SCHEMA_TABLES} tables at most"
             )
         if self.describe_schema_columns < 1:
             found.append(
