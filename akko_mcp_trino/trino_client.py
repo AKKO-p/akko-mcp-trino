@@ -20,8 +20,10 @@ The core has four:
   every caller. The server says so at start and in its instructions to hosts.
 * ``oauth2``, stdio only: Trino authenticates the local user through its browser
   login and names the user, never ``TRINO_USER``. One authentication object reuses
-  the driver's token cache and handles reauthentication. Startup verifies the
-  identity with ``SELECT current_user``.
+  the driver's token cache and handles reauthentication. The first call that is not
+  discovery verifies the identity with ``SELECT current_user``
+  (`TrinoClient.current_user`), the one query that runs before a caller is bound;
+  every other query needs that verified caller, as in ``jwt`` and ``impersonation``.
 
 The ``jwt`` and ``impersonation`` modes refuse to start unless the door requires
 a verified token, and refuse a query without a verified caller: never run as
@@ -179,8 +181,15 @@ class OAuth2Identity:
         ]
 
     def connection(self, user: Optional[str]) -> tuple[Optional[str], Any]:
-        """No Trino user, so Trino names the user it authenticated, never ``TRINO_USER``;
-        one authentication object, so cached tokens are reused."""
+        """The connection of a query run for ``user``, the subject Trino named at sign-in;
+        refuses a query without it, so nothing reaches Trino outside an admission."""
+        _verified_caller(self._config, user)
+        return self.sign_in()
+
+    def sign_in(self) -> tuple[None, Any]:
+        """The connection of the identity check alone (`TrinoClient.current_user`): no
+        Trino user, so Trino names the user it authenticated, never ``TRINO_USER``; one
+        authentication object, so cached tokens are reused."""
         if self._auth is None:
             self._auth = trino.auth.OAuth2Authentication(
                 redirect_auth_url_handler=trino.auth.CompositeRedirectHandler([_oauth2_redirect])
@@ -188,8 +197,8 @@ class OAuth2Identity:
         return None, self._auth
 
     def ping(self, client: "TrinoClient") -> None:
-        """A bounded ``SELECT 1`` as the user who signed in."""
-        client.query("SELECT 1")
+        """The identity check, ``SELECT current_user``, as the user who signed in."""
+        client.current_user()
 
 
 def _oauth2_redirect(url: str) -> None:
@@ -363,9 +372,9 @@ class TrinoClient:
         """Readiness, as the identity mode checks it."""
         self._identity.ping(self)
 
-    def _connect(self, user: Optional[str] = None):
+    def _connect(self, user: Optional[str] = None, connection: Optional[tuple] = None):
         cfg = self._config
-        trino_user, auth = self._identity.connection(user)
+        trino_user, auth = connection if connection is not None else self._identity.connection(user)
         tags = self._tags() if self._tags is not None else []
         return trino.dbapi.connect(
             host=cfg.trino_host,
@@ -450,9 +459,17 @@ class TrinoClient:
             raise over()
         return rows
 
-    def _run(self, sql: str, user: Optional[str], params: Any, limit: int, timeout: float) -> dict:
+    def _run(
+        self,
+        sql: str,
+        user: Optional[str],
+        params: Any,
+        limit: int,
+        timeout: float,
+        connection: Optional[tuple] = None,
+    ) -> dict:
         budget, call = self._time_budget(timeout)
-        conn = self._connect(user)
+        conn = self._connect(user, connection)
         cursor = conn.cursor()
         rows = self._fetch(cursor, sql, params, limit + 1, budget, call)
         truncated = len(rows) > limit
@@ -502,3 +519,20 @@ class TrinoClient:
             raise
         finally:
             self._metrics.duration.observe(time.perf_counter() - start)
+
+    def current_user(self) -> str:
+        """The user Trino authenticated, by ``SELECT current_user`` on the sign-in
+        connection of ``oauth2``: the one query that runs before a caller is bound.
+
+        Raises ValueError for any other identity mode, which knows its caller before
+        Trino does, and PermissionError when Trino names nobody."""
+        if not isinstance(self._identity, OAuth2Identity):
+            raise ValueError(
+                f"TRINO_IDENTITY_MODE={self._config.trino_identity_mode} does not sign in "
+                f"to Trino: only oauth2 asks Trino who the user is"
+            )
+        rows = self._run("SELECT current_user", None, None, 1, 0.0, self._identity.sign_in())
+        subject = rows["rows"][0][0] if rows["rows"] and rows["rows"][0] else None
+        if not isinstance(subject, str) or not subject.strip():
+            raise PermissionError("Trino OAuth2 returned no authenticated user")
+        return subject

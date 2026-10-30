@@ -12,15 +12,21 @@ from __future__ import annotations
 import contextvars
 import dataclasses
 from dataclasses import replace
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
+import anyio
 import pytest
+from mcp import MCPError
+from mcp.types import INVALID_REQUEST
 from starlette.applications import Starlette
 
 from akko_mcp_trino.app import build_asgi_app, run_stdio, transports_supported
 from akko_mcp_trino.audit import InMemoryAudit
 from akko_mcp_trino.auth import Principal
 from akko_mcp_trino.config import Config
+from akko_mcp_trino.extensions import Refusal
+from akko_mcp_trino.identity import current_subject
 from akko_mcp_trino.middleware import AuthIdentityMiddleware
 from akko_mcp_trino.tools import audited
 
@@ -193,9 +199,31 @@ def test_stdio_without_auth_runs_as_the_service_account():
 @pytest.mark.parametrize("token, required", [("", False), ("valid", True), ("invalid", False)])
 def test_stdio_uses_trinos_identity_for_admission_and_audit(token, required):
     mcp, audit = _FakeStdioMCP(), InMemoryAudit()
-    mcp.run = audited(audit, mcp.run)
-    client = Mock(query=Mock(return_value={"rows": [["trino-alice"]]}))
+    mcp.middleware = []
+    client = Mock(current_user=Mock(return_value="trino-alice"))
     guard = Mock(before_auth=Mock(return_value=None), after_auth=Mock(return_value=None))
+    binding = contextvars.ContextVar("oauth2_binding", default=None)
+    guard.after_auth.side_effect = lambda admission: admission.bind(binding, "bound")
+    tool = audited(audit, mcp.run)
+
+    async def call_next(ctx):
+        assert binding.get() == "bound"
+        tool("stdio")
+
+    async def calls():
+        middleware = mcp.middleware[0]
+        await middleware(_request("initialize"), lambda ctx: anyio.sleep(0))
+        await middleware(_request("tools/list"), lambda ctx: anyio.sleep(0))
+        client.current_user.assert_not_called()
+        guard.before_auth.assert_not_called()
+        async with anyio.create_task_group() as group:
+            for _ in range(2):
+                group.start_soon(middleware, _request("tools/call"), call_next)
+
+    def run(transport):
+        anyio.run(calls)
+
+    mcp.run = run
     contextvars.copy_context().run(
         run_stdio,
         replace(
@@ -211,33 +239,141 @@ def test_stdio_uses_trinos_identity_for_admission_and_audit(token, required):
         client=client,
         extensions=[guard],
     )
-    client.query.assert_called_once_with("SELECT current_user")
+    client.current_user.assert_called_once_with()
     assert mcp.ran_with == "stdio"
-    assert mcp.subject_seen == audit.events[0].subject == "trino-alice"
+    assert mcp.subject_seen == "trino-alice"
+    assert [event.subject for event in audit.events] == ["trino-alice", "trino-alice"]
     assert mcp.bearer_seen == ("valid" if required else None)
     assert guard.after_auth.call_args.args[0].principal.subject == "trino-alice"
+    assert guard.before_auth.call_count == guard.after_auth.call_count == 2
 
 
-@pytest.mark.parametrize("rows", [[], [[]], [[None]], [[42]], [[""]], [[" "]]])
-def test_stdio_refuses_an_empty_or_invalid_trino_identity(rows):
+def _request(method, request_id=1):
+    """The SDK's context of a message: a request has an id, a notification has none."""
+    return SimpleNamespace(method=method, request_id=request_id)
+
+
+def _oauth2_middleware(client, extensions=()):
+    """The middleware ``run_stdio`` installs in ``oauth2`` mode, and nothing served."""
     cfg = replace(_config("stdio"), trino_identity_mode="oauth2", trino_http_scheme="https")
-    mcp, client = Mock(), Mock(query=Mock(return_value={"rows": rows}))
-    with pytest.raises(PermissionError, match="authenticated user"):
-        run_stdio(cfg, mcp, auth_provider=None, client=client)
-    mcp.run.assert_not_called()
+    mcp = Mock(middleware=[])
+    run_stdio(cfg, mcp, auth_provider=None, client=client, extensions=extensions)
+    return mcp.middleware[0]
+
+
+@pytest.mark.parametrize(
+    "method, request_id",
+    [
+        ("initialize", 1),
+        ("ping", 1),
+        ("server/discover", 1),
+        ("tools/list", 1),
+        ("resources/list", 1),
+        ("resources/templates/list", 1),
+        ("prompts/list", 1),
+        ("notifications/initialized", None),
+        ("notifications/cancelled", None),
+        ("an/extensions/notification", None),
+    ],
+)
+def test_oauth2_discovery_passes_without_login_or_admission(method, request_id):
+    client, guard, call_next = Mock(), Mock(), AsyncMock(return_value="answer")
+    middleware = _oauth2_middleware(client, [guard])
+    assert anyio.run(middleware, _request(method, request_id), call_next) == "answer"
+    client.current_user.assert_not_called()
+    guard.before_auth.assert_not_called()
+    guard.after_auth.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "tools/call",
+        "resources/read",
+        "prompts/get",
+        "completion/complete",
+        "logging/setLevel",
+        "resources/subscribe",
+        "a/method/of/a/later/sdk",
+        "notifications/named/like/one",
+    ],
+)
+def test_oauth2_admits_every_other_method_before_it_runs(method):
+    """Deny by default: only the listed discovery methods skip the login. A resource or a
+    prompt an extension adds, or a method a later SDK adds, signs in and is admitted
+    like a tool call, so it never reaches Trino without the user it runs for. A
+    notification is told by its missing request id, never by its name: a request an
+    extension names ``notifications/...`` is admitted too."""
+    seen = {}
+    client = Mock(current_user=Mock(return_value="alice"))
+    guard = Mock(before_auth=Mock(return_value=None), after_auth=Mock(return_value=None))
+
+    async def call_next(ctx):
+        seen["subject"] = current_subject()
+
+    contextvars.copy_context().run(
+        anyio.run, _oauth2_middleware(client, [guard]), _request(method), call_next
+    )
+    client.current_user.assert_called_once_with()
+    guard.after_auth.assert_called_once()
+    assert seen == {"subject": "alice"}
+
+
+@pytest.mark.parametrize(
+    "refusal, message",
+    [
+        (Refusal("quota"), "admission refused: quota"),
+        (Refusal("quota", message="ask for more"), "admission refused: quota: ask for more"),
+    ],
+)
+def test_oauth2_refusal_answers_an_invalid_request_and_never_runs_the_call(refusal, message):
+    """A refusal is the request's error, with the guard's reason and what to do about
+    it: never the bare exception the SDK would log with its stack and answer code 0."""
+    client = Mock(current_user=Mock(return_value="alice"))
+    guard = Mock(before_auth=Mock(return_value=None), after_auth=Mock(return_value=refusal))
+    call_next = AsyncMock()
+    middleware = _oauth2_middleware(client, [guard])
+    with pytest.raises(MCPError) as raised:
+        anyio.run(middleware, _request("tools/call"), call_next)
+    assert (raised.value.code, raised.value.message) == (INVALID_REQUEST, message)
+    call_next.assert_not_called()
+
+
+def test_oauth2_trino_naming_nobody_answers_an_invalid_request():
+    client = Mock(current_user=Mock(side_effect=PermissionError("no authenticated user")))
+    call_next = AsyncMock()
+    with pytest.raises(MCPError, match="no authenticated user") as raised:
+        anyio.run(_oauth2_middleware(client), _request("tools/call"), call_next)
+    assert raised.value.code == INVALID_REQUEST
+    call_next.assert_not_called()
+
+
+def test_stdio_login_failure_is_deferred_to_the_tool_call():
+    client = Mock(current_user=Mock(side_effect=[RuntimeError("login failed"), "alice"]))
+    middleware = _oauth2_middleware(client)
+    client.current_user.assert_not_called()
+    tool = AsyncMock()
+
+    async def calls():
+        ctx = _request("tools/call")
+        with pytest.raises(RuntimeError, match="login failed"):
+            await middleware(ctx, tool)
+        tool.assert_not_called()
+        await middleware(ctx, tool)
+
+    anyio.run(calls)
+    assert client.current_user.call_count == 2
+    tool.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
     "client, required, error",
     [
         (None, False, ValueError),
-        (Mock(query=Mock(side_effect=RuntimeError)), False, RuntimeError),
         (Mock(), True, PermissionError),
     ],
 )
-def test_stdio_refuses_missing_client_failed_login_or_missing_required_token(
-    client, required, error
-):
+def test_stdio_refuses_missing_client_or_missing_required_token(client, required, error):
     cfg = replace(
         _config("stdio"),
         trino_identity_mode="oauth2",

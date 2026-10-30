@@ -55,10 +55,13 @@ class Admission:
 
     ``bearer`` is the token the request presented, for a guard to read;
     ``principal`` is None before authentication and when no token verified;
-    ``stdio`` is true for the single admission of a stdio process. A guard may
-    ``bind`` a value to a context variable for the duration of the request (a
-    value it derived from the request, for example); the middleware resets it
-    afterwards.
+    ``stdio`` is true for a stdio admission: once per process, at start, except
+    with ``TRINO_IDENTITY_MODE=oauth2``, where the guards run on every request
+    that is not discovery, never at start or for discovery, and always after
+    Trino named the user, so ``before_auth`` already sees that ``principal``. A
+    guard may ``bind`` a value to a context variable for the duration of the
+    request (a value it derived from the request, for example); the middleware
+    resets it afterwards.
     """
 
     headers: Mapping[str, str]
@@ -90,7 +93,8 @@ class Extension:
         return []
 
     def before_auth(self, admission: Admission) -> Optional[Refusal]:
-        """Refuse a request before its token is looked at, or None."""
+        """Refuse a request before its token is looked at, or None; in ``oauth2`` over
+        stdio, Trino has already named the user (see `Admission`)."""
         return None
 
     def after_auth(self, admission: Admission) -> Optional[Refusal]:

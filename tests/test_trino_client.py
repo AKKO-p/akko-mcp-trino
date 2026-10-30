@@ -279,8 +279,7 @@ def test_oauth2_reuses_auth_and_keeps_redirects_off_stdout(monkeypatch, capsys):
     assert check_config(cfg) == 0
     auth.assert_not_called()
     client = TrinoClient(cfg)
-    client.query("SELECT 1", user="ignored")
-    client.ping()
+    client.query("SELECT 1", user="alice")
     auth.assert_called_once()
     assert seen["auth"] is auth.return_value and seen["user"] is None
     capsys.readouterr()  # Discard --check's intentional stdout output.
@@ -290,6 +289,50 @@ def test_oauth2_reuses_auth_and_keeps_redirects_off_stdout(monkeypatch, capsys):
     browser.assert_called_once_with("https://trino.example/login")
     captured = capsys.readouterr()
     assert captured.out == "" and "https://trino.example/login" in captured.err
+
+
+def _oauth2_client(monkeypatch, rows, seen):
+    """A client in ``oauth2`` mode on a fake connection, the driver's login replaced."""
+    cfg = _cfg(trino_identity_mode="oauth2", transport="stdio", trino_http_scheme="https")
+    monkeypatch.setattr(tc.trino.auth, "OAuth2Authentication", Mock())
+    conn = _Conn(rows)
+    monkeypatch.setattr(tc.trino.dbapi, "connect", lambda **kw: seen.update(kw) or conn)
+    return TrinoClient(cfg), conn
+
+
+def test_oauth2_refuses_a_query_without_a_verified_caller(monkeypatch):
+    """Outside the identity check, ``oauth2`` needs the caller an admission bound, like
+    ``jwt`` and ``impersonation``: a method the door forgot fails, it never runs as the
+    user who signed in."""
+    seen = {}
+    client, conn = _oauth2_client(monkeypatch, [("1",)], seen)
+    with pytest.raises(PermissionError, match="TRINO_IDENTITY_MODE=oauth2 .* no verified caller"):
+        client.query("SELECT 1")
+    assert seen == {} and conn._cur.executed is None
+
+
+def test_oauth2_current_user_is_the_one_query_without_a_caller(monkeypatch):
+    seen = {}
+    client, conn = _oauth2_client(monkeypatch, [("alice",)], seen)
+    assert client.current_user() == "alice"
+    assert conn._cur.executed == ("SELECT current_user", None) and seen["user"] is None
+    client.ping()
+    assert conn._cur.executed == ("SELECT current_user", None)
+
+
+@pytest.mark.parametrize("rows", [[], [()], [(None,)], [(42,)], [("",)], [(" ",)]])
+def test_oauth2_current_user_refuses_an_empty_or_invalid_trino_identity(monkeypatch, rows):
+    client, _ = _oauth2_client(monkeypatch, rows, {})
+    with pytest.raises(PermissionError, match="authenticated user"):
+        client.current_user()
+
+
+def test_current_user_is_refused_by_a_mode_that_knows_its_caller(monkeypatch):
+    seen = {}
+    _patch_connect(monkeypatch, [("svc",)], seen)
+    with pytest.raises(ValueError, match="TRINO_IDENTITY_MODE=service does not sign in"):
+        TrinoClient(_CFG).current_user()
+    assert seen == {}
 
 
 # ---- jwt: the caller's own token, verified again by Trino

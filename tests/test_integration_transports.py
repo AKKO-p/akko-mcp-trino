@@ -22,10 +22,11 @@ import jwt as pyjwt
 import pytest
 import uvicorn
 from cryptography.hazmat.primitives.asymmetric import rsa
-from mcp import ClientSession
+from mcp import ClientSession, MCPError
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+from mcp.types import INVALID_REQUEST
 
 from akko_mcp_trino import auth
 from akko_mcp_trino.app import build_asgi_app
@@ -182,7 +183,8 @@ def test_each_http_transport_lists_the_eight_tools(served):
     )
 
 
-def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
+@pytest.mark.parametrize("identity", ["service", "oauth2"])
+def test_stdio_transport_runs_as_a_subprocess_with_the_users_token(identity):
     """Claude Desktop, Cursor and Vibe launch a local server over stdio. The
     user's token comes from the environment; strict mode still applies. Service mode
     without a door, chosen explicitly here, is announced to the host in the instructions
@@ -192,7 +194,8 @@ def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
         "MCP_TRANSPORT": "stdio",
         "MCP_AUTH_ENABLED": "false",
         "MCP_AUTH_REQUIRED": "false",
-        "TRINO_IDENTITY_MODE": "service",
+        "TRINO_IDENTITY_MODE": identity,
+        "TRINO_HTTP_SCHEME": "https",
         "TRINO_HOST": "h",
     }
     params = StdioServerParameters(command=sys.executable, args=["-m", "akko_mcp_trino"], env=env)
@@ -206,8 +209,121 @@ def test_stdio_transport_runs_as_a_subprocess_with_the_users_token():
     instructions, tools = anyio.run(go)
     assert "execute_query" in tools
     assert instructions.startswith("WARNING")
-    assert "TRINO_IDENTITY_MODE=service" in instructions
+    if identity == "service":
+        assert "TRINO_IDENTITY_MODE=service" in instructions
     assert "MCP_AUTH_ENABLED=false" in instructions
+
+
+_OAUTH2_SERVER = os.path.join(os.path.dirname(__file__), "oauth2_stdio_server.py")
+
+
+def _oauth2_stdio(tmp_path, client_calls, refuse=False):
+    """Run ``client_calls(session)`` against the ``oauth2`` stdio server of
+    ``oauth2_stdio_server.py`` once discovery is done; return what it answered, what
+    discovery recorded and every event of the run."""
+    events = tmp_path / "events.jsonl"
+    events.touch()
+    env = {
+        **os.environ,
+        "MCP_TRANSPORT": "stdio",
+        "MCP_AUTH_ENABLED": "false",
+        "MCP_AUTH_REQUIRED": "false",
+        "TRINO_IDENTITY_MODE": "oauth2",
+        "TRINO_HTTP_SCHEME": "https",
+        "TRINO_HOST": "h",
+        "OAUTH2_EVENTS": str(events),
+        "OAUTH2_REFUSE": "1" if refuse else "",
+    }
+    params = StdioServerParameters(command=sys.executable, args=[_OAUTH2_SERVER], env=env)
+
+    def read():
+        return [json.loads(line) for line in events.read_text().splitlines()]
+
+    async def go():
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                await s.list_tools()
+                await s.list_resources()
+                discovery = read()
+                return await client_calls(s), discovery
+
+    answered, discovery = anyio.run(go)
+    return answered, discovery, read()
+
+
+def test_oauth2_stdio_on_the_real_sdk_runs_each_call_as_the_user_trino_named(tmp_path):
+    """The real SDK, over stdio, with Trino faked at the driver. Discovery signs in to
+    nothing. Three concurrent tool calls and a resource read sign in once, and each runs
+    as the user Trino named, with the binding of its own admission: a synchronous tool
+    in a worker thread, an asynchronous one, a query and a resource an extension adds.
+    It fails if the middleware stops binding the call's context, or stops admitting a
+    method that is not discovery."""
+
+    async def calls(s):
+        answers = {}
+
+        async def call(name, args=None):
+            result = await s.call_tool(name, args or {})
+            answers[name] = json.loads(result.content[0].text)
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(call, "seen_sync")
+            group.start_soon(call, "seen_async")
+            group.start_soon(call, "execute_query", {"sql": "SELECT 1"})
+        read = await s.read_resource("test://seen")
+        answers["resource"] = json.loads(read.contents[0].text)
+        return answers
+
+    answers, discovery, events = _oauth2_stdio(tmp_path, calls)
+    assert discovery == [], "discovery reached Trino or a guard"
+    queries = [e for e in events if "trino" in e]
+    assert queries[0] == {
+        "trino": "SELECT current_user",
+        "user": None,
+        "subject": None,
+        "bound": "unbound",
+    }
+    assert [e["trino"] for e in queries].count("SELECT current_user") == 1
+    guards = [e for e in events if "guard" in e]
+    assert len(guards) == 4
+    assert all(g["subject"] == "alice" and g["stdio"] for g in guards)
+    bindings = {f"call-{g['guard']}" for g in guards}
+    seen = [answers["seen_sync"], answers["seen_async"], answers["resource"]]
+    assert all(a["subject"] == "alice" for a in seen)
+    (query,) = [e for e in queries if e["trino"] != "SELECT current_user"]
+    assert query["subject"] == "alice" and query["user"] is None
+    assert answers["execute_query"]["rows"] == [[1]]
+    assert sorted([a["bound"] for a in seen] + [query["bound"]]) == sorted(bindings)
+    audits = [e for e in events if "audit" in e]
+    assert sorted(e["audit"] for e in audits) == ["execute_query", "seen_async", "seen_sync"]
+    assert all(e["subject"] == "alice" and e["ok"] for e in audits)
+
+
+def test_oauth2_stdio_on_the_real_sdk_refused_admission_runs_nothing(tmp_path):
+    """A guard that refuses answers each call an ``INVALID_REQUEST`` error with its reason
+    and what to do about it; no tool runs, no query reaches Trino past the identity
+    check, and the audit records nothing."""
+
+    async def calls(s):
+        refused = []
+        for request in (
+            s.call_tool("execute_query", {"sql": "SELECT 1"}),
+            s.call_tool("seen_sync", {}),
+            s.read_resource("test://seen"),
+        ):
+            with pytest.raises(MCPError) as raised:
+                await request
+            refused.append((raised.value.code, raised.value.message))
+        return refused
+
+    refused, discovery, events = _oauth2_stdio(tmp_path, calls, refuse=True)
+    assert discovery == []
+    message = "admission refused: test_refused: ask an administrator"
+    assert refused == [(INVALID_REQUEST, message)] * 3
+    assert [e["trino"] for e in events if "trino" in e] == ["SELECT current_user"]
+    assert len([e for e in events if "guard" in e]) == 3
+    assert [e for e in events if "audit" in e] == []
 
 
 def test_a_foreign_host_header_is_served_not_refused_with_421(served):
