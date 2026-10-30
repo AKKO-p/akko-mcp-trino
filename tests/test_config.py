@@ -37,6 +37,8 @@ _ENV_KEYS = [
     "MCP_MAX_CATALOGS",
     "MCP_DESCRIBE_SCHEMA_TABLES",
     "MCP_DESCRIBE_SCHEMA_COLUMNS",
+    "MCP_SEARCH_MIN_LENGTH",
+    "MCP_SEARCH_RESERVE_SECONDS",
 ]
 
 
@@ -290,3 +292,53 @@ def test_extensions_default_to_none_and_are_named_in_order(monkeypatch):
     assert Config.from_env().extensions == ""
     monkeypatch.setenv("MCP_EXTENSIONS", "first, second")
     assert Config.from_env().extensions == "first, second"
+
+
+def test_search_settings_default_and_are_read_from_the_environment(monkeypatch):
+    c = Config.from_env()
+    assert (c.search_min_length, c.search_reserve_seconds) == (3, 2.0)
+    monkeypatch.setenv("MCP_SEARCH_MIN_LENGTH", "5")
+    monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "0.5")
+    c = Config.from_env()
+    assert (c.search_min_length, c.search_reserve_seconds) == (5, 0.5)
+
+
+def test_search_settings_no_search_can_serve_are_refused_at_start(monkeypatch):
+    monkeypatch.setenv("MCP_SEARCH_MIN_LENGTH", "0")
+    monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "-1")
+    assert Config.from_env().problems() == [
+        "MCP_SEARCH_MIN_LENGTH=0: search_columns must ask for 1 character or more",
+        "MCP_SEARCH_RESERVE_SECONDS=-1: a reserve is 0 seconds or more",
+    ]
+
+
+def test_a_reserve_that_takes_the_whole_call_budget_is_refused(monkeypatch):
+    """A reserve of the whole budget leaves the search no time to read anything."""
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "10")
+    monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "10")
+    assert Config.from_env().problems() == [
+        "MCP_SEARCH_RESERVE_SECONDS=10 is not below MCP_CALL_TIMEOUT_SECONDS=10: "
+        "search_columns would have no time left to search"
+    ]
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    assert Config.from_env().problems() == []
+
+
+def test_no_call_budget_is_warned_of_since_a_search_of_every_catalog_is_refused(monkeypatch):
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    assert Config.from_env().warnings() == [
+        "MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns "
+        "refuses to search every catalog and searches a named catalog only"
+    ]
+
+
+def test_a_reserve_of_zero_with_a_call_budget_is_warned_of(monkeypatch):
+    """Without a reserve, a search's last read may reach the call's deadline: the call then
+    answers its own time_budget error, with nothing of what the search found."""
+    monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "0")
+    assert Config.from_env().warnings() == [
+        "MCP_SEARCH_RESERVE_SECONDS=0: a search of search_columns may run to the end of the "
+        "call's budget, and the call then answers its time_budget error with nothing it found"
+    ]
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    assert "MCP_SEARCH_RESERVE_SECONDS" not in " ".join(Config.from_env().warnings())

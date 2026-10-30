@@ -1,6 +1,6 @@
 """The core alone serves the basics, and nothing more slips into it unnoticed.
 
-The core is what anyone may read and run: seven SQL tools, the read-only guard
+The core is what anyone may read and run: eight SQL tools, the read-only guard
 on the SQL tree, four Trino identities (the caller, by a token for Trino
 obtained by token exchange; the caller, impersonated by the server's own
 account; the local user by native OAuth2; or, when named, the one identity the
@@ -36,6 +36,7 @@ BASIC_TOOLS = {
     "describe_table",
     "explain_query",
     "execute_query",
+    "search_columns",
 }
 
 CORE_MODULES = {
@@ -52,6 +53,7 @@ CORE_MODULES = {
     "metrics",
     "middleware",
     "plugins",
+    "search",
     "server",
     "sql_guard",
     "token_exchange",
@@ -94,7 +96,7 @@ def _source() -> str:
     return "\n".join(p.read_text(encoding="utf-8") for p in sorted(CORE.glob("*.py")))
 
 
-def test_the_core_serves_seven_tools():
+def test_the_core_serves_eight_tools():
     mcp, _ = build_server(_config(), mcp_factory=lambda name, **_: FakeMCP())
     assert set(mcp.tools) == BASIC_TOOLS
 

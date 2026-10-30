@@ -454,6 +454,23 @@ def test_cli_check_reports_the_describe_schema_page(monkeypatch, capsys):
     assert "MCP_DESCRIBE_SCHEMA_COLUMNS=0: describe_schema must be allowed 1 column" in out
 
 
+def test_cli_check_reports_the_search_settings(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("MCP_SEARCH_MIN_LENGTH", "4")
+    monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "1.5")
+    check_config(Config.from_env())
+    out = capsys.readouterr().out
+    assert (
+        "search_columns: a text of 4 characters at least, 1.5 s of the call's budget kept "
+        "in reserve" in out
+    )
+    monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "0")
+    check_config(Config.from_env())
+    assert "WARNING: MCP_SEARCH_RESERVE_SECONDS=0" in capsys.readouterr().out
+
+
 def test_cli_check_reports_the_query_source_and_budget(monkeypatch, capsys):
     from akko_mcp_trino.__main__ import check_config
     from akko_mcp_trino.config import Config
