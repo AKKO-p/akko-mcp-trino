@@ -133,6 +133,7 @@ async def discovery(call) -> dict:
         "hidden_table": await search("supplier"),
         "empty": await search("zzqqzz"),
         "short": await search("ab %"),
+        "per_word": await search("nation mktsegment"),
         "quote_schema": await call("describe_schema", catalog="tpch", schema=quote),
         "column": await call("execute_query", sql="SELECT nosuch FROM tpch.tiny.nation"),
         "system": await call("execute_query", sql="SELECT * FROM system.jdbc.columns"),
@@ -262,6 +263,31 @@ def main() -> int:
         d_alice["column"].get("kind") == "column"
         and d_alice["column"].get("identifier") == "nosuch",
         d_alice["column"],
+    )
+    check(
+        "discovery: an unknown column advises describe_table on the table of the statement",
+        "tpch.tiny.nation" in d_alice["column"].get("hint", "")
+        and "describe_table" in d_alice["column"].get("hint", ""),
+        d_alice["column"],
+    )
+
+    def marked(answer: dict) -> set:
+        return {(m["table"], m["column"], tuple(m["words"])) for m in answer.get("matches", [])}
+
+    check(
+        "discovery: two words no column holds together give each word alone, marked partial",
+        d_alice["per_word"].get("partial") is True
+        and d_alice["per_word"].get("complete") is True
+        and {("customer", "mktsegment", ("mktsegment",)), ("nation", "nationkey", ("nation",))}
+        <= marked(d_alice["per_word"]),
+        d_alice["per_word"],
+    )
+    check(
+        "discovery: bob's per-word pass shows nation only",
+        d_bob["per_word"].get("partial") is True
+        and {t["table"] for t in d_bob["per_word"].get("tables", [])} == {"nation"}
+        and {m["table"] for m in d_bob["per_word"].get("matches", [])} == {"nation"},
+        d_bob["per_word"],
     )
     check(
         "discovery: the agent's own SQL on system.jdbc.columns stays refused (read_only)",
