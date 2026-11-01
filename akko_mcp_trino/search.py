@@ -13,6 +13,13 @@ holds a matching column, a column's table holds a word). Each is filtered by equ
 catalog and schema, which Trino pushes down to the views, so it loads that schema only, and
 a catalog of many thousand tables answers schema by schema instead of not at all.
 
+When a search of several words is complete and nothing holds every word on any page of its
+chain of cursors, the same call goes on with a per-word pass over the same scope: each row a
+word alone finds (the same rules, one word for all), marked with the words that found it,
+within the same row cap, time budget and rights. One pass reads all the words, two
+statements per schema as the first pass; ``partial`` says the page is of that pass, and
+``complete``, ``not_searched`` and the cursor then speak of it.
+
 The search never claims more than it did. Before each schema it checks what is left of the
 call's budget, keeping a reserve so that it ends with an answer, not with the call's own
 error; each query is bounded by what is left. It stops on the row cap too. Either way the
@@ -51,11 +58,29 @@ ROW_CAP = "row_cap"
 TABLES = "tables"
 COLUMNS = "columns"
 _PHASES = (TABLES, COLUMNS)
+# The two passes of a search: every word together, then, when that found nothing, each
+# word alone (its rows marked with the words that found them).
+EVERY_WORD = "every_word"
+PER_WORD = "per_word"
+_MODES = (EVERY_WORD, PER_WORD)
 # What a complete search that found nothing says, so that an agent tries another way
 # rather than conclude that the data does not exist.
 HINT = (
-    "Nothing matched every word. Try fewer words or other words (a synonym, a column or "
-    "table name), or browse with list_tables and describe_schema."
+    "Nothing matched these words: search again with one word from a column or table name "
+    "(never a value such as a date, an amount or a code), or browse with list_tables and "
+    "describe_schema."
+)
+# What a page of the per-word pass that has more to read says, so that an agent never takes
+# it for the end.
+PER_WORD_MORE_HINT = (
+    "No table or column holds every word together. This per-word search is not finished: "
+    "call search_columns again with the same text and cursor=next_cursor."
+)
+# What the last page of a per-word pass that found rows says: they hold some of the words.
+PER_WORD_HINT = (
+    "No table or column holds every word together, so these are partial matches, each found "
+    "by the words it lists: pick the right one, or search again with a single word from a "
+    "column or table name, then call describe_table on the table."
 )
 _WORD = re.compile(r"\w+")
 # What a cursor may hold: a schema name of this many characters at most, a row offset Trino
@@ -129,7 +154,8 @@ class Cursor:
     its ``phase`` (its tables, or its columns once its tables are read), after the first
     ``row_offset`` matching rows of that phase. ``query`` ties it to its search, ``gaps``
     says an earlier call of the search left a part of it not searched, and ``found`` that an
-    earlier call found a table or a column."""
+    earlier call found a table or a column. ``mode`` is the pass it resumes: every word
+    together, or each word alone once that found nothing."""
 
     catalog: str
     schema: str
@@ -138,6 +164,7 @@ class Cursor:
     gaps: bool = False
     phase: str = TABLES
     found: bool = False
+    mode: str = EVERY_WORD
 
 
 def encode_cursor(cursor: Cursor) -> str:
@@ -150,6 +177,7 @@ def encode_cursor(cursor: Cursor) -> str:
         "q": cursor.query,
         "g": cursor.gaps,
         "f": cursor.found,
+        "m": cursor.mode,
     }
     return base64.urlsafe_b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
 
@@ -161,7 +189,8 @@ def decode_cursor(token: str) -> Cursor:
     to be one the caller sees. The schema, empty for a catalog's first, comes from Trino's
     own listing and only ever enters a string literal: any lower-case name without NUL, up to
     ``MAX_NAME_LENGTH`` characters, so every cursor the server gives resumes, a Hive schema
-    such as ``2024_sales`` included. The phase is ``tables`` or ``columns``, the offset a
+    such as ``2024_sales`` included. The mode is ``every_word`` or ``per_word``, the phase
+    ``tables`` or ``columns``, the offset a
     whole number from 0 to ``MAX_ROW_OFFSET``."""
     try:
         data = json.loads(base64.b64decode(token.encode("ascii"), altchars=b"-_", validate=True))
@@ -169,6 +198,7 @@ def decode_cursor(token: str) -> Cursor:
             raise ValueError(_INVALID_CURSOR)
         catalog, schema, offset = data["c"], data["s"], data["o"]
         query, gaps, phase, found = data["q"], data["g"], data["p"], data["f"]
+        mode = data["m"]
         if not (isinstance(catalog, str) and isinstance(schema, str) and isinstance(query, str)):
             raise ValueError(_INVALID_CURSOR)
         if isinstance(offset, bool) or not isinstance(offset, int):
@@ -177,14 +207,16 @@ def decode_cursor(token: str) -> Cursor:
             raise ValueError(_INVALID_CURSOR)
         if not isinstance(found, bool):
             raise ValueError(_INVALID_CURSOR)
-        if phase not in _PHASES:
+        if phase not in _PHASES or mode not in _MODES:
             raise ValueError(_INVALID_CURSOR)
         if len(schema) > MAX_NAME_LENGTH or "\0" in schema or schema != schema.lower():
             raise ValueError(_INVALID_CURSOR)
         governed_catalog(catalog)
     except (ValueError, KeyError, binascii.Error) as exc:
         raise ValueError(_INVALID_CURSOR) from exc
-    return Cursor(catalog, schema, offset, query=query, gaps=gaps, phase=phase, found=found)
+    return Cursor(
+        catalog, schema, offset, query=query, gaps=gaps, phase=phase, found=found, mode=mode
+    )
 
 
 def _not_searched(catalog: str, schema: Optional[str], reason: str) -> dict:
@@ -220,7 +252,8 @@ def search(
     is asked anything. ``reserve_seconds`` of the call's budget are kept so the search
     ends with an answer. A refused metadata view answers its error, which names what to
     allow. A complete search that found nothing, over every call of its chain of cursors,
-    adds ``hint``."""
+    adds ``hint``; with several words, it goes on with the per-word pass, whose pages carry
+    ``partial`` and say what that pass searched."""
     words = search_words(text, min_length)
     if not words:
         raise ValueError(
@@ -267,17 +300,6 @@ def search(
             return False
         return True
 
-    def stalled(cat: str, sch: str, phase: str, offset: int) -> bool:
-        """Whether a stop here is exactly where this call resumed, so it moved nothing: with
-        every read bounded by the call (no query timeout of its own, or one as long as the
-        call), resuming here again would stop every later call at the same place."""
-        return start is not None and (cat, sch, phase, offset) == (
-            start.catalog,
-            start.schema,
-            start.phase,
-            start.row_offset,
-        )
-
     def allowed() -> float:
         """Seconds the next query may take (0: no budget of the call), or a plain
         TimeoutError when only the reserve is left."""
@@ -313,6 +335,14 @@ def search(
         + " AND "
         + any_word(words, ("c.column_name", "c.remarks"))
     )
+    patterns = [like_contains(w) for w in words]
+    # The per-word pass: a column with one word at least in its own name or comment, which
+    # is every column that word alone finds; each read says which words found each row.
+    own = [
+        f"(lower(c.column_name) LIKE {p} ESCAPE '!' OR lower(c.remarks) LIKE {p} ESCAPE '!')"
+        for p in patterns
+    ]
+    any_own = any_word(words, ("c.column_name", "c.remarks"))
 
     def matching_columns(select: str, cat_: str, sch_: str) -> str:
         """``select`` over the matching columns of one schema, each joined to its table's
@@ -324,160 +354,264 @@ def search(
             f"WHERE c.table_cat = {cat_} AND c.table_schem = {sch_} AND {column_match}"
         )
 
-    def read(phase: str, cat: str, sch: str, offset: int, room: int) -> dict:
-        """The matching tables, or columns, of one schema from row ``offset``, ``room`` of
-        them at most. Every view read is filtered by equality on the catalog and the
-        schema, the joined ones too, so Trino reads that schema only."""
-        cat_, sch_ = sql_literal(cat), sql_literal(sch)
+    def every_word_sql(phase: str, cat_: str, sch_: str) -> str:
+        """The statement of one phase of the search of every word."""
         if phase == TABLES:
             # A table whose own text holds every word, or that holds a matching column.
             holding = matching_columns("c.table_name", cat_, sch_)
-            sql = (
+            return (
                 f"SELECT s.table_name, s.comment FROM {TABLE_COMMENTS} s "
                 f"WHERE s.catalog_name = {cat_} AND s.schema_name = {sch_} "
                 f"AND ({every_word(words, ('s.table_name', 's.comment'))} "
                 f"OR s.table_name IN ({holding})) ORDER BY s.table_name"
             )
-        else:
-            sql = (
-                matching_columns("c.table_name, c.column_name, c.type_name, c.remarks", cat_, sch_)
-                + " ORDER BY c.table_name, c.ordinal_position"
+        return (
+            matching_columns("c.table_name, c.column_name, c.type_name, c.remarks", cat_, sch_)
+            + " ORDER BY c.table_name, c.ordinal_position"
+        )
+
+    def hits(flags: list[str]) -> str:
+        """How many words found a row: the rows most words found come first, so a row that
+        holds several words of the question is not lost behind pages of a common word."""
+        return "(" + " + ".join(f"CAST({f} AS integer)" for f in flags) + ")"
+
+    def per_word_sql(phase: str, cat_: str, sch_: str) -> str:
+        """The statement of one phase of the per-word pass: one flag per word, true when
+        that word alone finds the row, the rows most words found first, then in the order
+        of the first pass (stable, so a cursor's offset holds)."""
+        if phase == TABLES:
+            # A table whose own text holds a word, or that holds a column a word finds: the
+            # columns are read once, grouped by table, one flag per word.
+            table_flags = [
+                f"coalesce(lower(s.table_name) LIKE {p} ESCAPE '!' "
+                f"OR lower(s.comment) LIKE {p} ESCAPE '!' OR h.w{i}, false)"
+                for i, p in enumerate(patterns)
+            ]
+            flags = ", ".join(table_flags)
+            held = ", ".join(f"bool_or(coalesce({o}, false)) AS w{i}" for i, o in enumerate(own))
+            return (
+                f"SELECT s.table_name, s.comment, {flags} FROM {TABLE_COMMENTS} s "
+                f"LEFT JOIN (SELECT c.table_name, {held} FROM {JDBC_COLUMNS} c "
+                f"WHERE c.table_cat = {cat_} AND c.table_schem = {sch_} AND {any_own} "
+                "GROUP BY c.table_name) h ON h.table_name = s.table_name "
+                f"WHERE s.catalog_name = {cat_} AND s.schema_name = {sch_} "
+                f"AND ({any_word(words, ('s.table_name', 's.comment'))} "
+                f"OR h.table_name IS NOT NULL) ORDER BY {hits(table_flags)} DESC, s.table_name"
             )
+        column_flags = [f"coalesce({o}, false)" for o in own]
+        return (
+            f"SELECT c.table_name, c.column_name, c.type_name, c.remarks, "
+            f"{', '.join(column_flags)} "
+            f"FROM {JDBC_COLUMNS} c WHERE c.table_cat = {cat_} AND c.table_schem = {sch_} "
+            f"AND {any_own} ORDER BY {hits(column_flags)} DESC, c.table_name, c.ordinal_position"
+        )
+
+    def read(mode: str, phase: str, cat: str, sch: str, offset: int, room: int) -> dict:
+        """The matching tables, or columns, of one schema from row ``offset``, ``room`` of
+        them at most, for the search of every word or for its per-word pass. Every view
+        read is filtered by equality on the catalog and the schema, the joined ones too,
+        so Trino reads that schema only."""
+        cat_, sch_ = sql_literal(cat), sql_literal(sch)
+        sql = (every_word_sql if mode == EVERY_WORD else per_word_sql)(phase, cat_, sch_)
         return ctx.run(f"{sql} OFFSET {offset} LIMIT {room + 1}", max_rows=room, timeout=allowed())
 
-    catalogs = (
-        [only_catalog] if only_catalog else [c.lower() for c in ctx.visible_catalogs(max_catalogs)]
-    )
-    if start is not None:
-        if start.catalog not in catalogs:  # hidden now, or never shown: not this search's
-            raise ValueError(_INVALID_CURSOR)
-        catalogs = [c for c in catalogs if c >= start.catalog]
-    tables: list[dict] = []
-    matches: list[dict] = []
-    gaps: list[dict] = []
-    searched = 0
-    # Where the search stopped: the catalog's index, the schema ("" for the catalog's
-    # first), the phase and the row offset in it, and why.
-    stop: Optional[tuple[int, str, str, int, str]] = None
-    for index, cat in enumerate(catalogs):
-        at = start if start is not None and cat == start.catalog else None
-        first = at.schema if at is not None else ""
-        # Before its schemas are read, the search of this catalog resumes where it was.
-        here = (index, first, *((at.phase, at.row_offset) if at is not None else (TABLES, 0)))
-        try:
-            governed_catalog(cat)
-        except ValueError:  # a name the statement cannot carry is named, never queried
-            gaps.append(_not_searched(cat, None, INVALID_ARGUMENT))
-            continue
-        schemas = [only_schema]
-        if not only_schema:
-            if len(tables) + len(matches) >= ctx.page_size:
-                stop = (*here, ROW_CAP)
-                break
-            try:
-                schemas = schemas_of(cat, first)
-            except CallTimeout:
-                raise
-            except TimeoutError:
-                # Slower than one query may be, or than a whole call: resuming would not help.
-                if time_remains() or stalled(cat, *here[1:]):
-                    gaps.append(_not_searched(cat, None, TIME_BUDGET))
-                    continue
-                stop = (*here, TIME_BUDGET)
-                break
-            except Exception as e:  # noqa: BLE001 - this catalog only, said in the answer
-                gaps.append(_not_searched(cat, None, explain_error(e)["kind"]))
-                continue
-        for sch in schemas:
-            phase, offset = (
-                (at.phase, at.row_offset) if at is not None and sch == first else (TABLES, 0)
+    def found_by(flags: list) -> list[str]:
+        """The words whose flag is true, in the order given."""
+        return [w for w, hit in zip(words, flags) if hit]
+
+    def scan(mode: str, begin: Optional[Cursor]) -> dict:
+        """One pass over the scope, from ``begin`` (None: from the start), within the row
+        cap and the call's time: what it found, what it skipped, where it stopped. A
+        refused metadata view answers its error, as ``{"error"}``."""
+        tables: list[dict] = []
+        matches: list[dict] = []
+        gaps: list[dict] = []
+        searched = 0
+        catalogs = all_catalogs
+        if begin is not None:
+            catalogs = [c for c in catalogs if c >= begin.catalog]
+
+        def stalled(cat: str, sch: str, phase: str, offset: int) -> bool:
+            """Whether a stop here is exactly where this call resumed, so it moved
+            nothing: with every read bounded by the call (no query timeout of its own, or
+            one as long as the call), resuming here again would stop every later call at
+            the same place."""
+            return begin is not None and (cat, sch, phase, offset) == (
+                begin.catalog,
+                begin.schema,
+                begin.phase,
+                begin.row_offset,
             )
-            skipped = False
-            for phase in _PHASES[_PHASES.index(phase) :]:
-                room = ctx.page_size - len(tables) - len(matches)
-                if room <= 0:
-                    stop = (index, sch, phase, offset, ROW_CAP)
+
+        # Where the pass stopped: the catalog's index, the schema ("" for the catalog's
+        # first), the phase and the row offset in it, and why.
+        stop: Optional[tuple[int, str, str, int, str]] = None
+        for index, cat in enumerate(catalogs):
+            at = begin if begin is not None and cat == begin.catalog else None
+            first = at.schema if at is not None else ""
+            # Before its schemas are read, the pass of this catalog resumes where it was.
+            here = (index, first, *((at.phase, at.row_offset) if at is not None else (TABLES, 0)))
+            try:
+                governed_catalog(cat)
+            except ValueError:  # a name the statement cannot carry is named, never queried
+                gaps.append(_not_searched(cat, None, INVALID_ARGUMENT))
+                continue
+            schemas = [only_schema]
+            if not only_schema:
+                if len(tables) + len(matches) >= ctx.page_size:
+                    stop = (*here, ROW_CAP)
                     break
                 try:
-                    res = read(phase, cat, sch, offset, room)
+                    schemas = schemas_of(cat, first)
                 except CallTimeout:
                     raise
                 except TimeoutError:
-                    # Slower than one query may be, or than a whole call: named and skipped,
-                    # or every resumed call would stop here again. Stopped by what was left
-                    # of the call after some progress: resumed here.
-                    if time_remains() or stalled(cat, sch, phase, offset):
-                        gaps.append(_not_searched(cat, sch, TIME_BUDGET))
+                    # Slower than one query may be, or than a whole call: resuming would
+                    # not help.
+                    if time_remains() or stalled(cat, *here[1:]):
+                        gaps.append(_not_searched(cat, None, TIME_BUDGET))
+                        continue
+                    stop = (*here, TIME_BUDGET)
+                    break
+                except Exception as e:  # noqa: BLE001 - this catalog only, said in the answer
+                    gaps.append(_not_searched(cat, None, explain_error(e)["kind"]))
+                    continue
+            for sch in schemas:
+                phase, offset = (
+                    (at.phase, at.row_offset) if at is not None and sch == first else (TABLES, 0)
+                )
+                skipped = False
+                for phase in _PHASES[_PHASES.index(phase) :]:
+                    room = ctx.page_size - len(tables) - len(matches)
+                    if room <= 0:
+                        stop = (index, sch, phase, offset, ROW_CAP)
+                        break
+                    try:
+                        res = read(mode, phase, cat, sch, offset, room)
+                    except CallTimeout:
+                        raise
+                    except TimeoutError:
+                        # Slower than one query may be, or than a whole call: named and
+                        # skipped, or every resumed call would stop here again. Stopped by
+                        # what was left of the call after some progress: resumed here.
+                        if time_remains() or stalled(cat, sch, phase, offset):
+                            gaps.append(_not_searched(cat, sch, TIME_BUDGET))
+                            skipped = True
+                            break
+                        stop = (index, sch, phase, offset, TIME_BUDGET)
+                        break
+                    except Exception as e:  # noqa: BLE001 - this schema only, said in the answer
+                        out = metadata_view_error(e)
+                        if out["kind"] in VIEW_REFUSED:  # a view itself: nothing is searched
+                            note(error=error_code(e))
+                            return {"error": out}
+                        gaps.append(_not_searched(cat, sch, out["kind"]))
                         skipped = True
                         break
-                    stop = (index, sch, phase, offset, TIME_BUDGET)
+                    rows = res["rows"][:room]
+                    for row in rows:
+                        where = {"catalog": cat, "schema": sch, "table": row[0]}
+                        if phase == TABLES:
+                            entry = {**where, "comment": row[1]}
+                        else:
+                            entry = {
+                                **where,
+                                "column": row[1],
+                                "type": row[2],
+                                "comment": row[3],
+                            }
+                        if mode == PER_WORD:
+                            entry["words"] = found_by(row[2:] if phase == TABLES else row[4:])
+                        (tables if phase == TABLES else matches).append(entry)
+                    if res.get("truncated") or len(res["rows"]) > room:
+                        stop = (index, sch, phase, offset + len(rows), ROW_CAP)
+                        break
+                    offset = 0
+                if stop is not None:
                     break
-                except Exception as e:  # noqa: BLE001 - this schema only, said in the answer
-                    out = metadata_view_error(e)
-                    if out["kind"] in VIEW_REFUSED:  # a view itself: nothing can be searched
-                        note(error=error_code(e))
-                        return out
-                    gaps.append(_not_searched(cat, sch, out["kind"]))
-                    skipped = True
-                    break
-                rows = res["rows"][:room]
-                if phase == TABLES:
-                    tables += [
-                        {"catalog": cat, "schema": sch, "table": table, "comment": comment}
-                        for table, comment in rows
-                    ]
-                else:
-                    matches += [
-                        {
-                            "catalog": cat,
-                            "schema": sch,
-                            "table": table,
-                            "column": column,
-                            "type": kind,
-                            "comment": comment,
-                        }
-                        for table, column, kind, comment in rows
-                    ]
-                if res.get("truncated") or len(res["rows"]) > room:
-                    stop = (index, sch, phase, offset + len(rows), ROW_CAP)
-                    break
-                offset = 0
+                if not skipped:
+                    searched += 1
             if stop is not None:
                 break
-            if not skipped:
-                searched += 1
+        return {
+            "tables": tables,
+            "matches": matches,
+            "gaps": gaps,
+            "searched": searched,
+            "stop": stop,
+            "catalogs": catalogs,
+        }
+
+    def answer(mode: str, part: dict, begin: Optional[Cursor], searched: int) -> dict:
+        """The reply for a pass that ``begin`` resumed (None: started in this call), with
+        the schemas this call finished in that pass, the cursor that resumes it, and the
+        hint: on a page of the per-word pass with more to read, the one that sends to
+        next_cursor."""
+        earlier_gaps = begin is not None and begin.gaps
+        earlier_found = begin is not None and begin.found
+        tables, matches, gaps, stop = part["tables"], part["matches"], part["gaps"], part["stop"]
+        not_searched = list(gaps)
+        next_cursor = None
         if stop is not None:
-            break
-    earlier_gaps = start is not None and start.gaps
-    earlier_found = start is not None and start.found
-    not_searched = list(gaps)
-    next_cursor = None
-    if stop is not None:
-        index, sch, phase, offset, reason = stop
-        # The schema it stopped in (from there on in its catalog), or the catalog it did not
-        # open, then every catalog after it, never opened.
-        not_searched.append(_not_searched(catalogs[index], sch or None, reason))
-        not_searched += [_not_searched(c, None, reason) for c in catalogs[index + 1 :]]
-        resume = Cursor(
-            catalogs[index],
-            sch,
-            offset,
-            query=digest,
-            gaps=bool(gaps) or earlier_gaps,
-            phase=phase,
-            found=bool(tables or matches) or earlier_found,
-        )
-        next_cursor = encode_cursor(resume)
-    complete = not gaps and stop is None and not earlier_gaps
-    note(rows=len(tables) + len(matches), truncated=not complete)
-    answer = {
-        "tables": tables,
-        "matches": matches,
-        "schemas_searched": searched,
-        "not_searched": not_searched,
-        "complete": complete,
-        "next_cursor": next_cursor,
-    }
-    if complete and not tables and not matches and not earlier_found:
-        answer["hint"] = HINT
-    return answer
+            catalogs = part["catalogs"]
+            index, sch, phase, offset, reason = stop
+            # The schema it stopped in (from there on in its catalog), or the catalog it did
+            # not open, then every catalog after it, never opened.
+            not_searched.append(_not_searched(catalogs[index], sch or None, reason))
+            not_searched += [_not_searched(c, None, reason) for c in catalogs[index + 1 :]]
+            resume = Cursor(
+                catalogs[index],
+                sch,
+                offset,
+                query=digest,
+                gaps=bool(gaps) or earlier_gaps,
+                phase=phase,
+                found=bool(tables or matches) or earlier_found,
+                mode=mode,
+            )
+            next_cursor = encode_cursor(resume)
+        complete = not gaps and stop is None and not earlier_gaps
+        note(rows=len(tables) + len(matches), truncated=not complete)
+        out: dict[str, Any] = {
+            "tables": tables,
+            "matches": matches,
+            "schemas_searched": searched,
+            "not_searched": not_searched,
+            "complete": complete,
+            "next_cursor": next_cursor,
+        }
+        if mode == PER_WORD:
+            out["partial"] = True
+            if next_cursor is not None:
+                out["hint"] = PER_WORD_MORE_HINT
+            elif tables or matches or earlier_found:
+                out["hint"] = PER_WORD_HINT
+            else:  # nothing found by the pass, complete or with a part skipped
+                out["hint"] = HINT
+        elif complete and not tables and not matches and not earlier_found:
+            out["hint"] = HINT
+        return out
+
+    all_catalogs = (
+        [only_catalog] if only_catalog else [c.lower() for c in ctx.visible_catalogs(max_catalogs)]
+    )
+    if start is not None and start.catalog not in all_catalogs:
+        raise ValueError(_INVALID_CURSOR)  # hidden now, or never shown: not this search's
+    if start is not None and start.mode == PER_WORD:
+        part = scan(PER_WORD, start)
+        if "error" in part:
+            return part["error"]
+        return answer(PER_WORD, part, start, part["searched"])
+    part = scan(EVERY_WORD, start)
+    if "error" in part:
+        return part["error"]
+    whole = answer(EVERY_WORD, part, start, part["searched"])
+    if len(words) < 2 or "hint" not in whole:
+        return whole
+    # Complete, and nothing holds every word on any page: each word alone, in the time and
+    # the row cap left, from the start of the scope.
+    per_word = scan(PER_WORD, None)
+    if "error" in per_word:
+        return per_word["error"]
+    # The page speaks of the per-word pass: its schemas only, never the first pass's twice.
+    return answer(PER_WORD, per_word, None, per_word["searched"])

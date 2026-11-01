@@ -15,7 +15,11 @@ import akko_mcp_trino.audit as audit_module
 from akko_mcp_trino.audit import InMemoryAudit, bind_call, reset_call, time_allowed
 from akko_mcp_trino.search import (
     COLUMNS,
+    EVERY_WORD,
     HINT,
+    PER_WORD,
+    PER_WORD_HINT,
+    PER_WORD_MORE_HINT,
     TABLES,
     Cursor,
     decode_cursor,
@@ -223,6 +227,10 @@ class Trino:
             assert "information_schema" not in names or "<> 'information_schema'" in sql
             names = [s for s in names if s != "information_schema"]
             return {"rows": [[s] for s in names], "row_count": len(names), "truncated": False}
+        if sql.startswith("SELECT s.table_name, s.comment, coalesce("):
+            return self._per_word_tables(sql, timeout, kw)
+        if sql.startswith("SELECT c.table_name, c.column_name, c.type_name, c.remarks, coalesce("):
+            return self._per_word_columns(sql, timeout, kw)
         if sql.startswith("SELECT s.table_name, s.comment FROM system.metadata.table_comments s "):
             cat = re.search(r"WHERE s\.catalog_name = '([^']*)'", sql).group(1)
             sch = re.search(r"AND s\.schema_name = '([^']*)'", sql).group(1)
@@ -260,11 +268,74 @@ class Trino:
         return {"rows": rows[:cap], "row_count": min(cap, len(rows)), "truncated": len(rows) > cap}
 
 
+def _page(rows, sql, kw):
+    """The rows of a statement from its OFFSET, cut at the client's row cap."""
+    offset = int(re.search(r"OFFSET (\d+)", sql).group(1))
+    rows = rows[offset:]
+    cap = kw.get("max_rows") or 100
+    return {"rows": rows[:cap], "row_count": min(cap, len(rows)), "truncated": len(rows) > cap}
+
+
+def _per_word_words(sql):
+    """The words a per-word statement asks for, in the order of its flags."""
+    return list(dict.fromkeys(_read(p) for p in re.findall(_LITERAL + " ESCAPE", sql)))
+
+
+def _own(word, row):
+    """Whether ``word`` alone finds a (table, column, type, comment) row: in its own name or
+    comment, which also puts it in its four fields."""
+    return any(t is not None and word in _lower(t) for t in (row[1], row[3]))
+
+
+def _per_word(self, sql, timeout, kw, tables):
+    """A statement of the per-word pass, read back as Trino would answer it."""
+    prefix = "s." if tables else "c."
+    cat = re.search(rf"WHERE {prefix}(?:catalog_name|table_cat) = '([^']*)'", sql).group(1)
+    sch = re.search(rf"AND {prefix}(?:schema_name|table_schem) = '([^']*)'", sql).group(1)
+    assert f"WHERE c.table_cat = '{cat}' AND c.table_schem = '{sch}' AND (" in sql
+    phase = "tables" if tables else "columns"
+    self._spend((cat, sch, phase) if tables else (cat, sch), timeout, 0.0 if tables else 1.0)
+    self._fail((cat, sch), (cat, sch, phase))
+    words = _per_word_words(sql)
+    columns = sorted(self.columns.get((cat, sch), []), key=lambda r: r[0])
+    if not tables:
+        assert sql.count(" FROM ") == 1, "the columns' statement reads system.jdbc.columns alone"
+        rows = [
+            list(r) + [_own(w, r) for w in words] for r in columns if any(_own(w, r) for w in words)
+        ]
+        rows.sort(key=lambda r: -sum(r[4:]))  # most words first, stable after
+        return _page(rows, sql, kw)
+    assert f"WHERE s.catalog_name = '{cat}' AND s.schema_name = '{sch}' AND (" in sql
+    assert "GROUP BY c.table_name) h ON h.table_name = s.table_name" in sql
+    rows = []
+    for name, comment in sorted(self._tables_of(cat, sch).items()):
+        flags = [
+            any(t is not None and w in _lower(t) for t in (name, comment))
+            or any(r[0] == name and _own(w, r) for r in columns)
+            for w in words
+        ]
+        if any(flags):
+            rows.append([name, comment, *flags])
+    rows.sort(key=lambda r: -sum(r[2:]))  # most words first, stable after
+    return _page(rows, sql, kw)
+
+
+Trino._per_word_tables = lambda self, sql, timeout, kw: _per_word(self, sql, timeout, kw, True)
+Trino._per_word_columns = lambda self, sql, timeout, kw: _per_word(self, sql, timeout, kw, False)
+
+
 @pytest.fixture
 def clock(monkeypatch):
-    """The audit's clock, moved by the fake client's reads."""
+    """The audit's clock, moved by the fake client's reads. The patch is on the time
+    module itself, so a thread another test left running (an event loop) reads the real
+    clock until a test sets its fake client."""
     state = {"trino": None}
-    monkeypatch.setattr(audit_module.time, "monotonic", lambda: state["trino"].now)
+    real = audit_module.time.monotonic
+    monkeypatch.setattr(
+        audit_module.time,
+        "monotonic",
+        lambda: state["trino"].now if state["trino"] is not None else real(),
+    )
     return state
 
 
@@ -376,7 +447,7 @@ def test_the_statements_read_one_schema_with_one_escaped_pattern_per_word(clock)
     column's own name or comment."""
     trino = Trino({"demo": ["crm"]}, _COLUMNS)
     _ask(trino, clock, "50%_off Rate", catalog="demo", min_length=2)
-    tables, columns = trino.calls[-2][0], trino.calls[-1][0]
+    tables, columns = trino.calls[1][0], trino.calls[2][0]  # after the schemas of demo
     patterns = ("'%50%'", "'%!_off%'", "'%rate%'")
     match = (
         "FROM system.jdbc.columns c LEFT JOIN system.metadata.table_comments t "
@@ -463,8 +534,9 @@ def test_every_word_must_appear_in_the_column_or_its_table(clock):
     assert _found(_ask(trino, clock, "spending category")) == ["crm.transactions.category"]
     # "archived" in the table's comment only: every column of that table
     assert _found(_ask(trino, clock, "archived amount")) == ["crm_archive.transactions_2019.amount"]
-    # each word found somewhere, never both for one column: no match
-    assert _ask(trino, clock, "customer category")["matches"] == []
+    # each word found somewhere, never both for one column: nothing holds both, so the
+    # answer is the per-word pass
+    assert _ask(trino, clock, "customer category")["partial"] is True
 
 
 def test_the_words_ignore_case_order_and_punctuation(clock):
@@ -541,7 +613,7 @@ def test_a_complete_search_with_no_result_at_all_gives_the_hint(clock):
     empty = _ask(trino, clock, "loyalty points")
     assert empty["matches"] == [] and empty["tables"] == [] and empty["complete"] is True
     assert empty["hint"] == HINT
-    assert "fewer words" in HINT and "list_tables" in HINT and "describe_schema" in HINT
+    assert "one word" in HINT and "list_tables" in HINT and "describe_schema" in HINT
     assert "hint" not in _ask(trino, clock, "segment"), "something found: no hint"
     assert "hint" not in _ask(trino, clock, "2019")
     slow = Trino(_BANK, _BANK_COLUMNS, tables=_BANK_TABLES, cost={("demo", "crm_archive"): 50.0})
@@ -747,15 +819,53 @@ def _query_of(trino, clock):
         _forge(["a", "list"]),
         _forge({"c": "demo"}),
         _forge(
-            {"c": "demo", "s": "crm", "p": "columns", "o": -1, "q": "x", "g": False, "f": False}
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "columns",
+                "o": -1,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
         ),
         _forge(
-            {"c": "demo", "s": "crm", "p": "columns", "o": True, "q": "x", "g": False, "f": False}
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "columns",
+                "o": True,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
         ),
         _forge(
-            {"c": "demo", "s": "crm", "p": "columns", "o": 1.5, "q": "x", "g": False, "f": False}
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "columns",
+                "o": 1.5,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
         ),
-        _forge({"c": "demo", "s": "CRM", "p": "columns", "o": 0, "q": "x", "g": False, "f": False}),
+        _forge(
+            {
+                "c": "demo",
+                "s": "CRM",
+                "p": "columns",
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
+        ),
         _forge(
             {
                 "c": "demo",
@@ -768,22 +878,140 @@ def _query_of(trino, clock):
             }
         ),
         _forge(
-            {"c": "demo", "s": "s" * 1025, "p": "columns", "o": 0, "q": "x", "g": False, "f": False}
+            {
+                "c": "demo",
+                "s": "s" * 1025,
+                "p": "columns",
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
         ),
         _forge(
-            {"c": "demo", "s": "crm", "p": "columns", "o": 2**63, "q": "x", "g": False, "f": False}
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "columns",
+                "o": 2**63,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
         ),
         _forge(
-            {"c": "de'mo", "s": "crm", "p": "columns", "o": 0, "q": "x", "g": False, "f": False}
+            {
+                "c": "de'mo",
+                "s": "crm",
+                "p": "columns",
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
         ),
-        _forge({"c": 7, "s": "crm", "p": "columns", "o": 0, "q": "x", "g": False, "f": False}),
-        _forge({"c": "demo", "s": "crm", "p": "columns", "o": 0, "q": 1, "g": False, "f": False}),
-        _forge({"c": "demo", "s": "crm", "p": "columns", "o": 0, "q": "x", "g": "no", "f": False}),
-        _forge({"c": "demo", "s": "crm", "p": "views", "o": 0, "q": "x", "g": False, "f": False}),
-        _forge({"c": "demo", "s": "crm", "p": "tables", "o": 0, "q": "x", "g": False}),
-        _forge({"c": "demo", "s": "crm", "p": "tables", "o": 0, "q": "x", "g": False, "f": "yes"}),
-        _forge({"c": "demo", "s": "crm", "p": None, "o": 0, "q": "x", "g": False, "f": False}),
-        _forge({"c": "demo", "s": "crm", "o": 0, "q": "x", "g": False, "f": False}),
+        _forge(
+            {
+                "c": 7,
+                "s": "crm",
+                "p": "columns",
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
+        ),
+        _forge(
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "columns",
+                "o": 0,
+                "q": 1,
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
+        ),
+        _forge(
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "columns",
+                "o": 0,
+                "q": "x",
+                "g": "no",
+                "f": False,
+                "m": "every_word",
+            }
+        ),
+        _forge(
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "views",
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
+        ),
+        _forge(
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "tables",
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "m": "every_word",
+            }
+        ),
+        _forge({"c": "demo", "s": "crm", "p": "tables", "o": 0, "q": "x", "g": False, "f": False}),
+        _forge(
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "tables",
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "x",
+            }
+        ),
+        _forge(
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": "tables",
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "f": "yes",
+                "m": "every_word",
+            }
+        ),
+        _forge(
+            {
+                "c": "demo",
+                "s": "crm",
+                "p": None,
+                "o": 0,
+                "q": "x",
+                "g": False,
+                "f": False,
+                "m": "every_word",
+            }
+        ),
+        _forge(
+            {"c": "demo", "s": "crm", "o": 0, "q": "x", "g": False, "f": False, "m": "every_word"}
+        ),
         base64.urlsafe_b64encode(b"\xff\xfe").decode(),
         "é",
     ],
@@ -801,7 +1029,7 @@ def test_a_forged_cursor_is_invalid_argument_and_nothing_reaches_trino(clock, to
 
 
 def test_a_cursor_round_trips():
-    c = Cursor("demo", "crm", 40, query="abc", gaps=True, phase=COLUMNS, found=True)
+    c = Cursor("demo", "crm", 40, query="abc", gaps=True, phase=COLUMNS, found=True, mode=PER_WORD)
     assert decode_cursor(encode_cursor(c)) == c
     assert decode_cursor(encode_cursor(Cursor("demo", "", 0))) == Cursor("demo", "", 0)
     assert Cursor("demo", "", 0).phase == TABLES
@@ -1087,7 +1315,16 @@ def test_a_search_stopped_in_a_schema_that_is_not_an_identifier_resumes(clock):
 
 def test_a_schema_in_a_cursor_only_ever_enters_a_literal():
     token = _forge(
-        {"c": "demo", "s": "it's", "p": "tables", "o": 0, "q": "x", "g": False, "f": False}
+        {
+            "c": "demo",
+            "s": "it's",
+            "p": "tables",
+            "o": 0,
+            "q": "x",
+            "g": False,
+            "f": False,
+            "m": "every_word",
+        }
     )
     assert decode_cursor(token).schema == "it's"
 
@@ -1214,6 +1451,267 @@ def test_a_refused_comment_view_answers_the_error_that_names_what_to_allow(clock
     out = _ask(trino, clock, "order")
     assert out["kind"] == "permission" and "system.metadata.table_comments" in out["error"]
     assert "tables" not in out and "matches" not in out
+
+
+# ---- the per-word pass: nothing holds every word, so each word alone
+
+_SHOP = {"demo": ["crm"]}
+_SHOP_COLUMNS = {
+    ("demo", "crm"): [
+        ("accounts", "id", "bigint", None),
+        ("accounts", "customer_id", "bigint", "Customer who holds it"),
+        ("accounts", "balance", "decimal", "Current balance"),
+        ("customers", "id", "bigint", "Customer key"),
+        ("customers", "segment", "varchar", "Retail or business"),
+        ("transactions", "amount", "decimal", "Booked amount: the revenue of a sale"),
+        ("transactions", "category", "varchar", "Spending category"),
+        ("transactions", "booked_at", "date", None),
+    ]
+}
+_SHOP_TABLES = {
+    ("demo", "crm"): {
+        "accounts": "Bank accounts",
+        "customers": "People who hold an account",
+        "transactions": "Card transactions",
+    }
+}
+
+
+def _shop(**kw):
+    return Trino(_SHOP, _SHOP_COLUMNS, tables=_SHOP_TABLES, **kw)
+
+
+def _marked(out):
+    return (
+        [(t["table"], t["words"]) for t in out["tables"]],
+        [(f"{m['table']}.{m['column']}", m["words"]) for m in out["matches"]],
+    )
+
+
+def test_several_words_that_match_nothing_together_give_each_word_alone(clock):
+    """The question put whole into a search: no row holds every word, and a date is no
+    metadata. The same call answers each word alone, marked partial with its words."""
+    out = _ask(_shop(), clock, "spending category March 2026")
+    assert out["partial"] is True and out["hint"] == PER_WORD_HINT
+    assert out["schemas_searched"] == 1, "the per-word pass's schemas, not both passes'"
+    assert _marked(out) == (
+        [("transactions", ["spending", "category"])],
+        [("transactions.category", ["spending", "category"])],
+    )
+    assert out["complete"] is True and out["next_cursor"] is None and out["not_searched"] == []
+
+
+def test_each_word_alone_finds_its_tables_and_columns_by_the_same_rules(clock):
+    out = _ask(_shop(), clock, "revenue customer")
+    assert _marked(out) == (
+        [("accounts", ["customer"]), ("customers", ["customer"]), ("transactions", ["revenue"])],
+        [
+            ("accounts.customer_id", ["customer"]),
+            ("customers.id", ["customer"]),
+            ("transactions.amount", ["revenue"]),
+        ],
+    )
+    assert "customers.segment" not in _marked(out)[1], "a column needs a word of its own"
+    assert all(m["comment"] is not None for m in out["matches"])
+
+
+def test_the_per_word_pass_reads_each_schema_in_two_bounded_statements(clock):
+    trino = _shop()
+    _ask(trino, clock, "revenue customer", catalog="demo")
+    tables, columns = trino.calls[-2][0], trino.calls[-1][0]
+    own = [
+        f"(lower(c.column_name) LIKE {p} ESCAPE '!' OR lower(c.remarks) LIKE {p} ESCAPE '!')"
+        for p in ("'%revenue%'", "'%customer%'")
+    ]
+    any_own = (
+        "(lower(c.column_name) LIKE '%revenue%' ESCAPE '!' "
+        "OR lower(c.remarks) LIKE '%revenue%' ESCAPE '!' "
+        "OR lower(c.column_name) LIKE '%customer%' ESCAPE '!' "
+        "OR lower(c.remarks) LIKE '%customer%' ESCAPE '!')"
+    )
+    assert columns == (
+        "SELECT c.table_name, c.column_name, c.type_name, c.remarks, "
+        f"coalesce({own[0]}, false), coalesce({own[1]}, false) "
+        "FROM system.jdbc.columns c WHERE c.table_cat = 'demo' AND c.table_schem = 'crm' "
+        f"AND {any_own} ORDER BY (CAST(coalesce({own[0]}, false) AS integer) + "
+        f"CAST(coalesce({own[1]}, false) AS integer)) DESC, c.table_name, c.ordinal_position "
+        "OFFSET 0 LIMIT 98"
+    ), "the three tables found leave 97 rows of the cap"
+    assert tables == (
+        "SELECT s.table_name, s.comment, "
+        "coalesce(lower(s.table_name) LIKE '%revenue%' ESCAPE '!' "
+        "OR lower(s.comment) LIKE '%revenue%' ESCAPE '!' OR h.w0, false), "
+        "coalesce(lower(s.table_name) LIKE '%customer%' ESCAPE '!' "
+        "OR lower(s.comment) LIKE '%customer%' ESCAPE '!' OR h.w1, false) "
+        "FROM system.metadata.table_comments s LEFT JOIN (SELECT c.table_name, "
+        f"bool_or(coalesce({own[0]}, false)) AS w0, bool_or(coalesce({own[1]}, false)) AS w1 "
+        "FROM system.jdbc.columns c WHERE c.table_cat = 'demo' AND c.table_schem = 'crm' "
+        f"AND {any_own} GROUP BY c.table_name) h ON h.table_name = s.table_name "
+        "WHERE s.catalog_name = 'demo' AND s.schema_name = 'crm' "
+        "AND ((lower(s.table_name) LIKE '%revenue%' ESCAPE '!' "
+        "OR lower(s.comment) LIKE '%revenue%' ESCAPE '!' "
+        "OR lower(s.table_name) LIKE '%customer%' ESCAPE '!' "
+        "OR lower(s.comment) LIKE '%customer%' ESCAPE '!') OR h.table_name IS NOT NULL) "
+        "ORDER BY (CAST(coalesce(lower(s.table_name) LIKE '%revenue%' ESCAPE '!' "
+        "OR lower(s.comment) LIKE '%revenue%' ESCAPE '!' OR h.w0, false) AS integer) + "
+        "CAST(coalesce(lower(s.table_name) LIKE '%customer%' ESCAPE '!' "
+        "OR lower(s.comment) LIKE '%customer%' ESCAPE '!' OR h.w1, false) AS integer)) DESC, "
+        "s.table_name OFFSET 0 LIMIT 101"
+    )
+    assert len(trino.calls) == 6, "for each pass, the schemas of demo, then two reads"
+
+
+def test_the_rows_most_words_found_come_first_in_the_per_word_pass(clock):
+    """A common word fills pages of tables in name order; the row that holds several words
+    of the question must not wait behind them."""
+    columns = {
+        ("demo", "crm"): [
+            ("a_customers", "customer_name", "varchar", None),
+            ("b_customers", "customer_code", "varchar", None),
+            ("z_ledger", "customer_balance", "decimal", None),
+        ]
+    }
+    out = _ask(Trino(_SHOP, columns), clock, "customer balance points")
+    assert [m["column"] for m in out["matches"]] == [
+        "customer_balance",
+        "customer_name",
+        "customer_code",
+    ]
+    assert out["tables"][0]["table"] == "z_ledger"
+
+
+def test_one_word_that_matches_nothing_gives_the_hint_and_no_second_pass(clock):
+    trino = _shop()
+    out = _ask(trino, clock, "loyalty")
+    assert out["hint"] == HINT and "partial" not in out
+    assert "never a value" in HINT and "one word" in HINT
+    assert not any(", coalesce(" in sql for sql, _ in trino.calls)
+
+
+def test_words_that_match_nothing_alone_either_end_with_the_hint(clock):
+    out = _ask(_shop(), clock, "loyalty points")
+    assert out["partial"] is True and out["hint"] == HINT
+    assert out["tables"] == [] and out["matches"] == [] and out["complete"] is True
+
+
+def test_a_search_that_found_every_word_has_no_per_word_pass(clock):
+    trino = _shop()
+    out = _ask(trino, clock, "spending category")
+    assert "partial" not in out and "hint" not in out
+    assert _found(out) == ["crm.transactions.category"]
+    assert not any(", coalesce(" in sql for sql, _ in trino.calls)
+
+
+def test_an_incomplete_search_that_found_nothing_has_no_per_word_pass_yet(clock):
+    trino = _shop(cost={("demo", "crm"): 50.0})
+    out = _ask(trino, clock, "revenue customer", budget=10)
+    assert out["complete"] is False and "partial" not in out and "hint" not in out
+    assert decode_cursor(out["next_cursor"]).mode == EVERY_WORD
+
+
+def test_the_per_word_pass_cut_by_the_row_cap_says_so_and_resumes_to_the_end(clock):
+    trino = _shop()
+    whole = _ask(trino, clock, "revenue customer")
+    pages, token = [], ""
+    while True:
+        out = _ask(trino, clock, "revenue customer", max_rows=2, cursor=token)
+        pages.append(out)
+        assert out["partial"] is True and all("words" in r for r in out["tables"] + out["matches"])
+        assert len(out["tables"]) + len(out["matches"]) <= 2
+        if out["next_cursor"] is None:
+            break
+        assert out["complete"] is False and out["not_searched"][0]["reason"] == "row_cap"
+        assert out["hint"] == PER_WORD_MORE_HINT, "a cut page sends to next_cursor"
+        token = out["next_cursor"]
+        assert decode_cursor(token).mode == PER_WORD
+    assert [t for p in pages for t in p["tables"]] == whole["tables"]
+    assert [m for p in pages for m in p["matches"]] == whole["matches"]
+    assert pages[-1]["complete"] is True and len(pages) == 3
+    assert pages[-1]["hint"] == PER_WORD_HINT
+
+
+def test_the_per_word_pass_out_of_time_says_so_and_resumes(clock):
+    """The first pass takes the call's time: the per-word pass starts, finds no time left,
+    and says what it did not search, never complete."""
+    trino = _shop(cost={("demo", "crm"): 6.0})
+    first = _ask(trino, clock, "revenue customer", budget=10)
+    assert first["partial"] is True and first["complete"] is False
+    assert first["tables"] == [] and first["matches"] == []
+    assert first["hint"] == PER_WORD_MORE_HINT, "an empty page with more to read is no end"
+    assert "next_cursor" in PER_WORD_MORE_HINT and "not finished" in PER_WORD_MORE_HINT
+    assert first["not_searched"] == [{"catalog": "demo", "schema": "crm", "reason": "time_budget"}]
+    resume = decode_cursor(first["next_cursor"])
+    assert (resume.mode, resume.schema, resume.phase) == (PER_WORD, "crm", TABLES)
+    trino.cost = {}
+    again = _ask(trino, clock, "revenue customer", budget=10, cursor=first["next_cursor"])
+    assert again["partial"] is True and again["complete"] is True
+    assert [m["column"] for m in again["matches"]] == ["customer_id", "id", "amount"]
+    assert [t["table"] for t in again["tables"]] == ["accounts", "customers", "transactions"]
+    assert again["hint"] == PER_WORD_HINT
+
+
+def test_a_per_word_pass_that_skipped_a_schema_and_found_nothing_gives_the_hint(clock):
+    """A schema skipped in the per-word pass (an error of Trino, or a read slower than a
+    query may be): the pass ends incomplete, with no cursor and no row. It has no partial
+    match to pick from, so its hint is the one for nothing found."""
+    trino = Trino({"demo": ["a", "b"]}, {("demo", "a"): [], ("demo", "b"): []})
+    real = trino.query
+
+    def query(sql, user=None, params=None, **kw):
+        if ", coalesce(" in sql and "'b'" in sql:
+            trino.calls.append((sql, kw))
+            raise _InternalError("metastore down")
+        return real(sql, user, params, **kw)
+
+    trino.query = query
+    out = _ask(trino, clock, "loyalty points")
+    assert out["partial"] is True and out["complete"] is False and out["next_cursor"] is None
+    assert out["not_searched"] == [{"catalog": "demo", "schema": "b", "reason": "unavailable"}]
+    assert out["tables"] == [] and out["matches"] == []
+    assert out["hint"] == HINT
+
+
+def test_a_per_word_chain_that_found_rows_keeps_its_hint_on_an_empty_last_page(clock):
+    trino = Trino(
+        {"demo": ["a", "b"]},
+        {("demo", "a"): [("t", "loyalty", "int", None)], ("demo", "b"): []},
+    )
+    first = _ask(trino, clock, "loyalty points", max_rows=2)
+    assert first["partial"] is True and len(first["tables"]) + len(first["matches"]) == 2
+    assert decode_cursor(first["next_cursor"]).found is True
+    assert first["hint"] == PER_WORD_MORE_HINT
+    last = _ask(trino, clock, "loyalty points", max_rows=2, cursor=first["next_cursor"])
+    assert last["tables"] == [] and last["matches"] == [] and last["complete"] is True
+    assert last["hint"] == PER_WORD_HINT
+
+
+def test_a_refused_view_in_the_per_word_pass_answers_its_error(clock):
+    denied = _UserError(
+        "PERMISSION_DENIED", "Access Denied: Cannot select from system.jdbc.columns"
+    )
+    trino = _shop()
+    real = trino.query
+
+    def query(sql, user=None, params=None, **kw):
+        if ", coalesce(" in sql:
+            trino.calls.append((sql, kw))
+            raise denied
+        return real(sql, user, params, **kw)
+
+    trino.query = query
+    out = _ask(trino, clock, "revenue customer")
+    assert out["kind"] == "permission" and "partial" not in out
+
+
+def test_a_refused_view_when_the_per_word_pass_resumes_answers_its_error(clock):
+    denied = _UserError(
+        "PERMISSION_DENIED", "Access Denied: Cannot select from system.jdbc.columns"
+    )
+    trino = _shop()
+    first = _ask(trino, clock, "revenue customer", max_rows=2)
+    trino.fail = {("demo", "crm", "tables"): denied}
+    out = _ask(trino, clock, "revenue customer", max_rows=2, cursor=first["next_cursor"])
+    assert out["kind"] == "permission" and "tables" not in out
 
 
 # ---- failures: one schema does not stop the others, and nothing is complete with a gap
@@ -1367,10 +1865,10 @@ def test_search_in_a_call_without_a_budget_needs_a_catalog():
 def test_the_description_says_how_to_use_the_answer_and_that_comments_are_data():
     mcp = FakeMCP()
     register_query_tools(mcp, Trino({}, {}))
-    doc = mcp.tools["search_columns"].__doc__
+    doc = " ".join(mcp.tools["search_columns"].__doc__.split())  # as one line, wrap aside
     for said in (
         "first tool to call",
-        "its table's comment",
+        "its table's name or its table's",
         "cursor=next_cursor",
         "describe_schema",
         "describe_table",
@@ -1380,7 +1878,10 @@ def test_the_description_says_how_to_use_the_answer_and_that_comments_are_data()
         "tables",
         "hint",
         "list_tables",
-        "_ belongs to a word",
+        "belongs to a word: customer_id is one word",
         "call describe_table",
+        "never a value",
+        '"partial": true',
+        '"words"',
     ):
         assert said in doc, said
