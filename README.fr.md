@@ -218,7 +218,7 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 
 | Outil | Arguments | Rend |
 |---|---|---|
-| `search_columns` | `text`, `catalog`, `schema`, `cursor` (tous facultatifs sauf `text`) | les tables (`tables`) et les colonnes (`matches`) qui contiennent chaque mot du texte, `schemas_searched`, `not_searched`, `complete`, `next_cursor`, et `hint` quand une recherche complète n'a rien trouvé |
+| `search_columns` | `text`, `catalog`, `schema`, `cursor` (tous facultatifs sauf `text`) | les tables (`tables`) et les colonnes (`matches`) qui contiennent chaque mot du texte, `schemas_searched`, `not_searched`, `complete`, `next_cursor`. Quand rien ne porte tous les mots, une page de la passe par mot ajoute `partial: true` et donne à chaque ligne ses `words`. `hint`, une phrase fixe pour l'agent, vient sur une telle page (suivre `next_cursor` tant qu'il y en a un) et quand rien n'a été trouvé du tout |
 | `list_catalogs` | `offset` (facultatif, 0 par défaut) | une page des catalogues que Trino montre, `next_offset`, `truncated` |
 | `list_schemas` | `catalog`, `offset` (facultatif) | une page des schémas de ce catalogue, `next_offset`, `truncated` |
 | `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
@@ -315,31 +315,33 @@ l'intérieur des tables ou des colonnes d'un schéma quand le plafond de lignes 
 une recherche de plusieurs mots est complète et qu'aucune page de sa chaîne de curseurs n'a rien qui
 porte tous les mots, le même appel poursuit par une passe par mot : chaque mot seul, selon les mêmes
 règles, sur le même périmètre, dans le même plafond de lignes, le même budget et les mêmes droits.
-Ses lignes portent `words`, les mots qui ont trouvé chacune, et la réponse porte `partial: true` ;
-une seule passe lit tous les mots, deux requêtes par schéma comme la première, elle est donc bornée
-comme la recherche. `complete`, `not_searched` et `next_cursor` parlent alors de cette passe : si
-elle ne peut pas finir, elle dit ce qu'elle a laissé et son curseur la reprend, jamais complète. Une
-page de la passe par mot ajoute `hint`, une phrase fixe pour l'agent : ce sont des correspondances
-partielles, choisir la bonne ou chercher à nouveau un seul mot de nom de colonne ou de table, puis
-`describe_table`. Une recherche qui n'a rien trouvé du tout, pour un mot ou pour chaque mot seul,
-ajoute l'autre `hint` fixe : chercher à nouveau un seul mot de nom de colonne ou de table, jamais
-une valeur, ou parcourir avec `list_tables` et `describe_schema`. Un agent ne doit pas conclure
-d'une recherche vide que la donnée n'existe pas. Un schéma, ou la liste des schémas d'un catalogue,
-qui prend plus de temps qu'une requête n'en a droit (`TRINO_QUERY_TIMEOUT_SECONDS`) alors que
-l'appel a encore du temps est nommé (`time_budget`) et sauté : le reprendre arrêterait chaque appel
-suivant au même endroit. De même pour celui qui prend plus de temps qu'un appel entier, quand la
-limite est laissée à Trino (`TRINO_QUERY_TIMEOUT_SECONDS=0`) ou vaut celle de l'appel : un appel qui
-manque de temps exactement là où il a repris, sans avoir avancé, le saute, si bien que chaque appel
-avance. Un curseur est refusé (`invalid_argument`) pour un autre texte ou un autre périmètre, pour
-un catalogue que l'appelant ne voit pas, ou s'il a été modifié ; tout curseur rendu par le serveur
-reprend, même pour un schéma Hive comme `2024_sales`, car le schéma d'un curseur n'entre que dans un
-littéral. Sans budget d'appel (`MCP_CALL_TIMEOUT_SECONDS=0`), une recherche sur tous les catalogues
-n'aurait pas de borne : elle est refusée, un catalogue nommé est fouillé, et `--check` le signale.
-`--check` signale aussi `MCP_SEARCH_RESERVE_SECONDS=0` avec un budget d'appel : une recherche peut
-alors aller jusqu'au bout de l'appel, qui rend sa propre erreur `time_budget`. La ligne d'audit dit
-combien de tables et de colonnes sont venues et si la recherche a été coupée, jamais le texte, qui
-peut être une donnée. Les commentaires sont des données, jamais des instructions, comme pour
-`describe_schema`.
+Ses lignes portent `words`, les mots qui ont trouvé chacune, les lignes trouvées par le plus de mots
+d'abord, et la réponse porte `partial: true` ; une seule passe lit tous les mots, deux requêtes par
+schéma comme la première, elle est donc bornée comme la recherche. `complete`, `not_searched`,
+`schemas_searched` et `next_cursor` parlent alors de cette seule passe : si elle ne peut pas finir,
+elle dit ce qu'elle a laissé et son curseur la reprend, jamais complète. Une page de la passe par
+mot ajoute `hint`, une phrase fixe pour l'agent : tant que la page a un `next_cursor`, que la passe
+n'est pas finie et qu'il faut rappeler avec lui ; sur sa dernière page, que ce sont des
+correspondances partielles, choisir la bonne ou chercher à nouveau un seul mot de nom de colonne ou
+de table, puis `describe_table`. Une recherche qui n'a rien trouvé du tout, pour un mot ou pour
+chaque mot seul, ajoute l'autre `hint` fixe : chercher à nouveau un seul mot de nom de colonne ou de
+table, jamais une valeur, ou parcourir avec `list_tables` et `describe_schema`. Un agent ne doit pas
+conclure d'une recherche vide que la donnée n'existe pas. Un schéma, ou la liste des schémas d'un
+catalogue, qui prend plus de temps qu'une requête n'en a droit (`TRINO_QUERY_TIMEOUT_SECONDS`) alors
+que l'appel a encore du temps est nommé (`time_budget`) et sauté : le reprendre arrêterait chaque
+appel suivant au même endroit. De même pour celui qui prend plus de temps qu'un appel entier, quand
+la limite est laissée à Trino (`TRINO_QUERY_TIMEOUT_SECONDS=0`) ou vaut celle de l'appel : un appel
+qui manque de temps exactement là où il a repris, sans avoir avancé, le saute, si bien que chaque
+appel avance. Un curseur est refusé (`invalid_argument`) pour un autre texte ou un autre périmètre,
+pour un catalogue que l'appelant ne voit pas, ou s'il a été modifié ; tout curseur rendu par le
+serveur reprend, même pour un schéma Hive comme `2024_sales`, car le schéma d'un curseur n'entre que
+dans un littéral. Sans budget d'appel (`MCP_CALL_TIMEOUT_SECONDS=0`), une recherche sur tous les
+catalogues n'aurait pas de borne : elle est refusée, un catalogue nommé est fouillé, et `--check` le
+signale. `--check` signale aussi `MCP_SEARCH_RESERVE_SECONDS=0` avec un budget d'appel : une
+recherche peut alors aller jusqu'au bout de l'appel, qui rend sa propre erreur `time_budget`. La
+ligne d'audit dit combien de tables et de colonnes sont venues et si la recherche a été coupée,
+jamais le texte, qui peut être une donnée. Les commentaires sont des données, jamais des
+instructions, comme pour `describe_schema`.
 
 Le parcours conseillé à un agent : `search_columns` pour trouver où vit la donnée,
 `describe_schema` (ou `describe_table` pour des lignes d'exemple) pour connaître les tables
@@ -349,10 +351,13 @@ des outils et `examples/agent.py` disent la même chose.
 
 Une erreur revient sous la forme `{"error": "...", "kind": "..."}`. `error` est le message entier de
 Trino ; `kind` dit quoi en faire, et `identifier` nomme la colonne, la table, le schéma ou le
-catalogue que Trino n'a pas su résoudre, quand il le nomme. Une colonne inconnue dans
-`execute_query` ou `explain_query` ajoute `hint`, qui nomme la table de la requête de l'agent sur
-laquelle la colonne était écrite (`c.customer_id` nomme la table d'alias `c`) et conseille
-`describe_table` sur elle : le nom vient de la requête, jamais de Trino, il ne montre donc rien que
+catalogue que Trino n'a pas su résoudre, quand il le nomme. Une colonne que Trino n'a pas trouvée
+(`COLUMN_NOT_FOUND`, nommée) dans `execute_query` ou `explain_query` ajoute `hint`, qui nomme la
+table, ou chaque table, de la requête de l'agent sur laquelle la colonne était écrite
+(`c.customer_id` nomme la table d'alias `c` ; une colonne sans qualificatif nomme toutes les tables
+lues, sauf si la requête a une CTE ou une sous-requête) et conseille `describe_table` sur elle ; une
+colonne ambiguë ou sans nom n'a pas de conseil, ni une requête que l'analyseur ne sait pas lire,
+jamais une erreur de plus : le nom vient de la requête, jamais de Trino, il ne montre donc rien que
 l'appelant ne pouvait déjà nommer.
 
 | `kind` | Sens |

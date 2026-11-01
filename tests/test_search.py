@@ -19,6 +19,7 @@ from akko_mcp_trino.search import (
     HINT,
     PER_WORD,
     PER_WORD_HINT,
+    PER_WORD_MORE_HINT,
     TABLES,
     Cursor,
     decode_cursor,
@@ -302,6 +303,7 @@ def _per_word(self, sql, timeout, kw, tables):
         rows = [
             list(r) + [_own(w, r) for w in words] for r in columns if any(_own(w, r) for w in words)
         ]
+        rows.sort(key=lambda r: -sum(r[4:]))  # most words first, stable after
         return _page(rows, sql, kw)
     assert f"WHERE s.catalog_name = '{cat}' AND s.schema_name = '{sch}' AND (" in sql
     assert "GROUP BY c.table_name) h ON h.table_name = s.table_name" in sql
@@ -314,6 +316,7 @@ def _per_word(self, sql, timeout, kw, tables):
         ]
         if any(flags):
             rows.append([name, comment, *flags])
+    rows.sort(key=lambda r: -sum(r[2:]))  # most words first, stable after
     return _page(rows, sql, kw)
 
 
@@ -1483,6 +1486,7 @@ def test_several_words_that_match_nothing_together_give_each_word_alone(clock):
     metadata. The same call answers each word alone, marked partial with its words."""
     out = _ask(_shop(), clock, "spending category March 2026")
     assert out["partial"] is True and out["hint"] == PER_WORD_HINT
+    assert out["schemas_searched"] == 1, "the per-word pass's schemas, not both passes'"
     assert _marked(out) == (
         [("transactions", ["spending", "category"])],
         [("transactions.category", ["spending", "category"])],
@@ -1522,7 +1526,9 @@ def test_the_per_word_pass_reads_each_schema_in_two_bounded_statements(clock):
         "SELECT c.table_name, c.column_name, c.type_name, c.remarks, "
         f"coalesce({own[0]}, false), coalesce({own[1]}, false) "
         "FROM system.jdbc.columns c WHERE c.table_cat = 'demo' AND c.table_schem = 'crm' "
-        f"AND {any_own} ORDER BY c.table_name, c.ordinal_position OFFSET 0 LIMIT 98"
+        f"AND {any_own} ORDER BY (CAST(coalesce({own[0]}, false) AS integer) + "
+        f"CAST(coalesce({own[1]}, false) AS integer)) DESC, c.table_name, c.ordinal_position "
+        "OFFSET 0 LIMIT 98"
     ), "the three tables found leave 97 rows of the cap"
     assert tables == (
         "SELECT s.table_name, s.comment, "
@@ -1539,9 +1545,32 @@ def test_the_per_word_pass_reads_each_schema_in_two_bounded_statements(clock):
         "OR lower(s.comment) LIKE '%revenue%' ESCAPE '!' "
         "OR lower(s.table_name) LIKE '%customer%' ESCAPE '!' "
         "OR lower(s.comment) LIKE '%customer%' ESCAPE '!') OR h.table_name IS NOT NULL) "
-        "ORDER BY s.table_name OFFSET 0 LIMIT 101"
+        "ORDER BY (CAST(coalesce(lower(s.table_name) LIKE '%revenue%' ESCAPE '!' "
+        "OR lower(s.comment) LIKE '%revenue%' ESCAPE '!' OR h.w0, false) AS integer) + "
+        "CAST(coalesce(lower(s.table_name) LIKE '%customer%' ESCAPE '!' "
+        "OR lower(s.comment) LIKE '%customer%' ESCAPE '!' OR h.w1, false) AS integer)) DESC, "
+        "s.table_name OFFSET 0 LIMIT 101"
     )
     assert len(trino.calls) == 6, "for each pass, the schemas of demo, then two reads"
+
+
+def test_the_rows_most_words_found_come_first_in_the_per_word_pass(clock):
+    """A common word fills pages of tables in name order; the row that holds several words
+    of the question must not wait behind them."""
+    columns = {
+        ("demo", "crm"): [
+            ("a_customers", "customer_name", "varchar", None),
+            ("b_customers", "customer_code", "varchar", None),
+            ("z_ledger", "customer_balance", "decimal", None),
+        ]
+    }
+    out = _ask(Trino(_SHOP, columns), clock, "customer balance points")
+    assert [m["column"] for m in out["matches"]] == [
+        "customer_balance",
+        "customer_name",
+        "customer_code",
+    ]
+    assert out["tables"][0]["table"] == "z_ledger"
 
 
 def test_one_word_that_matches_nothing_gives_the_hint_and_no_second_pass(clock):
@@ -1585,12 +1614,13 @@ def test_the_per_word_pass_cut_by_the_row_cap_says_so_and_resumes_to_the_end(clo
         if out["next_cursor"] is None:
             break
         assert out["complete"] is False and out["not_searched"][0]["reason"] == "row_cap"
-        assert out["hint"] == PER_WORD_HINT
+        assert out["hint"] == PER_WORD_MORE_HINT, "a cut page sends to next_cursor"
         token = out["next_cursor"]
         assert decode_cursor(token).mode == PER_WORD
     assert [t for p in pages for t in p["tables"]] == whole["tables"]
     assert [m for p in pages for m in p["matches"]] == whole["matches"]
     assert pages[-1]["complete"] is True and len(pages) == 3
+    assert pages[-1]["hint"] == PER_WORD_HINT
 
 
 def test_the_per_word_pass_out_of_time_says_so_and_resumes(clock):
@@ -1599,6 +1629,9 @@ def test_the_per_word_pass_out_of_time_says_so_and_resumes(clock):
     trino = _shop(cost={("demo", "crm"): 6.0})
     first = _ask(trino, clock, "revenue customer", budget=10)
     assert first["partial"] is True and first["complete"] is False
+    assert first["tables"] == [] and first["matches"] == []
+    assert first["hint"] == PER_WORD_MORE_HINT, "an empty page with more to read is no end"
+    assert "next_cursor" in PER_WORD_MORE_HINT and "not finished" in PER_WORD_MORE_HINT
     assert first["not_searched"] == [{"catalog": "demo", "schema": "crm", "reason": "time_budget"}]
     resume = decode_cursor(first["next_cursor"])
     assert (resume.mode, resume.schema, resume.phase) == (PER_WORD, "crm", TABLES)
@@ -1618,6 +1651,7 @@ def test_a_per_word_chain_that_found_rows_keeps_its_hint_on_an_empty_last_page(c
     first = _ask(trino, clock, "loyalty points", max_rows=2)
     assert first["partial"] is True and len(first["tables"]) + len(first["matches"]) == 2
     assert decode_cursor(first["next_cursor"]).found is True
+    assert first["hint"] == PER_WORD_MORE_HINT
     last = _ask(trino, clock, "loyalty points", max_rows=2, cursor=first["next_cursor"])
     assert last["tables"] == [] and last["matches"] == [] and last["complete"] is True
     assert last["hint"] == PER_WORD_HINT

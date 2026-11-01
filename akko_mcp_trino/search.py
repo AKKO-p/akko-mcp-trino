@@ -71,6 +71,12 @@ HINT = (
     "describe_schema."
 )
 # What a page of the per-word pass says: its rows hold some of the words, not all.
+# What a page of the per-word pass that has more to read says, so that an agent never takes
+# it for the end.
+PER_WORD_MORE_HINT = (
+    "No table or column holds every word together. This per-word search is not finished: "
+    "call search_columns again with the same text and cursor=next_cursor."
+)
 PER_WORD_HINT = (
     "No table or column holds every word together, so these are partial matches, each found "
     "by the words it lists: pick the right one, or search again with a single word from a "
@@ -364,17 +370,24 @@ def search(
             + " ORDER BY c.table_name, c.ordinal_position"
         )
 
+    def hits(flags: list[str]) -> str:
+        """How many words found a row: the rows most words found come first, so a row that
+        holds several words of the question is not lost behind pages of a common word."""
+        return "(" + " + ".join(f"CAST({f} AS integer)" for f in flags) + ")"
+
     def per_word_sql(phase: str, cat_: str, sch_: str) -> str:
         """The statement of one phase of the per-word pass: one flag per word, true when
-        that word alone finds the row."""
+        that word alone finds the row, the rows most words found first, then in the order
+        of the first pass (stable, so a cursor's offset holds)."""
         if phase == TABLES:
             # A table whose own text holds a word, or that holds a column a word finds: the
             # columns are read once, grouped by table, one flag per word.
-            flags = ", ".join(
+            table_flags = [
                 f"coalesce(lower(s.table_name) LIKE {p} ESCAPE '!' "
                 f"OR lower(s.comment) LIKE {p} ESCAPE '!' OR h.w{i}, false)"
                 for i, p in enumerate(patterns)
-            )
+            ]
+            flags = ", ".join(table_flags)
             held = ", ".join(f"bool_or(coalesce({o}, false)) AS w{i}" for i, o in enumerate(own))
             return (
                 f"SELECT s.table_name, s.comment, {flags} FROM {TABLE_COMMENTS} s "
@@ -383,13 +396,14 @@ def search(
                 "GROUP BY c.table_name) h ON h.table_name = s.table_name "
                 f"WHERE s.catalog_name = {cat_} AND s.schema_name = {sch_} "
                 f"AND ({any_word(words, ('s.table_name', 's.comment'))} "
-                "OR h.table_name IS NOT NULL) ORDER BY s.table_name"
+                f"OR h.table_name IS NOT NULL) ORDER BY {hits(table_flags)} DESC, s.table_name"
             )
-        flags = ", ".join(f"coalesce({o}, false)" for o in own)
+        column_flags = [f"coalesce({o}, false)" for o in own]
         return (
-            f"SELECT c.table_name, c.column_name, c.type_name, c.remarks, {flags} "
+            f"SELECT c.table_name, c.column_name, c.type_name, c.remarks, "
+            f"{', '.join(column_flags)} "
             f"FROM {JDBC_COLUMNS} c WHERE c.table_cat = {cat_} AND c.table_schem = {sch_} "
-            f"AND {any_own} ORDER BY c.table_name, c.ordinal_position"
+            f"AND {any_own} ORDER BY {hits(column_flags)} DESC, c.table_name, c.ordinal_position"
         )
 
     def read(mode: str, phase: str, cat: str, sch: str, offset: int, room: int) -> dict:
@@ -530,7 +544,9 @@ def search(
 
     def answer(mode: str, part: dict, begin: Optional[Cursor], searched: int) -> dict:
         """The reply for a pass that ``begin`` resumed (None: started in this call), with
-        the schemas this call finished, the cursor that resumes it, and the hint."""
+        the schemas this call finished in that pass, the cursor that resumes it, and the
+        hint: on a page of the per-word pass with more to read, the one that sends to
+        next_cursor."""
         earlier_gaps = begin is not None and begin.gaps
         earlier_found = begin is not None and begin.found
         tables, matches, gaps, stop = part["tables"], part["matches"], part["gaps"], part["stop"]
@@ -567,7 +583,10 @@ def search(
         nothing = complete and not tables and not matches and not earlier_found
         if mode == PER_WORD:
             out["partial"] = True
-            out["hint"] = HINT if nothing else PER_WORD_HINT
+            if next_cursor is not None:
+                out["hint"] = PER_WORD_MORE_HINT
+            else:
+                out["hint"] = HINT if nothing else PER_WORD_HINT
         elif nothing:
             out["hint"] = HINT
         return out
@@ -593,4 +612,5 @@ def search(
     per_word = scan(PER_WORD, None)
     if "error" in per_word:
         return per_word["error"]
-    return answer(PER_WORD, per_word, None, part["searched"] + per_word["searched"])
+    # The page speaks of the per-word pass: its schemas only, never the first pass's twice.
+    return answer(PER_WORD, per_word, None, per_word["searched"])
