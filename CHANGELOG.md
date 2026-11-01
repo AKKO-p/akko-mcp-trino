@@ -6,7 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-10-30
+## [0.7.0] - 2026-11-01
 
 Two discovery tools, paged lists, explained errors. Nothing is removed; one helper for plugins changes its signature. See [MIGRATING.md](MIGRATING.md).
 
