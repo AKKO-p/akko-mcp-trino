@@ -73,6 +73,9 @@ from .sql_guard import (
 from .trino_client import TrinoClient, every_row
 
 MAX_SAMPLE_ROWS = 20
+# The most tables of the agent's statement the advice on an unknown column checks, each by
+# one lookup of its own in Trino; the others get no advice.
+MAX_ADVICE_TABLES = 4
 # The audit code of an error a tool returns without naming it (``note(error=...)``).
 UNNAMED_ERROR = "tool_error"
 
@@ -208,20 +211,24 @@ def dumps(obj: Any) -> str:
     return json.dumps(obj, default=_plain)
 
 
-def error_reply(exc: Exception, sql: str = "") -> str:
+def error_reply(
+    exc: Exception, sql: str = "", visible: Optional[Callable[[str], bool]] = None
+) -> str:
     """The error for the agent, whole, with its kind (see ``akko_mcp_trino.errors``); for the
     audit, its code only. A column of ``sql`` Trino could not find (``COLUMN_NOT_FOUND``,
     named) adds a ``hint`` naming the tables of the agent's own statement it may belong to,
-    never a name from Trino; an ambiguous or unnamed column has none, and neither has a
-    statement the parser fails on: the advice never costs the agent its error."""
+    never a name from Trino, and only those ``visible`` says the caller sees, at most
+    ``MAX_ADVICE_TABLES`` of them; an ambiguous or unnamed column has none, and neither has
+    a statement the parser fails on: the advice never costs the agent its error."""
     note(error=error_code(exc))
     out = explain_error(exc)
     identifier = out.get("identifier")
-    if sql and identifier and getattr(exc, "error_name", None) == "COLUMN_NOT_FOUND":
+    if sql and visible and identifier and getattr(exc, "error_name", None) == "COLUMN_NOT_FOUND":
         try:
             tables = tables_for_column(sql, str(identifier))
         except Exception:  # noqa: BLE001 - advice only: fail safe to none
             tables = []
+        tables = [t for t in tables[:MAX_ADVICE_TABLES] if visible(t)]
         if len(tables) == 1:
             out["hint"] = (
                 f"Read the columns of {tables[0]} with describe_table, then write the query "
@@ -499,6 +506,28 @@ def register_query_tools(
     run = tools.run
 
     schema_visible = tools.schema_visible
+
+    def advice_visible(name: str) -> bool:
+        """Whether the caller sees the table ``name`` of their own statement, as Trino
+        resolves it (a name without catalog in the session catalog): one lookup of
+        information_schema.tables by equality, filtered by Trino for the caller, in the
+        call's time. A name without its schema, a catalog the statement cannot carry, a
+        refusal, an error or no time left: not seen, so no advice names it."""
+        parts = name.split(".")
+        if len(parts) == 2 and session_catalog:
+            parts = [session_catalog.lower(), *parts]
+        if len(parts) != 3:
+            return False
+        catalog, schema, table = parts
+        try:
+            res = run(
+                f"SELECT table_name FROM {governed_catalog(catalog)}.information_schema.tables "
+                f"WHERE table_schema = {sql_literal(schema)} "
+                f"AND table_name = {sql_literal(table)}"
+            )
+        except Exception:  # noqa: BLE001 - advice only: not seen
+            return False
+        return bool(res["rows"])
 
     def page_of(ordered_sql: str, start: int) -> tuple[list, bool]:
         """The page of ``ordered_sql`` from row ``start``, and whether more rows follow.
@@ -841,7 +870,7 @@ def register_query_tools(
             note(rows=len(res["rows"]), truncated=was_cut(res))
             return dumps({"plan": "\n".join(str(r[0]) for r in res["rows"])})
         except Exception as e:  # noqa: BLE001
-            return error_reply(e, sql)
+            return error_reply(e, sql, advice_visible)
 
     def execute_query(sql: str, max_rows: int = 0) -> str:
         sql = normalize_sql(sql)
@@ -855,7 +884,7 @@ def register_query_tools(
         try:
             res = run(sql, max_rows=int(max_rows))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
-            return error_reply(e, sql)
+            return error_reply(e, sql, advice_visible)
         note(rows=res["row_count"], truncated=bool(res.get("truncated", False)))
         return dumps(res)
 

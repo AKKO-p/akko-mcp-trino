@@ -355,10 +355,14 @@ catalogue que Trino n'a pas su résoudre, quand il le nomme. Une colonne que Tri
 (`COLUMN_NOT_FOUND`, nommée) dans `execute_query` ou `explain_query` ajoute `hint`, qui nomme la
 table, ou chaque table, de la requête de l'agent sur laquelle la colonne était écrite
 (`c.customer_id` nomme la table d'alias `c` ; une colonne sans qualificatif nomme toutes les tables
-lues, sauf si la requête a une CTE ou une sous-requête) et conseille `describe_table` sur elle ; une
-colonne ambiguë ou sans nom n'a pas de conseil, ni une requête que l'analyseur ne sait pas lire,
-jamais une erreur de plus : le nom vient de la requête, jamais de Trino, il ne montre donc rien que
-l'appelant ne pouvait déjà nommer.
+lues, sauf si la requête a une CTE ou une sous-requête) et conseille `describe_table` sur elle. Il
+ne nomme que les tables que l'appelant voit : chaque candidate, quatre au plus, est cherchée dans
+`information_schema.tables` de son catalogue par égalité, au nom de l'appelant, dans le temps de
+l'appel (un nom sans catalogue dans `TRINO_CATALOG` ; un nom sans schéma n'est pas cherché), et une
+table cachée, un refus, une erreur ou un temps épuisé valent pas de conseil pour elle ; une colonne
+ambiguë ou sans nom n'a pas de conseil, ni une requête que l'analyseur ne sait pas lire, jamais une
+erreur de plus : le nom vient de la requête, jamais de Trino, il ne montre donc rien que l'appelant
+ne pouvait déjà nommer.
 
 | `kind` | Sens |
 |---|---|

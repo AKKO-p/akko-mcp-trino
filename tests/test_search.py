@@ -326,9 +326,16 @@ Trino._per_word_columns = lambda self, sql, timeout, kw: _per_word(self, sql, ti
 
 @pytest.fixture
 def clock(monkeypatch):
-    """The audit's clock, moved by the fake client's reads."""
+    """The audit's clock, moved by the fake client's reads. The patch is on the time
+    module itself, so a thread another test left running (an event loop) reads the real
+    clock until a test sets its fake client."""
     state = {"trino": None}
-    monkeypatch.setattr(audit_module.time, "monotonic", lambda: state["trino"].now)
+    real = audit_module.time.monotonic
+    monkeypatch.setattr(
+        audit_module.time,
+        "monotonic",
+        lambda: state["trino"].now if state["trino"] is not None else real(),
+    )
     return state
 
 

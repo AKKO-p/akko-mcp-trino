@@ -610,10 +610,14 @@ could not find (`COLUMN_NOT_FOUND`, named) in `execute_query` or `explain_query`
 adds `hint`, which names the table, or each table, of the agent's own statement the
 column was written against (`c.customer_id` names the table aliased `c`; a column
 without a qualifier names every table read, unless the statement has a CTE or a
-subquery) and advises `describe_table` on it; an ambiguous or unnamed column gets no
-hint, and a statement the parser cannot read gets none either, never an error of its
-own: the name comes from the statement, never from Trino, so it shows nothing the
-caller could not already name:
+subquery) and advises `describe_table` on it. It names only the tables the caller
+sees: each candidate, at most four, is looked up in its catalog's
+`information_schema.tables` by equality, as the caller, in the call's time (a name
+without catalog in `TRINO_CATALOG`; a name without schema is not looked up), and a
+hidden table, a refusal, an error or no time left means no advice for it; an
+ambiguous or unnamed column gets no hint, and a statement the parser cannot read
+gets none either, never an error of its own: the name comes from the statement,
+never from Trino, so it shows nothing the caller could not already name:
 
 | `kind` | Meaning |
 |---|---|

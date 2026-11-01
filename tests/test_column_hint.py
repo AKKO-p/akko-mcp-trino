@@ -7,6 +7,7 @@ already name.
 """
 
 import json
+import re
 
 import pytest
 
@@ -75,9 +76,41 @@ def test_the_tables_a_column_may_belong_to_come_from_the_statement(sql, identifi
     assert tables_for_column(sql, identifier) == tables
 
 
-def _tools(raises):
+_SEEN = ("demo.crm.accounts", "demo.crm.customers", "tpch.tiny.nation")
+
+
+class _Client(FakeClient):
+    """The statement fails with ``raises``; a lookup of a table answers it when the caller
+    sees it (``seen``), or fails with ``lookup`` when given."""
+
+    def __init__(self, raises, seen=_SEEN, lookup=None):
+        super().__init__()
+        self.raises, self.seen, self.lookup = raises, seen, lookup
+
+    def query(self, sql, user=None, params=None, **keywords):
+        self.calls.append((sql, user))
+        found = re.fullmatch(
+            r"SELECT table_name FROM (\w+)\.information_schema\.tables "
+            r"WHERE table_schema = '([^']*)' AND table_name = '([^']*)'",
+            sql,
+        )
+        if not found:
+            raise self.raises
+        if self.lookup is not None:
+            raise self.lookup
+        name = ".".join(found.groups())
+        rows = [[found.group(3)]] if name in self.seen else []
+        return {"columns": ["table_name"], "rows": rows, "row_count": len(rows)}
+
+
+_LAST: list = []  # the client of the last _tools, for the tests that read its calls
+
+
+def _tools(raises, **kw):
     mcp = FakeMCP()
-    register_query_tools(mcp, FakeClient(raises=raises))
+    client = _Client(raises, **kw)
+    register_query_tools(mcp, client, session_catalog="demo")
+    _LAST[:] = [client]
     return mcp.tools
 
 
@@ -90,6 +123,83 @@ def test_an_unknown_column_advises_describe_table_on_its_table(tool):
         "again with a column it has."
     )
     assert out["error"] == "line 1:8: Column 'c.customer_id' cannot be resolved"
+
+
+def test_the_advice_names_only_the_tables_the_caller_sees():
+    """dave reads accounts but not customers: an unknown column without a qualifier names
+    accounts alone, never the table he may not see."""
+    out = json.loads(
+        _tools(_column("nope"), seen=("demo.crm.accounts",))["execute_query"](sql=_JOIN)
+    )
+    assert out["hint"] == (
+        "Read the columns of demo.crm.accounts with describe_table, then write the query "
+        "again with a column it has."
+    )
+    hidden = json.loads(
+        _tools(_column("c.customer_id"), seen=("demo.crm.accounts",))["execute_query"](sql=_JOIN)
+    )
+    assert "hint" not in hidden, "the only candidate is hidden: no advice"
+
+
+def test_each_candidate_is_looked_up_by_equality_in_its_catalog():
+    tools = _tools(_column("nope"))
+    tools["execute_query"](sql=_JOIN)
+    client = _client_of(tools)
+    lookups = [sql for sql, _ in client.calls if "information_schema.tables" in sql]
+    assert lookups == [
+        "SELECT table_name FROM demo.information_schema.tables "
+        "WHERE table_schema = 'crm' AND table_name = 'accounts'",
+        "SELECT table_name FROM demo.information_schema.tables "
+        "WHERE table_schema = 'crm' AND table_name = 'customers'",
+    ]
+
+
+@pytest.mark.parametrize(
+    "lookup",
+    [
+        _TrinoError("PERMISSION_DENIED", "Access Denied: Cannot access catalog demo"),
+        TimeoutError("the query exceeded its time budget"),
+        ConnectionError("lost"),
+    ],
+)
+def test_a_lookup_that_fails_gives_no_advice_and_keeps_the_error(lookup):
+    out = json.loads(_tools(_column("c.customer_id"), lookup=lookup)["execute_query"](sql=_JOIN))
+    assert out["kind"] == "column" and out["identifier"] == "c.customer_id"
+    assert "hint" not in out
+
+
+@pytest.mark.parametrize(
+    ("sql", "looked_up"),
+    [
+        ("SELECT nope FROM crm.accounts", ["demo.information_schema.tables"]),
+        ("SELECT nope FROM accounts", []),
+        ('SELECT nope FROM "we\'ird".crm.accounts', []),
+        ("SELECT nope FROM system.runtime.queries", []),
+    ],
+)
+def test_a_name_is_looked_up_only_when_its_catalog_and_schema_are_known(sql, looked_up):
+    tools = _tools(_column("nope"))
+    out = json.loads(tools["execute_query"](sql=sql))
+    calls = [c for c, _ in _client_of(tools).calls if "information_schema.tables" in c]
+    assert [c.split(" FROM ")[1].split(" ")[0] for c in calls] == looked_up
+    if not looked_up:
+        assert "hint" not in out
+
+
+def test_the_lookups_are_bounded():
+    from akko_mcp_trino.tools import MAX_ADVICE_TABLES
+
+    names = [f"demo.crm.t{i}" for i in range(MAX_ADVICE_TABLES + 3)]
+    sql = "SELECT nope FROM " + ", ".join(names)
+    tools = _tools(_column("nope"), seen=tuple(names))
+    out = json.loads(tools["execute_query"](sql=sql))
+    lookups = [c for c, _ in _client_of(tools).calls if "information_schema.tables" in c]
+    assert len(lookups) == MAX_ADVICE_TABLES
+    assert out["hint"].count("demo.crm.t") == MAX_ADVICE_TABLES
+
+
+def _client_of(tools):
+    return _LAST[0]
 
 
 def test_no_hint_when_no_table_of_the_statement_is_identifiable():
