@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "trino": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.15.2",
+        "http://localhost:3000/mcp",
+        "--header",
+        "Authorization:${AUTH_HEADER}"
+      ],
+      "env": {
+        "AUTH_HEADER": "Bearer <the user's access token>"
+      }
+    }
+  }
+}

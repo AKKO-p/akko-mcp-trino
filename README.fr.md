@@ -103,6 +103,7 @@ docker compose up -d --wait
 
 - Le fonctionnement de bout en bout est décrit sur [akko-ai.com/docs/comment-ca-marche](https://akko-ai.com/docs/comment-ca-marche/) (aussi [en anglais](https://akko-ai.com/en/docs/how-it-works/)).
 - Le guide, les prérequis, la configuration et les exemples sont sur [akko-ai.com/docs/coeur-open-source](https://akko-ai.com/docs/coeur-open-source/) (aussi [en anglais](https://akko-ai.com/en/docs/open-source-core/)) et [akko-ai.com/docs/exemples](https://akko-ai.com/docs/exemples/).
+- Le guide pas à pas pour Claude Desktop et Cursor est sur [akko-ai.com/docs/brancher-claude-cursor](https://akko-ai.com/docs/brancher-claude-cursor/) (en anglais dans ce dépôt, [docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md)).
 - La référence est dans ce dépôt, en anglais : le [README](README.md), [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md).
 
 ## Pourquoi
@@ -288,7 +289,15 @@ curl -s localhost:3001/metrics   # métriques Prometheus
 ## Brancher un MCP host
 
 Le MCP host envoie le token d'accès de l'utilisateur, émis pour ce serveur ; le serveur le vérifie et
-nomme l'appelant dans la ligne d'audit. Cursor, Claude Desktop, VS Code (`mcp.json`) :
+nomme l'appelant dans la ligne d'audit.
+
+Le guide **Brancher Claude Desktop ou Cursor** déroule la sandbox en cinq minutes, votre propre
+Trino en `stdio` avec la connexion navigateur de Trino, et un serveur partagé avec un token par
+utilisateur. Un client MCP a vérifié chaque configuration. Le guide est en anglais dans ce
+dépôt ([docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md)) et en français sur
+[akko-ai.com/docs/brancher-claude-cursor](https://akko-ai.com/docs/brancher-claude-cursor/).
+
+Cursor (`~/.cursor/mcp.json`), et tout MCP host qui prend une URL et des en-têtes :
 
 ```json
 {
@@ -300,6 +309,9 @@ nomme l'appelant dans la ligne d'audit. Cursor, Claude Desktop, VS Code (`mcp.js
   }
 }
 ```
+
+Le fichier de configuration de Claude Desktop ne lance que des serveurs locaux : il rejoint un
+serveur HTTP par un pont local, comme le montre le guide.
 
 `streamable-http` (`/mcp`) est le transport par défaut. Claude Desktop, Cursor et Mistral Vibe
 peuvent aussi lancer le serveur eux-mêmes en `stdio` : l'appelant est alors `MCP_USER_TOKEN`,

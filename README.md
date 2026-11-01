@@ -135,6 +135,7 @@ access: Trino decides for each user with the rules it already has, or, in
 
 - **How it works, end to end:** [akko-ai.com/en/docs/how-it-works](https://akko-ai.com/en/docs/how-it-works/) (also [en français](https://akko-ai.com/docs/comment-ca-marche/)).
 - **Guide, prerequisites, configuration, examples:** [akko-ai.com/en/docs/open-source-core](https://akko-ai.com/en/docs/open-source-core/) (also [en français](https://akko-ai.com/docs/coeur-open-source/)) and [akko-ai.com/en/docs/examples](https://akko-ai.com/en/docs/examples/).
+- **Claude Desktop and Cursor, step by step:** [docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md).
 - **Reference, in this repository:** this README, [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md).
 
 ## Contents
@@ -399,7 +400,11 @@ this server; the server verifies it and names the caller in the audit line. A
 host that supports MCP authorization finds the provider through the protected
 resource metadata the server publishes when `MCP_RESOURCE_URL` is set.
 
-Cursor, Claude Desktop, VS Code (`mcp.json`):
+**Claude Desktop and Cursor, step by step:** the sandbox in five minutes, your own Trino
+over stdio with Trino's browser login, and a shared server with a token per user, each
+configuration checked with an MCP client: [docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md).
+
+Cursor (`~/.cursor/mcp.json`), and any host that takes a URL and headers:
 
 ```json
 {
@@ -432,6 +437,9 @@ async def main(token: str):
 
 anyio.run(main, "<token>")
 ```
+
+Claude Desktop's configuration file starts local servers only: it reaches an HTTP server
+through a local bridge, as [the guide](docs/guides/connect-claude-desktop-cursor.md) shows.
 
 `streamable-http` (`/mcp`) is the default and what current hosts expect. Set
 `MCP_TRANSPORT=sse` for older hosts (`/sse`); the guard is the same on both.
