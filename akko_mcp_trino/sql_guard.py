@@ -250,15 +250,18 @@ def referenced_tables(sql: str) -> list[str]:
     return sorted(names)
 
 
-def tables_for_column(sql: str, identifier: str) -> list[str]:
-    """The tables of ``sql`` a column it names may belong to, as written, in lower case.
+def tables_for_column(sql: str, identifier: str) -> list[tuple[str, ...]]:
+    """The tables of ``sql`` a column it names may belong to, each as the parts the agent
+    wrote (catalog, schema, table, those given), in lower case, sorted. A part keeps any dot
+    it holds (``"x.y".t`` is the two parts ``x.y`` and ``t``), so a name is never read as
+    another catalog or schema.
 
     For advice only, from the agent's own statement, never from Trino: a column written
     ``c.customer_id`` belongs to the table whose alias or name is ``c``; a column written
     without a qualifier may belong to any table the statement reads, unless the statement
     has a CTE or a nested SELECT (subquery, EXISTS, IN), which it may belong to instead:
-    then nothing. A name defined by
-    the statement (a CTE) is not a table. A statement that does not parse names nothing."""
+    then nothing. A name defined by the statement (a CTE) is not a table. A statement that
+    does not parse names nothing."""
     s = sql.strip()
     m = _EXPLAIN_RE.match(s)
     if m is not None:
@@ -268,7 +271,7 @@ def tables_for_column(sql: str, identifier: str) -> list[str]:
     except Exception:  # noqa: BLE001 - unparseable: nothing named
         return []
     qualifier = identifier.lower().rpartition(".")[0]
-    names: set[str] = set()
+    names: set[tuple[str, ...]] = set()
     for st in statements:
         ctes = {cte.alias_or_name.lower() for cte in st.find_all(exp.CTE)}
         nested = any(s.find_ancestor(exp.Select) is not None for s in st.find_all(exp.Select))
@@ -283,8 +286,7 @@ def tables_for_column(sql: str, identifier: str) -> list[str]:
             parts = [p.lower() for p in (table.catalog, table.db, table.name) if p]
             if len(parts) == 1 and parts[0] in ctes:
                 continue
-            name = ".".join(parts)
-            if qualifier and qualifier not in (table.alias.lower(), parts[-1], name):
+            if qualifier and qualifier not in (table.alias.lower(), parts[-1], ".".join(parts)):
                 continue
-            names.add(name)
+            names.add(tuple(parts))
     return sorted(names)

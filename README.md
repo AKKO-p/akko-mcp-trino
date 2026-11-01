@@ -612,12 +612,15 @@ column was written against (`c.customer_id` names the table aliased `c`; a colum
 without a qualifier names every table read, unless the statement has a CTE or a
 subquery) and advises `describe_table` on it. It names only the tables the caller
 sees: each candidate, at most four, is looked up in its catalog's
-`information_schema.tables` by equality, as the caller, in the call's time (a name
-without catalog in `TRINO_CATALOG`; a name without schema is not looked up), and a
-hidden table, a refusal, an error or no time left means no advice for it; an
-ambiguous or unnamed column gets no hint, and a statement the parser cannot read
-gets none either, never an error of its own: the name comes from the statement,
-never from Trino, so it shows nothing the caller could not already name:
+`information_schema.tables` by equality, as the caller, each part exactly as written
+(a quoted part may hold a dot), in what is left of the call minus one second, at
+most five seconds, so a slow lookup never costs the agent its error; a name without
+catalog is looked up in `TRINO_CATALOG`, and a name without schema (`FROM accounts`)
+gets no advice, a known limit; a hidden table, a refusal, an error or less than a
+second left means no advice for it; an ambiguous or unnamed column gets no hint, and
+a statement the parser cannot read gets none either, never an error of its own: the
+name comes from the statement, never from Trino, so it shows nothing the caller
+could not already name:
 
 | `kind` | Meaning |
 |---|---|

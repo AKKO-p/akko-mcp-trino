@@ -39,6 +39,7 @@ from mcp.types import ToolAnnotations
 from .audit import (
     AuditEvent,
     bind_call,
+    current_call,
     current_request_id,
     error_code,
     note,
@@ -76,6 +77,11 @@ MAX_SAMPLE_ROWS = 20
 # The most tables of the agent's statement the advice on an unknown column checks, each by
 # one lookup of its own in Trino; the others get no advice.
 MAX_ADVICE_TABLES = 4
+# The time of one such lookup: what is left of the call minus a reserve, so a slow lookup
+# stops as a plain timeout and the call still answers the agent's error; no lookup with less
+# than the reserve left; at most this many seconds without a call budget.
+ADVICE_RESERVE_SECONDS = 1.0
+ADVICE_LOOKUP_SECONDS = 5.0
 # The audit code of an error a tool returns without naming it (``note(error=...)``).
 UNNAMED_ERROR = "tool_error"
 
@@ -211,8 +217,15 @@ def dumps(obj: Any) -> str:
     return json.dumps(obj, default=_plain)
 
 
+def table_name(parts: tuple[str, ...]) -> str:
+    """A table's name as the agent wrote it, a part with a dot quoted, so it reads as one."""
+    return ".".join(f'"{p}"' if "." in p else p for p in parts)
+
+
 def error_reply(
-    exc: Exception, sql: str = "", visible: Optional[Callable[[str], bool]] = None
+    exc: Exception,
+    sql: str = "",
+    visible: Optional[Callable[[tuple[str, ...]], bool]] = None,
 ) -> str:
     """The error for the agent, whole, with its kind (see ``akko_mcp_trino.errors``); for the
     audit, its code only. A column of ``sql`` Trino could not find (``COLUMN_NOT_FOUND``,
@@ -228,16 +241,16 @@ def error_reply(
             tables = tables_for_column(sql, str(identifier))
         except Exception:  # noqa: BLE001 - advice only: fail safe to none
             tables = []
-        tables = [t for t in tables[:MAX_ADVICE_TABLES] if visible(t)]
-        if len(tables) == 1:
+        named = [table_name(t) for t in tables[:MAX_ADVICE_TABLES] if visible(t)]
+        if len(named) == 1:
             out["hint"] = (
-                f"Read the columns of {tables[0]} with describe_table, then write the query "
+                f"Read the columns of {named[0]} with describe_table, then write the query "
                 "again with a column it has."
             )
-        elif tables:
+        elif named:
             out["hint"] = (
                 "Read the columns of each of these tables with describe_table: "
-                f"{', '.join(tables)}. Then write the query again with a column one of them has."
+                f"{', '.join(named)}. Then write the query again with a column one of them has."
             )
     return dumps(out)
 
@@ -507,23 +520,34 @@ def register_query_tools(
 
     schema_visible = tools.schema_visible
 
-    def advice_visible(name: str) -> bool:
-        """Whether the caller sees the table ``name`` of their own statement, as Trino
-        resolves it (a name without catalog in the session catalog): one lookup of
-        information_schema.tables by equality, filtered by Trino for the caller, in the
-        call's time. A name without its schema, a catalog the statement cannot carry, a
-        refusal, an error or no time left: not seen, so no advice names it."""
-        parts = name.split(".")
+    def advice_visible(parts: tuple[str, ...]) -> bool:
+        """Whether the caller sees the table of their own statement named by ``parts``, as
+        Trino resolves it (a name without catalog in the session catalog): one lookup of
+        information_schema.tables by equality on each part, exactly as written, filtered by
+        Trino for the caller. It never costs the call its answer: it waits what is left of
+        the call minus ``ADVICE_RESERVE_SECONDS`` at most (``ADVICE_LOOKUP_SECONDS`` without
+        a call budget), so a slow lookup stops as a plain timeout, and with less than the
+        reserve left it does not run. A name without its schema, a catalog the statement
+        cannot carry, a refusal, an error or no time: not seen, so no advice names it."""
         if len(parts) == 2 and session_catalog:
-            parts = [session_catalog.lower(), *parts]
+            parts = (session_catalog.lower(), *parts)
         if len(parts) != 3:
             return False
         catalog, schema, table = parts
+        call = current_call()
+        left = call.time_left() if call is not None else None
+        if left is None:
+            timeout = ADVICE_LOOKUP_SECONDS
+        elif left - ADVICE_RESERVE_SECONDS <= 0:
+            return False
+        else:
+            timeout = min(left - ADVICE_RESERVE_SECONDS, ADVICE_LOOKUP_SECONDS)
         try:
             res = run(
                 f"SELECT table_name FROM {governed_catalog(catalog)}.information_schema.tables "
                 f"WHERE table_schema = {sql_literal(schema)} "
-                f"AND table_name = {sql_literal(table)}"
+                f"AND table_name = {sql_literal(table)}",
+                timeout=timeout,
             )
         except Exception:  # noqa: BLE001 - advice only: not seen
             return False

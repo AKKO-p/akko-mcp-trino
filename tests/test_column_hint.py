@@ -11,6 +11,7 @@ import re
 
 import pytest
 
+import akko_mcp_trino.audit as audit_module
 from akko_mcp_trino.sql_guard import tables_for_column
 from akko_mcp_trino.tools import register_query_tools
 from tests.test_tools import FakeClient, FakeMCP
@@ -73,7 +74,30 @@ _JOIN = (
     ],
 )
 def test_the_tables_a_column_may_belong_to_come_from_the_statement(sql, identifier, tables):
-    assert tables_for_column(sql, identifier) == tables
+    assert tables_for_column(sql, identifier) == [tuple(t.split(".")) for t in tables]
+
+
+def test_a_part_with_a_dot_stays_one_part():
+    """A quoted name may hold a dot: it is one part, never read as a catalog or a schema."""
+    assert tables_for_column('SELECT nope FROM "x.y".t', "nope") == [("x.y", "t")]
+    assert tables_for_column('SELECT nope FROM "a.b"', "nope") == [("a.b",)]
+
+
+def test_a_part_with_a_dot_is_looked_up_exactly_or_gives_no_advice():
+    tools = _tools(_column("nope"), seen=("demo.x.y.t",))
+    out = json.loads(tools["execute_query"](sql='SELECT nope FROM "x.y".t'))
+    lookups = [c for c, _ in _client_of(tools).calls if "information_schema.tables" in c]
+    assert lookups == [
+        "SELECT table_name FROM demo.information_schema.tables "
+        "WHERE table_schema = 'x.y' AND table_name = 't'"
+    ], "the schema x.y of the session catalog, never the catalog x"
+    assert out["hint"].startswith('Read the columns of "x.y".t with describe_table')
+    tools = _tools(_column("nope"))
+    out = json.loads(tools["execute_query"](sql='SELECT nope FROM "a.b"'))
+    assert "hint" not in out
+    assert not [c for c, _ in _client_of(tools).calls if "information_schema.tables" in c]
+    out = json.loads(_tools(_column("nope"))["execute_query"](sql='SELECT nope FROM "c.d".s.t'))
+    assert "hint" not in out, "a catalog with a dot cannot be carried: no lookup, no advice"
 
 
 _SEEN = ("demo.crm.accounts", "demo.crm.customers", "tpch.tiny.nation")
@@ -262,3 +286,74 @@ def test_the_query_tools_say_what_a_column_error_adds():
     for name in ("execute_query", "explain_query"):
         doc = mcp.tools[name].__doc__
         assert "describe_table" in doc and 'may add "hint"' in " ".join(doc.split()), name
+
+
+# ---- the advice never costs the agent its error, within the call's budget
+
+
+class _Clocked(_Client):
+    """A client on a simulated clock: the statement takes ``statement`` seconds and fails;
+    each lookup takes ``lookup`` seconds, stopped as the real client stops a query, by a
+    plain TimeoutError at its own timeout, or by the call's CallTimeout at its deadline."""
+
+    def __init__(self, raises, statement, lookup):
+        super().__init__(raises)
+        self.now, self.statement, self.cost = 0.0, statement, lookup
+        self.timeouts = []
+
+    def query(self, sql, user=None, params=None, **keywords):
+        timeout = keywords.get("timeout", 0.0)
+        if "information_schema.tables" not in sql:
+            self.calls.append((sql, user))
+            self.now += self.statement
+            raise self.raises
+        self.timeouts.append(timeout)
+        allowed = audit_module.time_allowed(timeout)
+        if allowed > 0 and self.cost > allowed:
+            self.now += allowed
+            if allowed == timeout:
+                raise TimeoutError(f"the query exceeded its time budget of {timeout:g} s")
+            raise audit_module.current_call().timed_out()
+        self.now += self.cost
+        return super().query(sql, user, params, **keywords)
+
+
+def _clocked(monkeypatch, *, budget, statement, lookup):
+    client = _Clocked(_column("c.customer_id"), statement, lookup)
+    monkeypatch.setattr(audit_module.time, "monotonic", lambda: client.now)
+    mcp = FakeMCP()
+    register_query_tools(mcp, client, call_timeout_seconds=budget, session_catalog="demo")
+    return mcp.tools, client
+
+
+def test_a_slow_lookup_stops_before_the_deadline_and_the_error_comes_back(monkeypatch):
+    from akko_mcp_trino.tools import ADVICE_RESERVE_SECONDS
+
+    tools, client = _clocked(monkeypatch, budget=10, statement=7.0, lookup=50.0)
+    out = json.loads(tools["execute_query"](sql=_JOIN))
+    assert out["kind"] == "column" and out["identifier"] == "c.customer_id"
+    assert "hint" not in out and "time_budget" not in json.dumps(out)
+    assert client.timeouts == [pytest.approx(10 - 7 - ADVICE_RESERVE_SECONDS)]
+    assert client.now < 10
+
+
+def test_no_lookup_runs_with_less_than_the_reserve_left(monkeypatch):
+    tools, client = _clocked(monkeypatch, budget=10, statement=9.5, lookup=0.1)
+    out = json.loads(tools["execute_query"](sql=_JOIN))
+    assert out["kind"] == "column" and "hint" not in out
+    assert client.timeouts == []
+
+
+def test_a_quick_lookup_within_the_budget_gives_the_advice(monkeypatch):
+    tools, client = _clocked(monkeypatch, budget=10, statement=2.0, lookup=0.5)
+    out = json.loads(tools["execute_query"](sql=_JOIN))
+    assert out["hint"].startswith("Read the columns of demo.crm.customers")
+
+
+def test_without_a_call_budget_a_lookup_is_bounded_by_its_own_short_time(monkeypatch):
+    from akko_mcp_trino.tools import ADVICE_LOOKUP_SECONDS
+
+    tools, client = _clocked(monkeypatch, budget=0, statement=2.0, lookup=60.0)
+    out = json.loads(tools["execute_query"](sql=_JOIN))
+    assert out["kind"] == "column" and "hint" not in out
+    assert client.timeouts == [ADVICE_LOOKUP_SECONDS]
