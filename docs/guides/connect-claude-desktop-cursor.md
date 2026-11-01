@@ -360,7 +360,7 @@ one is not set. For a file that holds several servers, name the entry with `--se
 
 ## What was verified
 
-On 1 November 2026, with the sandbox at commit `dac01db` on a Linux host, akko-mcp-trino
+On 1 and 2 November 2026, with the sandbox at commit `dac01db` on a Linux host, akko-mcp-trino
 0.7.0 from PyPI (`uvx akko-mcp-trino==0.7.0`) and Docker Hub (`akkoai/akko-mcp-trino:0.7.0`),
 the official MCP Python SDK 2.3.0, Node.js 22 and 20.18.1, and `mcp-remote` 0.15.2:
 
