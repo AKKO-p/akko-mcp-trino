@@ -70,13 +70,13 @@ HINT = (
     "(never a value such as a date, an amount or a code), or browse with list_tables and "
     "describe_schema."
 )
-# What a page of the per-word pass says: its rows hold some of the words, not all.
 # What a page of the per-word pass that has more to read says, so that an agent never takes
 # it for the end.
 PER_WORD_MORE_HINT = (
     "No table or column holds every word together. This per-word search is not finished: "
     "call search_columns again with the same text and cursor=next_cursor."
 )
+# What the last page of a per-word pass that found rows says: they hold some of the words.
 PER_WORD_HINT = (
     "No table or column holds every word together, so these are partial matches, each found "
     "by the words it lists: pick the right one, or search again with a single word from a "
@@ -580,14 +580,15 @@ def search(
             "complete": complete,
             "next_cursor": next_cursor,
         }
-        nothing = complete and not tables and not matches and not earlier_found
         if mode == PER_WORD:
             out["partial"] = True
             if next_cursor is not None:
                 out["hint"] = PER_WORD_MORE_HINT
-            else:
-                out["hint"] = HINT if nothing else PER_WORD_HINT
-        elif nothing:
+            elif tables or matches or earlier_found:
+                out["hint"] = PER_WORD_HINT
+            else:  # nothing found by the pass, complete or with a part skipped
+                out["hint"] = HINT
+        elif complete and not tables and not matches and not earlier_found:
             out["hint"] = HINT
         return out
 

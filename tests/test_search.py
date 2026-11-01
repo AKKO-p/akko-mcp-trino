@@ -1643,6 +1643,27 @@ def test_the_per_word_pass_out_of_time_says_so_and_resumes(clock):
     assert again["hint"] == PER_WORD_HINT
 
 
+def test_a_per_word_pass_that_skipped_a_schema_and_found_nothing_gives_the_hint(clock):
+    """A schema skipped in the per-word pass (an error of Trino, or a read slower than a
+    query may be): the pass ends incomplete, with no cursor and no row. It has no partial
+    match to pick from, so its hint is the one for nothing found."""
+    trino = Trino({"demo": ["a", "b"]}, {("demo", "a"): [], ("demo", "b"): []})
+    real = trino.query
+
+    def query(sql, user=None, params=None, **kw):
+        if ", coalesce(" in sql and "'b'" in sql:
+            trino.calls.append((sql, kw))
+            raise _InternalError("metastore down")
+        return real(sql, user, params, **kw)
+
+    trino.query = query
+    out = _ask(trino, clock, "loyalty points")
+    assert out["partial"] is True and out["complete"] is False and out["next_cursor"] is None
+    assert out["not_searched"] == [{"catalog": "demo", "schema": "b", "reason": "unavailable"}]
+    assert out["tables"] == [] and out["matches"] == []
+    assert out["hint"] == HINT
+
+
 def test_a_per_word_chain_that_found_rows_keeps_its_hint_on_an_empty_last_page(clock):
     trino = Trino(
         {"demo": ["a", "b"]},

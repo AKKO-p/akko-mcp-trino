@@ -256,7 +256,8 @@ def tables_for_column(sql: str, identifier: str) -> list[str]:
     For advice only, from the agent's own statement, never from Trino: a column written
     ``c.customer_id`` belongs to the table whose alias or name is ``c``; a column written
     without a qualifier may belong to any table the statement reads, unless the statement
-    has a CTE or a subquery, which it may belong to instead: then nothing. A name defined by
+    has a CTE or a nested SELECT (subquery, EXISTS, IN), which it may belong to instead:
+    then nothing. A name defined by
     the statement (a CTE) is not a table. A statement that does not parse names nothing."""
     s = sql.strip()
     m = _EXPLAIN_RE.match(s)
@@ -270,9 +271,11 @@ def tables_for_column(sql: str, identifier: str) -> list[str]:
     names: set[str] = set()
     for st in statements:
         ctes = {cte.alias_or_name.lower() for cte in st.find_all(exp.CTE)}
-        if not qualifier and (ctes or any(True for _ in st.find_all(exp.Subquery))):
-            # A column without a qualifier may belong to a CTE or a subquery, not to a
-            # table read inside it: no advice rather than a guess.
+        nested = any(s.find_ancestor(exp.Select) is not None for s in st.find_all(exp.Select))
+        if not qualifier and (ctes or nested):
+            # A column without a qualifier may belong to a CTE or a nested SELECT (a
+            # subquery, EXISTS, IN), not to a table read inside it: no advice rather than a
+            # guess. The branches of a UNION are not nested.
             return []
         for table in st.find_all(exp.Table):
             if not isinstance(table.this, exp.Identifier):

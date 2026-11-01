@@ -52,6 +52,18 @@ _JOIN = (
         ),
         ("WITH x AS (SELECT id FROM demo.crm.t) SELECT foo FROM x", "foo", []),
         ("SELECT foo FROM (SELECT id FROM demo.crm.t) s", "foo", []),
+        ("SELECT foo FROM demo.crm.t WHERE EXISTS (SELECT 1 FROM demo.crm.u)", "foo", []),
+        ("SELECT foo FROM demo.crm.t WHERE id IN (SELECT id FROM demo.crm.u)", "foo", []),
+        (
+            "SELECT foo FROM demo.crm.t UNION ALL SELECT foo FROM demo.crm.u",
+            "foo",
+            ["demo.crm.t", "demo.crm.u"],
+        ),
+        (
+            "SELECT t.foo FROM demo.crm.t t WHERE EXISTS (SELECT 1 FROM demo.crm.u)",
+            "t.foo",
+            ["demo.crm.t"],
+        ),
         (
             "WITH x AS (SELECT 1 AS a) SELECT y.foo FROM demo.crm.t y JOIN x ON true",
             "y.foo",
