@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "trino": {
+      "url": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer <the user's access token>"
+      }
+    }
+  }
+}

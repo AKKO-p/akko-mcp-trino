@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "trino": {
+      "command": "uvx",
+      "args": [
+        "akko-mcp-trino==0.7.0"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "TRINO_IDENTITY_MODE": "oauth2",
+        "TRINO_HOST": "trino.example.internal",
+        "TRINO_PORT": "8443",
+        "TRINO_HTTP_SCHEME": "https",
+        "TRINO_CATALOG": "iceberg",
+        "MCP_AUTH_ENABLED": "false",
+        "MCP_AUTH_REQUIRED": "false"
+      }
+    }
+  }
+}

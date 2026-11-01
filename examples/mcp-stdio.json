@@ -3,7 +3,7 @@
     "trino": {
       "command": "uvx",
       "args": [
-        "akko-mcp-trino"
+        "akko-mcp-trino==0.7.0"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
