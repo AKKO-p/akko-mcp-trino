@@ -101,7 +101,11 @@ def test_host_configs_set_only_variables_the_server_reads_and_pin_their_versions
 
     source = (ROOT / "akko_mcp_trino" / "config.py").read_text(encoding="utf-8")
     read_by_code = set(re.findall(r'os\.environ\.get\("([A-Z_]+)"', source))
-    pinned = ("akko-mcp-trino==" + __version__, "akkoai/akko-mcp-trino:" + __version__)
+    # The package, or the image under any registry and namespace, with or without a tag.
+    server = re.compile(r"^(?:[^\s/]+/)*akko-mcp-trino(?:[=:@].*)?$")
+    pinned = re.compile(
+        rf"^(?:akko-mcp-trino=={re.escape(__version__)}|(?:[^\s/]+/)+akko-mcp-trino:{re.escape(__version__)})$"
+    )
     wrong = []
     for name, config in _configs():
         for cfg in config["mcpServers"].values():
@@ -111,11 +115,11 @@ def test_host_configs_set_only_variables_the_server_reads_and_pin_their_versions
                 for a in args
                 if a.startswith("mcp-remote") and not re.fullmatch(r"mcp-remote@\d+\.\d+\.\d+", a)
             ]
-            launched = [
-                a for a in args if a.startswith(("akko-mcp-trino", "akkoai/akko-mcp-trino"))
-            ]
+            launched = [a for a in args if server.match(a)]
             wrong += [
-                f"{name}: {a} is not pinned to {__version__}" for a in launched if a not in pinned
+                f"{name}: {a} is not pinned to {__version__}"
+                for a in launched
+                if not pinned.match(a)
             ]
             if not launched:
                 continue
