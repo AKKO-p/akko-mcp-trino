@@ -34,12 +34,17 @@ entry `trino`. If your file already has other servers, add the entry next to the
 **How each host reaches the server.** Cursor connects to a streamable HTTP server itself:
 an entry with a `url` and `headers`. Claude Desktop's configuration file starts local
 servers only: an entry with a `command`, its `args` and `env`. Its remote connectors,
-added under **Customize > Connectors**, are reached from Anthropic's cloud, not from your
-computer, so they cannot reach a server on `localhost` or on a private network; and their
-request headers are meant for one credential shared by everyone, not for a token per user
+added under **Customize > Connectors**, connect from Anthropic's cloud, not from your
+computer ([Claude Help Center](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp)),
+so they cannot reach a server on `localhost` or on a private network unless your
+organization uses [MCP tunnels](https://claude.com/docs/connectors/mcp-tunnels/overview).
+Their request headers are meant for one credential shared by everyone; signing each person
+in there goes through OAuth, with a server reachable from the internet
 ([Claude's documentation](https://claude.com/docs/connectors/custom)). So for an HTTP
-server, Claude Desktop starts a small local bridge, [`mcp-remote`](https://github.com/punkpeye/mcp-remote),
-which forwards to the server's URL with your header. It needs Node.js 18 or later.
+server, this guide has Claude Desktop start a small local bridge, [`mcp-remote`](https://github.com/punkpeye/mcp-remote),
+which forwards to the server's URL with your header. `mcp-remote` 0.15.2 needs Node.js
+20.18.1 or later (`node --version`), and Claude Desktop uses the Node.js installed on the
+system.
 
 ## 1. Try it in five minutes: the sandbox
 
@@ -130,8 +135,9 @@ again under **Customize**; in Claude Desktop, restart the application. Stop the 
 Here the host starts the server itself, on your computer, and the server signs you in to
 Trino with Trino's own browser login. Nothing to deploy, no token to paste. You need:
 
-- Trino 351 or later, over https, with its OAuth2 authenticator configured
-  (`http-server.authentication.type` includes `OAUTH2`);
+- Trino over https, with its OAuth2 authenticator configured
+  (`http-server.authentication.type` includes `OAUTH2`); akko-mcp-trino supports Trino 351
+  and later, and this path was verified with Trino 482;
 - [uv](https://docs.astral.sh/uv/), whose `uvx` downloads and runs akko-mcp-trino from
   PyPI, or Docker (below).
 
@@ -169,7 +175,21 @@ is signed by your company's own authority, add `"TRINO_VERIFY": "/path/to/ca.pem
 `MCP_AUTH_ENABLED` and `MCP_AUTH_REQUIRED` are `false` because there is no MCP token in this
 path: Trino authenticates you, and every query runs as the user Trino names.
 
-**With Docker instead of uv**, the same variables go to `docker run`:
+The server says so when it starts, in the host's log, and in the instructions it gives the
+host at initialization:
+
+```
+WARNING:akko_mcp_trino.__main__:MCP_AUTH_ENABLED=false: no caller is verified; anyone who reaches this server queries Trino
+```
+
+Here that is expected. Over stdio, the only thing that reaches the server is the host
+process that started it on your computer, and Trino's own browser login decides who you
+are: no query runs before you sign in, and each runs as you. The same setting on a server
+other people can reach over the network would let anyone query Trino through it: never
+turn the door off there, and keep `oauth2` for stdio, which the server enforces.
+
+**With Docker instead of uv**, the same variables go to `docker run` (for Cursor, add
+`"type": "stdio"` as above):
 
 ```json
 {
@@ -194,7 +214,8 @@ path: Trino authenticates you, and every query runs as the user Trino names.
 ```
 
 In a container, the server cannot open your browser: read the login URL in the host's log
-(below).
+(below). For `TRINO_VERIFY`, mount the authority into the container too
+(`"-v", "/path/to/ca.pem:/ca.pem:ro", "-e", "TRINO_VERIFY=/ca.pem"`).
 
 ### What happens at the first question
 
@@ -222,6 +243,11 @@ for the server by your identity provider, then IdP), exchanges it at the IdP for
 issued for Trino, and Trino runs the query as that user, with their own rights. Deploy the
 server as in [Install and run](../../README.md#install-and-run), behind https, with
 `MCP_RESOURCE_URL` set to its public URL.
+
+The configurations below put each user's token in a header written by hand. That is a
+shortcut for testing and for a first rollout, not the way a team should run day to day:
+the token expires, often within the hour (one hour in the sandbox), and each user then has
+to fetch a new one, paste it and restart the server in the host.
 
 **Cursor**:
 
@@ -266,15 +292,22 @@ started with that variable set.
 
 If the server's certificate is signed by your company's own authority, add
 `"NODE_EXTRA_CA_CERTS": "/path/to/ca.pem"` to `env`: the bridge does not inherit it from
-your shell.
+your shell. `mcp-remote` can also read the header from a file (`--header-file`, one
+`Name: value` per line) instead of the configuration.
 
-**Getting the token.** Each user asks the IdP for an access token whose audience is the
-server (`MCP_OIDC_AUDIENCE` or `MCP_RESOURCE_URL`), the way your organization hands out
-tokens to command-line tools. A token issued for Trino is refused: the server only accepts
-tokens issued for itself. Hosts that support MCP authorization can also find the IdP on
-their own through the protected resource metadata the server publishes; Cursor documents
-OAuth sign-in for remote servers. We have not verified that flow with this server, so this
-guide stays with the header.
+**Getting and renewing the token.** Each user asks the IdP for an access token whose
+audience is the server (`MCP_OIDC_AUDIENCE` or `MCP_RESOURCE_URL`), the way your
+organization hands out tokens to command-line tools. A token issued for Trino is refused:
+the server only accepts tokens issued for itself. When the host answers `401`, the token
+has expired: fetch a new one, replace it, and restart the server in the host.
+
+**What a team should do instead.** Each user's host should obtain and renew that user's
+own token itself, through MCP authorization: with `MCP_RESOURCE_URL` set, the server
+publishes the metadata that points a host to the IdP. Cursor documents OAuth sign-in for
+remote servers, and signing in is what `mcp-remote` does when no header is given. We have
+not verified either flow with this server, so this guide shows the header only. What a team
+must never do is share one token between people: the server would see one user, Trino
+would apply one user's rights, and the audit would name that user for everyone.
 
 **Why not one shared identity?** In `service` mode every query runs as one Trino account,
 whoever asks. Everyone then reads what that account reads, Trino's row filters and masks
@@ -286,11 +319,15 @@ only fits data that every caller may read anyway.
 
 [`examples/check_host_config.py`](../../examples/check_host_config.py) reads the same file
 the host reads, starts or reaches the server the way the host would, lists the tools and
-calls `search_columns`:
+calls `search_columns`. It is not part of the package: run it from a clone of this
+repository, with Python 3.12 or later.
 
 ```bash
-pip install akko-mcp-trino
-python examples/check_host_config.py ~/.cursor/mcp.json --search email
+git clone https://github.com/AKKO-p/akko-mcp-trino.git
+cd akko-mcp-trino
+python3 -m venv .venv && . .venv/bin/activate
+pip install akko-mcp-trino==0.7.0
+python3 examples/check_host_config.py ~/.cursor/mcp.json --search email
 ```
 
 ```
@@ -301,16 +338,18 @@ search_columns('email'):
 {"tables": [...], "matches": [...], "complete": true, "next_cursor": null}
 ```
 
-It resolves Cursor's `${env:NAME}` from your environment, as Cursor does.
+It resolves Cursor's `${env:NAME}` from your environment, as Cursor does, and stops if
+one is not set. For a file that holds several servers, name the entry with `--server trino`.
 
 ## Common errors
 
 | What you see | Why | Fix |
 |---|---|---|
 | `401`, `this server requires a bearer token issued for it by the identity provider: send Authorization: Bearer <access token>` | no header, or a header without the `Bearer ` prefix | write `Bearer ` then the token, with the space |
-| `401`, `the bearer token is invalid, expired, or not issued for this server` | the token expired (one hour in the sandbox), or its audience is another client, Trino's included | ask for a new token, issued for the server; in the sandbox, `./token.sh <user>` without a second argument |
+| `401`, `the bearer token is invalid, expired, or not issued for this server` | the token expired (one hour in the sandbox), or its audience is another client, Trino's included | ask for a new token, issued for the server, replace it and restart the server in the host; in the sandbox, `./token.sh <user>` without a second argument |
 | the bridge logs `Dynamic Client Registration rejected (HTTP 401)` | the server refused the token, and `mcp-remote` tried to sign in by itself | fix the token as above; if it keeps trying, delete `~/.mcp-auth` and restart the host |
 | the bridge logs `Non-HTTPS URLs are only allowed for localhost or when --allow-http flag is provided` | an `http://` URL that is not `localhost` | serve the server over https (path 3); `--allow-http` only on a trusted private network |
+| the bridge logs `ReferenceError: File is not defined`, or `npm warn EBADENGINE` for `undici` | Node.js is older than 20.18.1 | install Node.js 20.18.1 or later; Claude Desktop uses the system's |
 | the bridge logs `unable to get local issuer certificate` | the server's certificate is signed by an authority Node.js does not know | `NODE_EXTRA_CA_CERTS` in the entry's `env` |
 | `TRINO_IDENTITY_MODE=oauth2 requires TRINO_HTTP_SCHEME=https` | `oauth2` over http | `TRINO_HTTP_SCHEME=https`, and Trino's https port |
 | `TRINO_IDENTITY_MODE=oauth2 requires MCP_TRANSPORT=stdio` | `oauth2` on an HTTP transport | `oauth2` is for path 2 only; a team server uses `jwt` |
@@ -323,13 +362,13 @@ It resolves Cursor's `${env:NAME}` from your environment, as Cursor does.
 
 On 1 November 2026, with the sandbox at commit `dac01db` on a Linux host, akko-mcp-trino
 0.7.0 from PyPI (`uvx akko-mcp-trino==0.7.0`) and Docker Hub (`akkoai/akko-mcp-trino:0.7.0`),
-the official MCP Python SDK 2.3.0, Node.js 22 and `mcp-remote` 0.15.2:
+the official MCP Python SDK 2.3.0, Node.js 22 and 20.18.1, and `mcp-remote` 0.15.2:
 
 | Configuration | Run as | Result |
 |---|---|---|
 | Cursor, path 1 (`url`, `headers`) | streamable HTTP, carol's token | 8 tools; `search_columns("email")` finds `demo.crm.customers.email` |
-| Claude Desktop, path 1 (`npx mcp-remote`) | stdio, the bridge started by the client | the same |
-| Cursor and Claude Desktop, path 2 (`uvx`, `oauth2`) | stdio, Trino 482 with its OAuth2 authenticator, a scripted browser signing in at Keycloak | 8 tools before any login; the first call opens the login, then answers; `SELECT current_user` returns `carol_analyst` |
+| Claude Desktop, path 1 (`npx mcp-remote`) | stdio, the bridge started by the client, on Node.js 22 and on Node.js 20.18.1 | the same |
+| Cursor and Claude Desktop, path 2 (`uvx`, `oauth2`) | stdio, Trino 482 with its OAuth2 authenticator, a scripted browser signing in at Keycloak | the warning quoted above at start; 8 tools before any login; the first call opens the login, then answers; `SELECT current_user` returns `carol_analyst` |
 | path 2, the host giving up | a first call with a 5 second timeout during the login, then a second call | the first times out, the second answers as `carol_analyst` |
 | path 2 with Docker | stdio, `docker run -i` | 8 tools, the search answers |
 | Cursor and Claude Desktop, path 3 | https behind a TLS proxy, a private authority (`NODE_EXTRA_CA_CERTS` for the bridge) | 8 tools, the search answers |

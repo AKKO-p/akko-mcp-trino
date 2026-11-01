@@ -291,13 +291,14 @@ curl -s localhost:3001/metrics   # métriques Prometheus
 Le MCP host envoie le token d'accès de l'utilisateur, émis pour ce serveur ; le serveur le vérifie et
 nomme l'appelant dans la ligne d'audit.
 
-Le guide **Brancher Claude Desktop ou Cursor** déroule la sandbox en cinq minutes, votre propre
+Le guide **Brancher Claude Desktop ou Cursor** déroule le sandbox en cinq minutes, votre propre
 Trino en `stdio` avec la connexion navigateur de Trino, et un serveur partagé avec un token par
 utilisateur. Un client MCP a vérifié chaque configuration. Le guide est en anglais dans ce
 dépôt ([docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md)) et en français sur
 [akko-ai.com/docs/brancher-claude-cursor](https://akko-ai.com/docs/brancher-claude-cursor/).
 
-Cursor (`~/.cursor/mcp.json`), et tout MCP host qui prend une URL et des en-têtes :
+Cursor lit ce bloc dans `~/.cursor/mcp.json`, comme les MCP hosts qui lisent le même format
+`mcpServers` :
 
 ```json
 {

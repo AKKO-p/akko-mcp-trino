@@ -6,10 +6,13 @@ or its url and headers over streamable HTTP), lists the tools and calls
 search_columns. Cursor's ${env:NAME} references are resolved from the
 environment, as Cursor resolves them.
 
-    python examples/check_host_config.py ~/.cursor/mcp.json
-    python examples/check_host_config.py claude_desktop_config.json --server trino --search email
+    git clone https://github.com/AKKO-p/akko-mcp-trino.git && cd akko-mcp-trino
+    python3 -m venv .venv && . .venv/bin/activate      # Python 3.12 or later
+    pip install akko-mcp-trino==0.7.0
+    python3 examples/check_host_config.py ~/.cursor/mcp.json
+    python3 examples/check_host_config.py claude_desktop_config.json --server trino --search email
 
-Dependencies: pip install akko-mcp-trino
+It is not part of the package: run it from a clone of the repository.
 """
 
 from __future__ import annotations
@@ -28,10 +31,17 @@ from mcp.client.streamable_http import create_mcp_http_client, streamable_http_c
 _ENV_REF = re.compile(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
+def _env(match: re.Match) -> str:
+    name = match.group(1)
+    if name not in os.environ:
+        sys.exit(f"${{env:{name}}} is not set: export it, as Cursor would need it too")
+    return os.environ[name]
+
+
 def _resolve(value):
     """Cursor's ${env:NAME}, resolved; any other text, Claude Desktop's included, unchanged."""
     if isinstance(value, str):
-        return _ENV_REF.sub(lambda m: os.environ.get(m.group(1), ""), value)
+        return _ENV_REF.sub(_env, value)
     if isinstance(value, list):
         return [_resolve(v) for v in value]
     if isinstance(value, dict):

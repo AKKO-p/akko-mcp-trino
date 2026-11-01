@@ -94,27 +94,32 @@ def test_every_host_config_uses_only_keys_its_host_documents():
     assert wrong == []
 
 
-def test_host_configs_set_only_variables_the_server_reads_and_pin_this_version():
+def test_host_configs_set_only_variables_the_server_reads_and_pin_their_versions():
+    """Every launch of the server is pinned to this version, every bridge to one release:
+    a host file copied today must start the same thing tomorrow."""
     from akko_mcp_trino import __version__
 
     source = (ROOT / "akko_mcp_trino" / "config.py").read_text(encoding="utf-8")
     read_by_code = set(re.findall(r'os\.environ\.get\("([A-Z_]+)"', source))
+    pinned = ("akko-mcp-trino==" + __version__, "akkoai/akko-mcp-trino:" + __version__)
     wrong = []
     for name, config in _configs():
         for cfg in config["mcpServers"].values():
             args = cfg.get("args", [])
+            wrong += [
+                f"{name}: {a} is not pinned"
+                for a in args
+                if a.startswith("mcp-remote") and not re.fullmatch(r"mcp-remote@\d+\.\d+\.\d+", a)
+            ]
             launched = [
                 a for a in args if a.startswith(("akko-mcp-trino", "akkoai/akko-mcp-trino"))
+            ]
+            wrong += [
+                f"{name}: {a} is not pinned to {__version__}" for a in launched if a not in pinned
             ]
             if not launched:
                 continue
             names = set(cfg.get("env", {}))
             names |= {a.split("=", 1)[0] for a in args if re.match(r"^[A-Z_]+=", a)}
             wrong += [f"{name}: {v}" for v in sorted(names - read_by_code)]
-            wrong += [
-                f"{name}: {a}"
-                for a in launched
-                if ("==" in a or ":" in a)
-                and not a.endswith(("==" + __version__, ":" + __version__))
-            ]
     assert wrong == []

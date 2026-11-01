@@ -404,7 +404,8 @@ resource metadata the server publishes when `MCP_RESOURCE_URL` is set.
 over stdio with Trino's browser login, and a shared server with a token per user, each
 configuration checked with an MCP client: [docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md).
 
-Cursor (`~/.cursor/mcp.json`), and any host that takes a URL and headers:
+Cursor reads this block in `~/.cursor/mcp.json`, as do the hosts that read the same
+`mcpServers` format:
 
 ```json
 {
@@ -459,7 +460,7 @@ for one for Trino, as over http) and in `impersonation` mode, and as
   "mcpServers": {
     "trino": {
       "command": "uvx",
-      "args": ["akko-mcp-trino"],
+      "args": ["akko-mcp-trino==0.7.0"],
       "env": {
         "MCP_TRANSPORT": "stdio",
         "TRINO_HOST": "trino.example.internal", "TRINO_PORT": "8443", "TRINO_HTTP_SCHEME": "https",
