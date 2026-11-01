@@ -58,7 +58,7 @@ identity to Trino, and the rules Trino already has do the rest.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-dark.svg">
-  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg" alt="The same question by three sandbox users. alice_admin sees the 10 customers in clear. carol_analyst sees the 5 European customers with masked e-mails. For dave_viewer, the table demo.crm.customers is not found or not visible.">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg" alt="The same question by three sandbox users. alice_admin sees the 10 customers in clear. carol_analyst sees the 5 European customers with masked e-mails. dave_viewer is refused by Trino: Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.">
 </picture>
 
 The same question from the three users of the sandbox, through the same agent and the same

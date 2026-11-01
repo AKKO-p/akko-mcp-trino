@@ -47,7 +47,7 @@ Carol jusqu'à Trino, et les règles que Trino a déjà font le reste.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-2-qui-voit-quoi-dark.svg">
-  <img src="docs/images/comprendre-2-qui-voit-quoi-light.svg" alt="La même question posée par trois utilisateurs du sandbox. alice_admin voit les 10 clients en clair. carol_analyst voit les 5 clients européens, e-mails masqués. Pour dave_viewer, la table demo.crm.customers est introuvable ou invisible.">
+  <img src="docs/images/comprendre-2-qui-voit-quoi-light.svg" alt="La même question posée par trois utilisateurs du sandbox. alice_admin voit les 10 clients en clair. carol_analyst voit les 5 clients européens, e-mails masqués. dave_viewer est refusé par Trino : Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.">
 </picture>
 
 La même question, posée par les trois utilisateurs du sandbox, par le même agent et le même

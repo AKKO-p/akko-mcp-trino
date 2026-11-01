@@ -32,7 +32,7 @@ An agent connected through one service account with broad rights reaches Trino u
 account, so the rules written for Carol no longer apply. akko-mcp-trino brings Carol's own
 identity to Trino.
 
-![alice_admin sees the 10 customers in clear, carol_analyst the 5 European customers with masked e-mails, and for dave_viewer the table is not found or not visible.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg)
+![alice_admin sees the 10 customers in clear, carol_analyst the 5 European customers with masked e-mails, and dave_viewer is refused by Trino (Access Denied).](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg)
 
 The same question from the three users of the sandbox. Trino answers each of them with the
 sandbox's OPA policy; the server copies no rule.

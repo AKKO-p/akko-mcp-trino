@@ -41,8 +41,8 @@ text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
 <rect x="104" y="427" width="94.0" height="24" rx="8" fill="#ecebfb"/>
 <text x="114" y="444" font-size="13" class="ac b" xml:space="preserve">le serveur</text>
 <text x="104" y="475" font-size="18" class="bb" xml:space="preserve">Aucune colonne ne porte les deux mots ensemble</text>
-<text x="104" y="499" font-size="14.5" class="mu" xml:space="preserve">Avant la 0.7.0, l’agent recevait « rien trouvé » et Mistral s’arrêtait là. Maintenant, le serveur</text>
-<text x="104" y="520" font-size="14.5" class="mu" xml:space="preserve">cherche chaque mot séparément.</text>
+<text x="104" y="499" font-size="14.5" class="mu" xml:space="preserve">Sans cette seconde passe, l’agent recevait « rien trouvé » et Mistral s’arrêtait là. Maintenant, le</text>
+<text x="104" y="520" font-size="14.5" class="mu" xml:space="preserve">serveur cherche chaque mot séparément.</text>
 <rect x="104" y="571" width="145.8" height="24" rx="8" fill="#ecebfb"/>
 <text x="114" y="588" font-size="13" class="ac b" xml:space="preserve">le serveur répond</text>
 <text x="104" y="619" font-size="18" class="bb" xml:space="preserve">Chaque résultat dit quel mot il a trouvé</text>
