@@ -45,6 +45,66 @@ and every call leaves one audit line.
 > the `jwt` mode exchanges the caller's token instead of passing it on. See
 > [MIGRATING.md](MIGRATING.md) for both.
 
+## Understand in five steps
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/understand-1-problem-dark.svg">
+  <img src="docs/images/understand-1-problem-light.svg" alt="Carol, an analyst, asks for the list of customers. Through a service account with broad rights, Trino sees mcp-svc and returns 10 customers with e-mails in clear. Through akko-mcp-trino, Trino sees carol_analyst and returns 5 European customers with e-mails masked.">
+</picture>
+
+An agent connected through one service account with broad rights reaches Trino under that
+account, so the rules written for Carol no longer apply. akko-mcp-trino brings Carol's own
+identity to Trino, and the rules Trino already has do the rest.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/understand-2-who-sees-what-dark.svg">
+  <img src="docs/images/understand-2-who-sees-what-light.svg" alt="The same question by three sandbox users. alice_admin sees the 10 customers in clear. carol_analyst sees the 5 European customers with masked e-mails. For dave_viewer, the table demo.crm.customers is not found or not visible.">
+</picture>
+
+The same question from the three users of the sandbox, through the same agent and the same
+server. Trino answers each of them with the sandbox's OPA policy; the server copies no rule.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/understand-3-step-by-step-dark.svg">
+  <img src="docs/images/understand-3-step-by-step-light.svg" alt="Six steps. The question asks for the revenue per customer. search_columns searches revenue customer. No column holds both words, so the server matches each word and says which word each column matched. describe_schema shows the join, and execute_query sums transactions.amount per customer_id as the person.">
+</picture>
+
+How the agent finds where the revenue is: one `search_columns` call, matches word by word when no
+column holds every word, then `describe_schema` and `execute_query`. The search answer shown is
+the server's, from the sandbox.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/understand-4-identity-modes-dark.svg">
+  <img src="docs/images/understand-4-identity-modes-light.svg" alt="Three questions pick an identity mode: token exchange gives jwt, a Trino impersonation rule gives impersonation, a server on one person's machine gives oauth2, otherwise service. The four modes are drawn on the same grid of MCP host, server and Trino; service, one account for everyone, is marked in amber.">
+</picture>
+
+Four identity modes, from the safest to the simplest. `jwt` is the default; `service` gives
+every caller the same account and is used only when you name it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/understand-5-measurements-dark.svg">
+  <img src="docs/images/understand-5-measurements-light.svg" alt="Right answers: Mistral 62.5% on 0.6.1 and 70% on 0.7.0, Claude 93.3% on both. Tool calls per question: Mistral 5.8 then 3.0, Claude 8.5 then 4.9.">
+</picture>
+
+The same five business questions asked to Mistral and to Claude, on 0.6.1 and on 0.7.0. The
+harness and its reports are in [akko-sandbox](https://github.com/AKKO-p/akko-sandbox/tree/main/agent).
+
+The interactive version of these five steps is on
+[akko-ai.com/en/docs/understand](https://akko-ai.com/en/docs/understand/) (also
+[en français](https://akko-ai.com/docs/comprendre/)).
+
+### Try it in five minutes
+
+The sandbox starts Keycloak, Trino, OPA and the server on your machine, with the three users
+above:
+
+```bash
+git clone https://github.com/AKKO-p/akko-sandbox.git
+cd akko-sandbox
+docker compose up -d --wait
+./demo.sh
+```
+
 ## Why
 
 An agent that reads a lakehouse needs a small, predictable surface: a few tools

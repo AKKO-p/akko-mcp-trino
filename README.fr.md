@@ -34,6 +34,68 @@ et en durée, et chaque appel laisse une ligne d'audit.
 Ce document est un résumé en français. Le [README en anglais](README.md) fait référence pour
 chaque réglage.
 
+## Comprendre en cinq étapes
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-1-probleme-dark.svg">
+  <img src="docs/images/comprendre-1-probleme-light.svg" alt="Carol, analyste, demande la liste des clients. Par un service account aux droits larges, Trino voit mcp-svc et renvoie 10 clients, e-mails en clair. Par akko-mcp-trino, Trino voit carol_analyst et renvoie 5 clients européens, e-mails masqués.">
+</picture>
+
+Un agent branché sur un service account aux droits larges arrive dans Trino sous ce compte, et
+les règles écrites pour Carol ne s'appliquent plus. akko-mcp-trino fait arriver l'identité de
+Carol jusqu'à Trino, et les règles que Trino a déjà font le reste.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-2-qui-voit-quoi-dark.svg">
+  <img src="docs/images/comprendre-2-qui-voit-quoi-light.svg" alt="La même question posée par trois utilisateurs du sandbox. alice_admin voit les 10 clients en clair. carol_analyst voit les 5 clients européens, e-mails masqués. Pour dave_viewer, la table demo.crm.customers est introuvable ou invisible.">
+</picture>
+
+La même question, posée par les trois utilisateurs du sandbox, par le même agent et le même
+serveur. Trino répond à chacun avec la policy OPA du sandbox ; le serveur ne recopie aucune
+règle.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-3-pas-a-pas-dark.svg">
+  <img src="docs/images/comprendre-3-pas-a-pas-light.svg" alt="Six étapes. La question demande le chiffre d'affaires par client. search_columns cherche revenue customer. Aucune colonne ne porte les deux mots, alors le serveur cherche chaque mot et dit lequel chaque colonne a trouvé. describe_schema montre la jointure, et execute_query somme transactions.amount par customer_id sous l'identité de la personne.">
+</picture>
+
+Voici comment l'agent trouve la colonne du chiffre d'affaires : un seul appel à
+`search_columns`, une recherche mot par mot quand aucune colonne ne porte tous les mots, puis
+`describe_schema` et `execute_query`. La réponse de la recherche est celle du serveur, dans le
+sandbox.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-4-modes-identite-dark.svg">
+  <img src="docs/images/comprendre-4-modes-identite-light.svg" alt="Trois questions choisissent le mode d'identité. Un échange de tokens donne jwt, une règle d'impersonation dans Trino donne impersonation, un serveur sur le poste d'une seule personne donne oauth2, sinon service. Les quatre modes suivent la même grille (MCP host, serveur, Trino), et service, un seul compte pour tous, est en orange.">
+</picture>
+
+Quatre modes d'identité, du plus sûr au plus simple. `jwt` est le mode par défaut. `service`
+donne le même compte à tous les appelants, et ne s'active que si vous le nommez.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-5-mesures-dark.svg">
+  <img src="docs/images/comprendre-5-mesures-light.svg" alt="Bonnes réponses : Mistral 62,5 % en 0.6.1 et 70 % en 0.7.0, Claude 93,3 % dans les deux versions. Tool calls par question : Mistral 5,8 puis 3,0, Claude 8,5 puis 4,9.">
+</picture>
+
+Les mêmes cinq questions métier, posées à Mistral et à Claude, en 0.6.1 puis en 0.7.0. L'outil
+de mesure et ses rapports sont dans [akko-sandbox](https://github.com/AKKO-p/akko-sandbox/tree/main/agent).
+
+La version interactive de ces cinq étapes est sur
+[akko-ai.com/docs/comprendre](https://akko-ai.com/docs/comprendre/) (aussi
+[en anglais](https://akko-ai.com/en/docs/understand/)).
+
+### Essayer en cinq minutes
+
+Le sandbox lance Keycloak, Trino, OPA et le serveur sur votre machine, avec les trois
+utilisateurs ci-dessus :
+
+```bash
+git clone https://github.com/AKKO-p/akko-sandbox.git
+cd akko-sandbox
+docker compose up -d --wait
+./demo.sh
+```
+
 ## Documentation
 
 - Le fonctionnement de bout en bout est décrit sur [akko-ai.com/docs/comment-ca-marche](https://akko-ai.com/docs/comment-ca-marche/) (aussi [en anglais](https://akko-ai.com/en/docs/how-it-works/)).

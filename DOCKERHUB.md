@@ -24,6 +24,43 @@ and a write anywhere in it is refused before Trino.
 
 Source, documentation and issues: **[github.com/AKKO-p/akko-mcp-trino](https://github.com/AKKO-p/akko-mcp-trino)**
 
+## Understand in five steps
+
+![Through a service account with broad rights, Trino sees mcp-svc and returns 10 customers with e-mails in clear. Through akko-mcp-trino, Trino sees carol_analyst and returns 5 European customers with e-mails masked.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-1-problem-light.svg)
+
+An agent connected through one service account with broad rights reaches Trino under that
+account, so the rules written for Carol no longer apply. akko-mcp-trino brings Carol's own
+identity to Trino.
+
+![alice_admin sees the 10 customers in clear, carol_analyst the 5 European customers with masked e-mails, and for dave_viewer the table is not found or not visible.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg)
+
+The same question from the three users of the sandbox. Trino answers each of them with the
+sandbox's OPA policy; the server copies no rule.
+
+![search_columns searches revenue customer, the server matches each word and says which one, then describe_schema and execute_query.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-3-step-by-step-light.svg)
+
+How the agent finds where the revenue is, tool call by tool call.
+
+![The four identity modes on the same grid: jwt by default, impersonation, oauth2 on a workstation, and service, one account for everyone, marked in amber.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-4-identity-modes-light.svg)
+
+Four identity modes, from the safest to the simplest, and three questions to pick yours.
+
+![Right answers: Mistral 62.5% on 0.6.1 and 70% on 0.7.0, Claude 93.3% on both. Tool calls per question: Mistral 5.8 then 3.0, Claude 8.5 then 4.9.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-5-measurements-light.svg)
+
+The same five business questions asked to Mistral and to Claude, on 0.6.1 and on 0.7.0. The
+interactive version of these steps is on
+[akko-ai.com/en/docs/understand](https://akko-ai.com/en/docs/understand/).
+
+Try it in five minutes with the [sandbox](https://github.com/AKKO-p/akko-sandbox): Keycloak,
+Trino, OPA and this image, with the three users above.
+
+```bash
+git clone https://github.com/AKKO-p/akko-sandbox.git
+cd akko-sandbox
+docker compose up -d --wait
+./demo.sh
+```
+
 ## Tags
 
 | Tag | Meaning |
