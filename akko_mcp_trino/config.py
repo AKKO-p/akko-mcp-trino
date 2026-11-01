@@ -21,6 +21,11 @@ DEFAULT_DESCRIBE_SCHEMA_COLUMNS = 1000
 # fails on a statement of thousands of branches.
 MAX_DESCRIBE_SCHEMA_TABLES = 100
 DEFAULT_SEARCH_MIN_LENGTH = 3
+# The most words a search of `search_columns` takes, and the longest word: each word adds
+# a few LIKE to each statement, so a text of thousands of words would make a statement too
+# long for Trino and slow every schema.
+DEFAULT_SEARCH_MAX_WORDS = 8
+DEFAULT_SEARCH_MAX_WORD_LENGTH = 64
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
 
 
@@ -116,10 +121,15 @@ class Config:
     # however wide, and the answer says when a page was shortened.
     describe_schema_tables: int = DEFAULT_DESCRIBE_SCHEMA_TABLES
     describe_schema_columns: int = DEFAULT_DESCRIBE_SCHEMA_COLUMNS
-    # `search_columns`: the shortest text it searches, so that a letter or two does not
-    # read every column, and the seconds of the call's budget it keeps in reserve, so that
-    # it stops early enough to answer what it searched rather than the call's own error.
+    # `search_columns`: the shortest word it searches (shorter words are ignored), so that
+    # a letter or two does not read every column, and the seconds of the call's budget it
+    # keeps in reserve, so that it stops early enough to answer what it searched rather
+    # than the call's own error.
     search_min_length: int = DEFAULT_SEARCH_MIN_LENGTH
+    # `search_columns`: the most words a text may hold, and the longest word; above either,
+    # the search is refused before Trino is asked anything.
+    search_max_words: int = DEFAULT_SEARCH_MAX_WORDS
+    search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
 
     def problems(self) -> list[str]:
@@ -157,6 +167,16 @@ class Config:
             found.append(
                 f"MCP_SEARCH_MIN_LENGTH={self.search_min_length}: "
                 "search_columns must ask for 1 character or more"
+            )
+        if self.search_max_words < 1:
+            found.append(
+                f"MCP_SEARCH_MAX_WORDS={self.search_max_words}: "
+                "search_columns must take 1 word or more"
+            )
+        if self.search_max_word_length < self.search_min_length:
+            found.append(
+                f"MCP_SEARCH_MAX_WORD_LENGTH={self.search_max_word_length} is below "
+                f"MCP_SEARCH_MIN_LENGTH={self.search_min_length}: no word could be searched"
             )
         if self.search_reserve_seconds < 0:
             found.append(
@@ -256,6 +276,12 @@ class Config:
             ),
             search_min_length=int(
                 os.environ.get("MCP_SEARCH_MIN_LENGTH", str(DEFAULT_SEARCH_MIN_LENGTH))
+            ),
+            search_max_words=int(
+                os.environ.get("MCP_SEARCH_MAX_WORDS", str(DEFAULT_SEARCH_MAX_WORDS))
+            ),
+            search_max_word_length=int(
+                os.environ.get("MCP_SEARCH_MAX_WORD_LENGTH", str(DEFAULT_SEARCH_MAX_WORD_LENGTH))
             ),
             search_reserve_seconds=float(
                 os.environ.get("MCP_SEARCH_RESERVE_SECONDS", str(DEFAULT_SEARCH_RESERVE_SECONDS))
