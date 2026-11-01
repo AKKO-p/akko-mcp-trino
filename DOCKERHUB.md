@@ -56,7 +56,10 @@ docker run -d --name akko-mcp-trino -p 3000:3000 -p 3001:3001 \
 Without token exchange: `-e TRINO_IDENTITY_MODE=impersonation -e TRINO_USER=mcp-service` and a
 password or client certificate for that account. One identity for every caller:
 `-e TRINO_IDENTITY_MODE=service -e TRINO_USER=mcp-reader -e TRINO_PASSWORD=...`. Upgrading from
-0.6 or 0.5: see [MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md).
+0.6: let the engine's policy read `system.jdbc` and `system.metadata` (the two new tools read them),
+keep `MCP_CALL_TIMEOUT_SECONDS` at 0 or above `MCP_SEARCH_RESERVE_SECONDS` (2 by default), and read a
+`truncated` listing on with `next_offset`. Upgrading from 0.6 or 0.5: see
+[MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md).
 
 The MCP endpoint is `http://localhost:3000/mcp` (streamable HTTP); the host sends the user's
 access token as `Authorization: Bearer <token>`. Then:

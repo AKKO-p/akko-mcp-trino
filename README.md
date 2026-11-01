@@ -33,7 +33,14 @@ and every call leaves one audit line.
 
 > **Upgrading from 0.6?** 0.7.0 removes and renames nothing: it adds
 > `search_columns` and `describe_schema`, pages the listings, and gives every
-> error a `kind`. One helper for plugins changes its signature.
+> error a `kind`. Let the engine's policy read `system.jdbc` and
+> `system.metadata`, which the two new tools read (0.6 advised refusing all of
+> `system`). Keep `MCP_CALL_TIMEOUT_SECONDS` at 0 or above
+> `MCP_SEARCH_RESERVE_SECONDS` (2 by default), or the server refuses to start.
+> A `truncated` listing is no longer the end: read on with `next_offset`.
+> Extension authors: one helper changes its signature, and in `oauth2` mode the
+> guards run on every request that is not discovery, no longer once at start.
+>
 > **From 0.5?** 0.6.0 changed the defaults: a verified caller is required, and
 > the `jwt` mode exchanges the caller's token instead of passing it on. See
 > [MIGRATING.md](MIGRATING.md) for both.
@@ -64,7 +71,7 @@ access: Trino decides for each user with the rules it already has, or, in
 ## Documentation
 
 - **How it works, end to end:** [akko-ai.com/en/docs/how-it-works](https://akko-ai.com/en/docs/how-it-works/) (also [en français](https://akko-ai.com/docs/comment-ca-marche/)).
-- **Guide, prerequisites, configuration, examples:** [akko-ai.com/docs/akko-mcp-trino](https://akko-ai.com/docs/akko-mcp-trino/) (also [in English](https://akko-ai.com/en/docs/akko-mcp-trino/)) and [akko-ai.com/docs/exemples](https://akko-ai.com/docs/exemples/).
+- **Guide, prerequisites, configuration, examples:** [akko-ai.com/en/docs/open-source-core](https://akko-ai.com/en/docs/open-source-core/) (also [en français](https://akko-ai.com/docs/coeur-open-source/)) and [akko-ai.com/en/docs/examples](https://akko-ai.com/en/docs/examples/).
 - **Reference, in this repository:** this README, [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md).
 
 ## Contents
@@ -134,7 +141,7 @@ refuse to start unless the door requires a valid token. An extension (see
 | | Supported | Tested |
 |---|---|---|
 | Python | 3.12, 3.13 | 3.12, 3.13 (CI) |
-| Trino | 351 and later; https with the JWT authenticator for `jwt`, with a password or certificate authenticator and impersonation rules for `impersonation`; http (local) or https for `service` | a recent release with the JWT and certificate authenticators, behind OPA and behind file-based rules, with row filters and column masks |
+| Trino | 351 and later; https with the JWT authenticator for `jwt`, with a password or certificate authenticator and impersonation rules for `impersonation`, with OAuth2 for `oauth2` (stdio); http (local) or https for `service` | a recent release with the JWT and certificate authenticators, behind OPA and behind file-based rules, with row filters and column masks |
 | Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA and file-based rules, with row filters and column masks |
 | Identity providers | any OIDC provider publishing a JWKS (the door); OAuth 2.0 Token Exchange, RFC 8693 (`jwt` mode) | Keycloak 26 (standard token exchange) |
 | MCP | protocol negotiated by the official `mcp` SDK 2.2 (initialize handshake revisions 2024-11-05 to 2025-11-25, and the stateless 2026-07-28 revision); transports `streamable-http`, `sse` and `stdio` | all three transports, official SDK client at its default revision, in CI |
@@ -422,7 +429,7 @@ The [examples](examples/README.md) folder has the details.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `search_columns` | `text`, `catalog`, `schema`, `cursor` (all but `text` optional) | `{"tables": [{"catalog", "schema", "table", "comment"}], "matches": [{"catalog", "schema", "table", "column", "type", "comment"}], "schemas_searched": n, "not_searched": [{"catalog", "schema", "reason"}], "complete": bool, "next_cursor": token or null}`: the tables and columns that hold every word of the text. When nothing holds every word, a page of the per-word pass adds `"partial": true` and gives each row its `"words"`. `"hint"`, a fixed sentence for the agent, comes on such a page (follow `next_cursor` while there is one) and when nothing was found at all |
+| `search_columns` | `text`, `catalog`, `schema`, `cursor` (all but `text` optional) | `{"tables": [{"catalog", "schema", "table", "comment"}], "matches": [{"catalog", "schema", "table", "column", "type", "comment"}], "schemas_searched": n, "not_searched": [{"catalog", "schema", "reason"}], "complete": bool, "next_cursor": token or null}`: the tables and columns that hold every word of the text. When nothing holds every word, a page of the per-word pass adds `"partial": true` and gives each row its `"words"`. `"hint"`, a fixed sentence for the agent, comes on such a page (follow `next_cursor` while there is one) and on a complete search that found nothing |
 | `list_catalogs` | `offset` (optional, 0 by default) | `{"catalogs": [...], "next_offset": n or null, "truncated": bool}`: one page of the catalogs Trino shows |
 | `list_schemas` | `catalog`, `offset` (optional) | `{"schemas": [...], "next_offset": n or null, "truncated": bool}`: one page of the schemas in that catalog |
 | `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
@@ -451,7 +458,9 @@ is not a table), and only `SHOW CATALOGS` and a `SHOW SCHEMAS`, `SHOW TABLES`
 or `SHOW COLUMNS` whose `FROM` gives the full name, catalog included, get
 through. The metadata tools refuse `system` as a catalog name too, and
 `list_catalogs` does not list it. So set `TRINO_CATALOG` to a data catalog;
-the engine's policy must refuse `system` too, the guard being a second line.
+the engine's policy must refuse `system` too, except reading `system.jdbc` and
+`system.metadata` (see [What read-only covers](#what-read-only-covers)), the
+guard being a second line.
 
 Results are capped at `TRINO_MAX_ROWS` (100 by default, 1 at least): one row
 more is read, so `truncated` says whether the answer was cut, and the rest of
@@ -636,7 +645,7 @@ could not already name:
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino refused the statement; fix that part of it |
 | `permission` | Trino or the identity provider refused the right; report it, do not retry |
-| `invalid_argument` | the server refused an argument (an identifier, an `offset`) before reaching Trino |
+| `invalid_argument` | the server refused an argument (an identifier, an `offset`, a cursor, a search text out of bounds) before reaching Trino |
 | `read_only` | the statement writes and the server is read-only |
 | `time_budget` | the call ran out of its time budget; narrow the request |
 | `unavailable` | Trino could not answer (internal error, connection lost): the statement is neither valid nor invalid, try again later |
