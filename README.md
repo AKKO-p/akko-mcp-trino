@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-621%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-717%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -20,7 +20,8 @@
 **Give your AI agents read-only access to Trino, and nothing more.**
 
 akko-mcp-trino is an [MCP](https://modelcontextprotocol.io) server for Trino.
-It lets an agent list catalogs, schemas and tables, describe a table, explain a
+It lets an agent find the tables and columns that hold what it is looking for,
+describe a schema or a table, list catalogs, schemas and tables, explain a
 query and run it, and it refuses every write it is sent: each statement is
 parsed, and a write anywhere in it is refused before Trino. By default every
 query runs as the user the agent acts for. The server verifies the user's
@@ -30,9 +31,82 @@ leaves the server. Trino's access control (OPA, Ranger, or Trino's own rules)
 then decides what that user may read. Results are bounded in rows and in time,
 and every call leaves one audit line.
 
-> **Upgrading from 0.5?** 0.6.0 changes the defaults: a verified caller is
-> required, and the `jwt` mode exchanges the caller's token instead of passing
-> it on. See [MIGRATING.md](MIGRATING.md).
+> **Upgrading from 0.6?** 0.7.0 removes and renames nothing: it adds
+> `search_columns` and `describe_schema`, pages the listings, and gives every
+> error a `kind`. Let the engine's policy read `system.jdbc` and
+> `system.metadata`, which the two new tools read (0.6 advised refusing all of
+> `system`). Keep `MCP_CALL_TIMEOUT_SECONDS` at 0 or above
+> `MCP_SEARCH_RESERVE_SECONDS` (2 by default), or the server refuses to start.
+> A `truncated` listing is no longer the end: read on with `next_offset`.
+> Extension authors: one helper changes its signature, and in `oauth2` mode the
+> guards run on every request that is not discovery, no longer once at start.
+>
+> **From 0.5?** 0.6.0 changed the defaults: a verified caller is required, and
+> the `jwt` mode exchanges the caller's token instead of passing it on. See
+> [MIGRATING.md](MIGRATING.md) for both.
+
+## Understand in five steps
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-1-problem-dark.svg">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-1-problem-light.svg" alt="Carol, an analyst, asks for the list of customers. In an illustrative setup with a service account with broad rights, Trino sees mcp-svc and returns 10 customers with e-mails in clear. With akko-mcp-trino in its default jwt mode, Trino sees carol_analyst and returns 5 European customers with e-mails masked, as in the sandbox.">
+</picture>
+
+An agent connected through one service account with broad rights reaches Trino under that
+account, so the rules written for Carol no longer apply. The left panel is an illustration: the
+sandbox's policy would refuse such an account. akko-mcp-trino brings Carol's own identity to Trino,
+and the rules Trino already has do the rest.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-dark.svg">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg" alt="The same query by three sandbox users, through the same MCP client. alice_admin gets the 10 customers in clear. carol_analyst gets the 5 European customers with masked e-mails. dave_viewer is refused by Trino: Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.">
+</picture>
+
+The same query from the three users of the sandbox, through the same MCP client and the same
+server. Trino answers each of them with the sandbox's OPA policy; the server copies no rule.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-3-step-by-step-dark.svg">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-3-step-by-step-light.svg" alt="A real trial of Mistral on 0.7.0, in six steps. It asks which customer segment holds the largest total account balance, searches with four words and gets matches word by word, joins on a column that does not exist, reads the server's hint, reads the columns of customers with describe_table, fixes the join and gets business, 17620.75.">
+</picture>
+
+A real trial, tool call by tool call: Mistral on 0.7.0 looks for the segment with the largest
+balance. The search matches word by word, the error on a wrong join names the table to read, and
+the agent fixes its join. Every tool answer shown is the server's, replayed in the sandbox.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-4-identity-modes-dark.svg">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-4-identity-modes-light.svg" alt="Three questions pick an identity mode: token exchange gives jwt, a Trino impersonation rule gives impersonation, a server on one person's machine with Trino's OAuth2 login gives oauth2, otherwise service. The four modes are drawn on the same grid of MCP host, server and Trino; service, one account for everyone, is marked in amber.">
+</picture>
+
+Four identity modes, from the safest to the simplest. `jwt` is the default; `service` gives
+every caller the same account and is used only when you name it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-5-measurements-dark.svg">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-5-measurements-light.svg" alt="Mistral answers right 62.5% of the time on 0.6.1 and 70% on 0.7.0, Claude 93.3% on both. Mistral goes from 5.8 to 3.0 tool calls per question, Claude from 8.5 to 4.9. Mistral varies more between runs than the gap between versions, and input tokens rise by about 41%.">
+</picture>
+
+The same five business questions asked to Mistral and to Claude, on 0.6.1 and on 0.7.0. Mistral
+varies more from one run to the next than the gap between the versions, and 0.7.0 sends about 41%
+more input tokens per question, because its tool descriptions are longer. The harness and its
+reports are in [akko-sandbox](https://github.com/AKKO-p/akko-sandbox/tree/main/agent/reports).
+
+The interactive version of these five steps is on
+[akko-ai.com/en/docs/understand](https://akko-ai.com/en/docs/understand/) (also
+[en français](https://akko-ai.com/docs/comprendre/)).
+
+### Try it in five minutes
+
+The sandbox starts Keycloak, Trino, OPA and the server on your machine, with the three users
+above:
+
+```bash
+git clone https://github.com/AKKO-p/akko-sandbox.git
+cd akko-sandbox
+docker compose up -d --wait
+./demo.sh
+```
 
 ## Why
 
@@ -55,12 +129,12 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 621 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
+- **Small and proven.** 717 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
 
 ## Documentation
 
 - **How it works, end to end:** [akko-ai.com/en/docs/how-it-works](https://akko-ai.com/en/docs/how-it-works/) (also [en français](https://akko-ai.com/docs/comment-ca-marche/)).
-- **Guide, prerequisites, configuration, examples:** [akko-ai.com/docs/akko-mcp-trino](https://akko-ai.com/docs/akko-mcp-trino/) (also [in English](https://akko-ai.com/en/docs/akko-mcp-trino/)) and [akko-ai.com/docs/exemples](https://akko-ai.com/docs/exemples/).
+- **Guide, prerequisites, configuration, examples:** [akko-ai.com/en/docs/open-source-core](https://akko-ai.com/en/docs/open-source-core/) (also [en français](https://akko-ai.com/docs/coeur-open-source/)) and [akko-ai.com/en/docs/examples](https://akko-ai.com/en/docs/examples/).
 - **Reference, in this repository:** this README, [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md).
 
 ## Contents
@@ -130,7 +204,7 @@ refuse to start unless the door requires a valid token. An extension (see
 | | Supported | Tested |
 |---|---|---|
 | Python | 3.12, 3.13 | 3.12, 3.13 (CI) |
-| Trino | 351 and later; https with the JWT authenticator for `jwt`, with a password or certificate authenticator and impersonation rules for `impersonation`; http (local) or https for `service` | a recent release with the JWT and certificate authenticators, behind OPA and behind file-based rules, with row filters and column masks |
+| Trino | 351 and later; https with the JWT authenticator for `jwt`, with a password or certificate authenticator and impersonation rules for `impersonation`, with OAuth2 for `oauth2` (stdio); http (local) or https for `service` | a recent release with the JWT and certificate authenticators, behind OPA and behind file-based rules, with row filters and column masks |
 | Policy engines | OPA (`trino-opa`), Ranger (Trino plugin), Trino file-based access control | OPA and file-based rules, with row filters and column masks |
 | Identity providers | any OIDC provider publishing a JWKS (the door); OAuth 2.0 Token Exchange, RFC 8693 (`jwt` mode) | Keycloak 26 (standard token exchange) |
 | MCP | protocol negotiated by the official `mcp` SDK 2.2 (initialize handshake revisions 2024-11-05 to 2025-11-25, and the stateless 2026-07-28 revision); transports `streamable-http`, `sse` and `stdio` | all three transports, official SDK client at its default revision, in CI |
@@ -310,8 +384,13 @@ with memory caching or optional `keyring`. `--check` does not log in.
 ### Container
 
 A [Dockerfile](Dockerfile) ships with the repository (non-root, health check,
-OCI labels). Run it with the same environment variables, publishing ports
-`3000` (MCP) and `3001` (health).
+OCI labels). The image is published for `linux/amd64` and `linux/arm64` as
+`akkoai/akko-mcp-trino` and `ghcr.io/akko-p/akko-mcp-trino`. Run it with the
+same environment variables, publishing ports `3000` (MCP) and `3001` (health):
+
+```bash
+docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
+```
 
 ## Connect an MCP host
 
@@ -413,7 +492,7 @@ The [examples](examples/README.md) folder has the details.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `search_columns` | `text`, `catalog`, `schema`, `cursor` (all but `text` optional) | `{"tables": [{"catalog", "schema", "table", "comment"}], "matches": [{"catalog", "schema", "table", "column", "type", "comment"}], "schemas_searched": n, "not_searched": [{"catalog", "schema", "reason"}], "complete": bool, "next_cursor": token or null}`: the tables and columns that hold every word of the text. When nothing holds every word, a page of the per-word pass adds `"partial": true` and gives each row its `"words"`. `"hint"`, a fixed sentence for the agent, comes on such a page (follow `next_cursor` while there is one) and when nothing was found at all |
+| `search_columns` | `text`, `catalog`, `schema`, `cursor` (all but `text` optional) | `{"tables": [{"catalog", "schema", "table", "comment"}], "matches": [{"catalog", "schema", "table", "column", "type", "comment"}], "schemas_searched": n, "not_searched": [{"catalog", "schema", "reason"}], "complete": bool, "next_cursor": token or null}`: the tables and columns that hold every word of the text. When nothing holds every word, a page of the per-word pass adds `"partial": true` and gives each row its `"words"`. `"hint"`, a fixed sentence for the agent, comes on such a page (follow `next_cursor` while there is one) and on a complete search that found nothing |
 | `list_catalogs` | `offset` (optional, 0 by default) | `{"catalogs": [...], "next_offset": n or null, "truncated": bool}`: one page of the catalogs Trino shows |
 | `list_schemas` | `catalog`, `offset` (optional) | `{"schemas": [...], "next_offset": n or null, "truncated": bool}`: one page of the schemas in that catalog |
 | `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
@@ -442,7 +521,9 @@ is not a table), and only `SHOW CATALOGS` and a `SHOW SCHEMAS`, `SHOW TABLES`
 or `SHOW COLUMNS` whose `FROM` gives the full name, catalog included, get
 through. The metadata tools refuse `system` as a catalog name too, and
 `list_catalogs` does not list it. So set `TRINO_CATALOG` to a data catalog;
-the engine's policy must refuse `system` too, the guard being a second line.
+the engine's policy must refuse `system` too, except reading `system.jdbc` and
+`system.metadata` (see [What read-only covers](#what-read-only-covers)), the
+guard being a second line.
 
 Results are capped at `TRINO_MAX_ROWS` (100 by default, 1 at least): one row
 more is read, so `truncated` says whether the answer was cut, and the rest of
@@ -560,8 +641,9 @@ finish, it says what it left and its cursor resumes it, never complete. A page o
 the per-word pass adds `hint`, a fixed sentence for the agent: while the page has a
 `next_cursor`, that the pass is not finished and to call again with it; on its last
 page, that these are partial matches, to pick the right one or search again with one
-word from a column or table name, then `describe_table`. A search that found nothing
-at all, for one word or for each word alone, adds the other fixed `hint`: search
+word from a column or table name, then `describe_table`. A complete search that found
+nothing at all, and the last page of a per-word pass that found nothing on any page,
+add the other fixed `hint`: search
 again with one word from a column or table name, never a value, or browse with
 `list_tables` and `describe_schema`. An agent should not conclude from an empty
 search that the data does not exist. A schema, or the schema list of a catalog, that
@@ -626,7 +708,7 @@ could not already name:
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino refused the statement; fix that part of it |
 | `permission` | Trino or the identity provider refused the right; report it, do not retry |
-| `invalid_argument` | the server refused an argument (an identifier, an `offset`) before reaching Trino |
+| `invalid_argument` | the server refused an argument (an identifier, an `offset`, a cursor, a search text out of bounds) before reaching Trino |
 | `read_only` | the statement writes and the server is read-only |
 | `time_budget` | the call ran out of its time budget; narrow the request |
 | `unavailable` | Trino could not answer (internal error, connection lost): the statement is neither valid nor invalid, try again later |
@@ -978,7 +1060,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 621 tests; line or branch coverage below 100 % fails the run
+pytest                        # 717 tests; line or branch coverage below 100 % fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start

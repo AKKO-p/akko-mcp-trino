@@ -7,6 +7,7 @@ we do.
 
 | Version | Supported |
 |---|---|
+| 0.7.x | yes |
 | 0.6.x | yes |
 | 0.5.x and earlier | no: `jwt` mode passes the caller's token on to Trino, and the defaults serve requests without a token. Upgrade with [MIGRATING.md](MIGRATING.md). |
 

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="608" viewBox="0 0 880 608" role="img" aria-labelledby="t d">
+<title id="t">An agent behind a broad service account</title>
+<desc id="d">Two side by side panels. In an illustrative setup with a service account with broad rights, Trino sees mcp-svc and returns 10 customers with e-mails in clear. With akko-mcp-trino in its default jwt mode, Trino sees carol_analyst and returns 5 European customers with e-mails masked, as in the sandbox.</desc>
+<style>
+text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'DejaVu Sans', sans-serif;fill:#e8ecf4}
+.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace}
+.mu{fill:#a6b0c3} .fa{fill:#7a859b} .ac{fill:#8f88ff} .am{fill:#e0a43a}
+.ok{fill:#4ade80} .no{fill:#f87171} .b{font-weight:600} .bb{font-weight:700}
+.ln{fill:none;stroke:#a6b0c3;stroke-width:1.5} .dash{stroke-dasharray:4 4}
+.grid{stroke:#24304a;stroke-width:1}
+</style>
+<path d="M28.5 0.5H851.5A28 28 0 0 1 879.5 28.5V593.5A14 14 0 0 1 865.5 607.5H14.5A14 14 0 0 1 0.5 593.5V28.5A28 28 0 0 1 28.5 0.5Z" fill="#131b2c" stroke="#24304a"/>
+<rect x="260" y="-20" width="360" height="38" rx="19" fill="#0d1117" stroke="#24304a"/>
+<text x="440.0" y="64" font-size="21" text-anchor="middle" class="bb" xml:space="preserve">Carol, an analyst, asks for the list of customers</text>
+<rect x="32" y="92" width="396" height="440" rx="18" fill="#0c1220" stroke="#f87171" stroke-width="1.2"/>
+<text x="230.0" y="124" font-size="16" text-anchor="middle" class="bb no" xml:space="preserve">With a service account with broad rights</text>
+<text x="230.0" y="146" font-size="13" text-anchor="middle" class="am b" xml:space="preserve">This setup is an illustration, without akko-mcp-trino.</text>
+<rect x="80.0" y="162" width="300" height="54" rx="12" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
+<text x="230.0" y="186.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Carol</text>
+<text x="230.0" y="205.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">carol_analyst</text>
+<path class="ln" d="M230.0 216V251"/>
+<path class="ln" d="M225.0 245L230.0 251L235.0 245"/>
+<text x="242.0" y="239" font-size="13" class="mu" xml:space="preserve">her question</text>
+<rect x="80.0" y="252" width="300" height="54" rx="12" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
+<text x="230.0" y="276.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">AI agent and MCP server</text>
+<text x="230.0" y="295.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">connected as mcp-svc</text>
+<path class="ln" d="M230.0 306V341"/>
+<path class="ln" d="M225.0 335L230.0 341L235.0 335"/>
+<text x="242.0" y="329" font-size="13" class="mu" xml:space="preserve">query as mcp-svc</text>
+<rect x="80.0" y="342" width="300" height="54" rx="12" fill="#2c1414" stroke="#f87171" stroke-width="1"/>
+<text x="230.0" y="366.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Trino, the query engine</text>
+<text x="230.0" y="385.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">sees mcp-svc</text>
+<path class="ln" d="M230.0 396V431"/>
+<path class="ln" d="M225.0 425L230.0 431L235.0 425"/>
+<text x="242.0" y="419" font-size="13" class="mu" xml:space="preserve">answer</text>
+<rect x="80.0" y="432" width="300" height="80" rx="12" fill="#2c1414"/>
+<text x="230.0" y="466" font-size="17" text-anchor="middle" class="bb no" xml:space="preserve">10 customers, e-mails in clear</text>
+<text x="230.0" y="492" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">Her rules no longer apply</text>
+<rect x="452" y="92" width="396" height="440" rx="18" fill="#0c1220" stroke="#4ade80" stroke-width="1.2"/>
+<text x="650.0" y="124" font-size="16" text-anchor="middle" class="bb ok" xml:space="preserve">With akko-mcp-trino (jwt, the default)</text>
+<text x="650.0" y="146" font-size="13" text-anchor="middle" class="mu" xml:space="preserve">The sandbox's real answer</text>
+<rect x="500.0" y="162" width="300" height="54" rx="12" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
+<text x="650.0" y="186.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Carol</text>
+<text x="650.0" y="205.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">carol_analyst</text>
+<path class="ln" d="M650.0 216V251"/>
+<path class="ln" d="M645.0 245L650.0 251L655.0 245"/>
+<text x="662.0" y="239" font-size="13" class="mu" xml:space="preserve">her question and her token</text>
+<rect x="500.0" y="252" width="300" height="54" rx="12" fill="#1d1d44" stroke="#8f88ff" stroke-width="1"/>
+<text x="650.0" y="276.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">AI agent and akko-mcp-trino</text>
+<text x="650.0" y="295.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">verifies Carol's token</text>
+<path class="ln" d="M650.0 306V341"/>
+<path class="ln" d="M645.0 335L650.0 341L655.0 335"/>
+<text x="662.0" y="329" font-size="13" class="mu" xml:space="preserve">query as carol_analyst</text>
+<rect x="500.0" y="342" width="300" height="54" rx="12" fill="#10261a" stroke="#4ade80" stroke-width="1"/>
+<text x="650.0" y="366.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Trino, the query engine</text>
+<text x="650.0" y="385.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">sees carol_analyst</text>
+<path class="ln" d="M650.0 396V431"/>
+<path class="ln" d="M645.0 425L650.0 431L655.0 425"/>
+<text x="662.0" y="419" font-size="13" class="mu" xml:space="preserve">answer</text>
+<rect x="500.0" y="432" width="300" height="80" rx="12" fill="#10261a"/>
+<text x="650.0" y="466" font-size="17" text-anchor="middle" class="bb ok" xml:space="preserve">5 European customers, e-mails masked</text>
+<text x="650.0" y="492" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">Trino applies her rules</text>
+<text x="440.0" y="566" font-size="15" text-anchor="middle" class="b" xml:space="preserve">The rights are already written in Trino.</text>
+<text x="440.0" y="588" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">The only real work is to bring the right identity to it.</text>
+</svg>

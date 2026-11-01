@@ -1,4 +1,9 @@
-# The sdist carries the package, its tests and its examples.
+# The sdist carries the package, its tests, its examples and the images its README shows.
 prune dist
 prune .venv
 include image-requirements.txt
+include CHANGELOG.md MIGRATING.md pytest.ini
+include tests/*.py
+graft examples
+graft docs/images
+global-exclude __pycache__ *.py[cod]
