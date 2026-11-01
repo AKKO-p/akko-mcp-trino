@@ -25,7 +25,7 @@ text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
 <circle cx="62" cy="1100" r="17" fill="#8f88ff"/>
 <text x="62" y="1105.5" font-size="15" text-anchor="middle" class="bb" style="fill:#0c1220">6</text>
 <text x="440.0" y="64" font-size="21" text-anchor="middle" class="bb" xml:space="preserve">Comment l’agent trouve la bonne colonne</text>
-<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Un vrai essai, tool call par tool call (Mistral, 0.7.0). Chaque réponse montrée est celle du serveur.</text>
+<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Un vrai essai, tool call par tool call (Mistral, 0.7.0). Chaque réponse de tool montrée est celle du serveur.</text>
 <rect x="104" y="120" width="101.4" height="24" rx="8" fill="#1d1d44"/>
 <text x="114" y="137" font-size="13" class="ac b" xml:space="preserve">la personne</text>
 <text x="104" y="168" font-size="18" class="bb" xml:space="preserve">« Quel segment de clients détient le plus gros solde total ? »</text>

@@ -72,7 +72,7 @@ server. Trino answers each of them with the sandbox's OPA policy; the server cop
 
 A real trial, tool call by tool call: Mistral on 0.7.0 looks for the segment with the largest
 balance. The search matches word by word, the error on a wrong join names the table to read, and
-the agent fixes its join. Every answer shown is the server's, replayed in the sandbox.
+the agent fixes its join. Every tool answer shown is the server's, replayed in the sandbox.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-4-identity-modes-dark.svg">

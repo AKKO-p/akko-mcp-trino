@@ -62,7 +62,7 @@ règle.
 
 Un vrai essai, tool call par tool call : Mistral en 0.7.0 cherche le segment qui détient le
 plus gros solde. La recherche trouve les mots un par un, l'erreur sur une mauvaise jointure nomme
-la table à lire, et l'agent corrige sa jointure. Chaque réponse montrée est celle du serveur,
+la table à lire, et l'agent corrige sa jointure. Chaque réponse de tool montrée est celle du serveur,
 rejouée dans le sandbox.
 
 <picture>

@@ -39,7 +39,7 @@ sandbox's OPA policy; the server copies no rule.
 
 ![A real trial of Mistral on 0.7.0: a search by four words matched word by word, a wrong join, the server's hint, describe_table, the fixed join and the answer.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-3-step-by-step-light.svg)
 
-A real trial, tool call by tool call: every answer shown is the server's.
+A real trial, tool call by tool call: every tool answer shown is the server's.
 
 ![The four identity modes on the same grid: jwt by default, impersonation, oauth2 on a workstation with Trino's OAuth2 login, and service, one account for everyone, marked in amber.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-4-identity-modes-light.svg)
 
