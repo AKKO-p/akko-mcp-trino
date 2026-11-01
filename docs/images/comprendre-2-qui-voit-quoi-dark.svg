@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="610" viewBox="0 0 880 610" role="img" aria-labelledby="t d">
+<title id="t">Qui voit quoi</title>
+<desc id="d">La même question posée par trois utilisateurs du sandbox. alice_admin voit les 10 clients en clair. carol_analyst voit les 5 clients européens, e-mails masqués. Pour dave_viewer, la table des clients est introuvable ou invisible.</desc>
+<style>
+text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'DejaVu Sans', sans-serif;fill:#e8ecf4}
+.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace}
+.mu{fill:#a6b0c3} .fa{fill:#7a859b} .ac{fill:#8f88ff} .am{fill:#e0a43a}
+.ok{fill:#4ade80} .no{fill:#f87171} .b{font-weight:600} .bb{font-weight:700}
+.ln{fill:none;stroke:#a6b0c3;stroke-width:1.5} .dash{stroke-dasharray:4 4}
+.grid{stroke:#24304a;stroke-width:1}
+</style>
+<path d="M28.5 0.5H851.5A28 28 0 0 1 879.5 28.5V595.5A14 14 0 0 1 865.5 609.5H14.5A14 14 0 0 1 0.5 595.5V28.5A28 28 0 0 1 28.5 0.5Z" fill="#131b2c" stroke="#24304a"/>
+<rect x="260" y="-20" width="360" height="38" rx="19" fill="#0d1117" stroke="#24304a"/>
+<rect x="32" y="114" width="448" height="404" rx="14" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
+<rect x="496" y="114" width="352" height="252" rx="14" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
+<rect x="496" y="382" width="352" height="136" rx="14" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
+<text x="440.0" y="64" font-size="21" text-anchor="middle" class="bb" xml:space="preserve">Qui voit quoi ?</text>
+<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">La même question, la liste des clients, par le même agent et le même serveur.</text>
+<text x="50" y="146" font-size="16" class="m bb" xml:space="preserve">alice_admin</text>
+<rect x="167.8" y="131" width="52.0" height="21" rx="10.5" fill="#1d1d44"/>
+<text x="193.8" y="146" font-size="12" text-anchor="middle" class="m ac" xml:space="preserve">admin</text>
+<text x="50" y="170" font-size="14" class="mu" xml:space="preserve">Toutes les lignes, toutes les colonnes en clair.</text>
+<text x="50" y="200" font-size="12" class="m fa" xml:space="preserve">id</text>
+<text x="80" y="200" font-size="12" class="m fa" xml:space="preserve">full_name</text>
+<text x="204" y="200" font-size="12" class="m fa" xml:space="preserve">email</text>
+<text x="420" y="200" font-size="12" class="m fa" xml:space="preserve">country</text>
+<path class="grid" d="M44 209H468"/>
+<text x="50" y="230" font-size="12.5" class="m" xml:space="preserve">1</text>
+<text x="80" y="230" font-size="14" xml:space="preserve">Lena Vogel</text>
+<text x="204" y="230" font-size="12.5" class="m" xml:space="preserve">lena.vogel@example.com</text>
+<text x="420" y="230" font-size="12.5" class="m" xml:space="preserve">DE</text>
+<text x="50" y="260" font-size="12.5" class="m" xml:space="preserve">2</text>
+<text x="80" y="260" font-size="14" xml:space="preserve">Hugo Martin</text>
+<text x="204" y="260" font-size="12.5" class="m" xml:space="preserve">hugo.martin@example.com</text>
+<text x="420" y="260" font-size="12.5" class="m" xml:space="preserve">FR</text>
+<text x="50" y="290" font-size="12.5" class="m" xml:space="preserve">3</text>
+<text x="80" y="290" font-size="14" xml:space="preserve">Sofia Ruiz</text>
+<text x="204" y="290" font-size="12.5" class="m" xml:space="preserve">sofia.ruiz@example.org</text>
+<text x="420" y="290" font-size="12.5" class="m" xml:space="preserve">ES</text>
+<text x="50" y="320" font-size="12.5" class="m" xml:space="preserve">4</text>
+<text x="80" y="320" font-size="14" xml:space="preserve">Noah Bennett</text>
+<text x="204" y="320" font-size="12.5" class="m" xml:space="preserve">noah.bennett@example.com</text>
+<text x="420" y="320" font-size="12.5" class="m" xml:space="preserve">US</text>
+<text x="50" y="350" font-size="12.5" class="m" xml:space="preserve">5</text>
+<text x="80" y="350" font-size="14" xml:space="preserve">Giulia Conti</text>
+<text x="204" y="350" font-size="12.5" class="m" xml:space="preserve">giulia.conti@example.org</text>
+<text x="420" y="350" font-size="12.5" class="m" xml:space="preserve">IT</text>
+<text x="50" y="380" font-size="12.5" class="m" xml:space="preserve">6</text>
+<text x="80" y="380" font-size="14" xml:space="preserve">Kenji Sato</text>
+<text x="204" y="380" font-size="12.5" class="m" xml:space="preserve">kenji.sato@example.com</text>
+<text x="420" y="380" font-size="12.5" class="m" xml:space="preserve">JP</text>
+<text x="50" y="410" font-size="12.5" class="m" xml:space="preserve">7</text>
+<text x="80" y="410" font-size="14" xml:space="preserve">Emma de Vries</text>
+<text x="204" y="410" font-size="12.5" class="m" xml:space="preserve">emma.devries@example.org</text>
+<text x="420" y="410" font-size="12.5" class="m" xml:space="preserve">NL</text>
+<text x="50" y="440" font-size="12.5" class="m" xml:space="preserve">8</text>
+<text x="80" y="440" font-size="14" xml:space="preserve">Lucas Almeida</text>
+<text x="204" y="440" font-size="12.5" class="m" xml:space="preserve">lucas.almeida@example.com</text>
+<text x="420" y="440" font-size="12.5" class="m" xml:space="preserve">BR</text>
+<text x="50" y="470" font-size="12.5" class="m" xml:space="preserve">9</text>
+<text x="80" y="470" font-size="14" xml:space="preserve">Olivia Clarke</text>
+<text x="204" y="470" font-size="12.5" class="m" xml:space="preserve">olivia.clarke@example.org</text>
+<text x="420" y="470" font-size="12.5" class="m" xml:space="preserve">GB</text>
+<text x="50" y="500" font-size="12.5" class="m" xml:space="preserve">10</text>
+<text x="80" y="500" font-size="14" xml:space="preserve">Chloe Tremblay</text>
+<text x="204" y="500" font-size="12.5" class="m" xml:space="preserve">chloe.tremblay@example.com</text>
+<text x="420" y="500" font-size="12.5" class="m" xml:space="preserve">CA</text>
+<text x="514" y="146" font-size="16" class="m bb" xml:space="preserve">carol_analyst</text>
+<rect x="651.4" y="131" width="67.19999999999999" height="21" rx="10.5" fill="#1d1d44"/>
+<text x="685.0" y="146" font-size="12" text-anchor="middle" class="m ac" xml:space="preserve">analyst</text>
+<text x="514" y="170" font-size="14" class="mu" xml:space="preserve">Les clients européens seulement (row filter),</text>
+<text x="514" y="188" font-size="14" class="mu" xml:space="preserve">e-mails masqués (column mask).</text>
+<text x="514" y="218" font-size="12" class="m fa" xml:space="preserve">id</text>
+<text x="544" y="218" font-size="12" class="m fa" xml:space="preserve">full_name</text>
+<text x="654" y="218" font-size="12" class="m fa" xml:space="preserve">email</text>
+<text x="780" y="218" font-size="12" class="m fa" xml:space="preserve">country</text>
+<path class="grid" d="M508 227H836"/>
+<text x="514" y="244" font-size="12.5" class="m" xml:space="preserve">1</text>
+<text x="544" y="244" font-size="14" xml:space="preserve">Lena Vogel</text>
+<text x="654" y="244" font-size="12.5" class="m am" xml:space="preserve">***@example.com</text>
+<text x="780" y="244" font-size="12.5" class="m" xml:space="preserve">DE</text>
+<text x="514" y="270" font-size="12.5" class="m" xml:space="preserve">2</text>
+<text x="544" y="270" font-size="14" xml:space="preserve">Hugo Martin</text>
+<text x="654" y="270" font-size="12.5" class="m am" xml:space="preserve">***@example.com</text>
+<text x="780" y="270" font-size="12.5" class="m" xml:space="preserve">FR</text>
+<text x="514" y="296" font-size="12.5" class="m" xml:space="preserve">3</text>
+<text x="544" y="296" font-size="14" xml:space="preserve">Sofia Ruiz</text>
+<text x="654" y="296" font-size="12.5" class="m am" xml:space="preserve">***@example.org</text>
+<text x="780" y="296" font-size="12.5" class="m" xml:space="preserve">ES</text>
+<text x="514" y="322" font-size="12.5" class="m" xml:space="preserve">5</text>
+<text x="544" y="322" font-size="14" xml:space="preserve">Giulia Conti</text>
+<text x="654" y="322" font-size="12.5" class="m am" xml:space="preserve">***@example.org</text>
+<text x="780" y="322" font-size="12.5" class="m" xml:space="preserve">IT</text>
+<text x="514" y="348" font-size="12.5" class="m" xml:space="preserve">7</text>
+<text x="544" y="348" font-size="14" xml:space="preserve">Emma de Vries</text>
+<text x="654" y="348" font-size="12.5" class="m am" xml:space="preserve">***@example.org</text>
+<text x="780" y="348" font-size="12.5" class="m" xml:space="preserve">NL</text>
+<text x="514" y="414" font-size="16" class="m bb" xml:space="preserve">dave_viewer</text>
+<rect x="631.8" y="399" width="59.599999999999994" height="21" rx="10.5" fill="#1d1d44"/>
+<text x="661.5999999999999" y="414" font-size="12" text-anchor="middle" class="m ac" xml:space="preserve">viewer</text>
+<text x="514" y="438" font-size="14" class="mu" xml:space="preserve">La table customers lui est cachée.</text>
+<rect x="514" y="454" width="316" height="56" rx="10" fill="#2c1414"/>
+<text x="672.0" y="478" font-size="13" text-anchor="middle" class="m no" xml:space="preserve">Table demo.crm.customers</text>
+<text x="672.0" y="497" font-size="13" text-anchor="middle" class="m no" xml:space="preserve">not found or not visible</text>
+<text x="440.0" y="560" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">Ces trois réponses viennent de Trino, avec la policy OPA du sandbox.</text>
+<text x="440.0" y="582" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">Le serveur MCP ne recopie aucune règle : il transmet seulement l’identité de chacun.</text>
+</svg>

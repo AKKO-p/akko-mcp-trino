@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="960" viewBox="0 0 880 960" role="img" aria-labelledby="t d">
+<title id="t">The four identity modes</title>
+<desc id="d">Three questions pick the mode, then the four modes drawn on the same grid of MCP host, server and Trino: jwt, the default, impersonation, oauth2 on a workstation, and service, in amber, one account for all.</desc>
+<style>
+text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'DejaVu Sans', sans-serif;fill:#0f1b2d}
+.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace}
+.mu{fill:#4d5a70} .fa{fill:#7d8798} .ac{fill:#4a42d4} .am{fill:#a16207}
+.ok{fill:#15803d} .no{fill:#b42318} .b{font-weight:600} .bb{font-weight:700}
+.ln{fill:none;stroke:#4d5a70;stroke-width:1.5} .dash{stroke-dasharray:4 4}
+.grid{stroke:#e3e6ec;stroke-width:1}
+</style>
+<path d="M28.5 0.5H851.5A28 28 0 0 1 879.5 28.5V945.5A14 14 0 0 1 865.5 959.5H14.5A14 14 0 0 1 0.5 945.5V28.5A28 28 0 0 1 28.5 0.5Z" fill="#f6f7f9" stroke="#e3e6ec"/>
+<rect x="260" y="-20" width="360" height="38" rx="19" fill="#ffffff" stroke="#e3e6ec"/>
+<text x="440.0" y="64" font-size="21" text-anchor="middle" class="bb" xml:space="preserve">Which identity mode for you?</text>
+<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Answer in order. The four modes are drawn on the same grid, so you see what changes.</text>
+<rect x="32" y="116" width="816" height="46" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="50" y="144.0" font-size="15" class="bb fa" xml:space="preserve">1.</text>
+<text x="74" y="144.0" font-size="15" xml:space="preserve">Can your identity provider exchange tokens (RFC 8693, like Keycloak 26)?</text>
+<rect x="735.6" y="125.0" width="94.39999999999999" height="28" rx="14" fill="#ecebfb"/>
+<text x="782.8000000000001" y="144.0" font-size="13.5" text-anchor="middle" class="ac" xml:space="preserve">Yes → <tspan class="m b">jwt</tspan></text>
+<path class="ln" d="M56 164V185"/>
+<path class="ln" d="M51 179L56 185L61 179"/>
+<text x="68" y="180" font-size="12.5" class="mu" xml:space="preserve">No</text>
+<rect x="32" y="188" width="816" height="46" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="50" y="216.0" font-size="15" class="bb fa" xml:space="preserve">2.</text>
+<text x="74" y="216.0" font-size="15" xml:space="preserve">Can Trino let one service account act on behalf of users?</text>
+<rect x="659.6" y="197.0" width="170.4" height="28" rx="14" fill="#ecebfb"/>
+<text x="744.8000000000001" y="216.0" font-size="13.5" text-anchor="middle" class="ac" xml:space="preserve">Yes → <tspan class="m b">impersonation</tspan></text>
+<path class="ln" d="M56 236V257"/>
+<path class="ln" d="M51 251L56 257L61 251"/>
+<text x="68" y="252" font-size="12.5" class="mu" xml:space="preserve">No</text>
+<rect x="32" y="260" width="816" height="66" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="50" y="288.0" font-size="15" class="bb fa" xml:space="preserve">3.</text>
+<text x="74" y="288.0" font-size="15" xml:space="preserve">Does the server run on one person's machine (Claude Desktop,</text>
+<text x="74" y="308.0" font-size="15" xml:space="preserve">Cursor)?</text>
+<rect x="712.8" y="279.0" width="117.19999999999999" height="28" rx="14" fill="#fbf3e3"/>
+<text x="771.4" y="298.0" font-size="13.5" text-anchor="middle" class="am" xml:space="preserve">No → <tspan class="m b">service</tspan></text>
+<rect x="585.5999999999999" y="279.0" width="117.19999999999999" height="28" rx="14" fill="#ecebfb"/>
+<text x="644.1999999999999" y="298.0" font-size="13.5" text-anchor="middle" class="ac" xml:space="preserve">Yes → <tspan class="m b">oauth2</tspan></text>
+<rect x="32" y="348" width="392" height="282" rx="14" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="50" y="380" font-size="18" class="m bb" xml:space="preserve">jwt</text>
+<rect x="94.4" y="364" width="70.4" height="22" rx="11" fill="#ecebfb"/>
+<text x="129.60000000000002" y="379" font-size="12" text-anchor="middle" class="m ac" xml:space="preserve">default</text>
+<text x="50" y="406" font-size="14.5" class="mu" xml:space="preserve">Trino sees <tspan class="b" style="fill:#0f1b2d">the user</tspan></text>
+<rect x="50.4" y="468.0" width="86.39999999999999" height="38.4" rx="8" fill="#f6f7f9" stroke="#e3e6ec" stroke-width="1"/>
+<text x="93.6" y="491.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">MCP host</text>
+<rect x="184.8" y="468.0" width="86.39999999999999" height="38.4" rx="8" fill="#ecebfb" stroke="#4a42d4" stroke-width="1"/>
+<text x="228.0" y="491.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">server</text>
+<rect x="319.2" y="468.0" width="86.39999999999999" height="38.4" rx="8" fill="#f6f7f9" stroke="#0f1b2d" stroke-width="1"/>
+<text x="362.4" y="491.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">Trino</text>
+<path class="ln" d="M273.6 487.2H317.0"/>
+<path class="ln" d="M311.0 482.2L317.0 487.2L311.0 492.2"/>
+<path class="ln" d="M139.2 487.2H182.6"/>
+<path class="ln" d="M176.6 482.2L182.6 487.2L176.6 492.2"/>
+<rect x="199.2" y="432.0" width="57.599999999999994" height="24.0" rx="8" fill="#f6f7f9" stroke="#e3e6ec" stroke-width="1"/>
+<text x="228.0" y="448.3" font-size="12" text-anchor="middle" xml:space="preserve">IdP</text>
+<path class="ln dash" d="M228.0 456.0V468.0"/>
+<text x="160.8" y="528.0" font-size="12" text-anchor="middle" class="mu" xml:space="preserve">user's token</text>
+<text x="295.2" y="528.0" font-size="12" text-anchor="middle" class="mu" xml:space="preserve">exchanged token</text>
+<text x="326.4" y="447.6" font-size="12" text-anchor="middle" class="fa" xml:space="preserve">token exchange</text>
+<text x="50" y="572" font-size="13.5" class="mu" xml:space="preserve"><tspan class="b" style="fill:#0f1b2d">The safest.</tspan> The server never passes on the token it</text>
+<text x="50" y="591" font-size="13.5" class="mu" xml:space="preserve">receives: it gets another one, issued for Trino.</text>
+<rect x="456" y="348" width="392" height="282" rx="14" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="474" y="380" font-size="18" class="m bb" xml:space="preserve">impersonation</text>
+<text x="474" y="406" font-size="14.5" class="mu" xml:space="preserve">Trino sees <tspan class="b" style="fill:#0f1b2d">the user</tspan></text>
+<rect x="474.4" y="468.0" width="86.39999999999999" height="38.4" rx="8" fill="#f6f7f9" stroke="#e3e6ec" stroke-width="1"/>
+<text x="517.6" y="491.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">MCP host</text>
+<rect x="608.8" y="468.0" width="86.39999999999999" height="38.4" rx="8" fill="#ecebfb" stroke="#4a42d4" stroke-width="1"/>
+<text x="652.0" y="491.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">server</text>
+<rect x="743.2" y="468.0" width="86.39999999999999" height="38.4" rx="8" fill="#f6f7f9" stroke="#0f1b2d" stroke-width="1"/>
+<text x="786.4" y="491.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">Trino</text>
+<path class="ln" d="M697.6 487.2H741.0"/>
+<path class="ln" d="M735.0 482.2L741.0 487.2L735.0 492.2"/>
+<path class="ln" d="M563.2 487.2H606.6"/>
+<path class="ln" d="M600.6 482.2L606.6 487.2L600.6 492.2"/>
+<text x="584.8" y="528.0" font-size="12" text-anchor="middle" class="mu" xml:space="preserve">verified token</text>
+<text x="719.2" y="528.0" font-size="12" text-anchor="middle" class="mu" xml:space="preserve">server's account,</text>
+<text x="719.2" y="542.4" font-size="12" text-anchor="middle" class="mu" xml:space="preserve">on behalf of the user</text>
+<text x="474" y="572" font-size="13.5" class="mu" xml:space="preserve"><tspan class="b" style="fill:#0f1b2d">No token exchange.</tspan> Trino lets this one account act for</text>
+<text x="474" y="591" font-size="13.5" class="mu" xml:space="preserve">the others. The name always comes from the verified</text>
+<text x="474" y="610" font-size="13.5" class="mu" xml:space="preserve">token.</text>
+<rect x="32" y="646" width="392" height="282" rx="14" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="50" y="678" font-size="18" class="m bb" xml:space="preserve">oauth2</text>
+<rect x="126.80000000000001" y="662" width="99.2" height="22" rx="11" fill="#f6f7f9" stroke="#e3e6ec" stroke-width="1"/>
+<text x="176.4" y="677" font-size="12" text-anchor="middle" class="m mu" xml:space="preserve">workstation</text>
+<text x="50" y="704" font-size="14.5" class="mu" xml:space="preserve">Trino sees <tspan class="b" style="fill:#0f1b2d">the signed-in person</tspan></text>
+<rect x="50.4" y="766.0" width="86.39999999999999" height="38.4" rx="8" fill="#f6f7f9" stroke="#e3e6ec" stroke-width="1"/>
+<text x="93.6" y="789.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">browser</text>
+<rect x="184.8" y="766.0" width="86.39999999999999" height="38.4" rx="8" fill="#ecebfb" stroke="#4a42d4" stroke-width="1"/>
+<text x="228.0" y="789.7" font-size="12.5" text-anchor="middle" xml:space="preserve">local server</text>
+<rect x="319.2" y="766.0" width="86.39999999999999" height="38.4" rx="8" fill="#f6f7f9" stroke="#0f1b2d" stroke-width="1"/>
+<text x="362.4" y="789.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">Trino</text>
+<path class="ln" d="M273.6 785.2H317.0"/>
+<path class="ln" d="M311.0 780.2L317.0 785.2L311.0 790.2"/>
+<path class="ln dash" d="M93.6 763.6C93.6 732.4 362.4 732.4 362.4 762.6"/>
+<path class="ln" d="M357.4 756.6L362.4 762.6L367.4 756.6"/>
+<text x="228.0" y="728.8" font-size="12" text-anchor="middle" class="mu" xml:space="preserve">sign-in to Trino</text>
+<text x="295.2" y="826.0" font-size="12" text-anchor="middle" class="mu" xml:space="preserve">no name sent</text>
+<text x="160.8" y="826.0" font-size="12" text-anchor="middle" class="fa" xml:space="preserve">stdio only</text>
+<text x="50" y="870" font-size="13.5" class="mu" xml:space="preserve"><tspan class="b" style="fill:#0f1b2d">On the workstation.</tspan> Trino's own browser sign-in, with</text>
+<text x="50" y="889" font-size="13.5" class="mu" xml:space="preserve">no identity provider to set up on the server.</text>
+<rect x="456" y="646" width="392" height="282" rx="14" fill="#ffffff" stroke="#a16207" stroke-width="1.6"/>
+<text x="474" y="678" font-size="18" class="m bb" xml:space="preserve">service</text>
+<rect x="561.6" y="662" width="149.6" height="22" rx="11" fill="#fbf3e3"/>
+<text x="636.4" y="677" font-size="12" text-anchor="middle" class="m am" xml:space="preserve">name it on purpose</text>
+<text x="474" y="704" font-size="14.5" class="mu" xml:space="preserve">Trino sees <tspan class="b" style="fill:#0f1b2d">one account</tspan>, for everyone</text>
+<rect x="474.4" y="742.0" width="86.39999999999999" height="28.799999999999997" rx="8" fill="#f6f7f9" stroke="#e3e6ec" stroke-width="1"/>
+<text x="517.6" y="760.7" font-size="12" text-anchor="middle" xml:space="preserve">person A</text>
+<rect x="474.4" y="799.6" width="86.39999999999999" height="28.799999999999997" rx="8" fill="#f6f7f9" stroke="#e3e6ec" stroke-width="1"/>
+<text x="517.6" y="818.3" font-size="12" text-anchor="middle" xml:space="preserve">person B</text>
+<path class="ln" d="M563.2 756.4L605.2 778.0"/>
+<path class="ln" d="M563.2 814.0L605.2 792.4"/>
+<rect x="608.8" y="766.0" width="86.39999999999999" height="38.4" rx="8" fill="#fbf3e3" stroke="#a16207" stroke-width="1"/>
+<text x="652.0" y="789.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">server</text>
+<rect x="743.2" y="766.0" width="86.39999999999999" height="38.4" rx="8" fill="#f6f7f9" stroke="#0f1b2d" stroke-width="1"/>
+<text x="786.4" y="789.9" font-size="13" text-anchor="middle" class="b" xml:space="preserve">Trino</text>
+<path class="ln" d="M697.6 785.2H741.0"/>
+<path class="ln" d="M735.0 780.2L741.0 785.2L735.0 790.2"/>
+<text x="719.2" y="826.0" font-size="12" text-anchor="middle" class="mu" xml:space="preserve">as mcp-reader</text>
+<text x="474" y="870" font-size="13.5" class="mu" xml:space="preserve"><tspan class="b" style="fill:#0f1b2d">The same rights for everyone,</tspan> read-only. The server</text>
+<text x="474" y="889" font-size="13.5" class="mu" xml:space="preserve">says so with a warning at start.</text>
+</svg>

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="512" viewBox="0 0 880 512" role="img" aria-labelledby="t d">
+<title id="t">Mesuré avec de vrais agents</title>
+<desc id="d">Bonnes réponses : Mistral 62,5 % en 0.6.1 et 70 % en 0.7.0, Claude 93,3 % dans les deux versions. Tool calls par question : Mistral 5,8 puis 3,0, Claude 8,5 puis 4,9.</desc>
+<style>
+text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'DejaVu Sans', sans-serif;fill:#e8ecf4}
+.m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace}
+.mu{fill:#a6b0c3} .fa{fill:#7a859b} .ac{fill:#8f88ff} .am{fill:#e0a43a}
+.ok{fill:#4ade80} .no{fill:#f87171} .b{font-weight:600} .bb{font-weight:700}
+.ln{fill:none;stroke:#a6b0c3;stroke-width:1.5} .dash{stroke-dasharray:4 4}
+.grid{stroke:#24304a;stroke-width:1}
+</style>
+<path d="M28.5 0.5H851.5A28 28 0 0 1 879.5 28.5V497.5A14 14 0 0 1 865.5 511.5H14.5A14 14 0 0 1 0.5 497.5V28.5A28 28 0 0 1 28.5 0.5Z" fill="#131b2c" stroke="#24304a"/>
+<rect x="260" y="-20" width="360" height="38" rx="19" fill="#0d1117" stroke="#24304a"/>
+<text x="440.0" y="64" font-size="21" text-anchor="middle" class="bb" xml:space="preserve">Mesuré avec de vrais agents</text>
+<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Les mêmes cinq questions métier, chacune avec une colonne piège, posées à Mistral et à Claude.</text>
+<rect x="32" y="116" width="392" height="300" rx="14" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
+<text x="52" y="148" font-size="16" class="bb" xml:space="preserve">Bonnes réponses</text>
+<text x="52" y="170" font-size="13.5" class="mu" xml:space="preserve">Plus haut, c’est mieux</text>
+<path class="grid" d="M96 368.0H404"/>
+<text x="88" y="372.5" font-size="12" text-anchor="end" class="mu" xml:space="preserve">0 %</text>
+<path class="grid" d="M96 283.0H404" stroke-dasharray="3 4"/>
+<text x="88" y="287.5" font-size="12" text-anchor="end" class="mu" xml:space="preserve">50 %</text>
+<path class="grid" d="M96 198.0H404" stroke-dasharray="3 4"/>
+<text x="88" y="202.5" font-size="12" text-anchor="end" class="mu" xml:space="preserve">100 %</text>
+<rect x="135.2" y="261.8" width="40" height="106.2" rx="3" fill="#7a859b"/>
+<text x="155.2" y="254.8" font-size="13.5" text-anchor="middle" class="bb" xml:space="preserve">62,5</text>
+<rect x="183.2" y="249.0" width="40" height="119.0" rx="3" fill="#8f88ff"/>
+<text x="203.2" y="242.0" font-size="13.5" text-anchor="middle" class="bb" xml:space="preserve">70</text>
+<text x="179.2" y="392" font-size="14" text-anchor="middle" class="b" xml:space="preserve">Mistral</text>
+<rect x="283.0" y="209.4" width="40" height="158.6" rx="3" fill="#7a859b"/>
+<text x="303.0" y="202.4" font-size="13.5" text-anchor="middle" class="bb" xml:space="preserve">93,3</text>
+<rect x="331.0" y="209.4" width="40" height="158.6" rx="3" fill="#8f88ff"/>
+<text x="351.0" y="202.4" font-size="13.5" text-anchor="middle" class="bb" xml:space="preserve">93,3</text>
+<text x="327.0" y="392" font-size="14" text-anchor="middle" class="b" xml:space="preserve">Claude</text>
+<rect x="456" y="116" width="392" height="300" rx="14" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
+<text x="476" y="148" font-size="16" class="bb" xml:space="preserve">Tool calls par question</text>
+<text x="476" y="170" font-size="13.5" class="mu" xml:space="preserve">Plus bas, c’est mieux</text>
+<path class="grid" d="M520 368.0H828"/>
+<text x="512" y="372.5" font-size="12" text-anchor="end" class="mu" xml:space="preserve">0</text>
+<path class="grid" d="M520 283.0H828" stroke-dasharray="3 4"/>
+<text x="512" y="287.5" font-size="12" text-anchor="end" class="mu" xml:space="preserve">5</text>
+<path class="grid" d="M520 198.0H828" stroke-dasharray="3 4"/>
+<text x="512" y="202.5" font-size="12" text-anchor="end" class="mu" xml:space="preserve">10</text>
+<rect x="559.2" y="269.4" width="40" height="98.6" rx="3" fill="#7a859b"/>
+<text x="579.2" y="262.4" font-size="13.5" text-anchor="middle" class="bb" xml:space="preserve">5,8</text>
+<rect x="607.2" y="317.0" width="40" height="51.0" rx="3" fill="#8f88ff"/>
+<text x="627.2" y="310.0" font-size="13.5" text-anchor="middle" class="bb" xml:space="preserve">3,0</text>
+<text x="603.2" y="392" font-size="14" text-anchor="middle" class="b" xml:space="preserve">Mistral</text>
+<rect x="707.0" y="223.5" width="40" height="144.5" rx="3" fill="#7a859b"/>
+<text x="727.0" y="216.5" font-size="13.5" text-anchor="middle" class="bb" xml:space="preserve">8,5</text>
+<rect x="755.0" y="284.7" width="40" height="83.3" rx="3" fill="#8f88ff"/>
+<text x="775.0" y="277.7" font-size="13.5" text-anchor="middle" class="bb" xml:space="preserve">4,9</text>
+<text x="751.0" y="392" font-size="14" text-anchor="middle" class="b" xml:space="preserve">Claude</text>
+<rect x="370.0" y="435" width="13" height="13" rx="3" fill="#7a859b"/>
+<text x="390.0" y="446" font-size="13.5" class="mu" xml:space="preserve">0.6.1</text>
+<rect x="460.0" y="435" width="13" height="13" rx="3" fill="#8f88ff"/>
+<text x="480.0" y="446" font-size="13.5" class="mu" xml:space="preserve">0.7.0</text>
+<text x="440.0" y="482" font-size="12.5" text-anchor="middle" class="fa" xml:space="preserve">Mistral Codestral : 40 essais par version. Claude Sonnet 5.5 : 15 essais par version. Tool calls de Mistral mesurés sur la passe à 5 essais.</text>
+</svg>
