@@ -38,6 +38,8 @@ _ENV_KEYS = [
     "MCP_DESCRIBE_SCHEMA_TABLES",
     "MCP_DESCRIBE_SCHEMA_COLUMNS",
     "MCP_SEARCH_MIN_LENGTH",
+    "MCP_SEARCH_MAX_WORDS",
+    "MCP_SEARCH_MAX_WORD_LENGTH",
     "MCP_SEARCH_RESERVE_SECONDS",
 ]
 
@@ -315,6 +317,25 @@ def test_search_settings_default_and_are_read_from_the_environment(monkeypatch):
     monkeypatch.setenv("MCP_SEARCH_RESERVE_SECONDS", "0.5")
     c = Config.from_env()
     assert (c.search_min_length, c.search_reserve_seconds) == (5, 0.5)
+
+
+def test_search_word_bounds_default_and_are_read_from_the_environment(monkeypatch):
+    c = Config.from_env()
+    assert (c.search_max_words, c.search_max_word_length) == (8, 64)
+    monkeypatch.setenv("MCP_SEARCH_MAX_WORDS", "3")
+    monkeypatch.setenv("MCP_SEARCH_MAX_WORD_LENGTH", "20")
+    c = Config.from_env()
+    assert (c.search_max_words, c.search_max_word_length) == (3, 20)
+    assert c.problems() == []
+
+
+def test_search_word_bounds_no_search_can_serve_are_refused_at_start(monkeypatch):
+    monkeypatch.setenv("MCP_SEARCH_MAX_WORDS", "0")
+    monkeypatch.setenv("MCP_SEARCH_MAX_WORD_LENGTH", "2")
+    assert Config.from_env().problems() == [
+        "MCP_SEARCH_MAX_WORDS=0: search_columns must take 1 word or more",
+        "MCP_SEARCH_MAX_WORD_LENGTH=2 is below MCP_SEARCH_MIN_LENGTH=3: no word could be searched",
+    ]
 
 
 def test_search_settings_no_search_can_serve_are_refused_at_start(monkeypatch):

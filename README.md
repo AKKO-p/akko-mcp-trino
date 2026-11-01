@@ -507,11 +507,15 @@ instructions, and the server never places them in its own MCP instructions.
 
 `search_columns` is where an agent starts when it does not know which table holds
 what it needs. It takes one word or several: whitespace and punctuation split the
-text into words, and each word is looked for ignoring case. A column matches when
-every word appears in its name, its comment, its table's name or its table's
-comment, so "customer segment" finds `customers.segment`. `tables` lists the tables
-whose own name or comment holds every word, with their comment, so "archived 2019"
-finds a table `transactions_2019` commented "Archived transactions". It searches
+text into words, `_` belongs to a word (`customer_id` is one word), and each word is
+looked for ignoring case, lower-cased one code point at a time as Trino's `lower()`
+does. A column matches when every word appears in its name, its comment, its table's
+name or its table's comment, and one word at least in its own name or comment: so
+"customer segment" finds `customers.segment`, and a word found only in a table's
+name does not list every column of that table. `tables` lists, with their comment,
+the tables whose own name or comment holds every word and the tables that hold a
+column listed: "archived 2019" finds a table `transactions_2019` commented "Archived
+transactions" without its columns, which `describe_table` then reads. It searches
 every catalog the caller sees (`system` never), one catalog, or one schema. A named
 schema is checked first: one that does not exist and one the caller may not see
 answer the same error, `kind` `schema`, never an empty search said to be complete;
@@ -519,13 +523,18 @@ a catalog Trino does not know or refuses answers Trino's error. Each word is one
 escaped `LIKE` literal: a word holds no quote and no `%`, and its `_` is a plain
 character. A word shorter than `MCP_SEARCH_MIN_LENGTH` (3 by default) is ignored,
 and a text with no word left is refused and says so, so a letter or two does not
-read every column. The search reads `system.metadata.table_comments` and
-`system.jdbc.columns`, which Trino filters for each user, one schema at a time in a
-stable order (catalogs, then their schemas, sorted; in a schema its tables, then its
-columns). Both reads filter on the catalog and the schema by equality, which Trino
-pushes down to the views, so a catalog of many thousand tables answers schema by
-schema. It stays within the
-call's budget (`MCP_CALL_TIMEOUT_SECONDS`): before each schema it keeps
+read every column. A text of more than `MCP_SEARCH_MAX_WORDS` words (8 by default),
+or with a word longer than `MCP_SEARCH_MAX_WORD_LENGTH` characters (64 by default),
+is refused before Trino is asked anything, with the bound in the message: each word
+adds a few `LIKE` to every statement. The search reads
+`system.metadata.table_comments` and `system.jdbc.columns`, which Trino filters for
+each user, one schema at a time in a stable order (catalogs, then their schemas,
+sorted; in a schema its tables, then its columns). A schema costs two statements:
+its tables, and its columns, each of which reads both views of the schema (a table
+that holds a matching column, a column whose table's comment holds a word), so the
+comments of its tables are read twice. Every read filters on the catalog and the
+schema by equality, which Trino pushes down to the views, so a catalog of many
+thousand tables answers schema by schema. It stays within the call's budget (`MCP_CALL_TIMEOUT_SECONDS`): before each schema it keeps
 `MCP_SEARCH_RESERVE_SECONDS` (2 by default) in reserve, each query is stopped in
 Trino at what is left, and the search then answers what it searched rather than the
 call's own error. `tables` and `matches` together stop at the row cap
@@ -536,7 +545,8 @@ for each part left (`time_budget`, `row_cap`, or the `kind` of Trino's error; a
 scope was searched, over every call of the search. `next_cursor` resumes the same
 search where it stopped (that schema and the rest of its catalog, then every catalog
 not opened), inside a schema's tables or columns when the row cap stopped it there.
-A complete search that found nothing adds `hint`, a fixed sentence that suggests
+A complete search that found nothing, on any page of its chain of cursors, adds
+`hint`, a fixed sentence that suggests
 fewer or other words, or browsing with `list_tables` and `describe_schema`: an
 agent should not conclude from an empty search that the data does not exist. A
 schema, or the
@@ -677,9 +687,10 @@ refuse table functions and the `system` catalog too (see
 `system.metadata`, which Trino filters for each user, as it does
 `information_schema`: a user sees there only the tables and columns they may see
 elsewhere. `describe_schema` reads `system.jdbc.columns` and
-`system.metadata.table_comments`, and so does `search_columns`, by statements the server builds; a policy that refuses them makes them answer an
-error that says so, with no other way tried. The
-agent's own SQL stays refused on all of `system`, these views included.
+`system.metadata.table_comments`, and so does `search_columns`, by statements the
+server builds; a policy that refuses them makes them answer an error that says so,
+with no other way tried. The agent's own SQL stays refused on all of `system`, these
+views included.
 
 Set `hide-inaccessible-columns=true` in Trino's `config.properties` too. Without it, a
 `SELECT *` over a table with a column the policy hides is refused, and the refusal
@@ -817,6 +828,8 @@ reads its own variables from the same environment.
 | `MCP_DESCRIBE_SCHEMA_TABLES` | the most tables in one page of `describe_schema`, from 1 to 100: a page reads each of its tables by its own branch, so its cost grows with the page | `20` |
 | `MCP_DESCRIBE_SCHEMA_COLUMNS` | the most columns one page of `describe_schema` holds in all, 1 at least; the first table of a page comes whole however wide, and a page shortened for this budget says so | `1000` |
 | `MCP_SEARCH_MIN_LENGTH` | the shortest word `search_columns` searches, 1 at least; shorter words are ignored, and a text with none left is refused | `3` |
+| `MCP_SEARCH_MAX_WORDS` | the most words a text of `search_columns` may hold, 1 at least; above it the search is refused before Trino | `8` |
+| `MCP_SEARCH_MAX_WORD_LENGTH` | the longest word `search_columns` takes, not below `MCP_SEARCH_MIN_LENGTH`; a longer word is refused before Trino | `64` |
 | `MCP_SEARCH_RESERVE_SECONDS` | the seconds of the call's budget `search_columns` keeps in reserve, so that it answers what it searched before the call runs out; 0 or more, below `MCP_CALL_TIMEOUT_SECONDS` when that is set; 0 is warned of | `2` |
 | `TRINO_QUERY_TIMEOUT_SECONDS` | time budget of one query: past it, the server cancels the query in Trino; `0` leaves the limit to Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | time budget of one tool call, every query of the call included: past it, no query starts, the one running is cancelled and the agent gets an error; `0` sets none | `120` |

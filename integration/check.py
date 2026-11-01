@@ -223,9 +223,12 @@ def main() -> int:
         d_alice["words"],
     )
     check(
-        "discovery: a search lists the table whose name holds the word, for both users",
-        [t["table"] for t in d_alice["table"].get("tables", [])] == ["nation"]
-        and [t["table"] for t in d_bob["table"].get("tables", [])] == ["nation"],
+        "discovery: a search lists the table whose name holds the word and the tables that "
+        "hold a column found, each user what they may see",
+        [t["table"] for t in d_alice["table"].get("tables", [])]
+        == ["customer", "nation", "supplier"]
+        and [t["table"] for t in d_bob["table"].get("tables", [])] == ["nation"]
+        and {m["table"] for m in d_bob["table"].get("matches", [])} == {"nation"},
         (d_alice["table"], d_bob["table"]),
     )
     check(

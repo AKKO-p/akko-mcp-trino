@@ -139,6 +139,8 @@ def build_server(
         describe_schema_tables=config.describe_schema_tables,
         describe_schema_columns=config.describe_schema_columns,
         search_min_length=config.search_min_length,
+        search_max_words=config.search_max_words,
+        search_max_word_length=config.search_max_word_length,
         search_reserve_seconds=config.search_reserve_seconds,
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)

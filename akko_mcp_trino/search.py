@@ -1,14 +1,17 @@
 """search_columns: the tables and columns that hold every word of a text, within the call's time.
 
-The text is cut into words (whitespace and punctuation split them). A column matches when
-every word appears in its name, its comment, its table's name or its table's comment; a
-table matches when every word appears in its name or its comment. The search reads
+The text is cut into words (whitespace and punctuation split them; ``_`` belongs to a word).
+A column matches when every word appears in its name, its comment, its table's name or its
+table's comment, and one word at least in its own name or comment: a word found only in a
+table's name or comment does not list all its columns. A table matches when every word
+appears in its name or its comment, or when it holds a column that matches. The search reads
 ``system.metadata.table_comments`` and ``system.jdbc.columns``, which Trino filters for each
 user, one schema at a time, in a stable order: the catalogs the caller sees (never
 ``system``), sorted, and in each its schemas, sorted; in a schema its tables first, then its
-columns. Each query is filtered by equality on catalog and schema, which Trino pushes down
-to the views, so it loads that schema only, and a catalog of many thousand tables answers
-schema by schema instead of not at all.
+columns. A schema costs two statements, each reading both views of that schema (a table
+holds a matching column, a column's table holds a word). Each is filtered by equality on
+catalog and schema, which Trino pushes down to the views, so it loads that schema only, and
+a catalog of many thousand tables answers schema by schema instead of not at all.
 
 The search never claims more than it did. Before each schema it checks what is left of the
 call's budget, keeping a reserve so that it ends with an answer, not with the call's own
@@ -64,10 +67,17 @@ _INVALID_CURSOR = (
 )
 
 
+def trino_lower(text: str) -> str:
+    """``text`` lower-cased as Trino's ``lower()`` does: one code point at a time, without
+    the rules of context (a final sigma) or mappings to several code points (``İ``) that
+    ``str.lower`` applies, so that a word matches the names Trino lower-cases."""
+    return "".join(ch.lower()[0] for ch in text)
+
+
 def like_contains(text: str) -> str:
     """The ``LIKE`` literal that matches ``text`` anywhere, lower-cased, written with
     ``ESCAPE '!'``: ``!``, ``%`` and ``_`` are escaped, so each stands for itself."""
-    escaped = text.lower().replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    escaped = trino_lower(text).replace("!", "!!").replace("%", "!%").replace("_", "!_")
     return sql_literal(f"%{escaped}%")
 
 
@@ -75,8 +85,10 @@ def search_words(text: str, min_length: int) -> list[str]:
     """The words of ``text`` the search looks for, lower-cased, each once, in the order given.
 
     A word is a run of letters, digits and ``_``: whitespace and punctuation split them, so
-    a word holds no quote and no ``%``. A word shorter than ``min_length`` is dropped."""
-    return list(dict.fromkeys(w for w in _WORD.findall(text.lower()) if len(w) >= min_length))
+    a word holds no quote and no ``%``, and ``customer_id`` is one word. A word shorter than
+    ``min_length`` is dropped."""
+    found = _WORD.findall(trino_lower(text))
+    return list(dict.fromkeys(w for w in found if len(w) >= min_length))
 
 
 def every_word(words: list[str], fields: tuple[str, ...]) -> str:
@@ -85,6 +97,19 @@ def every_word(words: list[str], fields: tuple[str, ...]) -> str:
     return " AND ".join(
         "(" + " OR ".join(f"lower({f}) LIKE {pattern} ESCAPE '!'" for f in fields) + ")"
         for pattern in map(like_contains, words)
+    )
+
+
+def any_word(words: list[str], fields: tuple[str, ...]) -> str:
+    """The condition that one word at least appears, ignoring case, in one of ``fields``."""
+    return (
+        "("
+        + " OR ".join(
+            f"lower({f}) LIKE {pattern} ESCAPE '!'"
+            for pattern in map(like_contains, words)
+            for f in fields
+        )
+        + ")"
     )
 
 
@@ -102,8 +127,9 @@ def query_digest(words: list[str], catalog: str, schema: str) -> str:
 class Cursor:
     """Where a search resumes: in ``catalog``, from ``schema`` (empty: its first schema), at
     its ``phase`` (its tables, or its columns once its tables are read), after the first
-    ``row_offset`` matching rows of that phase. ``query`` ties it to its search, and
-    ``gaps`` says an earlier call of the search left a part of it not searched."""
+    ``row_offset`` matching rows of that phase. ``query`` ties it to its search, ``gaps``
+    says an earlier call of the search left a part of it not searched, and ``found`` that an
+    earlier call found a table or a column."""
 
     catalog: str
     schema: str
@@ -111,6 +137,7 @@ class Cursor:
     query: str = ""
     gaps: bool = False
     phase: str = TABLES
+    found: bool = False
 
 
 def encode_cursor(cursor: Cursor) -> str:
@@ -122,6 +149,7 @@ def encode_cursor(cursor: Cursor) -> str:
         "o": cursor.row_offset,
         "q": cursor.query,
         "g": cursor.gaps,
+        "f": cursor.found,
     }
     return base64.urlsafe_b64encode(json.dumps(data, separators=(",", ":")).encode()).decode()
 
@@ -140,12 +168,14 @@ def decode_cursor(token: str) -> Cursor:
         if not isinstance(data, dict):
             raise ValueError(_INVALID_CURSOR)
         catalog, schema, offset = data["c"], data["s"], data["o"]
-        query, gaps, phase = data["q"], data["g"], data["p"]
+        query, gaps, phase, found = data["q"], data["g"], data["p"], data["f"]
         if not (isinstance(catalog, str) and isinstance(schema, str) and isinstance(query, str)):
             raise ValueError(_INVALID_CURSOR)
         if isinstance(offset, bool) or not isinstance(offset, int):
             raise ValueError(_INVALID_CURSOR)
         if not 0 <= offset <= MAX_ROW_OFFSET or not isinstance(gaps, bool):
+            raise ValueError(_INVALID_CURSOR)
+        if not isinstance(found, bool):
             raise ValueError(_INVALID_CURSOR)
         if phase not in _PHASES:
             raise ValueError(_INVALID_CURSOR)
@@ -154,7 +184,7 @@ def decode_cursor(token: str) -> Cursor:
         governed_catalog(catalog)
     except (ValueError, KeyError, binascii.Error) as exc:
         raise ValueError(_INVALID_CURSOR) from exc
-    return Cursor(catalog, schema, offset, query=query, gaps=gaps, phase=phase)
+    return Cursor(catalog, schema, offset, query=query, gaps=gaps, phase=phase, found=found)
 
 
 def _not_searched(catalog: str, schema: Optional[str], reason: str) -> dict:
@@ -170,6 +200,8 @@ def search(
     cursor: Optional[str],
     *,
     min_length: int,
+    max_words: int,
+    max_word_length: int,
     reserve_seconds: float,
     max_catalogs: int,
 ) -> dict:
@@ -183,15 +215,27 @@ def search(
     policy hides answer the same error of kind ``schema``, never an empty search taken as
     complete, and a catalog Trino refuses or does not know raises its error. A text
     without a word of ``min_length`` characters, a schema without its catalog, every catalog
-    without a call budget, and a cursor that is not this search's raise ValueError before
-    Trino is asked anything. ``reserve_seconds`` of the call's budget are kept so the search
+    without a call budget, more than ``max_words`` words, a word longer than
+    ``max_word_length``, and a cursor that is not this search's raise ValueError before Trino
+    is asked anything. ``reserve_seconds`` of the call's budget are kept so the search
     ends with an answer. A refused metadata view answers its error, which names what to
-    allow. A complete search that found nothing adds ``hint``."""
+    allow. A complete search that found nothing, over every call of its chain of cursors,
+    adds ``hint``."""
     words = search_words(text, min_length)
     if not words:
         raise ValueError(
             f"Search text has no word of {min_length} characters or more (shorter words are "
             "ignored): give at least one, so the search does not read every column"
+        )
+    if len(words) > max_words:
+        raise ValueError(
+            f"Search text has {len(words)} words: give {max_words} at most, the most precise ones"
+        )
+    longest = max(words, key=len)
+    if len(longest) > max_word_length:
+        raise ValueError(
+            f"Search text has a word of {len(longest)} characters: a word is "
+            f"{max_word_length} characters at most"
         )
     if schema and not catalog:
         raise ValueError("A schema is searched within its catalog: name the catalog too")
@@ -263,28 +307,41 @@ def search(
             "kind": "schema",
         }
 
-    table_words = every_word(words, ("table_name", "comment"))
-    column_words = every_word(words, ("c.column_name", "c.remarks", "c.table_name", "t.comment"))
+    # A column: every word in its four fields, one word at least in its own two.
+    column_match = (
+        every_word(words, ("c.column_name", "c.remarks", "c.table_name", "t.comment"))
+        + " AND "
+        + any_word(words, ("c.column_name", "c.remarks"))
+    )
+
+    def matching_columns(select: str, cat_: str, sch_: str) -> str:
+        """``select`` over the matching columns of one schema, each joined to its table's
+        comment; both views filtered by equality on the catalog and the schema."""
+        return (
+            f"SELECT {select} FROM {JDBC_COLUMNS} c LEFT JOIN {TABLE_COMMENTS} t "
+            f"ON t.catalog_name = {cat_} AND t.schema_name = {sch_} "
+            "AND t.table_name = c.table_name "
+            f"WHERE c.table_cat = {cat_} AND c.table_schem = {sch_} AND {column_match}"
+        )
 
     def read(phase: str, cat: str, sch: str, offset: int, room: int) -> dict:
         """The matching tables, or columns, of one schema from row ``offset``, ``room`` of
-        them at most. Both views are filtered by equality on the catalog and the schema,
-        the join's side too, so Trino reads that schema only."""
+        them at most. Every view read is filtered by equality on the catalog and the
+        schema, the joined ones too, so Trino reads that schema only."""
         cat_, sch_ = sql_literal(cat), sql_literal(sch)
         if phase == TABLES:
+            # A table whose own text holds every word, or that holds a matching column.
+            holding = matching_columns("c.table_name", cat_, sch_)
             sql = (
-                f"SELECT table_name, comment FROM {TABLE_COMMENTS} "
-                f"WHERE catalog_name = {cat_} AND schema_name = {sch_} AND {table_words} "
-                "ORDER BY table_name"
+                f"SELECT s.table_name, s.comment FROM {TABLE_COMMENTS} s "
+                f"WHERE s.catalog_name = {cat_} AND s.schema_name = {sch_} "
+                f"AND ({every_word(words, ('s.table_name', 's.comment'))} "
+                f"OR s.table_name IN ({holding})) ORDER BY s.table_name"
             )
         else:
             sql = (
-                "SELECT c.table_name, c.column_name, c.type_name, c.remarks "
-                f"FROM {JDBC_COLUMNS} c LEFT JOIN {TABLE_COMMENTS} t "
-                f"ON t.catalog_name = {cat_} AND t.schema_name = {sch_} "
-                "AND t.table_name = c.table_name "
-                f"WHERE c.table_cat = {cat_} AND c.table_schem = {sch_} AND {column_words} "
-                "ORDER BY c.table_name, c.ordinal_position"
+                matching_columns("c.table_name, c.column_name, c.type_name, c.remarks", cat_, sch_)
+                + " ORDER BY c.table_name, c.ordinal_position"
             )
         return ctx.run(f"{sql} OFFSET {offset} LIMIT {room + 1}", max_rows=room, timeout=allowed())
 
@@ -392,6 +449,7 @@ def search(
         if stop is not None:
             break
     earlier_gaps = start is not None and start.gaps
+    earlier_found = start is not None and start.found
     not_searched = list(gaps)
     next_cursor = None
     if stop is not None:
@@ -407,6 +465,7 @@ def search(
             query=digest,
             gaps=bool(gaps) or earlier_gaps,
             phase=phase,
+            found=bool(tables or matches) or earlier_found,
         )
         next_cursor = encode_cursor(resume)
     complete = not gaps and stop is None and not earlier_gaps
@@ -419,6 +478,6 @@ def search(
         "complete": complete,
         "next_cursor": next_cursor,
     }
-    if complete and not tables and not matches:
+    if complete and not tables and not matches and not earlier_found:
         answer["hint"] = HINT
     return answer
