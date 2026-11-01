@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="880" height="588" viewBox="0 0 880 588" role="img" aria-labelledby="t d">
-<title id="t">Le problème : un agent derrière un service account aux droits larges</title>
-<desc id="d">Deux panneaux côte à côte. Avec un service account aux droits larges, Trino voit mcp-svc et renvoie 10 clients, e-mails en clair. Avec akko-mcp-trino, Trino voit carol_analyst et renvoie 5 clients européens, e-mails masqués.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="608" viewBox="0 0 880 608" role="img" aria-labelledby="t d">
+<title id="t">Un agent derrière un service account aux droits larges</title>
+<desc id="d">Deux panneaux côte à côte. Dans un montage d’illustration avec un service account aux droits larges, Trino voit mcp-svc et renvoie 10 clients, e-mails en clair. Avec akko-mcp-trino dans son mode jwt par défaut, Trino voit carol_analyst et renvoie 5 clients européens, e-mails masqués, comme dans le sandbox.</desc>
 <style>
 text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'DejaVu Sans', sans-serif;fill:#0f1b2d}
 .m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace}
@@ -9,55 +9,57 @@ text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
 .ln{fill:none;stroke:#4d5a70;stroke-width:1.5} .dash{stroke-dasharray:4 4}
 .grid{stroke:#e3e6ec;stroke-width:1}
 </style>
-<path d="M28.5 0.5H851.5A28 28 0 0 1 879.5 28.5V573.5A14 14 0 0 1 865.5 587.5H14.5A14 14 0 0 1 0.5 573.5V28.5A28 28 0 0 1 28.5 0.5Z" fill="#f6f7f9" stroke="#e3e6ec"/>
+<path d="M28.5 0.5H851.5A28 28 0 0 1 879.5 28.5V593.5A14 14 0 0 1 865.5 607.5H14.5A14 14 0 0 1 0.5 593.5V28.5A28 28 0 0 1 28.5 0.5Z" fill="#f6f7f9" stroke="#e3e6ec"/>
 <rect x="260" y="-20" width="360" height="38" rx="19" fill="#ffffff" stroke="#e3e6ec"/>
 <text x="440.0" y="64" font-size="21" text-anchor="middle" class="bb" xml:space="preserve">Carol, analyste, demande la liste des clients</text>
-<rect x="32" y="92" width="396" height="420" rx="18" fill="#ffffff" stroke="#b42318" stroke-width="1.2"/>
+<rect x="32" y="92" width="396" height="440" rx="18" fill="#ffffff" stroke="#b42318" stroke-width="1.2"/>
 <text x="230.0" y="124" font-size="16" text-anchor="middle" class="bb no" xml:space="preserve">Avec un service account aux droits larges</text>
-<rect x="80.0" y="142" width="300" height="54" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
-<text x="230.0" y="166.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Carol</text>
-<text x="230.0" y="185.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">carol_analyst</text>
-<path class="ln" d="M230.0 196V231"/>
-<path class="ln" d="M225.0 225L230.0 231L235.0 225"/>
-<text x="242.0" y="219" font-size="13" class="mu" xml:space="preserve">sa question</text>
-<rect x="80.0" y="232" width="300" height="54" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
-<text x="230.0" y="256.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Agent IA et serveur MCP</text>
-<text x="230.0" y="275.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">connecté en mcp-svc</text>
-<path class="ln" d="M230.0 286V321"/>
-<path class="ln" d="M225.0 315L230.0 321L235.0 315"/>
-<text x="242.0" y="309" font-size="13" class="mu" xml:space="preserve">requête en mcp-svc</text>
-<rect x="80.0" y="322" width="300" height="54" rx="12" fill="#fbeaea" stroke="#b42318" stroke-width="1"/>
-<text x="230.0" y="346.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Trino, le query engine</text>
-<text x="230.0" y="365.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">voit mcp-svc</text>
-<path class="ln" d="M230.0 376V411"/>
-<path class="ln" d="M225.0 405L230.0 411L235.0 405"/>
-<text x="242.0" y="399" font-size="13" class="mu" xml:space="preserve">réponse</text>
-<rect x="80.0" y="412" width="300" height="80" rx="12" fill="#fbeaea"/>
-<text x="230.0" y="446" font-size="17" text-anchor="middle" class="bb no" xml:space="preserve">10 clients, e-mails en clair</text>
-<text x="230.0" y="472" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">Ses règles ne s’appliquent plus</text>
-<rect x="452" y="92" width="396" height="420" rx="18" fill="#ffffff" stroke="#15803d" stroke-width="1.2"/>
-<text x="650.0" y="124" font-size="16" text-anchor="middle" class="bb ok" xml:space="preserve">Avec akko-mcp-trino</text>
-<rect x="500.0" y="142" width="300" height="54" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
-<text x="650.0" y="166.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Carol</text>
-<text x="650.0" y="185.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">carol_analyst</text>
-<path class="ln" d="M650.0 196V231"/>
-<path class="ln" d="M645.0 225L650.0 231L655.0 225"/>
-<text x="662.0" y="219" font-size="13" class="mu" xml:space="preserve">sa question et son token</text>
-<rect x="500.0" y="232" width="300" height="54" rx="12" fill="#ecebfb" stroke="#4a42d4" stroke-width="1"/>
-<text x="650.0" y="256.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Agent IA et akko-mcp-trino</text>
-<text x="650.0" y="275.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">vérifie le token de Carol</text>
-<path class="ln" d="M650.0 286V321"/>
-<path class="ln" d="M645.0 315L650.0 321L655.0 315"/>
-<text x="662.0" y="309" font-size="13" class="mu" xml:space="preserve">requête en carol_analyst</text>
-<rect x="500.0" y="322" width="300" height="54" rx="12" fill="#e7f4ec" stroke="#15803d" stroke-width="1"/>
-<text x="650.0" y="346.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Trino, le query engine</text>
-<text x="650.0" y="365.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">voit carol_analyst</text>
-<path class="ln" d="M650.0 376V411"/>
-<path class="ln" d="M645.0 405L650.0 411L655.0 405"/>
-<text x="662.0" y="399" font-size="13" class="mu" xml:space="preserve">réponse</text>
-<rect x="500.0" y="412" width="300" height="80" rx="12" fill="#e7f4ec"/>
-<text x="650.0" y="446" font-size="17" text-anchor="middle" class="bb ok" xml:space="preserve">5 clients européens, e-mails masqués</text>
-<text x="650.0" y="472" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">Trino applique ses règles</text>
-<text x="440.0" y="546" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Les droits sont déjà écrits dans Trino.</text>
-<text x="440.0" y="568" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Le seul vrai travail est de faire arriver la bonne identité jusqu’à lui.</text>
+<text x="230.0" y="146" font-size="13" text-anchor="middle" class="am b" xml:space="preserve">Illustration : montage sans akko-mcp-trino</text>
+<rect x="80.0" y="162" width="300" height="54" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="230.0" y="186.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Carol</text>
+<text x="230.0" y="205.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">carol_analyst</text>
+<path class="ln" d="M230.0 216V251"/>
+<path class="ln" d="M225.0 245L230.0 251L235.0 245"/>
+<text x="242.0" y="239" font-size="13" class="mu" xml:space="preserve">sa question</text>
+<rect x="80.0" y="252" width="300" height="54" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="230.0" y="276.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Agent IA et serveur MCP</text>
+<text x="230.0" y="295.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">connecté en mcp-svc</text>
+<path class="ln" d="M230.0 306V341"/>
+<path class="ln" d="M225.0 335L230.0 341L235.0 335"/>
+<text x="242.0" y="329" font-size="13" class="mu" xml:space="preserve">requête en mcp-svc</text>
+<rect x="80.0" y="342" width="300" height="54" rx="12" fill="#fbeaea" stroke="#b42318" stroke-width="1"/>
+<text x="230.0" y="366.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Trino, le query engine</text>
+<text x="230.0" y="385.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">voit mcp-svc</text>
+<path class="ln" d="M230.0 396V431"/>
+<path class="ln" d="M225.0 425L230.0 431L235.0 425"/>
+<text x="242.0" y="419" font-size="13" class="mu" xml:space="preserve">réponse</text>
+<rect x="80.0" y="432" width="300" height="80" rx="12" fill="#fbeaea"/>
+<text x="230.0" y="466" font-size="17" text-anchor="middle" class="bb no" xml:space="preserve">10 clients, e-mails en clair</text>
+<text x="230.0" y="492" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">Ses règles ne s’appliquent plus</text>
+<rect x="452" y="92" width="396" height="440" rx="18" fill="#ffffff" stroke="#15803d" stroke-width="1.2"/>
+<text x="650.0" y="124" font-size="16" text-anchor="middle" class="bb ok" xml:space="preserve">Avec akko-mcp-trino (jwt, par défaut)</text>
+<text x="650.0" y="146" font-size="13" text-anchor="middle" class="mu" xml:space="preserve">La réponse réelle du sandbox</text>
+<rect x="500.0" y="162" width="300" height="54" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
+<text x="650.0" y="186.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Carol</text>
+<text x="650.0" y="205.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">carol_analyst</text>
+<path class="ln" d="M650.0 216V251"/>
+<path class="ln" d="M645.0 245L650.0 251L655.0 245"/>
+<text x="662.0" y="239" font-size="13" class="mu" xml:space="preserve">sa question et son token</text>
+<rect x="500.0" y="252" width="300" height="54" rx="12" fill="#ecebfb" stroke="#4a42d4" stroke-width="1"/>
+<text x="650.0" y="276.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Agent IA et akko-mcp-trino</text>
+<text x="650.0" y="295.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">vérifie le token de Carol</text>
+<path class="ln" d="M650.0 306V341"/>
+<path class="ln" d="M645.0 335L650.0 341L655.0 335"/>
+<text x="662.0" y="329" font-size="13" class="mu" xml:space="preserve">requête en carol_analyst</text>
+<rect x="500.0" y="342" width="300" height="54" rx="12" fill="#e7f4ec" stroke="#15803d" stroke-width="1"/>
+<text x="650.0" y="366.0" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Trino, le query engine</text>
+<text x="650.0" y="385.0" font-size="13" text-anchor="middle" class="m mu" xml:space="preserve">voit carol_analyst</text>
+<path class="ln" d="M650.0 396V431"/>
+<path class="ln" d="M645.0 425L650.0 431L655.0 425"/>
+<text x="662.0" y="419" font-size="13" class="mu" xml:space="preserve">réponse</text>
+<rect x="500.0" y="432" width="300" height="80" rx="12" fill="#e7f4ec"/>
+<text x="650.0" y="466" font-size="17" text-anchor="middle" class="bb ok" xml:space="preserve">5 clients européens, e-mails masqués</text>
+<text x="650.0" y="492" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">Trino applique ses règles</text>
+<text x="440.0" y="566" font-size="15" text-anchor="middle" class="b" xml:space="preserve">Les droits sont déjà écrits dans Trino.</text>
+<text x="440.0" y="588" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Le seul vrai travail est de faire arriver la bonne identité jusqu’à lui.</text>
 </svg>

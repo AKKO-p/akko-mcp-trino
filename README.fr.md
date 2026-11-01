@@ -38,35 +38,36 @@ chaque réglage.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-1-probleme-dark.svg">
-  <img src="docs/images/comprendre-1-probleme-light.svg" alt="Carol, analyste, demande la liste des clients. Par un service account aux droits larges, Trino voit mcp-svc et renvoie 10 clients, e-mails en clair. Par akko-mcp-trino, Trino voit carol_analyst et renvoie 5 clients européens, e-mails masqués.">
+  <img src="docs/images/comprendre-1-probleme-light.svg" alt="Carol, analyste, demande la liste des clients. Dans un montage d'illustration avec un service account aux droits larges, Trino voit mcp-svc et renvoie 10 clients, e-mails en clair. Avec akko-mcp-trino dans son mode jwt par défaut, Trino voit carol_analyst et renvoie 5 clients européens, e-mails masqués, comme dans le sandbox.">
 </picture>
 
 Un agent branché sur un service account aux droits larges arrive dans Trino sous ce compte, et
-les règles écrites pour Carol ne s'appliquent plus. akko-mcp-trino fait arriver l'identité de
-Carol jusqu'à Trino, et les règles que Trino a déjà font le reste.
+les règles écrites pour Carol ne s'appliquent plus. Le panneau de gauche est une illustration :
+la policy du sandbox refuserait un tel compte. akko-mcp-trino fait arriver l'identité de Carol
+jusqu'à Trino, et les règles que Trino a déjà font le reste.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-2-qui-voit-quoi-dark.svg">
-  <img src="docs/images/comprendre-2-qui-voit-quoi-light.svg" alt="La même question posée par trois utilisateurs du sandbox. alice_admin voit les 10 clients en clair. carol_analyst voit les 5 clients européens, e-mails masqués. dave_viewer est refusé par Trino : Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.">
+  <img src="docs/images/comprendre-2-qui-voit-quoi-light.svg" alt="La même requête lancée par trois utilisateurs du sandbox, par le même client MCP. alice_admin reçoit les 10 clients en clair. carol_analyst reçoit les 5 clients européens, e-mails masqués. dave_viewer est refusé par Trino : Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.">
 </picture>
 
-La même question, posée par les trois utilisateurs du sandbox, par le même agent et le même
-serveur. Trino répond à chacun avec la policy OPA du sandbox ; le serveur ne recopie aucune
+La même requête, lancée par les trois utilisateurs du sandbox, par le même client MCP et le
+même serveur. Trino répond à chacun avec la policy OPA du sandbox ; le serveur ne recopie aucune
 règle.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-3-pas-a-pas-dark.svg">
-  <img src="docs/images/comprendre-3-pas-a-pas-light.svg" alt="Six étapes. La question demande le chiffre d'affaires par client. search_columns cherche revenue customer. Aucune colonne ne porte les deux mots, alors le serveur cherche chaque mot et dit lequel chaque colonne a trouvé. describe_schema montre la jointure, et execute_query somme transactions.amount par customer_id sous l'identité de la personne.">
+  <img src="docs/images/comprendre-3-pas-a-pas-light.svg" alt="Un vrai essai de Mistral en 0.7.0, en six étapes. Il demande quel segment de clients détient le plus gros solde total, cherche avec quatre mots et reçoit des résultats mot par mot, fait une jointure sur une colonne qui n'existe pas, lit le conseil du serveur, lit les colonnes de customers avec describe_table, corrige la jointure et obtient business, 17620.75.">
 </picture>
 
-Voici comment l'agent trouve la colonne du chiffre d'affaires : un seul appel à
-`search_columns`, une recherche mot par mot quand aucune colonne ne porte tous les mots, puis
-`describe_schema` et `execute_query`. La réponse de la recherche est celle du serveur, dans le
-sandbox.
+Un vrai essai, tool call par tool call : Mistral en 0.7.0 cherche le segment qui détient le
+plus gros solde. La recherche trouve les mots un par un, l'erreur sur une mauvaise jointure nomme
+la table à lire, et l'agent corrige sa jointure. Chaque réponse montrée est celle du serveur,
+rejouée dans le sandbox.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-4-modes-identite-dark.svg">
-  <img src="docs/images/comprendre-4-modes-identite-light.svg" alt="Trois questions choisissent le mode d'identité. Un échange de tokens donne jwt, une règle d'impersonation dans Trino donne impersonation, un serveur sur le poste d'une seule personne donne oauth2, sinon service. Les quatre modes suivent la même grille (MCP host, serveur, Trino), et service, un seul compte pour tous, est en orange.">
+  <img src="docs/images/comprendre-4-modes-identite-light.svg" alt="Trois questions choisissent le mode d'identité. Un échange de tokens donne jwt, une règle d'impersonation dans Trino donne impersonation, un serveur sur le poste d'une seule personne avec la connexion OAuth2 de Trino donne oauth2, sinon service. Les quatre modes suivent la même grille (MCP host, serveur, Trino), et service, un seul compte pour tous, est en orange.">
 </picture>
 
 Quatre modes d'identité, du plus sûr au plus simple. `jwt` est le mode par défaut. `service`
@@ -74,11 +75,13 @@ donne le même compte à tous les appelants, et ne s'active que si vous le nomme
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/comprendre-5-mesures-dark.svg">
-  <img src="docs/images/comprendre-5-mesures-light.svg" alt="Bonnes réponses : Mistral 62,5 % en 0.6.1 et 70 % en 0.7.0, Claude 93,3 % dans les deux versions. Tool calls par question : Mistral 5,8 puis 3,0, Claude 8,5 puis 4,9.">
+  <img src="docs/images/comprendre-5-mesures-light.svg" alt="Mistral répond juste à 62,5 % en 0.6.1 et à 70 % en 0.7.0, Claude à 93,3 % dans les deux versions. Mistral passe de 5,8 à 3,0 tool calls par question, Claude de 8,5 à 4,9. Mistral varie plus d'un run à l'autre que l'écart entre les versions, et les tokens d'entrée augmentent d'environ 41 %.">
 </picture>
 
-Les mêmes cinq questions métier, posées à Mistral et à Claude, en 0.6.1 puis en 0.7.0. L'outil
-de mesure et ses rapports sont dans [akko-sandbox](https://github.com/AKKO-p/akko-sandbox/tree/main/agent).
+Les mêmes cinq questions métier, posées à Mistral et à Claude, en 0.6.1 puis en 0.7.0. Mistral
+varie plus d'un run à l'autre que l'écart entre les versions, et la 0.7.0 envoie environ 41 % de
+tokens d'entrée en plus par question, parce que ses descriptions de tools sont plus longues.
+L'outil de mesure et ses rapports sont dans [akko-sandbox](https://github.com/AKKO-p/akko-sandbox/tree/main/agent/reports).
 
 La version interactive de ces cinq étapes est sur
 [akko-ai.com/docs/comprendre](https://akko-ai.com/docs/comprendre/) (aussi

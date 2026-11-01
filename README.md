@@ -49,33 +49,34 @@ and every call leaves one audit line.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-1-problem-dark.svg">
-  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-1-problem-light.svg" alt="Carol, an analyst, asks for the list of customers. Through a service account with broad rights, Trino sees mcp-svc and returns 10 customers with e-mails in clear. Through akko-mcp-trino, Trino sees carol_analyst and returns 5 European customers with e-mails masked.">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-1-problem-light.svg" alt="Carol, an analyst, asks for the list of customers. In an illustrative setup with a service account with broad rights, Trino sees mcp-svc and returns 10 customers with e-mails in clear. With akko-mcp-trino in its default jwt mode, Trino sees carol_analyst and returns 5 European customers with e-mails masked, as in the sandbox.">
 </picture>
 
 An agent connected through one service account with broad rights reaches Trino under that
-account, so the rules written for Carol no longer apply. akko-mcp-trino brings Carol's own
-identity to Trino, and the rules Trino already has do the rest.
+account, so the rules written for Carol no longer apply. The left panel is an illustration: the
+sandbox's policy would refuse such an account. akko-mcp-trino brings Carol's own identity to Trino,
+and the rules Trino already has do the rest.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-dark.svg">
-  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg" alt="The same question by three sandbox users. alice_admin sees the 10 customers in clear. carol_analyst sees the 5 European customers with masked e-mails. dave_viewer is refused by Trino: Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg" alt="The same query by three sandbox users, through the same MCP client. alice_admin gets the 10 customers in clear. carol_analyst gets the 5 European customers with masked e-mails. dave_viewer is refused by Trino: Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.">
 </picture>
 
-The same question from the three users of the sandbox, through the same agent and the same
+The same query from the three users of the sandbox, through the same MCP client and the same
 server. Trino answers each of them with the sandbox's OPA policy; the server copies no rule.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-3-step-by-step-dark.svg">
-  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-3-step-by-step-light.svg" alt="Six steps. The question asks for the revenue per customer. search_columns searches revenue customer. No column holds both words, so the server matches each word and says which word each column matched. describe_schema shows the join, and execute_query sums transactions.amount per customer_id as the person.">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-3-step-by-step-light.svg" alt="A real trial of Mistral on 0.7.0, in six steps. It asks which customer segment holds the largest total account balance, searches with four words and gets matches word by word, joins on a column that does not exist, reads the server's hint, reads the columns of customers with describe_table, fixes the join and gets business, 17620.75.">
 </picture>
 
-How the agent finds where the revenue is: one `search_columns` call, matches word by word when no
-column holds every word, then `describe_schema` and `execute_query`. The search answer shown is
-the server's, from the sandbox.
+A real trial, tool call by tool call: Mistral on 0.7.0 looks for the segment with the largest
+balance. The search matches word by word, the error on a wrong join names the table to read, and
+the agent fixes its join. Every answer shown is the server's, replayed in the sandbox.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-4-identity-modes-dark.svg">
-  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-4-identity-modes-light.svg" alt="Three questions pick an identity mode: token exchange gives jwt, a Trino impersonation rule gives impersonation, a server on one person's machine gives oauth2, otherwise service. The four modes are drawn on the same grid of MCP host, server and Trino; service, one account for everyone, is marked in amber.">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-4-identity-modes-light.svg" alt="Three questions pick an identity mode: token exchange gives jwt, a Trino impersonation rule gives impersonation, a server on one person's machine with Trino's OAuth2 login gives oauth2, otherwise service. The four modes are drawn on the same grid of MCP host, server and Trino; service, one account for everyone, is marked in amber.">
 </picture>
 
 Four identity modes, from the safest to the simplest. `jwt` is the default; `service` gives
@@ -83,11 +84,13 @@ every caller the same account and is used only when you name it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-5-measurements-dark.svg">
-  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-5-measurements-light.svg" alt="Right answers: Mistral 62.5% on 0.6.1 and 70% on 0.7.0, Claude 93.3% on both. Tool calls per question: Mistral 5.8 then 3.0, Claude 8.5 then 4.9.">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-5-measurements-light.svg" alt="Mistral answers right 62.5% of the time on 0.6.1 and 70% on 0.7.0, Claude 93.3% on both. Mistral goes from 5.8 to 3.0 tool calls per question, Claude from 8.5 to 4.9. Mistral varies more between runs than the gap between versions, and input tokens rise by about 41%.">
 </picture>
 
-The same five business questions asked to Mistral and to Claude, on 0.6.1 and on 0.7.0. The
-harness and its reports are in [akko-sandbox](https://github.com/AKKO-p/akko-sandbox/tree/main/agent).
+The same five business questions asked to Mistral and to Claude, on 0.6.1 and on 0.7.0. Mistral
+varies more from one run to the next than the gap between the versions, and 0.7.0 sends about 41%
+more input tokens per question, because its tool descriptions are longer. The harness and its
+reports are in [akko-sandbox](https://github.com/AKKO-p/akko-sandbox/tree/main/agent/reports).
 
 The interactive version of these five steps is on
 [akko-ai.com/en/docs/understand](https://akko-ai.com/en/docs/understand/) (also

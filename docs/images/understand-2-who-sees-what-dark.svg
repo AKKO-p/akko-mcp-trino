@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="682" viewBox="0 0 880 682" role="img" aria-labelledby="t d">
 <title id="t">Who sees what</title>
-<desc id="d">The same query by three sandbox users. alice_admin gets the 10 customers in clear. carol_analyst gets the 5 European customers with masked e-mails. dave_viewer is refused by Trino: Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.</desc>
+<desc id="d">The same query by three sandbox users, through the same MCP client. alice_admin gets the 10 customers in clear. carol_analyst gets the 5 European customers with masked e-mails. dave_viewer is refused by Trino: Access Denied: Cannot select from columns [country, full_name, id, email] in table or view demo.crm.customers.</desc>
 <style>
 text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'DejaVu Sans', sans-serif;fill:#e8ecf4}
 .m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace}
@@ -15,7 +15,7 @@ text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
 <rect x="496" y="136" width="352" height="252" rx="14" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
 <rect x="496" y="404" width="352" height="186" rx="14" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
 <text x="440.0" y="64" font-size="21" text-anchor="middle" class="bb" xml:space="preserve">Who sees what?</text>
-<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">The same query, through the same agent and the same server.</text>
+<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">The same query, through the same MCP client and the same server.</text>
 <text x="440.0" y="114" font-size="13" text-anchor="middle" class="m" xml:space="preserve">SELECT full_name, email, country FROM demo.crm.customers ORDER BY id</text>
 <text x="50" y="168" font-size="16" class="m bb" xml:space="preserve">alice_admin</text>
 <rect x="167.8" y="153" width="52.0" height="21" rx="10.5" fill="#1d1d44"/>
@@ -88,6 +88,6 @@ text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
 <text x="526" y="512" font-size="12.5" class="m no" xml:space="preserve">in table or view demo.crm.customers</text>
 <text x="514" y="550" font-size="13.5" class="mu" xml:space="preserve">Searched with search_columns <tspan class="m">"email"</tspan>,</text>
 <text x="514" y="570" font-size="13.5" class="mu" xml:space="preserve">he gets no match, and the search is complete.</text>
-<text x="440.0" y="632" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">These three answers come from Trino, with the sandbox's OPA policy.</text>
+<text x="440.0" y="632" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">These answers come from what Trino lets each user see, with the sandbox's OPA policy.</text>
 <text x="440.0" y="654" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">The MCP server copies no rule: it only passes on each person's identity.</text>
 </svg>

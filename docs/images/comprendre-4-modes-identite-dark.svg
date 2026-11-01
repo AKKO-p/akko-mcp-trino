@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="1000" viewBox="0 0 880 1000" role="img" aria-labelledby="t d">
 <title id="t">Les quatre modes d’identité</title>
-<desc id="d">Trois questions choisissent le mode, puis les quatre modes sur la même grille (MCP host, serveur, Trino) : jwt, par défaut, impersonation, oauth2 sur un poste de travail, et service, en orange, un seul compte pour tous.</desc>
+<desc id="d">Trois questions choisissent le mode, puis les quatre modes sur la même grille (MCP host, serveur, Trino) : jwt, par défaut, impersonation, oauth2 sur un poste de travail, et service, en orange, un seul compte pour tous.</desc>
 <style>
 text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'DejaVu Sans', sans-serif;fill:#e8ecf4}
 .m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace}
@@ -33,8 +33,8 @@ text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
 <text x="68" y="292" font-size="12.5" class="mu" xml:space="preserve">Non</text>
 <rect x="32" y="300" width="816" height="66" rx="12" fill="#0c1220" stroke="#24304a" stroke-width="1"/>
 <text x="50" y="328.0" font-size="15" class="bb fa" xml:space="preserve">3.</text>
-<text x="74" y="328.0" font-size="15" xml:space="preserve">Le serveur tourne-t-il sur le poste d’une seule personne</text>
-<text x="74" y="348.0" font-size="15" xml:space="preserve">(Claude Desktop, Cursor) ?</text>
+<text x="74" y="328.0" font-size="15" xml:space="preserve">Le serveur tourne-t-il sur le poste d’une seule personne,</text>
+<text x="74" y="348.0" font-size="15" xml:space="preserve">avec la connexion OAuth2 de Trino (Claude Desktop, Cursor) ?</text>
 <rect x="705.2" y="319.0" width="124.8" height="28" rx="14" fill="#2a2112"/>
 <text x="767.6" y="338.0" font-size="13.5" text-anchor="middle" class="am" xml:space="preserve">Non → <tspan class="m b">service</tspan></text>
 <rect x="578.0" y="319.0" width="117.19999999999999" height="28" rx="14" fill="#1d1d44"/>

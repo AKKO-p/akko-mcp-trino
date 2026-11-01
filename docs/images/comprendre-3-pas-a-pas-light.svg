@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="880" height="1151" viewBox="0 0 880 1151" role="img" aria-labelledby="t d">
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="1420" viewBox="0 0 880 1420" role="img" aria-labelledby="t d">
 <title id="t">L’agent pas à pas</title>
-<desc id="d">Six étapes : la question, search_columns avec revenue customer, aucune colonne avec les deux mots, les correspondances mot par mot avec leurs words, describe_schema, puis execute_query.</desc>
+<desc id="d">Un vrai essai en six étapes, Mistral en 0.7.0. Il demande quel segment de clients détient le plus gros solde total, cherche avec quatre mots et reçoit des résultats mot par mot, fait une jointure sur une colonne qui n’existe pas, lit le conseil du serveur, lit les colonnes de customers avec describe_table, corrige la jointure et obtient business, 17620.75.</desc>
 <style>
 text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'DejaVu Sans', sans-serif;fill:#0f1b2d}
 .m{font-family:ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace}
@@ -9,71 +9,91 @@ text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
 .ln{fill:none;stroke:#4d5a70;stroke-width:1.5} .dash{stroke-dasharray:4 4}
 .grid{stroke:#e3e6ec;stroke-width:1}
 </style>
-<path d="M28.5 0.5H851.5A28 28 0 0 1 879.5 28.5V1136.5A14 14 0 0 1 865.5 1150.5H14.5A14 14 0 0 1 0.5 1136.5V28.5A28 28 0 0 1 28.5 0.5Z" fill="#f6f7f9" stroke="#e3e6ec"/>
+<path d="M28.5 0.5H851.5A28 28 0 0 1 879.5 28.5V1405.5A14 14 0 0 1 865.5 1419.5H14.5A14 14 0 0 1 0.5 1405.5V28.5A28 28 0 0 1 28.5 0.5Z" fill="#f6f7f9" stroke="#e3e6ec"/>
 <rect x="260" y="-20" width="360" height="38" rx="19" fill="#ffffff" stroke="#e3e6ec"/>
-<path d="M62 131V960" stroke="#e3e6ec" stroke-width="2"/>
+<path d="M62 131V1100" stroke="#e3e6ec" stroke-width="2"/>
 <circle cx="62" cy="131" r="17" fill="#4a42d4"/>
-<text x="62" y="136.5" font-size="15" text-anchor="middle" class="bb" fill="#ffffff" style="fill:#ffffff" xml:space="preserve">1</text>
-<circle cx="62" cy="254" r="17" fill="#4a42d4"/>
-<text x="62" y="259.5" font-size="15" text-anchor="middle" class="bb" fill="#ffffff" style="fill:#ffffff" xml:space="preserve">2</text>
-<circle cx="62" cy="438" r="17" fill="#4a42d4"/>
-<text x="62" y="443.5" font-size="15" text-anchor="middle" class="bb" fill="#ffffff" style="fill:#ffffff" xml:space="preserve">3</text>
-<circle cx="62" cy="582" r="17" fill="#4a42d4"/>
-<text x="62" y="587.5" font-size="15" text-anchor="middle" class="bb" fill="#ffffff" style="fill:#ffffff" xml:space="preserve">4</text>
-<circle cx="62" cy="837" r="17" fill="#4a42d4"/>
-<text x="62" y="842.5" font-size="15" text-anchor="middle" class="bb" fill="#ffffff" style="fill:#ffffff" xml:space="preserve">5</text>
-<circle cx="62" cy="960" r="17" fill="#4a42d4"/>
-<text x="62" y="965.5" font-size="15" text-anchor="middle" class="bb" fill="#ffffff" style="fill:#ffffff" xml:space="preserve">6</text>
+<text x="62" y="136.5" font-size="15" text-anchor="middle" class="bb" style="fill:#ffffff">1</text>
+<circle cx="62" cy="249" r="17" fill="#4a42d4"/>
+<text x="62" y="254.5" font-size="15" text-anchor="middle" class="bb" style="fill:#ffffff">2</text>
+<circle cx="62" cy="390" r="17" fill="#4a42d4"/>
+<text x="62" y="395.5" font-size="15" text-anchor="middle" class="bb" style="fill:#ffffff">3</text>
+<circle cx="62" cy="672" r="17" fill="#4a42d4"/>
+<text x="62" y="677.5" font-size="15" text-anchor="middle" class="bb" style="fill:#ffffff">4</text>
+<circle cx="62" cy="918" r="17" fill="#4a42d4"/>
+<text x="62" y="923.5" font-size="15" text-anchor="middle" class="bb" style="fill:#ffffff">5</text>
+<circle cx="62" cy="1100" r="17" fill="#4a42d4"/>
+<text x="62" y="1105.5" font-size="15" text-anchor="middle" class="bb" style="fill:#ffffff">6</text>
 <text x="440.0" y="64" font-size="21" text-anchor="middle" class="bb" xml:space="preserve">Comment l’agent trouve la bonne colonne</text>
-<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Une vraie question, tool call par tool call. La réponse de la recherche est celle du serveur, mot pour mot.</text>
+<text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Un vrai essai, tool call par tool call (Mistral, 0.7.0). Chaque réponse montrée est celle du serveur.</text>
 <rect x="104" y="120" width="101.4" height="24" rx="8" fill="#ecebfb"/>
 <text x="114" y="137" font-size="13" class="ac b" xml:space="preserve">la personne</text>
-<text x="104" y="168" font-size="18" class="bb" xml:space="preserve">« Quel est le chiffre d’affaires par client ? »</text>
-<text x="104" y="192" font-size="14.5" class="mu" xml:space="preserve">L’agent ne connaît pas les tables, et il ne doit surtout pas deviner les noms de colonnes.</text>
-<rect x="104" y="243" width="130.60000000000002" height="24" rx="8" fill="#ecebfb"/>
-<text x="114" y="260" font-size="13" class="m ac b" xml:space="preserve">search_columns</text>
-<text x="244.60000000000002" y="260" font-size="13" class="fa" xml:space="preserve">cherche dans tous les catalogs que la personne voit</text>
-<text x="104" y="291" font-size="18" class="bb" xml:space="preserve">Il cherche avec deux mots : revenue customer</text>
-<text x="104" y="315" font-size="14.5" class="mu" xml:space="preserve">Un seul tool call sur tous les catalogs qu’il a le droit de voir, au lieu de les parcourir un par</text>
-<text x="104" y="336" font-size="14.5" class="mu" xml:space="preserve">un.</text>
-<rect x="104" y="357" width="300" height="34" rx="10" fill="#f2f3f7"/>
-<text x="118" y="379" font-size="13" class="m" xml:space="preserve"><tspan class="ac">"text"</tspan><tspan class="mu">: </tspan><tspan class="ok">"revenue customer"</tspan></text>
-<rect x="104" y="427" width="94.0" height="24" rx="8" fill="#ecebfb"/>
-<text x="114" y="444" font-size="13" class="ac b" xml:space="preserve">le serveur</text>
-<text x="104" y="475" font-size="18" class="bb" xml:space="preserve">Aucune colonne ne porte les deux mots ensemble</text>
-<text x="104" y="499" font-size="14.5" class="mu" xml:space="preserve">Sans cette seconde passe, l’agent recevait « rien trouvé » et Mistral s’arrêtait là. Maintenant, le</text>
-<text x="104" y="520" font-size="14.5" class="mu" xml:space="preserve">serveur cherche chaque mot séparément.</text>
-<rect x="104" y="571" width="145.8" height="24" rx="8" fill="#ecebfb"/>
-<text x="114" y="588" font-size="13" class="ac b" xml:space="preserve">le serveur répond</text>
-<text x="104" y="619" font-size="18" class="bb" xml:space="preserve">Chaque résultat dit quel mot il a trouvé</text>
-<text x="104" y="643" font-size="14.5" class="mu" xml:space="preserve">Le serveur ajoute "partial": true pour que l’agent sache que ce sont des correspondances partielles.</text>
-<rect x="104" y="666" width="232" height="58" rx="10" fill="#f6f7f9" stroke="#15803d" stroke-width="1.6"/>
-<text x="116" y="689" font-size="13" class="m" xml:space="preserve">crm.transactions.amount</text>
-<rect x="116" y="698" width="67.80000000000001" height="18" rx="9" fill="#fbf3e3"/>
-<text x="149.9" y="711" font-size="11.5" text-anchor="middle" class="m am" xml:space="preserve">revenue</text>
-<rect x="348" y="666" width="232" height="58" rx="10" fill="#f6f7f9" stroke="#15803d" stroke-width="1.6"/>
-<text x="360" y="689" font-size="13" class="m" xml:space="preserve">crm.accounts.customer_id</text>
-<rect x="360" y="698" width="75.2" height="18" rx="9" fill="#fbf3e3"/>
-<text x="397.6" y="711" font-size="11.5" text-anchor="middle" class="m am" xml:space="preserve">customer</text>
-<rect x="592" y="666" width="232" height="58" rx="10" fill="#f6f7f9" stroke="#e3e6ec" stroke-width="1"/>
-<text x="604" y="689" font-size="13" class="m" xml:space="preserve">crm.customers.segment</text>
-<rect x="604" y="698" width="75.2" height="18" rx="9" fill="#fbf3e3"/>
-<text x="641.6" y="711" font-size="11.5" text-anchor="middle" class="m am" xml:space="preserve">customer</text>
-<rect x="104" y="736" width="744" height="54" rx="10" fill="#f2f3f7"/>
-<text x="118" y="757" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"comment"</tspan><tspan class="mu">: </tspan><tspan class="ok">"Booked amount in the account currency: the revenue of a sale"</tspan><tspan class="mu">,</tspan></text>
-<text x="118" y="777" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"words"</tspan><tspan class="mu">: [</tspan><tspan class="ok">"revenue"</tspan><tspan class="mu">]  …  </tspan><tspan class="ac">"partial"</tspan><tspan class="mu">: </tspan><tspan class="ok">true</tspan></text>
-<rect x="104" y="826" width="138.5" height="24" rx="8" fill="#ecebfb"/>
-<text x="114" y="843" font-size="13" class="m ac b" xml:space="preserve">describe_schema</text>
-<text x="252.5" y="843" font-size="13" class="fa" xml:space="preserve">tout un schéma en un appel</text>
-<text x="104" y="874" font-size="18" class="bb" xml:space="preserve">Les colonnes de crm, en un seul tool call</text>
-<text x="104" y="898" font-size="14.5" class="mu" xml:space="preserve">L’agent voit la jointure : transactions.account_id vers accounts.id, puis accounts.customer_id.</text>
-<rect x="104" y="949" width="122.7" height="24" rx="8" fill="#ecebfb"/>
-<text x="114" y="966" font-size="13" class="m ac b" xml:space="preserve">execute_query</text>
-<text x="236.7" y="966" font-size="13" class="fa" xml:space="preserve">exécute la requête au nom de la personne</text>
-<text x="104" y="997" font-size="18" class="bb" xml:space="preserve">SUM(amount) par customer_id</text>
-<text x="104" y="1021" font-size="14.5" class="mu" xml:space="preserve">La requête part sous l’identité de la personne. Trino applique ses droits, et l’agent cite les</text>
-<text x="104" y="1042" font-size="14.5" class="mu" xml:space="preserve">colonnes utilisées.</text>
-<path d="M105.5 1065V1113" stroke="#4a42d4" stroke-width="3"/>
-<text x="118" y="1083" font-size="14.5" xml:space="preserve">Le chiffre d’affaires de chaque client, calculé sur transactions.amount, relié par</text>
-<text x="118" y="1104" font-size="14.5" xml:space="preserve">accounts.customer_id.</text>
+<text x="104" y="168" font-size="18" class="bb" xml:space="preserve">« Quel segment de clients détient le plus gros solde total ? »</text>
+<text x="104" y="192" font-size="14.5" class="mu" xml:space="preserve">L’agent ne connaît pas les tables, alors il cherche avant d’écrire du SQL.</text>
+<rect x="104" y="238" width="130.60000000000002" height="24" rx="8" fill="#ecebfb"/>
+<text x="114" y="255" font-size="13" class="m ac b" xml:space="preserve">search_columns</text>
+<text x="244.60000000000002" y="255" font-size="13" class="fa" xml:space="preserve">cherche dans tous les catalogs que la personne voit</text>
+<text x="104" y="286" font-size="18" class="bb" xml:space="preserve">Il cherche avec quatre mots</text>
+<rect x="104" y="305" width="350.25" height="34" rx="10" fill="#f2f3f7"/>
+<text x="118" y="327" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"text"</tspan><tspan class="mu">: </tspan><tspan class="ok">"customer segment account balance"</tspan></text>
+<rect x="104" y="379" width="145.8" height="24" rx="8" fill="#ecebfb"/>
+<text x="114" y="396" font-size="13" class="ac b" xml:space="preserve">le serveur répond</text>
+<text x="104" y="427" font-size="18" class="bb" xml:space="preserve">Aucune colonne ne porte les quatre mots, alors il cherche mot par mot</text>
+<text x="104" y="451" font-size="14.5" class="mu" xml:space="preserve">Chaque résultat liste les mots qui l’ont trouvé, dans l’ordre de la réponse du serveur.</text>
+<rect x="104" y="467" width="240" height="58" rx="10" fill="#f6f7f9" stroke="#15803d" stroke-width="1.6"/>
+<text x="116" y="490" font-size="13" class="m" xml:space="preserve">crm.accounts.balance</text>
+<text x="334" y="516" font-size="11.5" text-anchor="end" class="ok b" xml:space="preserve">retenue</text>
+<rect x="116" y="499" width="67.80000000000001" height="18" rx="9" fill="#fbf3e3"/>
+<text x="149.9" y="512" font-size="11.5" text-anchor="middle" class="m am" xml:space="preserve">account</text>
+<rect x="189.8" y="499" width="67.80000000000001" height="18" rx="9" fill="#fbf3e3"/>
+<text x="223.70000000000002" y="512" font-size="11.5" text-anchor="middle" class="m am" xml:space="preserve">balance</text>
+<rect x="356" y="467" width="240" height="58" rx="10" fill="#f6f7f9" stroke="#15803d" stroke-width="1.6"/>
+<text x="368" y="490" font-size="13" class="m" xml:space="preserve">crm.customers.segment</text>
+<text x="586" y="516" font-size="11.5" text-anchor="end" class="ok b" xml:space="preserve">retenue</text>
+<rect x="368" y="499" width="75.2" height="18" rx="9" fill="#fbf3e3"/>
+<text x="405.6" y="512" font-size="11.5" text-anchor="middle" class="m am" xml:space="preserve">customer</text>
+<rect x="449.2" y="499" width="67.80000000000001" height="18" rx="9" fill="#fbf3e3"/>
+<text x="483.1" y="512" font-size="11.5" text-anchor="middle" class="m am" xml:space="preserve">segment</text>
+<rect x="608" y="467" width="240" height="58" rx="10" fill="#f6f7f9" stroke="#15803d" stroke-width="1.6"/>
+<text x="620" y="490" font-size="13" class="m" xml:space="preserve">crm.accounts.customer_id</text>
+<text x="838" y="516" font-size="11.5" text-anchor="end" class="ok b" xml:space="preserve">retenue</text>
+<rect x="620" y="499" width="75.2" height="18" rx="9" fill="#fbf3e3"/>
+<text x="657.6" y="512" font-size="11.5" text-anchor="middle" class="m am" xml:space="preserve">customer</text>
+<text x="104" y="551" font-size="13.5" class="mu" xml:space="preserve">et transactions.account_id, transactions.amount, trouvées par « <tspan class="m">account</tspan> »</text>
+<rect x="104" y="567" width="693.375" height="54" rx="10" fill="#f2f3f7"/>
+<text x="118" y="589" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"partial"</tspan><tspan class="mu">: </tspan><tspan class="ok">true</tspan><tspan class="mu">,</tspan></text>
+<text x="118" y="609" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"hint"</tspan><tspan class="mu">: </tspan><tspan class="ok">"No table or column holds every word together, so these are partial matches, …"</tspan></text>
+<rect x="104" y="661" width="122.7" height="24" rx="8" fill="#ecebfb"/>
+<text x="114" y="678" font-size="13" class="m ac b" xml:space="preserve">execute_query</text>
+<text x="236.7" y="678" font-size="13" class="fa" xml:space="preserve">exécute la requête au nom de la personne</text>
+<text x="104" y="709" font-size="18" class="bb" xml:space="preserve">Il fait une jointure sur une colonne qui n’existe pas</text>
+<text x="104" y="733" font-size="14.5" class="mu" xml:space="preserve">Le serveur répond avec le type d’erreur et la table à lire.</text>
+<rect x="104" y="749" width="304.5" height="34" rx="10" fill="#f2f3f7"/>
+<text x="118" y="771" font-size="12.5" class="m" xml:space="preserve"><tspan class="mu">… ON </tspan><tspan class="no b">c.customer_id</tspan><tspan class="mu"> = a.customer_id …</tspan></text>
+<rect x="104" y="793" width="586.625" height="74" rx="10" fill="#f2f3f7"/>
+<text x="118" y="815" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"kind"</tspan><tspan class="mu">: </tspan><tspan class="ok">"column"</tspan><tspan class="mu">, </tspan><tspan class="ac">"identifier"</tspan><tspan class="mu">: </tspan><tspan class="ok">"c.customer_id"</tspan><tspan class="mu">,</tspan></text>
+<text x="118" y="835" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"hint"</tspan><tspan class="mu">: </tspan><tspan class="ok">"Read the columns of demo.crm.customers with describe_table, then</tspan></text>
+<text x="118" y="855" font-size="12.5" class="m" xml:space="preserve"><tspan class="ok">         write the query again with a column it has."</tspan></text>
+<rect x="104" y="907" width="130.60000000000002" height="24" rx="8" fill="#ecebfb"/>
+<text x="114" y="924" font-size="13" class="m ac b" xml:space="preserve">describe_table</text>
+<text x="244.60000000000002" y="924" font-size="13" class="fa" xml:space="preserve">les colonnes d’une table</text>
+<text x="104" y="955" font-size="18" class="bb" xml:space="preserve">Il lit les colonnes de customers</text>
+<text x="104" y="979" font-size="14.5" class="mu" xml:space="preserve">La table a une colonne id, pas customer_id.</text>
+<rect x="104" y="995" width="685.75" height="54" rx="10" fill="#f2f3f7"/>
+<text x="118" y="1017" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"rows"</tspan><tspan class="mu">: [[</tspan><tspan class="ok b">"id"</tspan><tspan class="mu">, "integer", "", ""], ["full_name", "varchar", "", ""],</tspan></text>
+<text x="118" y="1037" font-size="12.5" class="m" xml:space="preserve"><tspan class="mu">         ["email", "varchar", "", ""], ["country", "char(2)", "", ""], ["segment", …]]</tspan></text>
+<rect x="104" y="1089" width="122.7" height="24" rx="8" fill="#ecebfb"/>
+<text x="114" y="1106" font-size="13" class="m ac b" xml:space="preserve">execute_query</text>
+<text x="236.7" y="1106" font-size="13" class="fa" xml:space="preserve">exécute la requête au nom de la personne</text>
+<text x="104" y="1137" font-size="18" class="bb" xml:space="preserve">Il corrige la jointure et obtient la réponse</text>
+<text x="104" y="1161" font-size="14.5" class="mu" xml:space="preserve">La requête part sous le nom de carol_analyst, donc le row filter de Trino ne garde que ses clients</text>
+<text x="104" y="1182" font-size="14.5" class="mu" xml:space="preserve">européens.</text>
+<rect x="104" y="1198" width="235.875" height="34" rx="10" fill="#f2f3f7"/>
+<text x="118" y="1220" font-size="12.5" class="m" xml:space="preserve"><tspan class="mu">… ON </tspan><tspan class="ok b">c.id</tspan><tspan class="mu"> = a.customer_id …</tspan></text>
+<rect x="104" y="1242" width="411.25" height="34" rx="10" fill="#f2f3f7"/>
+<text x="118" y="1264" font-size="12.5" class="m" xml:space="preserve"><tspan class="ac">"rows"</tspan><tspan class="mu">: [[</tspan><tspan class="ok">"business"</tspan><tspan class="mu">, </tspan><tspan class="ok">"17620.75"</tspan><tspan class="mu">]], </tspan><tspan class="ac">"row_count"</tspan><tspan class="mu">: 1</tspan></text>
+<path d="M105.5 1288V1336" stroke="#4a42d4" stroke-width="3"/>
+<text x="118" y="1306" font-size="14.5" xml:space="preserve">The customer segment that holds the largest total account balance is the business segment,</text>
+<text x="118" y="1327" font-size="14.5" xml:space="preserve">with a total balance of 17620.75.</text>
+<text x="440.0" y="1392" font-size="14" text-anchor="middle" class="mu" xml:space="preserve">En 0.7.0, Mistral a bien répondu à cette question dans 4 essais sur 5, contre 0 sur 5 en 0.6.1.</text>
 </svg>
