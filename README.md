@@ -518,8 +518,8 @@ column listed: "archived 2019" finds a table `transactions_2019` commented "Arch
 transactions" without its columns, which `describe_table` then reads. It searches
 every catalog the caller sees (`system` never), one catalog, or one schema. A named
 schema is checked first: one that does not exist and one the caller may not see
-answer the same error, `kind` `schema`, never an empty search said to be complete;
-a catalog Trino does not know or refuses answers Trino's error. Each word is one
+answer the same error, `kind` `schema`, never an empty search said to be complete; a
+catalog Trino does not know or refuses answers Trino's error. Each word is one
 escaped `LIKE` literal: a word holds no quote and no `%`, and its `_` is a plain
 character. A word shorter than `MCP_SEARCH_MIN_LENGTH` (3 by default) is ignored,
 and a text with no word left is refused and says so, so a letter or two does not
@@ -529,44 +529,45 @@ is refused before Trino is asked anything, with the bound in the message: each w
 adds a few `LIKE` to every statement. The search reads
 `system.metadata.table_comments` and `system.jdbc.columns`, which Trino filters for
 each user, one schema at a time in a stable order (catalogs, then their schemas,
-sorted; in a schema its tables, then its columns). A schema costs two statements:
-its tables, and its columns, each of which reads both views of the schema (a table
-that holds a matching column, a column whose table's comment holds a word), so the
-comments of its tables are read twice. Every read filters on the catalog and the
-schema by equality, which Trino pushes down to the views, so a catalog of many
-thousand tables answers schema by schema. It stays within the call's budget (`MCP_CALL_TIMEOUT_SECONDS`): before each schema it keeps
+sorted; in a schema its tables, then its columns). A schema costs two statements,
+its tables then its columns, which read `system.metadata.table_comments` three times
+and `system.jdbc.columns` twice in all: the tables' statement reads the comments for
+the tables' own text and again for the columns a table holds, joined to their
+table's comment, and the columns' statement reads both views once. On Hive the
+comment view is the expensive one, a metastore call per table. Every read filters on
+the catalog and the schema by equality, which Trino pushes down to the views, so a
+catalog of many thousand tables answers schema by schema. It stays within the call's
+budget (`MCP_CALL_TIMEOUT_SECONDS`): before each schema it keeps
 `MCP_SEARCH_RESERVE_SECONDS` (2 by default) in reserve, each query is stopped in
 Trino at what is left, and the search then answers what it searched rather than the
 call's own error. `tables` and `matches` together stop at the row cap
-(`TRINO_MAX_ROWS`). The answer
-says exactly what was searched: `schemas_searched`, `not_searched` with a reason
-for each part left (`time_budget`, `row_cap`, or the `kind` of Trino's error; a
-`schema` of `null` is a whole catalog), and `complete`, true only when everything in
-scope was searched, over every call of the search. `next_cursor` resumes the same
-search where it stopped (that schema and the rest of its catalog, then every catalog
-not opened), inside a schema's tables or columns when the row cap stopped it there.
-A complete search that found nothing, on any page of its chain of cursors, adds
-`hint`, a fixed sentence that suggests
-fewer or other words, or browsing with `list_tables` and `describe_schema`: an
-agent should not conclude from an empty search that the data does not exist. A
-schema, or the
-schema list of a catalog, that takes longer than one query may
+(`TRINO_MAX_ROWS`). The answer says exactly what was searched: `schemas_searched`,
+`not_searched` with a reason for each part left (`time_budget`, `row_cap`, or the
+`kind` of Trino's error; a `schema` of `null` is a whole catalog), and `complete`,
+true only when everything in scope was searched, over every call of the search.
+`next_cursor` resumes the same search where it stopped (that schema and the rest of
+its catalog, then every catalog not opened), inside a schema's tables or columns
+when the row cap stopped it there. A complete search that found nothing, on any page
+of its chain of cursors, adds `hint`, a fixed sentence that suggests fewer or other
+words, or browsing with `list_tables` and `describe_schema`: an agent should not
+conclude from an empty search that the data does not exist. A schema, or the schema
+list of a catalog, that takes longer than one query may
 (`TRINO_QUERY_TIMEOUT_SECONDS`) while the call still has time is named
 (`time_budget`) and skipped: resuming it would stop every later call at the same
-place. So is one that takes longer than a whole call, when Trino's own limit is
-left in place (`TRINO_QUERY_TIMEOUT_SECONDS=0`) or is as long as the call: a call
-that runs out of time exactly where it resumed, having moved nothing, skips it, so
-every call advances. A cursor is refused (`invalid_argument`) for another text or scope, for a
-catalog the caller does not see, or when it was altered; every cursor the server
-gives resumes, a schema such as Hive's `2024_sales` included, since a schema in a
-cursor only ever enters a string literal. Without a call budget
+place. So is one that takes longer than a whole call, when Trino's own limit is left
+in place (`TRINO_QUERY_TIMEOUT_SECONDS=0`) or is as long as the call: a call that
+runs out of time exactly where it resumed, having moved nothing, skips it, so every
+call advances. A cursor is refused (`invalid_argument`) for another text or scope,
+for a catalog the caller does not see, or when it was altered; every cursor the
+server gives resumes, a schema such as Hive's `2024_sales` included, since a schema
+in a cursor only ever enters a string literal. Without a call budget
 (`MCP_CALL_TIMEOUT_SECONDS=0`) a search of every catalog would have no bound: it is
 refused, a named catalog is searched, and `--check` warns of it. `--check` also
-warns of `MCP_SEARCH_RESERVE_SECONDS=0` with a call budget: a search may then run
-to the end of the call, which answers its own `time_budget` error. The audit line
-says how many tables and columns came and whether the search was cut, never the
-text, which may be a value. Comments are data, never
-instructions, as for `describe_schema`.
+warns of `MCP_SEARCH_RESERVE_SECONDS=0` with a call budget: a search may then run to
+the end of the call, which answers its own `time_budget` error. The audit line says
+how many tables and columns came and whether the search was cut, never the text,
+which may be a value. Comments are data, never instructions, as for
+`describe_schema`.
 
 The path an agent is told to follow: `search_columns` to find where the data
 lives, `describe_schema` (or `describe_table` for sample rows) to learn the tables
