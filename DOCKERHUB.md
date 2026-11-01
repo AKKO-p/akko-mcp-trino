@@ -3,8 +3,9 @@
 **Give your AI agents read-only access to Trino, with the rights of the user they work for.**
 
 akko-mcp-trino is an [MCP](https://modelcontextprotocol.io) server for Trino, under the
-Apache 2.0 licence. It lets an agent list catalogs, schemas and tables, describe a table,
-explain a query and run it, and it refuses every write it is sent: each statement is parsed,
+Apache 2.0 licence. It lets an agent find the tables and columns that hold what it is looking
+for, describe a schema or a table, list catalogs, schemas and tables, explain a query and run
+it, and it refuses every write it is sent: each statement is parsed,
 and a write anywhere in it is refused before Trino.
 
 - **The user's own rights, safe by default.** In `jwt` mode, the default, the server verifies
@@ -17,7 +18,9 @@ and a write anywhere in it is refused before Trino.
   to every host.
 - **Bounded and audited.** 100 rows, 60 s per query, 120 s per tool call by default, one audit
   line per call, and no token ever written to the logs.
-- **Eight tools**, for any MCP host and any model.
+- **Eight tools**, for any MCP host and any model: `search_columns` (where the data lives),
+  `describe_schema`, `describe_table`, `list_catalogs`, `list_schemas` and `list_tables` (paged),
+  `explain_query` and `execute_query`. Every error carries a `kind` that says what to do about it.
 
 Source, documentation and issues: **[github.com/AKKO-p/akko-mcp-trino](https://github.com/AKKO-p/akko-mcp-trino)**
 
@@ -26,7 +29,7 @@ Source, documentation and issues: **[github.com/AKKO-p/akko-mcp-trino](https://g
 | Tag | Meaning |
 |---|---|
 | `X.Y.Z` (e.g. `0.7.0`) | one release |
-| `X.Y` (e.g. `0.6`) | the latest release of that minor line |
+| `X.Y` (e.g. `0.7`) | the latest release of that minor line |
 | `latest` | the latest release |
 
 Every tag is built for `linux/amd64` and `linux/arm64`, runs as a non-root user (uid 10001),
@@ -47,13 +50,13 @@ docker run -d --name akko-mcp-trino -p 3000:3000 -p 3001:3001 \
   -e TRINO_TOKEN_EXCHANGE_URL=https://idp.example.com/realms/data/protocol/openid-connect/token \
   -e TRINO_TOKEN_EXCHANGE_CLIENT_ID=akko-mcp -e TRINO_TOKEN_EXCHANGE_CLIENT_SECRET=... \
   -e TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \
-  akkoai/akko-mcp-trino:0.6
+  akkoai/akko-mcp-trino:0.7
 ```
 
 Without token exchange: `-e TRINO_IDENTITY_MODE=impersonation -e TRINO_USER=mcp-service` and a
 password or client certificate for that account. One identity for every caller:
 `-e TRINO_IDENTITY_MODE=service -e TRINO_USER=mcp-reader -e TRINO_PASSWORD=...`. Upgrading from
-0.5: see [MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md).
+0.6 or 0.5: see [MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md).
 
 The MCP endpoint is `http://localhost:3000/mcp` (streamable HTTP); the host sends the user's
 access token as `Authorization: Bearer <token>`. Then:
@@ -61,7 +64,7 @@ access token as `Authorization: Bearer <token>`. Then:
 ```bash
 curl -s localhost:3001/health   # {"status":"ok"}
 curl -s localhost:3001/ready    # {"status":"ready"} once Trino answers
-docker run --rm akkoai/akko-mcp-trino:0.6 akko-mcp-trino --version
+docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
 ```
 
 Before serving, `akko-mcp-trino --check` prints the effective configuration (never a secret)
@@ -69,7 +72,7 @@ and exits with 2 if something would refuse to start:
 
 ```bash
 docker run --rm -e TRINO_HOST=... -e TRINO_HTTP_SCHEME=https -e MCP_JWKS_URL=... \
-  akkoai/akko-mcp-trino:0.6 akko-mcp-trino --check
+  akkoai/akko-mcp-trino:0.7 akko-mcp-trino --check
 ```
 
 Every setting, the Trino configuration for each mode, local hosts over stdio and the extension

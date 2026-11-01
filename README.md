@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-621%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-717%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -20,7 +20,8 @@
 **Give your AI agents read-only access to Trino, and nothing more.**
 
 akko-mcp-trino is an [MCP](https://modelcontextprotocol.io) server for Trino.
-It lets an agent list catalogs, schemas and tables, describe a table, explain a
+It lets an agent find the tables and columns that hold what it is looking for,
+describe a schema or a table, list catalogs, schemas and tables, explain a
 query and run it, and it refuses every write it is sent: each statement is
 parsed, and a write anywhere in it is refused before Trino. By default every
 query runs as the user the agent acts for. The server verifies the user's
@@ -30,9 +31,12 @@ leaves the server. Trino's access control (OPA, Ranger, or Trino's own rules)
 then decides what that user may read. Results are bounded in rows and in time,
 and every call leaves one audit line.
 
-> **Upgrading from 0.5?** 0.6.0 changes the defaults: a verified caller is
-> required, and the `jwt` mode exchanges the caller's token instead of passing
-> it on. See [MIGRATING.md](MIGRATING.md).
+> **Upgrading from 0.6?** 0.7.0 removes and renames nothing: it adds
+> `search_columns` and `describe_schema`, pages the listings, and gives every
+> error a `kind`. One helper for plugins changes its signature.
+> **From 0.5?** 0.6.0 changed the defaults: a verified caller is required, and
+> the `jwt` mode exchanges the caller's token instead of passing it on. See
+> [MIGRATING.md](MIGRATING.md) for both.
 
 ## Why
 
@@ -55,7 +59,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 621 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
+- **Small and proven.** 717 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
 
 ## Documentation
 
@@ -310,8 +314,13 @@ with memory caching or optional `keyring`. `--check` does not log in.
 ### Container
 
 A [Dockerfile](Dockerfile) ships with the repository (non-root, health check,
-OCI labels). Run it with the same environment variables, publishing ports
-`3000` (MCP) and `3001` (health).
+OCI labels). The image is published for `linux/amd64` and `linux/arm64` as
+`akkoai/akko-mcp-trino` and `ghcr.io/akko-p/akko-mcp-trino`. Run it with the
+same environment variables, publishing ports `3000` (MCP) and `3001` (health):
+
+```bash
+docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
+```
 
 ## Connect an MCP host
 
@@ -560,8 +569,9 @@ finish, it says what it left and its cursor resumes it, never complete. A page o
 the per-word pass adds `hint`, a fixed sentence for the agent: while the page has a
 `next_cursor`, that the pass is not finished and to call again with it; on its last
 page, that these are partial matches, to pick the right one or search again with one
-word from a column or table name, then `describe_table`. A search that found nothing
-at all, for one word or for each word alone, adds the other fixed `hint`: search
+word from a column or table name, then `describe_table`. A complete search that found
+nothing at all, and the last page of a per-word pass that found nothing on any page,
+add the other fixed `hint`: search
 again with one word from a column or table name, never a value, or browse with
 `list_tables` and `describe_schema`. An agent should not conclude from an empty
 search that the data does not exist. A schema, or the schema list of a catalog, that
@@ -978,7 +988,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 621 tests; line or branch coverage below 100 % fails the run
+pytest                        # 717 tests; line or branch coverage below 100 % fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start
