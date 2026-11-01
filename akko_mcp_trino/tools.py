@@ -80,7 +80,7 @@ MAX_ADVICE_TABLES = 4
 # The time of one such lookup: what is left of the call minus a reserve, so a slow lookup
 # stops as a plain timeout and the call still answers the agent's error; no lookup with less
 # than the reserve left; at most this many seconds without a call budget.
-ADVICE_RESERVE_SECONDS = 1.0
+ADVICE_RESERVE_SECONDS = 2.0
 ADVICE_LOOKUP_SECONDS = 5.0
 # The audit code of an error a tool returns without naming it (``note(error=...)``).
 UNNAMED_ERROR = "tool_error"
@@ -218,8 +218,9 @@ def dumps(obj: Any) -> str:
 
 
 def table_name(parts: tuple[str, ...]) -> str:
-    """A table's name as the agent wrote it, a part with a dot quoted, so it reads as one."""
-    return ".".join(f'"{p}"' if "." in p else p for p in parts)
+    """A table's name as the agent wrote it, a part with a dot quoted (a double quote in it
+    doubled, as Trino reads it), so it reads as one."""
+    return ".".join(f'"{p.replace(chr(34), 2 * chr(34))}"' if "." in p else p for p in parts)
 
 
 def error_reply(

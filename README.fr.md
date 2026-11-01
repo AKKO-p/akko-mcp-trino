@@ -359,12 +359,13 @@ lues, sauf si la requête a une CTE ou une sous-requête) et conseille `describe
 ne nomme que les tables que l'appelant voit : chaque candidate, quatre au plus, est cherchée dans
 `information_schema.tables` de son catalogue par égalité, au nom de l'appelant, chaque partie telle
 qu'écrite (une partie entre guillemets peut contenir un point), dans le temps qui reste à l'appel
-moins une seconde, cinq secondes au plus, pour qu'une recherche lente ne fasse jamais perdre son
+moins deux secondes, cinq secondes au plus, pour qu'une recherche lente ne fasse jamais perdre son
 erreur à l'agent ; un nom sans catalogue est cherché dans `TRINO_CATALOG`, et un nom sans schéma
 (`FROM accounts`) n'a pas de conseil, une limite connue ; une table cachée, un refus, une erreur ou
-moins d'une seconde restante valent pas de conseil pour elle ; une colonne ambiguë ou sans nom n'a
-pas de conseil, ni une requête que l'analyseur ne sait pas lire, jamais une erreur de plus : le nom
-vient de la requête, jamais de Trino, il ne montre donc rien que l'appelant ne pouvait déjà nommer.
+moins de deux secondes restantes valent pas de conseil pour elle ; une colonne ambiguë ou sans nom
+n'a pas de conseil, ni une requête que l'analyseur ne sait pas lire, jamais une erreur de plus : le
+nom vient de la requête, jamais de Trino, il ne montre donc rien que l'appelant ne pouvait déjà
+nommer.
 
 | `kind` | Sens |
 |---|---|

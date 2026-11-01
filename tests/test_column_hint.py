@@ -77,6 +77,14 @@ def test_the_tables_a_column_may_belong_to_come_from_the_statement(sql, identifi
     assert tables_for_column(sql, identifier) == [tuple(t.split(".")) for t in tables]
 
 
+def test_a_part_with_a_dot_and_a_quote_is_shown_as_trino_reads_it():
+    from akko_mcp_trino.tools import table_name
+
+    assert table_name(("demo", 'x."y', "t")) == 'demo."x.""y".t'
+    assert table_name(("demo", 'o"k', "t")) == 'demo.o"k.t', "no dot: written as it is"
+    assert tables_for_column('SELECT nope FROM "x.""y".t', "nope") == [('x."y', "t")]
+
+
 def test_a_part_with_a_dot_stays_one_part():
     """A quoted name may hold a dot: it is one part, never read as a catalog or a schema."""
     assert tables_for_column('SELECT nope FROM "x.y".t', "nope") == [("x.y", "t")]
