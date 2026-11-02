@@ -327,13 +327,46 @@ _EXECUTE_DOC = """Run {what} on Trino and return the rows.
         the table of your statement to read with describe_table before you write it again.
         """
 _READ_ONLY_RULE = (
-    "Only SELECT, SHOW, DESCRIBE and EXPLAIN are accepted; INSERT, UPDATE, DELETE, "
-    "CREATE, DROP and the like are refused before reaching Trino, wherever they "
-    "appear in the statement."
+    "Only SELECT, DESCRIBE of a table and SHOW CATALOGS, SCHEMAS, TABLES, COLUMNS or "
+    "FUNCTIONS are accepted{extra}; INSERT, UPDATE, DELETE, CREATE, DROP and the like, and "
+    "any other command, are refused before reaching Trino, wherever they appear in the "
+    "statement."
 )
+
+
+def _read_only_rule(extra_reads: frozenset[str]) -> str:
+    """The rule execute_query states, with the commands the administrator opened."""
+    extra = f", and {', '.join(sorted(extra_reads))}" if extra_reads else ""
+    return _READ_ONLY_RULE.format(extra=extra)
+
+
 _WRITE_RULE = (
     "The statement may write (INSERT, UPDATE, DELETE, CREATE, DROP and the like), "
     "as far as Trino's access control allows the identity it runs as."
+)
+_EXPLAIN_ERRORS = """{"error": "...", "kind": "..."} (a syntax or
+        permission error from Trino); kind says what to fix (syntax, column, table,
+        schema, catalog, permission, function, type), and "unavailable" means Trino
+        did not answer, so the query is neither valid nor invalid. An unknown column may
+        add "hint", the table of your statement to read with describe_table."""
+_EXPLAIN_VALIDATE_DOC = (
+    """Check that Trino accepts a read-only SQL query, without running it.
+
+        Use it to check a query before execute_query: Trino analyzes the statement as
+        the caller (names, columns, types, rights).
+        Args: sql, one read-only statement, no trailing semicolon needed.
+        Returns JSON {"valid": true} or """
+    + _EXPLAIN_ERRORS
+    + "\n        "
+)
+_EXPLAIN_PLAN_DOC = (
+    """Show how Trino would execute a read-only SQL query, without running it.
+
+        Use it to check a query before execute_query and to see which connector
+        receives which predicate. Args: sql, one read-only statement, no trailing semicolon needed.
+        Returns JSON {"plan": "..."} or """
+    + _EXPLAIN_ERRORS
+    + "\n        "
 )
 
 # A describer adds to what describe_table answers, from what Trino described:
@@ -484,6 +517,7 @@ def register_query_tools(
     search_max_words: int = DEFAULT_SEARCH_MAX_WORDS,
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH,
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS,
+    extra_reads: frozenset[str] = frozenset(),
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -503,7 +537,9 @@ def register_query_tools(
     `search_max_words` words or a word longer than `search_max_word_length`, and keeps
     `search_reserve_seconds` of the call's budget so that it ends with an answer
     (`MCP_SEARCH_MIN_LENGTH`, `MCP_SEARCH_MAX_WORDS`, `MCP_SEARCH_MAX_WORD_LENGTH`,
-    `MCP_SEARCH_RESERVE_SECONDS`)."""
+    `MCP_SEARCH_RESERVE_SECONDS`). `extra_reads` are the read commands the allow-list
+    refuses by default and the administrator opened (`MCP_EXTRA_READ_COMMANDS`): with
+    EXPLAIN among them, explain_query prints the plan; without it, it only checks."""
     tools = ToolContext(
         mcp,
         client,
@@ -871,38 +907,37 @@ def register_query_tools(
             describe_table.__doc__ = (describe_table.__doc__ or "").rstrip() + "\n" + extra + "\n"
     tool("Describe table", governed=True)(describe_table)
 
-    @tool("Explain query")
-    def explain_query(sql: str) -> str:
-        """Show how Trino would execute a read-only SQL query, without running it.
+    show_plan = "EXPLAIN" in extra_reads
 
-        Use it to check a query before execute_query and to see which connector
-        receives which predicate. Args: sql, one read-only statement, no trailing semicolon needed.
-        Returns JSON {"plan": "..."} or {"error": "...", "kind": "..."} (a syntax or
-        permission error from Trino); kind says what to fix (syntax, column, table,
-        schema, catalog, permission, function, type), and "unavailable" means Trino
-        did not answer, so the query is neither valid nor invalid. An unknown column may
-        add "hint", the table of your statement to read with describe_table.
-        """
+    def explain_query(sql: str) -> str:
         try:
             sql = normalize_sql(sql)
-            if not is_read_only_sql(sql, session_catalog):
+            if not is_read_only_sql(sql, session_catalog, extra_reads):
                 return refusal_reply(
                     "read_only", "Only a read-only statement can be explained", kind=READ_ONLY
                 )
-            statement = f"EXPLAIN {sql}"
+            # Without EXPLAIN opened, Trino only analyzes the statement: a plan would print
+            # the row filter's predicate, the mask's expression and the table's row count.
+            statement = f"EXPLAIN {sql}" if show_plan else f"EXPLAIN (TYPE VALIDATE) {sql}"
             note(sql=statement, tables=referenced_tables(sql))
             res = run(statement)
             note(rows=len(res["rows"]), truncated=was_cut(res))
+            if not show_plan:
+                return dumps({"valid": True})
             return dumps({"plan": "\n".join(str(r[0]) for r in res["rows"])})
         except Exception as e:  # noqa: BLE001
             return error_reply(e, sql, advice_visible)
 
+    explain_query.__doc__ = _EXPLAIN_PLAN_DOC if show_plan else _EXPLAIN_VALIDATE_DOC
+    tool("Explain query")(explain_query)
+
     def execute_query(sql: str, max_rows: int = 0) -> str:
         sql = normalize_sql(sql)
-        if read_only and not is_read_only_sql(sql, session_catalog):
+        if read_only and not is_read_only_sql(sql, session_catalog, extra_reads):
             return refusal_reply(
                 "read_only",
-                "Read-only mode: only SELECT/SHOW/DESCRIBE/EXPLAIN queries allowed",
+                "Read-only mode: only SELECT, DESCRIBE of a table and SHOW CATALOGS, SCHEMAS, "
+                "TABLES, COLUMNS or FUNCTIONS are allowed",
                 kind=READ_ONLY,
             )
         note(sql=sql, tables=referenced_tables(sql))
@@ -915,7 +950,7 @@ def register_query_tools(
 
     execute_query.__doc__ = _EXECUTE_DOC.format(
         what="one read-only SQL statement" if read_only else "one SQL statement",
-        rule=_READ_ONLY_RULE if read_only else _WRITE_RULE,
+        rule=_read_only_rule(extra_reads) if read_only else _WRITE_RULE,
     )
     if read_only:
         tool("Run a read-only query", governed=True)(execute_query)

@@ -329,7 +329,7 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 | `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
 | `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, `truncated` ; un échantillon gouverné sur demande ; ce qu'ajoutent les descripteurs d'une extension |
-| `explain_query` | `sql` | le plan de Trino pour une requête en lecture, sans l'exécuter |
+| `explain_query` | `sql` | `{"valid": true}` : Trino a analysé la requête en lecture sous l'identité de l'appelant, sans l'exécuter ; le plan seulement si `EXPLAIN` figure dans `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | colonnes, lignes, nombre de lignes, `truncated` |
 
 Chaque tool passe par Trino sous l'identité du mode choisi, les tools de liste compris : Trino ne

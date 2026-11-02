@@ -1,5 +1,14 @@
 # Migrating
 
+## From 0.7.0 to 0.7.1
+
+A security release: reads that Trino answers past a row filter or a column mask are refused by default.
+
+- `execute_query` refuses every command outside its allow-list (`SELECT`, `DESCRIBE` of a table, `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS`, `SHOW FUNCTIONS`) with `kind` `read_only`. An agent that ran `SHOW STATS`, `EXPLAIN`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`, `DESCRIBE INPUT` or `DESCRIBE OUTPUT` now gets that refusal.
+- `explain_query` answers `{"valid": true}` instead of `{"plan": "..."}`, and its errors are unchanged. A client that only checked a statement keeps working; one that read the plan must ask the administrator to open `EXPLAIN`.
+- To keep the 0.7.0 behaviour for some of these commands, name them in `MCP_EXTRA_READ_COMMANDS`, for example `MCP_EXTRA_READ_COMMANDS="EXPLAIN, SHOW STATS"`. Do it only where no row filter or column mask needs to hold: Trino answers them from the whole table. The server says so at every start.
+- For plugins: `is_read_only_sql(sql, session_catalog)` now refuses these commands too; pass `extra_reads=parse_extra_reads(...)` to open them.
+
 ## From 0.6 to 0.7
 
 Nothing is removed or renamed. One helper for plugins changes its third argument, and the extension guards run differently in `oauth2` mode.

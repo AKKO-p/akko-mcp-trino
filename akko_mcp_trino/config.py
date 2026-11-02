@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from .sql_guard import parse_extra_reads
+
 # Defaults shared with the tools' registration, so a page and a bound never drift apart.
 DEFAULT_MAX_ROWS = 100
 DEFAULT_MAX_CATALOGS = 10000
@@ -131,6 +133,12 @@ class Config:
     search_max_words: int = DEFAULT_SEARCH_MAX_WORDS
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
+    # Read commands the allow-list refuses by default, named one by one by the
+    # administrator (comma-separated: EXPLAIN, SHOW STATS, SHOW CREATE, SHOW GRANTS,
+    # SHOW ROLES, SHOW SESSION). Trino answers them from the whole table or with the
+    # access rules themselves, past a row filter or a column mask. Empty, the default,
+    # opens none, and explain_query checks a statement without printing its plan.
+    extra_read_commands: str = ""
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -189,6 +197,10 @@ class Config:
                 f"MCP_CALL_TIMEOUT_SECONDS={self.call_timeout_seconds:g}: "
                 "search_columns would have no time left to search"
             )
+        try:
+            parse_extra_reads(self.extra_read_commands)
+        except ValueError as exc:
+            found.append(str(exc))
         for name, value in (
             ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
             ("MCP_CALL_TIMEOUT_SECONDS", self.call_timeout_seconds),
@@ -224,6 +236,16 @@ class Config:
                 "MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns "
                 "refuses to search every catalog and searches a named catalog only"
             )
+        try:
+            extra = sorted(parse_extra_reads(self.extra_read_commands))
+        except ValueError:
+            extra = []  # a problem, said by problems()
+        if extra:
+            found.append(
+                f"MCP_EXTRA_READ_COMMANDS={', '.join(extra)}: Trino answers these from the "
+                "whole table or with the access rules themselves; a row filter or a column "
+                "mask does not hide what they show"
+            )
         return found
 
     @staticmethod
@@ -258,6 +280,7 @@ class Config:
             tool_plugins=os.environ.get("MCP_TOOL_PLUGINS", ""),
             extensions=os.environ.get("MCP_EXTENSIONS", ""),
             jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
+            extra_read_commands=os.environ.get("MCP_EXTRA_READ_COMMANDS", ""),
             resource_url=os.environ.get("MCP_RESOURCE_URL", ""),
             token_exchange_url=os.environ.get("TRINO_TOKEN_EXCHANGE_URL", ""),
             token_exchange_client_id=os.environ.get("TRINO_TOKEN_EXCHANGE_CLIENT_ID", ""),

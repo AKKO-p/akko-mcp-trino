@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+- Read commands go by an allow-list: `SELECT`, `DESCRIBE` of a table, and `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` and `SHOW FUNCTIONS`. Any other command is refused with `kind` `read_only`, including one a later Trino adds. Before, any `SHOW`, `DESCRIBE` and `EXPLAIN` of a read was accepted. Trino answers some reads past a row filter or a column mask: `SHOW STATS` gives the lowest and highest value and the row count of the whole table, rows a row filter hides included; `EXPLAIN` prints the row filter's predicate, the mask's expression and the table's row count; `SHOW CREATE` prints a view's query; `SHOW GRANTS`, `SHOW ROLES` and `SHOW SESSION` show the access setup. `DESCRIBE INPUT` and `DESCRIBE OUTPUT` are refused too.
+- `explain_query` checks a statement without printing its plan: it asks Trino for `EXPLAIN (TYPE VALIDATE)`, as the caller, and answers `{"valid": true}` or the error, with its `kind`, as before.
+
+### Added
+- `MCP_EXTRA_READ_COMMANDS` (none by default): the read commands the allow-list refuses, opened one by one by the administrator, comma-separated: `EXPLAIN` (which also brings back the plan in `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`. Open one only where no row filter or column mask needs to hold. The server says which are open at start, in `--check` and to every MCP host; an unknown name refuses to start. The `system` catalog and `EXPLAIN ANALYZE` stay refused whatever is opened.
+- For plugins: `akko_mcp_trino.sql_guard.is_read_only_sql` takes `extra_reads`, and `parse_extra_reads(text)` reads the setting.
+
 ## [0.7.0] - 2026-11-01
 
 Two discovery tools, paged lists, explained errors. Nothing is removed; one helper for plugins changes its signature. See [MIGRATING.md](MIGRATING.md).

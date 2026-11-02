@@ -507,7 +507,7 @@ The [examples](examples/README.md) folder has the details.
 | `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
 | `describe_schema` | `catalog`, `schema`, `offset` (optional) | `{"catalog", "schema", "tables": [{"table", "type", "comment", "columns": [{"column", "type", "comment"}]}], "next_offset": n or null, "shortened": bool}`: one page of whole tables, with their comments and columns |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add |
-| `explain_query` | `sql` | `{"plan": "..."}`: how Trino would run a read-only statement, without running it |
+| `explain_query` | `sql` | `{"valid": true}`: Trino analyzed a read-only statement as the caller, without running it; `{"plan": "..."}` only once `EXPLAIN` is in `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (optional, lower than the server cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
 
 Every tool runs in Trino through the identity mode, the listing tools
@@ -518,7 +518,16 @@ value or a missing row is the access policy, not an error to retry.
 
 Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed
 in SQL. `execute_query` accepts any SQL Trino accepts, **as long as it is a
-read**: the statement is parsed into an AST and refused if it is more than one
+read**. Commands go by an allow-list: `SELECT`, `DESCRIBE` of a table, and
+`SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` and
+`SHOW FUNCTIONS`. Any other command is refused, including one a later Trino
+adds. Some reads Trino answers past a row filter or a column mask, and they are
+refused unless the administrator names them in `MCP_EXTRA_READ_COMMANDS`:
+`SHOW STATS` gives the lowest and highest value and the row count of the whole
+table, rows a row filter hides included; `EXPLAIN` prints the row filter's
+predicate, the mask's expression and the table's row count; `SHOW CREATE`
+prints a view's query; `SHOW GRANTS`, `SHOW ROLES` and `SHOW SESSION` show the
+access setup. The statement is parsed into an AST and refused if it is more than one
 statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `DROP`,
 `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including
 inside a CTE, a subquery, or the statement an `EXPLAIN` explains. `EXPLAIN
@@ -943,6 +952,7 @@ reads its own variables from the same environment.
 | `TRINO_CLIENT_CERT`, `TRINO_CLIENT_KEY` | a client certificate and its key (PEM paths) the account authenticates with instead (mTLS); https only | none |
 | `TRINO_CATALOG` | session catalog, where a name without a catalog is read; set it to a data catalog (with `system`, such names are refused) | `system` |
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
+| `MCP_EXTRA_READ_COMMANDS` | read commands the allow-list refuses, opened one by one, comma-separated: `EXPLAIN` (and the plan in `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`. Trino answers them past a row filter or a column mask: open one only where no row filter or mask needs to hold; said at every start and to every host; an unknown name refuses to start | none |
 | `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated`; also the size of one page of a listing | `100` |
 | `MCP_MAX_CATALOGS` | the most catalogs `list_catalogs` reads before it pages them, `system` aside, 1 at least; above it the tool answers an error, never a cut list | `10000` |
 | `MCP_DESCRIBE_SCHEMA_TABLES` | the most tables in one page of `describe_schema`, from 1 to 100: a page reads each of its tables by its own branch, so its cost grows with the page | `20` |

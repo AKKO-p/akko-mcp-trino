@@ -39,6 +39,23 @@ _WRITE_TYPES = (
 # SHOW/EXPLAIN/DESC parse as a generic `Command` (sqlglot does not structure
 # them); they are allowed by leading keyword, reads only.
 _COMMAND_READ_HEADS = ("SHOW", "DESCRIBE", "DESC")
+# The commands a read may use, as an allow-list: what an agent needs to find and read
+# data. Anything else is refused, including a command a later Trino adds. Some reads
+# Trino answers from the whole table or with the access rules themselves, past a row
+# filter or a column mask: SHOW STATS gives the lowest and highest value and the row
+# count of the whole table, EXPLAIN prints the row filter's predicate, the mask's
+# expression and the table's row count, SHOW CREATE prints a view's query. They are
+# refused unless the administrator names them in MCP_EXTRA_READ_COMMANDS.
+_SHOW_ALLOWED = frozenset({"CATALOGS", "SCHEMAS", "TABLES", "COLUMNS", "FUNCTIONS"})
+# What MCP_EXTRA_READ_COMMANDS may name, and the SHOW kinds each one opens.
+EXTRA_READ_COMMANDS: dict[str, frozenset[str]] = {
+    "EXPLAIN": frozenset(),
+    "SHOW STATS": frozenset({"STATS"}),
+    "SHOW CREATE": frozenset({"CREATE"}),
+    "SHOW GRANTS": frozenset({"GRANTS"}),
+    "SHOW ROLES": frozenset({"ROLES", "CURRENT", "ROLE"}),
+    "SHOW SESSION": frozenset({"SESSION"}),
+}
 # EXPLAIN [ ( options ) ] [ANALYZE] [VERBOSE] <statement>. sqlglot keeps the
 # whole thing as an opaque Command, so the statement inside is checked on its
 # own. EXPLAIN ANALYZE *executes* the statement it explains and is refused.
@@ -53,6 +70,24 @@ _NAME_TOKENS = (TokenType.VAR, TokenType.IDENTIFIER)
 
 def _is_system(name: str | None) -> bool:
     return (name or "").lower() == "system"
+
+
+def parse_extra_reads(text: str) -> frozenset[str]:
+    """The commands named in ``MCP_EXTRA_READ_COMMANDS``, comma-separated, case and spaces
+    folded (``"show stats, EXPLAIN"``); raises ValueError on a name it does not know, so a
+    typo never opens less, or more, than was meant."""
+    names = set()
+    for raw in text.split(","):
+        name = " ".join(raw.split()).upper()
+        if not name:
+            continue
+        if name not in EXTRA_READ_COMMANDS:
+            raise ValueError(
+                f"MCP_EXTRA_READ_COMMANDS: unknown command {raw.strip()!r}; "
+                f"known: {', '.join(EXTRA_READ_COMMANDS)}"
+            )
+        names.add(name)
+    return frozenset(names)
 
 
 def _reads_outside_governed_tables(node: exp.Expression, session_catalog: str | None) -> bool:
@@ -77,8 +112,13 @@ def _reads_outside_governed_tables(node: exp.Expression, session_catalog: str | 
     return False
 
 
-def _show_is_governed(rest: str, session_catalog: str | None) -> bool:
-    """Whether ``SHOW <rest>`` stays out of the ``system`` catalog.
+def _show_is_governed(
+    rest: str, session_catalog: str | None, extra_reads: frozenset[str] = frozenset()
+) -> bool:
+    """Whether ``SHOW <rest>`` is a SHOW a read may use and stays out of the ``system``
+    catalog.
+
+    Only the kinds of ``_SHOW_ALLOWED`` pass, plus those ``extra_reads`` opens.
 
     sqlglot keeps SHOW as an opaque command, so its words are tokenized: a name
     ``system`` anywhere refuses it. When the session catalog is ``system``, only
@@ -86,11 +126,14 @@ def _show_is_governed(rest: str, session_catalog: str | None) -> bool:
     catalog are let through; any other SHOW would be read in ``system``.
     """
     tokens = Trino().tokenize(rest)  # the whole statement already parsed, so this tokenizes
+    kind = tokens[0].text.upper() if tokens else ""
+    allowed = _SHOW_ALLOWED.union(*(EXTRA_READ_COMMANDS[name] for name in extra_reads))
+    if kind not in allowed:
+        return False
     if any(t.token_type != TokenType.STRING and _is_system(t.text) for t in tokens):
         return False
     if not _is_system(session_catalog):
         return True
-    kind = tokens[0].text.upper() if tokens else ""
     if kind == "CATALOGS":
         return True
     wanted = _SHOW_QUALIFIED_PARTS.get(kind)
@@ -181,7 +224,16 @@ def parse_error(sql: str) -> str | None:
     return None
 
 
-def is_read_only_sql(sql: str, session_catalog: str | None = None) -> bool:
+def _describes_a_table(sql: str) -> bool:
+    """Whether a DESCRIBE (or DESC) names a table: ``DESCRIBE INPUT`` and ``DESCRIBE OUTPUT``
+    read a prepared statement, which a read never prepares."""
+    words = sql.split(None, 2)
+    return len(words) >= 2 and words[1].upper() not in ("INPUT", "OUTPUT")
+
+
+def is_read_only_sql(
+    sql: str, session_catalog: str | None = None, extra_reads: frozenset[str] = frozenset()
+) -> bool:
     """True if and only if the query is purely a read, decided on the AST (sqlglot).
 
     Stricter and safer than a leading-keyword filter: rejects multi-statement
@@ -189,7 +241,10 @@ def is_read_only_sql(sql: str, session_catalog: str | None = None) -> bool:
     side-effecting commands (GRANT, CALL, SET, ...). Fail closed: a query that
     cannot be parsed is refused. ``session_catalog`` is the catalog Trino reads
     a name without catalog in (``TRINO_CATALOG``); when it is ``system``, such
-    names are refused like ``system.`` written out.
+    names are refused like ``system.`` written out. Commands go by an allow-list:
+    SELECT, DESCRIBE of a table, and SHOW CATALOGS, SCHEMAS, TABLES, COLUMNS and
+    FUNCTIONS; ``extra_reads`` (from ``parse_extra_reads``) opens EXPLAIN and the other
+    SHOW kinds of ``EXTRA_READ_COMMANDS``, one by one.
     """
     s = sql.strip()
     if not s:
@@ -201,6 +256,8 @@ def is_read_only_sql(sql: str, session_catalog: str | None = None) -> bool:
     if len(statements) != 1:  # exactly one statement, never stacked queries
         return False
     st = statements[0]
+    if s.split(None, 1)[0].upper() in ("DESCRIBE", "DESC") and not _describes_a_table(s):
+        return False
     if isinstance(st, _READ_TYPES):
         # A read at the root is not enough: refuse any write nested anywhere.
         if any(isinstance(node, _WRITE_TYPES) for node in st.walk()):
@@ -210,13 +267,15 @@ def is_read_only_sql(sql: str, session_catalog: str | None = None) -> bool:
         head, rest = (s.split(None, 1) + [""])[:2]
         head = head.upper()
         if head == "EXPLAIN":
+            if "EXPLAIN" not in extra_reads:
+                return False
             m = _EXPLAIN_RE.match(s)
             if m is None or m.group(1):  # malformed, or ANALYZE: it would run the statement
                 return False
             # the explained statement must itself be a read
-            return is_read_only_sql(m.group(2), session_catalog)
+            return is_read_only_sql(m.group(2), session_catalog, extra_reads)
         if head == "SHOW":
-            return _show_is_governed(rest, session_catalog)
+            return _show_is_governed(rest, session_catalog, extra_reads)
         return head in _COMMAND_READ_HEADS
     return False  # Insert / Update / Delete / Create / Drop / Alter / Grant / …
 

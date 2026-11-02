@@ -5,6 +5,7 @@ import pytest
 from akko_mcp_trino.config import Config
 
 _ENV_KEYS = [
+    "MCP_EXTRA_READ_COMMANDS",
     "TRINO_HOST",
     "TRINO_PORT",
     "TRINO_USER",
@@ -377,3 +378,25 @@ def test_a_reserve_of_zero_with_a_call_budget_is_warned_of(monkeypatch):
     ]
     monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
     assert "MCP_SEARCH_RESERVE_SECONDS" not in " ".join(Config.from_env().warnings())
+
+
+def test_extra_read_commands_are_none_by_default_and_said_when_opened(monkeypatch):
+    """0.7.1: the reads Trino answers past a row filter or a column mask stay closed
+    unless named; once named, every start and every host is told."""
+    assert Config.from_env().extra_read_commands == ""
+    assert not any("MCP_EXTRA_READ_COMMANDS" in w for w in Config.from_env().warnings())
+    monkeypatch.setenv("MCP_EXTRA_READ_COMMANDS", "show stats, EXPLAIN")
+    c = Config.from_env()
+    assert c.problems() == []
+    assert (
+        "MCP_EXTRA_READ_COMMANDS=EXPLAIN, SHOW STATS: Trino answers these from the whole "
+        "table or with the access rules themselves; a row filter or a column mask does not "
+        "hide what they show"
+    ) in c.warnings()
+
+
+def test_an_unknown_extra_read_command_refuses_to_start(monkeypatch):
+    monkeypatch.setenv("MCP_EXTRA_READ_COMMANDS", "SHOW STATS, DROP")
+    c = Config.from_env()
+    assert len(c.problems()) == 1 and "unknown command 'DROP'" in c.problems()[0]
+    assert not any("MCP_EXTRA_READ_COMMANDS" in w for w in c.warnings())
