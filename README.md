@@ -527,7 +527,11 @@ refused unless the administrator names them in `MCP_EXTRA_READ_COMMANDS`:
 table, rows a row filter hides included; `EXPLAIN` prints the row filter's
 predicate, the mask's expression and the table's row count; `SHOW CREATE`
 prints a view's query; `SHOW GRANTS`, `SHOW ROLES` and `SHOW SESSION` show the
-access setup. The statement is parsed into an AST and refused if it is more than one
+access setup. The server never returns Trino's statistics of a query
+(`processedRows`, `processedBytes`), which count the rows Trino read before a row
+filter. A row filter protects the rows of a result, not Trino's statistics: for a
+column whose values must stay hidden, a column mask holds where a row filter does not,
+including for users who query Trino directly. The statement is parsed into an AST and refused if it is more than one
 statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `DROP`,
 `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including
 inside a CTE, a subquery, or the statement an `EXPLAIN` explains. `EXPLAIN

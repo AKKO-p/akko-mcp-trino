@@ -341,7 +341,20 @@ sauterait pour un tool en lecture seule. Les sept autres tools ne font que lire,
 réglage.
 
 Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans le SQL.
-`execute_query` accepte tout SQL que Trino accepte, **pourvu que ce soit une lecture** : la requête
+`execute_query` accepte tout SQL que Trino accepte, **pourvu que ce soit une lecture**. Les
+commandes passent par une liste blanche : `SELECT`, `DESCRIBE` d'une table, et `SHOW CATALOGS`,
+`SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` et `SHOW FUNCTIONS`. Toute autre commande est refusée,
+y compris une commande qu'une version future de Trino ajouterait. Trino répond à certaines lectures
+sans tenir compte d'un filtre de lignes ou d'un masque de colonne. Elles sont refusées, sauf si
+l'administrateur les nomme dans `MCP_EXTRA_READ_COMMANDS` : `SHOW STATS` donne la plus petite et la
+plus grande valeur et le nombre de lignes de toute la table, lignes filtrées comprises ; `EXPLAIN`
+affiche le prédicat du filtre de lignes, l'expression du masque et le nombre de lignes de la table ;
+`SHOW CREATE` affiche la requête d'une vue ; `SHOW GRANTS`, `SHOW ROLES` et `SHOW SESSION` montrent
+la configuration des droits. Le serveur ne renvoie jamais les statistiques d'une requête que Trino
+calcule (`processedRows`, `processedBytes`) : elles comptent les lignes lues avant le filtre de
+lignes. Un filtre de lignes protège les lignes du résultat, pas les statistiques de Trino : pour une
+colonne dont les valeurs doivent rester cachées, un masque de colonne tient là où un filtre de lignes
+ne tient pas, y compris pour les utilisateurs qui interrogent Trino directement. La requête
 est analysée en arbre et refusée si elle contient plus d'une instruction, ou si un `INSERT`,
 `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `DROP`, `ALTER`, `GRANT`, `CALL` ou `SET` apparaît n'importe
 où dans l'arbre, y compris dans une CTE, une sous-requête ou l'instruction qu'un `EXPLAIN` explique.
