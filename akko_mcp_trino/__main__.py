@@ -80,6 +80,8 @@ def check_config(config: Config) -> int:
         f"audience={config.oidc_audience or '-'} resource={config.resource_url or '-'}",
         "audiences accepted: "
         + (", ".join(accepted_audiences(config, _audiences(extensions))) or "-"),
+        f"token signatures: {config.jwt_algorithms}; user from: "
+        + (config.jwt_user_claim or "preferred_username, else sub"),
         f"user token (stdio): {'set' if config.user_token else '-'}",
         f"trino identity mode: {config.trino_identity_mode} over {config.trino_http_scheme}",
         *identity,

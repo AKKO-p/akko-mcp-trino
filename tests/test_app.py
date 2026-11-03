@@ -454,6 +454,20 @@ def test_cli_check_reports_effective_config_without_secrets(monkeypatch, capsys)
     assert "token exchange: https://idp/token as client mcp-server (secret set)" in out
     assert "tok-secret" not in out and "exchange-secret" not in out, "a secret leaked"
     assert "extensions: none" in out and "WARNING" not in out
+    assert "token signatures: RS256; user from: preferred_username, else sub" in out
+
+
+def test_cli_check_says_the_token_algorithms_and_the_user_claim(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    _clean_identity_env(monkeypatch)
+    for name, value in _JWT_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("MCP_JWT_ALGORITHMS", "RS256,RS512")
+    monkeypatch.setenv("MCP_JWT_USER_CLAIM", "sub")
+    assert check_config(Config.from_env()) == 0
+    assert "token signatures: RS256,RS512; user from: sub" in capsys.readouterr().out
 
 
 def test_cli_check_of_the_defaults_names_what_the_safe_mode_needs(monkeypatch, capsys):
