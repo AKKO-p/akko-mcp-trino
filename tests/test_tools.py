@@ -592,6 +592,7 @@ def test_execute_query_refuses_reads_past_the_access_rules_by_default(sql):
     out = json.loads(mcp.tools["execute_query"](sql))
     assert out["kind"] == "read_only" and client.calls == []
     assert "SHOW STATS" not in mcp.tools["execute_query"].__doc__
+    assert "SHOW STATS" not in out["error"]
 
 
 def test_execute_query_runs_an_opened_read_and_says_so():
@@ -599,6 +600,14 @@ def test_execute_query_runs_an_opened_read_and_says_so():
     json.loads(mcp.tools["execute_query"]("SHOW STATS FOR c.s.t"))
     assert client.calls[-1][0] == "SHOW STATS FOR c.s.t"
     assert "and SHOW STATS" in mcp.tools["execute_query"].__doc__
+    refused = json.loads(mcp.tools["execute_query"]("SHOW CREATE VIEW c.s.v"))
+    assert "and SHOW STATS are allowed" in refused["error"]  # the refusal says what is open
+
+
+def test_explain_query_refuses_a_command_it_would_not_run():
+    mcp, client = _registered()
+    out = json.loads(mcp.tools["explain_query"]("SHOW STATS FOR c.s.t"))
+    assert out["kind"] == "read_only" and client.calls == []
 
 
 def test_listing_errors_are_returned_not_raised():

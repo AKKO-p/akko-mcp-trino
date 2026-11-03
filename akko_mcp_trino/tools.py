@@ -326,18 +326,25 @@ _EXECUTE_DOC = """Run {what} on Trino and return the rows.
         and "unavailable" means Trino did not answer. An unknown column may add "hint",
         the table of your statement to read with describe_table before you write it again.
         """
-_READ_ONLY_RULE = (
-    "Only SELECT, DESCRIBE of a table and SHOW CATALOGS, SCHEMAS, TABLES, COLUMNS or "
-    "FUNCTIONS are accepted{extra}; INSERT, UPDATE, DELETE, CREATE, DROP and the like, and "
-    "any other command, are refused before reaching Trino, wherever they appear in the "
-    "statement."
+# The reads execute_query accepts, said once for its description and its refusal.
+_ALLOWED_READS = (
+    "SELECT, DESCRIBE of a table and SHOW CATALOGS, SCHEMAS, TABLES, COLUMNS or FUNCTIONS"
 )
 
 
-def _read_only_rule(extra_reads: frozenset[str]) -> str:
-    """The rule execute_query states, with the commands the administrator opened."""
+def _allowed_reads(extra_reads: frozenset[str]) -> str:
+    """The reads execute_query accepts, with the commands the administrator opened."""
     extra = f", and {', '.join(sorted(extra_reads))}" if extra_reads else ""
-    return _READ_ONLY_RULE.format(extra=extra)
+    return _ALLOWED_READS + extra
+
+
+def _read_only_rule(extra_reads: frozenset[str]) -> str:
+    """The rule execute_query states in its description."""
+    return (
+        f"Only {_allowed_reads(extra_reads)} are accepted; INSERT, UPDATE, DELETE, CREATE, "
+        "DROP and the like, and any other command, are refused before reaching Trino, "
+        "wherever they appear in the statement."
+    )
 
 
 _WRITE_RULE = (
@@ -936,8 +943,7 @@ def register_query_tools(
         if read_only and not is_read_only_sql(sql, session_catalog, extra_reads):
             return refusal_reply(
                 "read_only",
-                "Read-only mode: only SELECT, DESCRIBE of a table and SHOW CATALOGS, SCHEMAS, "
-                "TABLES, COLUMNS or FUNCTIONS are allowed",
+                f"Read-only mode: only {_allowed_reads(extra_reads)} are allowed",
                 kind=READ_ONLY,
             )
         note(sql=sql, tables=referenced_tables(sql))

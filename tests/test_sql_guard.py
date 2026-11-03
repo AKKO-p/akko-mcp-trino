@@ -399,3 +399,61 @@ def test_parse_extra_reads_folds_case_and_spaces_and_refuses_an_unknown_name():
     assert parse_extra_reads("show  stats, explain") == {"SHOW STATS", "EXPLAIN"}
     with pytest.raises(ValueError, match="unknown command 'SHOW STAT'"):
         parse_extra_reads("SHOW STAT")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 1 EXCEPT SELECT 2",
+        "SELECT 1 INTERSECT SELECT 2",
+        "VALUES (1), (2)",
+        "(SELECT 1)",
+        "-- a comment first\nSELECT 1",
+        "/* a comment */ SHOW TABLES FROM demo.crm",
+        "-- a comment\nDESCRIBE demo.crm.orders",
+        'DESCRIBE "demo"."crm"."orders"',
+        "DESCRIBE crm.orders",
+    ],
+)
+def test_reads_an_agent_writes_pass(sql):
+    """The review of 0.7.1: set operations, VALUES, a parenthesized read and a comment
+    before the statement are reads too."""
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql(sql, session_catalog="demo") is True
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "PRAGMA x",
+        "DESCRIBE FORMATTED demo.crm.orders",
+        "DESCRIBE HISTORY demo.crm.orders",
+        "DESCRIBE SELECT 1",
+        "describe input q",
+        "-- c\nDESCRIBE OUTPUT q",
+        "DESCRIBE\tINPUT q",
+        "DESCRIBE a.b.c.d",
+        "DESCRIBE 'demo'",
+        "DESCRIBE OUTPUT q x",
+        "DESCRIBE system.runtime.queries",
+        'DESCRIBE "system".runtime.queries',
+        "SHOW /* c */ STATS FOR demo.crm.orders",
+        "-- c\nSHOW STATS FOR demo.crm.orders",
+        "/* c */ EXPLAIN SELECT 1",
+        "SHOW",
+        "SELECT 1 EXCEPT SELECT * FROM system.runtime.queries",
+        "VALUES (1) UNION SELECT * FROM TABLE(pg.system.query(query => 'select 1'))",
+    ],
+)
+def test_other_forms_stay_refused(sql):
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql(sql, session_catalog="demo") is False
+
+
+def test_describe_of_a_short_name_is_refused_when_the_session_catalog_is_system():
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql("DESCRIBE runtime.queries", session_catalog="system") is False
+    assert is_read_only_sql("DESCRIBE demo.crm.orders", session_catalog="system") is True

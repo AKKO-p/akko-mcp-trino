@@ -530,9 +530,9 @@ prints a view's query; `SHOW GRANTS`, `SHOW ROLES` and `SHOW SESSION` show the
 access setup. The server never returns Trino's statistics of a query
 (`processedRows`, `processedBytes`), which count the rows Trino read before a row
 filter. A row filter protects the rows of a result, not Trino's statistics: for a
-column whose values must stay hidden, a column mask holds where a row filter does not,
-including for users who query Trino directly. The statement is parsed into an AST and refused if it is more than one
-statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `DROP`,
+column whose values must stay hidden, a column mask holds where a row filter does
+not, including for users who query Trino directly. The statement is parsed into
+an AST and refused if it is more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `DROP`,
 `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including
 inside a CTE, a subquery, or the statement an `EXPLAIN` explains. `EXPLAIN
 ANALYZE` is refused: it executes what it explains. Table functions and the
@@ -956,7 +956,7 @@ reads its own variables from the same environment.
 | `TRINO_CLIENT_CERT`, `TRINO_CLIENT_KEY` | a client certificate and its key (PEM paths) the account authenticates with instead (mTLS); https only | none |
 | `TRINO_CATALOG` | session catalog, where a name without a catalog is read; set it to a data catalog (with `system`, such names are refused) | `system` |
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
-| `MCP_EXTRA_READ_COMMANDS` | read commands the allow-list refuses, opened one by one, comma-separated: `EXPLAIN` (and the plan in `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`. Trino answers them past a row filter or a column mask: open one only where no row filter or mask needs to hold; said at every start and to every host; an unknown name refuses to start | none |
+| `MCP_EXTRA_READ_COMMANDS` | read commands the allow-list refuses, opened one by one, comma-separated: `EXPLAIN` (and the plan in `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES` (with `SHOW CURRENT ROLES` and `SHOW ROLE GRANTS`), `SHOW SESSION`. Trino answers them past a row filter or a column mask: open one only where no row filter or mask needs to hold; said at every start and to every host; an unknown name refuses to start | none |
 | `TRINO_MAX_ROWS` | result cap, 1 at least; one more row is read to say whether the answer was `truncated`; also the size of one page of a listing | `100` |
 | `MCP_MAX_CATALOGS` | the most catalogs `list_catalogs` reads before it pages them, `system` aside, 1 at least; above it the tool answers an error, never a cut list | `10000` |
 | `MCP_DESCRIBE_SCHEMA_TABLES` | the most tables in one page of `describe_schema`, from 1 to 100: a page reads each of its tables by its own branch, so its cost grows with the page | `20` |

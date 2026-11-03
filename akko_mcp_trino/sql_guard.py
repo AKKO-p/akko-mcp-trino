@@ -18,8 +18,10 @@ from sqlglot.tokens import TokenType
 # A Trino identifier: alphanumerics, underscore and hyphen only.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 
-# sqlglot expression types that are purely READS.
-_READ_TYPES = (exp.Select, exp.Union, exp.Describe, exp.Pragma)
+# sqlglot expression types that are purely READS: a SELECT, a set operation of reads
+# (UNION, EXCEPT, INTERSECT), a parenthesized read and VALUES. DESCRIBE goes by its words
+# (see ``_describe_is_governed``).
+_READ_TYPES = (exp.Select, exp.SetOperation, exp.Subquery, exp.Values)
 # Node types that WRITE or have side effects, wherever they sit in the tree.
 # Checking only the root once let ``WITH w AS (DELETE FROM t) SELECT 1``
 # through (found by the live adversarial proof, 12 September 2026).
@@ -36,9 +38,6 @@ _WRITE_TYPES = (
     exp.Command,
     exp.Set,
 )
-# SHOW/EXPLAIN/DESC parse as a generic `Command` (sqlglot does not structure
-# them); they are allowed by leading keyword, reads only.
-_COMMAND_READ_HEADS = ("SHOW", "DESCRIBE", "DESC")
 # The commands a read may use, as an allow-list: what an agent needs to find and read
 # data. Anything else is refused, including a command a later Trino adds. Some reads
 # Trino answers from the whole table or with the access rules themselves, past a row
@@ -224,11 +223,19 @@ def parse_error(sql: str) -> str | None:
     return None
 
 
-def _describes_a_table(sql: str) -> bool:
-    """Whether a DESCRIBE (or DESC) names a table: ``DESCRIBE INPUT`` and ``DESCRIBE OUTPUT``
-    read a prepared statement, which a read never prepares."""
-    words = sql.split(None, 2)
-    return len(words) >= 2 and words[1].upper() not in ("INPUT", "OUTPUT")
+def _describe_is_governed(names: list, session_catalog: str | None) -> bool:
+    """Whether the words after DESCRIBE (or DESC), as tokens, are one table name of one to
+    three parts, outside the ``system`` catalog. ``DESCRIBE INPUT``, ``DESCRIBE OUTPUT``
+    (a prepared statement, which a read never prepares) and any other form are refused."""
+    if len(names) % 2 == 0 or len(names) > 5:  # name, or name.name, or name.name.name
+        return False
+    for i, token in enumerate(names):
+        expected = _NAME_TOKENS if i % 2 == 0 else (TokenType.DOT,)
+        if token.token_type not in expected:
+            return False
+    parts = (len(names) + 1) // 2
+    catalog = names[0].text if parts == 3 else session_catalog
+    return not _is_system(catalog)
 
 
 def is_read_only_sql(
@@ -256,16 +263,18 @@ def is_read_only_sql(
     if len(statements) != 1:  # exactly one statement, never stacked queries
         return False
     st = statements[0]
-    if s.split(None, 1)[0].upper() in ("DESCRIBE", "DESC") and not _describes_a_table(s):
-        return False
+    tokens = Trino().tokenize(s)
+    # The first word, comments skipped: a comment may come before any statement.
+    head = tokens[0].text.upper() if tokens else ""
+    if head in ("DESCRIBE", "DESC"):
+        return _describe_is_governed(tokens[1:], session_catalog)
     if isinstance(st, _READ_TYPES):
         # A read at the root is not enough: refuse any write nested anywhere.
         if any(isinstance(node, _WRITE_TYPES) for node in st.walk()):
             return False
         return not _reads_outside_governed_tables(st, session_catalog)
-    if isinstance(st, exp.Command):  # SHOW / EXPLAIN / DESC, unstructured
-        head, rest = (s.split(None, 1) + [""])[:2]
-        head = head.upper()
+    if isinstance(st, exp.Command):  # SHOW and EXPLAIN, unstructured
+        s = s[tokens[0].start :]
         if head == "EXPLAIN":
             if "EXPLAIN" not in extra_reads:
                 return False
@@ -275,8 +284,8 @@ def is_read_only_sql(
             # the explained statement must itself be a read
             return is_read_only_sql(m.group(2), session_catalog, extra_reads)
         if head == "SHOW":
+            rest = (s.split(None, 1) + [""])[1]
             return _show_is_governed(rest, session_catalog, extra_reads)
-        return head in _COMMAND_READ_HEADS
     return False  # Insert / Update / Delete / Create / Drop / Alter / Grant / …
 
 
