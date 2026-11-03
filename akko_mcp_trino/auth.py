@@ -14,6 +14,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional, Protocol, Sequence, Union
 
+from .config import parse_jwt_algorithms
+
 log = logging.getLogger(__name__)
 
 
@@ -124,6 +126,7 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
         accepted,
         leeway_seconds=config.jwt_leeway_seconds,
         refused_audiences=refused,
+        algorithms=parse_jwt_algorithms(config.jwt_algorithms),
     )
 
 

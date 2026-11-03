@@ -125,8 +125,9 @@ def test_jwks_no_token_returns_none():
 
 
 # ---- build_auth (provider selection) ----
-def _cfg(auth_enabled, jwks_url=""):
+def _cfg(auth_enabled, jwks_url="", **kw):
     return Config(
+        **kw,
         trino_host="h",
         trino_identity_mode="service",
         query_timeout_seconds=0.0,
@@ -310,3 +311,36 @@ def test_a_server_with_no_audience_of_its_own_refuses_to_start():
         auth.build_auth(
             Config(**{**_cfg(True, jwks_url="https://kc/jwks").__dict__, "oidc_audience": ""})
         )
+
+
+def _rs512(claims=None):
+    payload = {"iss": _ISS, "aud": _AUD, "exp": int(time.time()) + 3600, **(claims or {})}
+    return pyjwt.encode(payload, _PRIV, algorithm="RS512")
+
+
+def _built_for(**kw):
+    provider = auth.build_auth(_cfg(True, jwks_url="https://kc.example/jwks", **kw))
+    provider._client = _FakeJwks()  # the keys, without the network
+    return provider
+
+
+def test_rs256_only_by_default_so_an_rs512_token_is_refused():
+    provider = _built_for()
+    assert provider.verify(_bearer(_sign({"sub": "u"}))).subject == "u"
+    assert provider.verify(_bearer(_rs512({"sub": "u"}))) is None
+
+
+def test_mcp_jwt_algorithms_accepts_the_algorithms_it_names():
+    """An identity provider that signs with RS512, or rotates from RS256 to RS512."""
+    provider = _built_for(jwt_algorithms="rs256, RS512")
+    assert provider.verify(_bearer(_sign({"sub": "u"}))).subject == "u"
+    assert provider.verify(_bearer(_rs512({"sub": "v"}))).subject == "v"
+
+
+@pytest.mark.parametrize("value", ["HS256", "none", "RS256,HS512", "", " , "])
+def test_a_shared_secret_algorithm_none_or_nothing_refuses_to_start(value):
+    from akko_mcp_trino.config import parse_jwt_algorithms
+
+    with pytest.raises(ValueError, match="MCP_JWT_ALGORITHMS"):
+        parse_jwt_algorithms(value)
+    assert any("MCP_JWT_ALGORITHMS" in p for p in _cfg(True, jwt_algorithms=value).problems())

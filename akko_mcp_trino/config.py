@@ -13,6 +13,30 @@ from dataclasses import dataclass
 
 from .sql_guard import parse_extra_reads
 
+# The token signature algorithms the server may accept: public-key ones only, verified
+# against the issuer's JWKS.
+JWT_ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512")
+
+
+def parse_jwt_algorithms(text: str) -> list[str]:
+    """The algorithms named in ``MCP_JWT_ALGORITHMS``, comma-separated, upper-cased, in
+    order, once each; raises ValueError on none or on one outside ``JWT_ALGORITHMS``."""
+    names: list[str] = []
+    for raw in text.split(","):
+        name = raw.strip().upper()
+        if not name or name in names:
+            continue
+        if name not in JWT_ALGORITHMS:
+            raise ValueError(
+                f"MCP_JWT_ALGORITHMS: {raw.strip()!r} is not accepted; public-key "
+                f"algorithms only: {', '.join(JWT_ALGORITHMS)}"
+            )
+        names.append(name)
+    if not names:
+        raise ValueError("MCP_JWT_ALGORITHMS is empty: name one algorithm at least, RS256 for one")
+    return names
+
+
 # Defaults shared with the tools' registration, so a page and a bound never drift apart.
 DEFAULT_MAX_ROWS = 100
 DEFAULT_MAX_CATALOGS = 10000
@@ -97,6 +121,10 @@ class Config:
     extensions: str = ""
     # Tolerance on exp/nbf/iat for clock drift between the issuer and this server.
     jwt_leeway_seconds: int = 30
+    # The signature algorithms a caller's token may use, comma-separated: public-key
+    # algorithms only (RS, PS, ES). A shared-secret algorithm (HS*) or `none` refuses to
+    # start: the server verifies against the issuer's published public keys.
+    jwt_algorithms: str = "RS256"
     # This server's canonical URI (RFC 8707, RFC 9728), such as https://mcp.example.com/mcp.
     # Accepted as a token audience besides `MCP_OIDC_AUDIENCE`, named in the protected
     # resource metadata the server then publishes, and in the challenge of a 401.
@@ -201,6 +229,10 @@ class Config:
             parse_extra_reads(self.extra_read_commands)
         except ValueError as exc:
             found.append(str(exc))
+        try:
+            parse_jwt_algorithms(self.jwt_algorithms)
+        except ValueError as exc:
+            found.append(str(exc))
         for name, value in (
             ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
             ("MCP_CALL_TIMEOUT_SECONDS", self.call_timeout_seconds),
@@ -281,6 +313,7 @@ class Config:
             extensions=os.environ.get("MCP_EXTENSIONS", ""),
             jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
             extra_read_commands=os.environ.get("MCP_EXTRA_READ_COMMANDS", ""),
+            jwt_algorithms=os.environ.get("MCP_JWT_ALGORITHMS", "RS256"),
             resource_url=os.environ.get("MCP_RESOURCE_URL", ""),
             token_exchange_url=os.environ.get("TRINO_TOKEN_EXCHANGE_URL", ""),
             token_exchange_client_id=os.environ.get("TRINO_TOKEN_EXCHANGE_CLIENT_ID", ""),
