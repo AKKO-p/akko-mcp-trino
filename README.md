@@ -989,6 +989,7 @@ reads its own variables from the same environment.
 | `MCP_OIDC_AUDIENCE` | the audience a token must carry: the one the provider gives tokens issued for this server (RFC 8707); never Trino's | none (this or `MCP_RESOURCE_URL` is required when auth is enabled) |
 | `MCP_RESOURCE_URL` | this server's canonical URL, such as `https://mcp.example.com/mcp`: accepted as an audience, named in the protected resource metadata the server then publishes (RFC 9728) and in the challenge of a `401` | none |
 | `MCP_JWT_LEEWAY_SECONDS` | tolerance on `exp`/`nbf`/`iat` for clock drift between the issuer and this server | `30` |
+| `MCP_JWT_USER_CLAIM` | the claim of a caller's token that names the user, as the access rules know them: `sub` (the OpenID Connect standard, stable and unique), `upn`, `uid`...; a token without it is refused, never read from another claim | `preferred_username`, else `sub` |
 | `MCP_JWT_ALGORITHMS` | the signature algorithms a caller's token may use, comma-separated, among `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512` (for example `RS256,RS512` for an identity provider that signs with either); a shared-secret algorithm (`HS256`...) or `none` refuses to start | `RS256` |
 | `MCP_ALLOWED_HOSTS` | Host header filter (the SDK's DNS rebinding protection): `host` or `host:port` entries, comma-separated, `host:*` for any port (the only wildcard); once the filter is on, a request that carries an `Origin` header is refused (403); empty serves any Host | none (off) |
 

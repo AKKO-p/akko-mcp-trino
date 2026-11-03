@@ -344,3 +344,35 @@ def test_a_shared_secret_algorithm_none_or_nothing_refuses_to_start(value):
     with pytest.raises(ValueError, match="MCP_JWT_ALGORITHMS"):
         parse_jwt_algorithms(value)
     assert any("MCP_JWT_ALGORITHMS" in p for p in _cfg(True, jwt_algorithms=value).problems())
+
+
+def test_mcp_jwt_user_claim_names_the_user_from_that_claim_only():
+    """An identity provider that puts the user in sub (the OpenID Connect standard) and
+    something else in preferred_username: MCP_JWT_USER_CLAIM=sub picks sub."""
+    provider = _built_for(jwt_user_claim="sub")
+    p = provider.verify(_bearer(_sign({"sub": "A12345", "preferred_username": "Jean D."})))
+    assert p.subject == "A12345"
+
+
+def test_a_token_without_the_named_claim_is_refused_not_read_from_another():
+    provider = _built_for(jwt_user_claim="upn")
+    assert provider.verify(_bearer(_sign({"sub": "A12345", "preferred_username": "x"}))) is None
+    assert provider.verify(_bearer(_sign({"upn": ""}))) is None
+    assert provider.verify(_bearer(_sign({"upn": ["A12345"]}))) is None
+    assert provider.verify(_bearer(_sign({"upn": "A12345"}))).subject == "A12345"
+
+
+def test_without_mcp_jwt_user_claim_preferred_username_then_sub_as_before():
+    provider = _built_for()
+    assert provider.verify(_bearer(_sign({"sub": "s", "preferred_username": "p"}))).subject == "p"
+    assert provider.verify(_bearer(_sign({"sub": "s"}))).subject == "s"
+
+
+@pytest.mark.parametrize("value", ["sub", "upn", "preferred_username", "urn:oid:0.9.1", "x-uid"])
+def test_a_claim_name_is_accepted(value):
+    assert not any("MCP_JWT_USER_CLAIM" in p for p in _cfg(True, jwt_user_claim=value).problems())
+
+
+@pytest.mark.parametrize("value", ["a b", "sub;drop", "1abc", "é"])
+def test_a_malformed_claim_name_refuses_to_start(value):
+    assert any("MCP_JWT_USER_CLAIM" in p for p in _cfg(True, jwt_user_claim=value).problems())

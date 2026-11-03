@@ -127,6 +127,7 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
         leeway_seconds=config.jwt_leeway_seconds,
         refused_audiences=refused,
         algorithms=parse_jwt_algorithms(config.jwt_algorithms),
+        user_claim=config.jwt_user_claim,
     )
 
 
@@ -149,10 +150,20 @@ def _scopes(claim) -> tuple[str, ...]:
     return ()
 
 
-def _principal_from_claims(claims: dict) -> Principal:
+def _principal_from_claims(claims: dict, user_claim: str = "") -> Optional[Principal]:
+    """The caller a verified token names. ``user_claim`` (``MCP_JWT_USER_CLAIM``) names the
+    claim that holds the user; a token without it, or with an empty or non-text value, names
+    nobody (None), never another claim. Without it: ``preferred_username``, else ``sub``."""
+    if user_claim:
+        value = claims.get(user_claim)
+        if not isinstance(value, str) or not value:
+            return None
+        subject = value
+    else:
+        subject = str(claims.get("preferred_username") or claims.get("sub") or "")
     roles = claims.get("realm_access", {}).get("roles")
     return Principal(
-        subject=str(claims.get("preferred_username") or claims.get("sub") or ""),
+        subject=subject,
         roles=roles if isinstance(roles, list) else [],
         email=str(claims.get("email") or ""),
         token_id=str(claims.get("jti") or ""),
@@ -190,12 +201,14 @@ class JwksJwtAuth:
         algorithms=None,
         leeway_seconds: int = 30,
         refused_audiences: Sequence[str] = (),
+        user_claim: str = "",
     ):
         """Verify tokens against ``jwks_url`` for ``issuer`` and ``audience`` (one value or
         several, any of which may match), refusing a token that also names one of
         ``refused_audiences``; ``jwks_client`` is injectable for tests.
         """
         self._refused = frozenset(refused_audiences)
+        self._user_claim = user_claim
         self._issuer = issuer
         self._audience = audience if isinstance(audience, str) else list(audience)
         self._leeway = leeway_seconds
@@ -231,4 +244,7 @@ class JwksJwtAuth:
         if self._refused & set([aud] if isinstance(aud, str) else aud or []):
             log.info("token refused: issued for another resource")
             return None
-        return _principal_from_claims(claims)
+        principal = _principal_from_claims(claims, self._user_claim)
+        if principal is None:
+            log.info("token refused: no %s claim", self._user_claim)
+        return principal
