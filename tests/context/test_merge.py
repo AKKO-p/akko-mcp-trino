@@ -69,7 +69,7 @@ def test_multi_valued_fields_are_a_union_without_duplicates():
     ]
     assert merged["terms"] == [{"key": "k1", "source": "a"}, {"key": "k2", "source": "b"}]
     assert merged["properties"] == {
-        "set.k": {"value": "v", "source": "a"},
+        "set.k": {"value": "v", "source": "a", "other_values": [{"value": "other", "source": "b"}]},
         "set.j": {"value": "w", "source": "b"},
     }
     assert merged["grain"] == ["id", "day"]
@@ -124,3 +124,49 @@ def test_a_description_empty_after_cleaning_is_ignored():
         text_chars=BIG,
     )
     assert merged["sources"] == {"description": "b"}
+
+
+def test_invisible_characters_are_removed_from_every_catalogue_name():
+    zw, bidi = "​", "‮"
+    target = TableRef("c", "s", "t")
+    merged = merge_table(
+        [
+            (
+                "a",
+                TableContext(
+                    tags=(Labelled(f"p{zw}ii", f"c{bidi}at"),),
+                    terms=(f"k{zw}1",),
+                    properties=MappingProxyType({f"k{bidi}": Labelled(f"v{zw}al", f"s{zw}et")}),
+                    grain=(f"i{zw}d",),
+                    joins=(Join((f"a{bidi}",), target, (f"b{zw}",)),),
+                ),
+            ),
+            ("b", TableContext(terms=("k1",), tags=(Labelled("pii", "cat"),))),
+        ],
+        text_chars=BIG,
+    )
+    assert merged["tags"] == [{"name": "pii", "set": "cat", "source": "a"}]
+    assert merged["terms"] == [{"key": "k1", "source": "a"}]
+    assert merged["properties"] == {"set.k": {"value": "val", "source": "a"}}
+    assert merged["grain"] == ["id"]
+    assert merged["joins"][0]["columns"] == ["a"]
+    assert merged["joins"][0]["target_columns"] == ["b"]
+
+
+def test_names_are_not_cut_by_the_text_limit():
+    merged = merge_table([("a", TableContext(terms=("long_term_key",)))], text_chars=3)
+    assert merged["terms"] == [{"key": "long_term_key", "source": "a"}]
+    assert "cut" not in merged
+
+
+def test_a_differing_property_value_is_kept_as_another_value_with_its_source():
+    def props(value):
+        return TableContext(properties=MappingProxyType({"k": Labelled(value, "set")}))
+
+    merged = merge_table(
+        [("a", props("one")), ("b", props("two")), ("c", props("two")), ("d", props("one"))],
+        text_chars=BIG,
+    )
+    assert merged["properties"] == {
+        "set.k": {"value": "one", "source": "a", "other_values": [{"value": "two", "source": "b"}]}
+    }
