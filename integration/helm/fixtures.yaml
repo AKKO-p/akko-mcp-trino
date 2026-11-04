@@ -1,6 +1,6 @@
 # Disposable fixtures for the chart's live proof: a single-node Trino (tpch catalog, heap
 # at most 80 % of 1200 MiB) and a static JWKS endpoint standing in for the identity
-# provider. Both are removed with the namespace.
+# provider. Both are removed with the namespace (run.sh) or one by one (openshift.sh).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,7 +23,12 @@ spec:
             periodSeconds: 5
           resources:
             requests: {cpu: 250m, memory: 1200Mi}
-            limits: {memory: 1200Mi}
+            limits: {cpu: "1", memory: 1200Mi}
+          # Writable whatever the UID (OpenShift assigns an arbitrary one).
+          volumeMounts: [{name: data, mountPath: /data/trino}]
+      volumes:
+        - name: data
+          emptyDir: {sizeLimit: 512Mi}
 ---
 apiVersion: v1
 kind: Service
@@ -64,7 +69,7 @@ spec:
             capabilities: {drop: [ALL]}
           resources:
             requests: {cpu: 10m, memory: 32Mi}
-            limits: {memory: 64Mi}
+            limits: {cpu: 100m, memory: 64Mi}
           volumeMounts: [{name: jwks, mountPath: /jwks, readOnly: true}]
       volumes:
         - name: jwks
