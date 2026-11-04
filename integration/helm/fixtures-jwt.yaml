@@ -1,7 +1,8 @@
 # Disposable fixtures for the chart's live proof in jwt mode: the repository's integration
 # Keycloak (realm with token exchange, users alice and bob) and Trino over https with JWT
 # authentication (integration/trino, 768 MiB heap). Certificates and secrets are generated
-# by run.sh; both are removed with the namespace.
+# by run.sh or openshift.sh; both are removed at the end. No fixed UID: they run under
+# OpenShift's restricted-v2 SCC as they are.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -44,7 +45,7 @@ spec:
             failureThreshold: 60
           resources:
             requests: {cpu: 250m, memory: 768Mi}
-            limits: {memory: 768Mi}
+            limits: {cpu: "1", memory: 768Mi}
           volumeMounts:
             - {name: realm, mountPath: /opt/keycloak/data/import, readOnly: true}
             - {name: certs, mountPath: /certs, readOnly: true}
@@ -92,11 +93,15 @@ spec:
             failureThreshold: 60
           resources:
             requests: {cpu: 250m, memory: 1280Mi}
-            limits: {memory: 1280Mi}
+            limits: {cpu: "1", memory: 1280Mi}
           volumeMounts:
             - {name: etc, mountPath: /etc/trino, readOnly: true}
             - {name: certs, mountPath: /certs, readOnly: true}
+            # Writable whatever the UID (OpenShift assigns an arbitrary one).
+            - {name: data, mountPath: /data/trino}
       volumes:
+        - name: data
+          emptyDir: {sizeLimit: 512Mi}
         - name: etc
           configMap:
             name: trino-etc

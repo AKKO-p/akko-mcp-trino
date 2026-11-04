@@ -141,6 +141,8 @@ endpoint, the protected resource metadata and, with `sse`, `/messages/`). Its ce
 is never inline in the values: name a `kubernetes.io/tls` Secret the router may read in
 `route.tls.externalCertificate` (on an OpenShift version whose Route API has
 `spec.tls.externalCertificate`), or leave it empty for the router's default certificate.
+With it, the chart also renders the Role and RoleBinding that let the router's service
+account (`openshift-ingress/router`) read that Secret, as OpenShift documents.
 The Route terminates TLS at the router (`edge`) and reaches the pod in plain HTTP; `reencrypt` needs a TLS listener in front of the server (a sidecar in
 `extraContainers`, its port in `service.extraPorts` and named in `route.targetPort`),
 since the server itself listens in plain HTTP. The Route's timeout annotation is above
@@ -196,9 +198,17 @@ cluster in two passes:
   without a token or with a token issued for Trino, two users through the Service, each
   seen by Trino as themselves (a row filter applies to one), `helm test` and `--check`.
 
-Only rendered and validated (`helm template`, kubeconform, the render refusals):
-`impersonation` with a client certificate or a password, the Ingress, the OpenShift
-Route, `openshift: true` under a real SCC, the PodDisruptionBudget and the anti-affinity.
+[`integration/helm/openshift.sh`](../../integration/helm/openshift.sh) runs the same
+`service` and `jwt` passes, then `impersonation` with a client certificate over `https`,
+in the current project only (a project member's rights, within a quota, no python on the
+machine that runs it). On OpenShift it installs an edge Route and checks, through it: the
+pod under `restricted-v2` with a UID from the project's range, the `401` that points to
+the protected resource metadata, the metadata, the MCP calls, and no health path. Where
+the Route API is absent, those checks print `SKIP` and the calls go through the Service.
+
+Only rendered and validated (`helm template`, kubeconform, the render checks):
+`impersonation` with a password, the Ingress, `route.tls.externalCertificate`, the
+PodDisruptionBudget and the anti-affinity.
 
 ## Values
 
