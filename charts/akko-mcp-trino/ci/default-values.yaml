@@ -1,0 +1,14 @@
+# The defaults (jwt mode, door on) with the values that have none.
+trino:
+  host: trino.example.internal
+  catalog: lakehouse
+  tokenExchange:
+    url: https://idp.example.internal/realms/data/protocol/openid-connect/token
+    clientId: mcp-trino
+    audience: trino
+auth:
+  jwksUrl: https://idp.example.internal/realms/data/protocol/openid-connect/certs
+  issuer: https://idp.example.internal/realms/data
+  audience: mcp-trino
+existingSecret:
+  name: mcp-trino-credentials

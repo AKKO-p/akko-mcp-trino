@@ -1,0 +1,45 @@
+# OpenShift: arbitrary UID, Route with edge TLS, NetworkPolicy from the router, internal CA.
+openshift: true
+replicaCount: 2
+podAntiAffinity: soft
+podDisruptionBudget:
+  enabled: true
+trino:
+  host: trino.example.internal
+  catalog: lakehouse
+  tokenExchange:
+    url: https://idp.example.internal/realms/data/protocol/openid-connect/token
+    clientId: mcp-trino
+    audience: trino
+auth:
+  jwksUrl: https://idp.example.internal/realms/data/protocol/openid-connect/certs
+  issuer: https://idp.example.internal/realms/data
+  audience: mcp-trino
+  resourceUrl: https://mcp.example.internal/mcp
+  algorithms: [RS256, RS512]
+existingSecret:
+  name: mcp-trino-credentials
+ca:
+  configMap: internal-ca
+  key: ca.pem
+route:
+  enabled: true
+  host: mcp.example.internal
+networkPolicy:
+  enabled: true
+  metrics:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            network.openshift.io/policy-group: monitoring
+  egress:
+    trino:
+      - ipBlock:
+          cidr: 192.0.2.11/32
+    identityProvider:
+      to:
+        - ipBlock:
+            cidr: 192.0.2.10/32
+      ports:
+        - port: 443
+          protocol: TCP

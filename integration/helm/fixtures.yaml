@@ -1,0 +1,79 @@
+# Disposable fixtures for the chart's live proof: a single-node Trino (tpch catalog, heap
+# at most 80 % of 1200 MiB) and a static JWKS endpoint standing in for the identity
+# provider. Both are removed with the namespace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: trino-test}
+  template:
+    metadata:
+      labels: {app: trino-test}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: trino
+          image: trinodb/trino:482
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /v1/info, port: http}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 250m, memory: 1200Mi}
+            limits: {memory: 1200Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-test
+spec:
+  selector: {app: trino-test}
+  ports: [{name: http, port: 8080, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jwks-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: jwks-test}
+  template:
+    metadata:
+      labels: {app: jwks-test}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: jwks
+          image: MCP_IMAGE
+          command: [python, -m, http.server, "8080", --directory, /jwks]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /jwks.json, port: http}
+            periodSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+          volumeMounts: [{name: jwks, mountPath: /jwks, readOnly: true}]
+      volumes:
+        - name: jwks
+          configMap: {name: jwks-test}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jwks-test
+spec:
+  selector: {app: jwks-test}
+  ports: [{name: http, port: 8080, targetPort: http}]

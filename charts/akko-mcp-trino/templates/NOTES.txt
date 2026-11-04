@@ -1,0 +1,44 @@
+{{- $fullName := include "mcp-trino.fullname" . }}
+{{- $endpoint := include "mcp-trino.endpoint" . }}
+akko-mcp-trino {{ .Chart.AppVersion }} is installed as {{ $fullName }} in {{ .Release.Namespace }}.
+
+Transport {{ .Values.transport }}, endpoint {{ $endpoint }}, identity mode {{ .Values.trino.identityMode }},
+Trino {{ .Values.trino.httpScheme }}://{{ .Values.trino.host }}:{{ .Values.trino.port }} (catalog {{ .Values.trino.catalog }}).
+{{- if not (and .Values.auth.enabled .Values.auth.required) }}
+
+WARNING: the door is open (auth.enabled={{ .Values.auth.enabled }}, auth.required={{ .Values.auth.required }}).
+Every caller reaches Trino as {{ .Values.trino.user }} without a verified token. Local tests only.
+{{- end }}
+{{- if eq .Values.trino.identityMode "service" }}
+
+WARNING: service mode. Every query runs as {{ .Values.trino.user }}, whoever calls.
+{{- end }}
+
+1. Wait for the pods to be ready (/ready reaches Trino):
+
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ $fullName }}
+
+2. Print the effective configuration (never a secret) and any warning; exit 2 means
+   the server would refuse to start:
+
+  kubectl -n {{ .Release.Namespace }} exec deployment/{{ $fullName }} -- akko-mcp-trino --check
+
+3. Run the chart's test (health, readiness and --check, in a pod of its own):
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }} --logs
+
+4. Connect an MCP host to:
+{{- if .Values.route.enabled }}
+  https://{{ .Values.route.host | default "<the Route's host>" }}{{ $endpoint }}   (Route, {{ .Values.route.tls.termination }} TLS)
+{{- else if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ $endpoint }}   (Ingress)
+{{- end }}
+{{- else }}
+  http://{{ $fullName }}.{{ .Release.Namespace }}.svc:{{ .Values.ports.mcp }}{{ $endpoint }}   (in the cluster)
+  or, from your workstation:
+  kubectl -n {{ .Release.Namespace }} port-forward service/{{ $fullName }} {{ .Values.ports.mcp }}
+{{- end }}
+{{- if .Values.auth.enabled }}
+   The host sends the user's access token, issued for this server by the identity provider.
+{{- end }}

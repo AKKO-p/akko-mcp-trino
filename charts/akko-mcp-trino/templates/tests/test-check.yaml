@@ -1,0 +1,66 @@
+{{- if .Values.tests.enabled }}
+{{- $url := printf "http://%s:%v" (include "mcp-trino.fullname" .) .Values.ports.health }}
+# helm test: the server answers /health (and /ready) through its Service, and
+# `akko-mcp-trino --check` accepts the release's configuration (exit 0), with the same
+# settings, secrets and mounts as the server.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "mcp-trino.fullname" . }}-test
+  labels:
+    {{- include "mcp-trino.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "mcp-trino.serviceAccountName" . }}
+  automountServiceAccountToken: false
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    {{- include "mcp-trino.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: check
+      image: {{ include "mcp-trino.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      command:
+        - sh
+        - -ec
+        - |
+          # A NetworkPolicy may take a few seconds to admit a new pod: retry for 60 s.
+          python - "{{ $url }}" /health{{ if .Values.tests.ready }} /ready{{ end }} <<'EOF'
+          import sys, time, urllib.request
+          base, paths = sys.argv[1], sys.argv[2:]
+          for path in paths:
+              for attempt in range(30):
+                  try:
+                      with urllib.request.urlopen(base + path, timeout=10) as response:
+                          print(base + path, response.status, response.read().decode())
+                          break
+                  except OSError as exc:
+                      if attempt == 29:
+                          sys.exit(f"{base + path}: {exc}")
+                      time.sleep(2)
+          EOF
+          akko-mcp-trino --check
+      envFrom:
+        {{- include "mcp-trino.envFrom" . | nindent 8 }}
+      {{- with (include "mcp-trino.env" . | trim) }}
+      env:
+        {{- . | nindent 8 }}
+      {{- end }}
+      volumeMounts:
+        {{- include "mcp-trino.volumeMounts" . | nindent 8 }}
+      {{- with .Values.tests.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumes:
+    {{- include "mcp-trino.volumes" . | nindent 4 }}
+{{- end }}

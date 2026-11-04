@@ -197,6 +197,23 @@ contrôle de santé et prend les mêmes variables d'environnement, sur les ports
 
 Il faut Python 3.12 ou plus récent pour l'installation par pip.
 
+### Kubernetes et OpenShift
+
+Une chart Helm est livrée dans [`charts/akko-mcp-trino/`](charts/akko-mcp-trino/) : le serveur
+avec la porte d'authentification active et le mode `jwt` par défaut, un pod sans root au système
+de fichiers en lecture seule qui tourne aussi sous l'UID arbitraire d'OpenShift, des secrets lus
+dans un Secret existant, une autorité de certification interne, et en option un Ingress, une Route
+OpenShift, une NetworkPolicy et un PodDisruptionBudget. `helm template` refuse un réglage que le
+serveur refuserait au démarrage, ou une porte coupée sans accord explicite, et `helm test` lance
+`--check` avec la configuration de la release :
+
+```bash
+helm install mcp-trino ./charts/akko-mcp-trino -f mes-valeurs.yaml
+helm test mcp-trino --logs
+```
+
+Le [README de la chart](charts/akko-mcp-trino/README.md) (en anglais) en liste les valeurs.
+
 ## Démarrer
 
 | Mode | Identité dans Trino | Usage |

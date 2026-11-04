@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mcp-trino.fullname" . }}
+  labels:
+    {{- include "mcp-trino.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "mcp-trino.serverSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: mcp
+      port: {{ .Values.ports.mcp }}
+      targetPort: mcp
+      protocol: TCP
+    {{- if .Values.service.exposeHealthPort }}
+    - name: health
+      port: {{ .Values.ports.health }}
+      targetPort: health
+      protocol: TCP
+    {{- end }}
+    {{- with .Values.service.extraPorts }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}

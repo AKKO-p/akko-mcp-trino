@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- A Helm chart for Kubernetes and OpenShift, in `charts/akko-mcp-trino/` (chart 0.1.0, image 0.7.2): the door on and identity mode `jwt` by default, a non-root pod with a read-only root filesystem that also runs under OpenShift's arbitrary UID, secrets by `secretKeyRef` from an existing Secret, an internal CA, an optional Ingress, OpenShift Route (edge or reencrypt), NetworkPolicy and PodDisruptionBudget, a values schema, render-time refusals of settings the server would refuse (or the door turned off without `auth.acknowledgeNoAuth`), and a `helm test` that calls `/health`, `/ready` and `--check`. CI lints and renders it, validates it with kubeconform (Kubernetes 1.32 to 1.36, the OpenShift Route schema) and runs `ct lint`; `integration/helm/run.sh` is its live proof on a cluster.
+
 ## [0.7.2] - 2026-11-04
 
 The code of 0.7.1, with a shorter description of the reads the allow-list refuses. 0.7.1 is not published on PyPI.

@@ -1,0 +1,357 @@
+# Default values for akko-mcp-trino.
+#
+# The defaults are the safe ones: the server speaks streamable HTTP, verifies every
+# caller's token, and runs each query as that caller (identity mode `jwt`). A few values
+# have no sensible default and must be set: `trino.host`, `trino.catalog`, the identity
+# provider (`auth.*`) and the credentials of the identity mode. `helm template` fails with
+# a message that names the missing or inconsistent value.
+#
+# Secrets never go in these values: name an existing Secret (`existingSecret`) and its keys.
+
+image:
+  repository: akkoai/akko-mcp-trino
+  # Defaults to the chart's appVersion.
+  tag: ""
+  # Set to pin the image by digest (sha256:...); takes precedence over the tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+# Leaves the user and group to the platform: on OpenShift the restricted-v2 SCC assigns an
+# arbitrary UID from the project's range, so the chart sets no runAsUser, runAsGroup or
+# fsGroup. Detected automatically when the cluster serves security.openshift.io/v1; set
+# to true to render for OpenShift offline (helm template).
+openshift: false
+
+serviceAccount:
+  create: true
+  # Defaults to the full name of the release.
+  name: ""
+  annotations: {}
+  # The server never calls the Kubernetes API.
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+# Applied to the pod. On OpenShift (see `openshift`), runAsUser, runAsGroup and fsGroup
+# are dropped so that the SCC can assign them.
+podSecurityContext:
+  runAsNonRoot: true
+  # The image's user (`mcp`). Kubernetes needs a numeric UID to check runAsNonRoot.
+  runAsUser: 10001
+  runAsGroup: 10001
+  # Owns the mounted client key (mode 0440).
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+# Applied to the server container and to the test pod.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
+# MCP transport: `streamable-http` (endpoint /mcp) or `sse` (endpoint /sse). `stdio`
+# cannot be served by a pod.
+transport: streamable-http
+
+# Ports the server listens on (MCP_PORT, MCP_HEALTH_PORT).
+ports:
+  mcp: 3000
+  health: 3001
+
+server:
+  # Name announced to MCP hosts (MCP_SERVER_NAME); empty keeps the server's default.
+  name: ""
+  # Registrars of extra tools (MCP_TOOL_PLUGINS) and extensions (MCP_EXTENSIONS) installed
+  # in the image. The public image ships none.
+  toolPlugins: []
+  extensions: []
+
+trino:
+  # The coordinator (TRINO_HOST, TRINO_PORT). Required.
+  host: ""
+  port: 8443
+  # `https` is required by every identity mode but `service` (TRINO_HTTP_SCHEME).
+  httpScheme: https
+  # Session catalog (TRINO_CATALOG). Required, and never `system`.
+  catalog: ""
+  # `jwt` (each caller, by token exchange), `impersonation` (each caller, impersonated by
+  # `trino.user`) or `service` (one account for every caller). `oauth2` is stdio only and
+  # cannot be served by a pod.
+  identityMode: jwt
+  # The server's own Trino account (TRINO_USER): required in `impersonation` and `service`.
+  user: ""
+  # How that account authenticates in `impersonation` and `service`: `password` (key
+  # `existingSecret.keys.trinoPassword`), `clientCertificate` (see below) or `none`
+  # (`service` over a test coordinator only).
+  credential: password
+  # Client certificate of the account (TRINO_CLIENT_CERT, TRINO_CLIENT_KEY), mounted
+  # read-only with mode 0440. A kubernetes.io/tls Secret works as is.
+  clientCertificate:
+    secretName: ""
+    certKey: tls.crt
+    keyKey: tls.key
+  # TLS verification of Trino (TRINO_VERIFY): true or false. With `ca` set, true checks
+  # Trino's chain against that bundle.
+  verify: true
+  # TRINO_READ_ONLY. Refuses writes in execute_query.
+  readOnly: true
+  # Optional settings; null keeps the server's default (see the server's README).
+  maxRows: null                # TRINO_MAX_ROWS (100)
+  source: null                 # TRINO_SOURCE (the server name)
+  queryTimeoutSeconds: null    # TRINO_QUERY_TIMEOUT_SECONDS (60)
+  requestTimeoutSeconds: null  # TRINO_REQUEST_TIMEOUT_SECONDS (30)
+  # `jwt` only: the exchange of the caller's token for a token issued for Trino (RFC 8693).
+  tokenExchange:
+    # The provider's token endpoint, https only (TRINO_TOKEN_EXCHANGE_URL).
+    url: ""
+    # This server's confidential client (TRINO_TOKEN_EXCHANGE_CLIENT_ID); its secret is
+    # read from `existingSecret.keys.tokenExchangeClientSecret`.
+    clientId: ""
+    # Trino's audience, never one this server accepts (TRINO_TOKEN_EXCHANGE_AUDIENCE).
+    audience: ""
+    scope: ""
+    # TLS verification of the token endpoint (TRINO_TOKEN_EXCHANGE_VERIFY): true or false.
+    # With `ca` set, true checks against that bundle.
+    verify: true
+
+# The door: every caller's bearer token is verified against the provider's JWKS.
+auth:
+  # MCP_AUTH_ENABLED and MCP_AUTH_REQUIRED. Turning either off refuses to render unless
+  # `acknowledgeNoAuth` is true, and only `service` mode can run without them.
+  enabled: true
+  required: true
+  acknowledgeNoAuth: false
+  # The provider's JWKS endpoint (MCP_JWKS_URL). Required when auth is enabled.
+  jwksUrl: ""
+  # The issuer a token must carry (MCP_OIDC_ISSUER).
+  issuer: ""
+  # The audience the provider gives tokens issued for this server (MCP_OIDC_AUDIENCE).
+  # This or `resourceUrl` is required when auth is enabled.
+  audience: ""
+  # This server's canonical URL, such as https://mcp.example.com/mcp (MCP_RESOURCE_URL).
+  # Its path must be the transport's endpoint (/mcp or /sse).
+  resourceUrl: ""
+  # The claim that names the user (MCP_JWT_USER_CLAIM); empty keeps `sub`.
+  userClaim: ""
+  # Signature algorithms a token may use (MCP_JWT_ALGORITHMS); empty keeps RS256.
+  algorithms: []
+  # Clock drift tolerance (MCP_JWT_LEEWAY_SECONDS); null keeps 30.
+  leewaySeconds: null
+  # Host header filter (MCP_ALLOWED_HOSTS), `host` or `host:port` entries; empty is off.
+  allowedHosts: []
+
+# Limits of the tools; null keeps the server's default.
+limits:
+  callTimeoutSeconds: null       # MCP_CALL_TIMEOUT_SECONDS (120)
+  maxCatalogs: null              # MCP_MAX_CATALOGS (10000)
+  describeSchemaTables: null     # MCP_DESCRIBE_SCHEMA_TABLES (20)
+  describeSchemaColumns: null    # MCP_DESCRIBE_SCHEMA_COLUMNS (1000)
+  searchMinLength: null          # MCP_SEARCH_MIN_LENGTH (3)
+  searchMaxWords: null           # MCP_SEARCH_MAX_WORDS (8)
+  searchMaxWordLength: null      # MCP_SEARCH_MAX_WORD_LENGTH (64)
+  searchReserveSeconds: null     # MCP_SEARCH_RESERVE_SECONDS (2)
+
+# Read commands the allow-list refuses, opened one by one (MCP_EXTRA_READ_COMMANDS).
+# Some reads, such as SHOW STATS or EXPLAIN, can show facts beyond a row filter or a
+# column mask; refused by default.
+extraReadCommands: []
+
+# The Secret that holds the credentials, created beforehand (kubectl create secret, an
+# external secrets operator...). Only the keys the identity mode needs are read.
+existingSecret:
+  name: ""
+  keys:
+    # `jwt`: the token exchange client's secret (TRINO_TOKEN_EXCHANGE_CLIENT_SECRET).
+    tokenExchangeClientSecret: token-exchange-client-secret
+    # `impersonation` and `service` with `credential: password` (TRINO_PASSWORD).
+    trinoPassword: trino-password
+
+# An internal certificate authority (PEM bundle), from a ConfigMap or a Secret, mounted
+# read-only. It is used for Trino (TRINO_VERIFY), the token endpoint
+# (TRINO_TOKEN_EXCHANGE_VERIFY) and, with `setSslCertFile`, for every other TLS client of
+# the process, the JWKS fetch included (SSL_CERT_FILE). SSL_CERT_FILE replaces the system
+# store: the bundle must then hold every authority the server needs.
+ca:
+  configMap: ""
+  secret: ""
+  key: ca.crt
+  setSslCertFile: true
+
+# Extra environment variables (an extension's own settings, for example), as container
+# env entries. Never a secret value: use valueFrom.secretKeyRef.
+extraEnv: []
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 384Mi
+
+# /health never touches Trino, so a slow Trino cannot get the server restarted.
+livenessProbe:
+  httpGet:
+    path: /health
+    port: health
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 3
+# /ready reaches Trino: Trino's /v1/info in `jwt` mode, a bounded SELECT 1 as the server's
+# account otherwise.
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: health
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+startupProbe:
+  httpGet:
+    path: /health
+    port: health
+  periodSeconds: 2
+  failureThreshold: 30
+
+terminationGracePeriodSeconds: 30
+
+service:
+  type: ClusterIP
+  annotations: {}
+  # The health port (/health, /ready, /metrics) is exposed on the Service for the helm
+  # test and for metrics scraping; Ingress and Route only ever target the MCP port.
+  exposeHealthPort: true
+  # More ports, for a sidecar (see route.tls.termination), as Service port entries.
+  extraPorts: []
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Example:
+  #   hosts:
+  #     - host: mcp.example.com
+  #       paths:
+  #         - path: /mcp
+  #           pathType: Prefix
+  hosts: []
+  tls: []
+
+# OpenShift Route (route.openshift.io/v1).
+route:
+  enabled: false
+  host: ""
+  # Defaults to the transport's endpoint (/mcp or /sse); "/" routes every path.
+  path: ""
+  annotations:
+    # Long tool calls: above MCP_CALL_TIMEOUT_SECONDS (120 by default).
+    haproxy.router.openshift.io/timeout: 180s
+  tls:
+    # `edge`: the router terminates TLS and reaches the pod in plain HTTP. `reencrypt`
+    # needs a TLS listener in front of the server (a sidecar in `extraContainers` whose
+    # port is named in `targetPort` and listed in `service.extraPorts`), since the server
+    # itself listens in plain HTTP.
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+    # Inline PEM; empty uses the router's default certificate.
+    certificate: ""
+    key: ""
+    caCertificate: ""
+    # `reencrypt`: the CA the router checks the backend against; empty uses the service CA.
+    destinationCACertificate: ""
+  # The Service port the Route targets; defaults to the MCP port.
+  targetPort: ""
+
+# Sidecars, for example a TLS listener for a reencrypt Route.
+extraContainers: []
+
+# NetworkPolicy: ingress to the MCP port only from the listed peers (and from the OpenShift
+# router when the Route is enabled), to the health port from the helm test and the listed
+# metrics peers; egress only to DNS, Trino and the identity provider.
+networkPolicy:
+  enabled: false
+  ingress:
+    # Peers allowed to reach the MCP port, such as the ingress controller's namespace:
+    #   - namespaceSelector:
+    #       matchLabels:
+    #         kubernetes.io/metadata.name: ingress-nginx
+    from: []
+    # Adds the OpenShift router's namespaces when `route.enabled` is true.
+    openshiftRouter: true
+  metrics:
+    # Peers allowed to read /metrics on the health port.
+    from: []
+  egress:
+    # Cluster DNS; the defaults cover Kubernetes (kube-system) and OpenShift (openshift-dns).
+    dns:
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+        - port: 5353
+          protocol: UDP
+        - port: 5353
+          protocol: TCP
+    # Trino's peers (an ipBlock, or a namespace and pod selector). Required when enabled.
+    # The port is trino.port.
+    trino: []
+    # The identity provider's peers (JWKS and token endpoint) and ports. Required when
+    # auth is enabled.
+    identityProvider:
+      to: []
+      ports:
+        - port: 443
+          protocol: TCP
+    # Any other egress rule, as NetworkPolicy egress entries.
+    extra: []
+
+podDisruptionBudget:
+  enabled: false
+  # One of the two.
+  minAvailable: 1
+  maxUnavailable: null
+
+# `soft` spreads the replicas over nodes when it can (preferred anti-affinity); `""` sets
+# none. Ignored when `affinity` is set.
+podAntiAffinity: ""
+affinity: {}
+nodeSelector: {}
+tolerations: []
+topologySpreadConstraints: []
+priorityClassName: ""
+
+# helm test: calls /health (and /ready) through the Service, then runs
+# `akko-mcp-trino --check` with the release's configuration.
+tests:
+  enabled: true
+  ready: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

@@ -142,6 +142,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **How it works, end to end:** [akko-ai.com/en/docs/how-it-works](https://akko-ai.com/en/docs/how-it-works/) (also [en français](https://akko-ai.com/docs/comment-ca-marche/)).
 - **Guide, prerequisites, configuration, examples:** [akko-ai.com/en/docs/open-source-core](https://akko-ai.com/en/docs/open-source-core/) (also [en français](https://akko-ai.com/docs/coeur-open-source/)) and [akko-ai.com/en/docs/examples](https://akko-ai.com/en/docs/examples/).
 - **Claude Desktop and Cursor, step by step:** [docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md).
+- **Kubernetes and OpenShift:** the Helm chart, [charts/akko-mcp-trino/README.md](charts/akko-mcp-trino/README.md).
 - **Reference, in this repository:** this README, [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md).
 
 ## Contents
@@ -402,6 +403,23 @@ same environment variables, publishing ports `3000` (MCP) and `3001` (health):
 ```bash
 docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
 ```
+
+### Kubernetes and OpenShift
+
+A Helm chart ships in [`charts/akko-mcp-trino/`](charts/akko-mcp-trino/): the server with
+the door on and identity mode `jwt` by default, a non-root pod with a read-only root
+filesystem that also runs under OpenShift's arbitrary UID, secrets read from an existing
+Secret, an internal CA, and an optional Ingress, OpenShift Route, NetworkPolicy and
+PodDisruptionBudget. `helm template` refuses a setting the server would refuse at start,
+or the door turned off without an explicit acknowledgement, and `helm test` runs
+`--check` with the release's configuration:
+
+```bash
+helm install mcp-trino ./charts/akko-mcp-trino -f my-values.yaml
+helm test mcp-trino --logs
+```
+
+The [chart's README](charts/akko-mcp-trino/README.md) lists its values.
 
 ## Connect an MCP host
 
