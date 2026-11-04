@@ -58,6 +58,7 @@ CORE_MODULES = {
     "context/status",
     "context/text",
     "context/types",
+    "context/visibility",
     "errors",
     "extensions",
     "health",
@@ -181,10 +182,13 @@ def test_the_core_never_sends_trino_the_callers_own_token():
     assert "return bearer" not in source
 
 
-def test_the_core_audit_line_has_its_six_fields_and_trino_gets_no_client_tag():
+def test_the_core_audit_line_has_its_six_fields_and_trino_gets_only_the_gate_tag():
     line = AuditEvent(request_id="r", tool="t", subject="s", ok=True).as_dict()
     assert set(line) == {"request_id", "tool", "subject", "ok", "error", "duration_ms"}
     assert 'f"request_id=' not in _source() and 'f"tool=' not in _source()
+    # The one client tag of the core marks the statements of the filter by Trino's rights.
+    assert set(re.findall(r'^[A-Z_]*TAG = "([^"]*)"', _source(), re.M)) == {"mcp-gate"}
+    assert "query_tags(GATE_TAG)" in (CORE / "trino_client.py").read_text(encoding="utf-8")
 
 
 def test_without_an_extension_no_public_document_is_served_and_no_challenge_is_sent():

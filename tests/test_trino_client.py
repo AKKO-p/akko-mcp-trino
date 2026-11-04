@@ -645,6 +645,31 @@ def test_every_query_names_the_server_as_source_and_carries_the_tags_it_is_given
     assert seen["client_tags"] is None, "the core alone sends no client tag"
 
 
+def test_every_gate_statement_carries_the_mcp_gate_tag(monkeypatch):
+    seen = _capture(monkeypatch)
+    tagged = _client(_CFG, tags=lambda: ["tool=describe_table"])
+    run = tc.gate_runner(tagged.query)
+    run("SHOW CATALOGS", user="carol")
+    assert seen["client_tags"] == ["tool=describe_table", tc.GATE_TAG]
+    tagged.query("SELECT 1", user="carol")
+    assert seen["client_tags"] == ["tool=describe_table"], "the tag ends with the statement"
+    tc.gate_runner(_client(_CFG).query)("SHOW CATALOGS", user="carol")
+    assert seen["client_tags"] == ["mcp-gate"]
+
+
+def test_query_tags_nest_and_end_with_their_block(monkeypatch):
+    seen = _capture(monkeypatch)
+    client = _client(_CFG)
+    with tc.query_tags("a"):
+        with tc.query_tags("b", "c"):
+            client.query("SELECT 1")
+            assert seen["client_tags"] == ["a", "b", "c"]
+        client.query("SELECT 1")
+        assert seen["client_tags"] == ["a"]
+    client.query("SELECT 1")
+    assert seen["client_tags"] is None
+
+
 def test_the_source_can_be_set_and_no_tag_is_sent_outside_a_call(monkeypatch):
     seen = _capture(monkeypatch)
     _client(_cfg(trino_source="agents-gateway")).query("SELECT 1")
