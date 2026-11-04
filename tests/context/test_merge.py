@@ -203,8 +203,12 @@ def test_an_element_empty_once_cleaned_is_dropped():
                     joins=(
                         Join((zw,), target, ("b",)),
                         Join(("a",), target, (zw,)),
-                        Join(("a", zw), TableRef("c", zw, "t"), ("b",)),
-                        Join(("a", zw), target, ("b",)),
+                        Join(("a",), TableRef("c", zw, "t"), ("b",)),
+                        Join(("a", zw), target, ("b", "c")),
+                        Join(("a", "x"), target, ("b", zw)),
+                        Join(("a", "x"), target, ("b",)),
+                        Join(("a",), target, ("b", "c")),
+                        Join(("a",), target, ("b",)),
                     ),
                 ),
             )
@@ -216,4 +220,28 @@ def test_an_element_empty_once_cleaned_is_dropped():
     assert merged["grain"] == ["id"]
     assert merged["joins"] == [
         {"columns": ["a"], "table": "c.s.t", "target_columns": ["b"], "source": "a"}
+    ]
+
+
+def test_a_join_with_an_empty_column_or_unequal_sides_is_dropped_whole():
+    zw = "\u200b"
+    target = TableRef("c", "s", "t")
+    kept = Join(("a", "x"), target, ("b", "y"))
+    merged = merge_table(
+        [
+            (
+                "a",
+                TableContext(
+                    joins=(
+                        Join(("a", zw, "x"), target, ("b", "z", "y")),
+                        Join(("a", "x"), target, ("b", "z", "y")),
+                        kept,
+                    )
+                ),
+            )
+        ],
+        text_chars=BIG,
+    )
+    assert merged["joins"] == [
+        {"columns": ["a", "x"], "table": "c.s.t", "target_columns": ["b", "y"], "source": "a"}
     ]

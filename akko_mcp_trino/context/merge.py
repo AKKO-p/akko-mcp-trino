@@ -133,7 +133,10 @@ def _joins(entries) -> list[dict]:
             target = join.target
             parts = _plains((target.catalog, target.schema, target.table))
             columns, target_columns = _plains(join.columns), _plains(join.target_columns)
-            if len(parts) == 3 and columns and target_columns:
+            paired = (
+                len(columns) == len(join.columns) == len(join.target_columns) == len(target_columns)
+            )
+            if len(parts) == 3 and columns and paired:
                 found.append((columns, ".".join(parts), target_columns))
         return found
 
