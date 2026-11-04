@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-04
+
 A security release that also changes one default: the user is read from `sub`. With Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading, including when you follow the `0.7` image tag. See [MIGRATING.md](MIGRATING.md).
 
 ### Security

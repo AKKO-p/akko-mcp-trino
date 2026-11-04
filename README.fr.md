@@ -18,6 +18,12 @@ l'utilisateur ne quitte jamais le serveur. Le contrôle d'accès de Trino (OPA, 
 de Trino) décide ensuite de ce que cet utilisateur peut lire. Les résultats sont bornés en lignes
 et en durée, et chaque appel laisse une ligne d'audit.
 
+> **Vous venez de la 0.7.0 ?** La 0.7.1 est une version de sécurité. `execute_query`
+> refuse `SHOW STATS`, `EXPLAIN`, `SHOW CREATE` et les autres lectures auxquelles Trino
+> répond au-delà d'un filtre de lignes ou d'un masque, et l'utilisateur est lu dans `sub`.
+> Avec Keycloak, posez `MCP_JWT_USER_CLAIM=preferred_username` avant la mise à jour.
+> Voir [MIGRATING.md](MIGRATING.md).
+
 > **Vous venez de la 0.6 ?** La 0.7.0 ne retire et ne renomme rien : elle ajoute
 > `search_columns` et `describe_schema`, pagine les listes et donne à chaque erreur un `kind`.
 > Laissez la policy du moteur lire `system.jdbc` et `system.metadata`, que lisent les deux nouveaux
@@ -145,7 +151,7 @@ donnez.
   peut seulement refuser ce que le cœur autorise, jamais l'élargir.
 - **N'importe quel MCP host, n'importe quel modèle.** Cursor, Claude Desktop, VS Code, le SDK
   Python… Mistral, ou tout modèle compatible OpenAI avec l'agent d'exemple.
-- **Petit et prouvé.** 717 tests à 100 % de couverture des lignes et des branches, dont des suites
+- **Petit et prouvé.** 826 tests à 100 % de couverture des lignes et des branches, dont des suites
   sur le vrai SDK pour les trois transports, une exécution réelle contre Keycloak et Trino en CI
   ([`integration/`](integration/)) et une garde de neutralité produit.
 

@@ -66,7 +66,7 @@ docker compose up -d --wait
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.7.0`) | one release |
+| `X.Y.Z` (e.g. `0.7.1`) | one release |
 | `X.Y` (e.g. `0.7`) | the latest release of that minor line |
 | `latest` | the latest release |
 

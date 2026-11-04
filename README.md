@@ -1,8 +1,8 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-717%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-826%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
-  <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.7.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351-blue" alt="Trino">
   <img src="https://img.shields.io/badge/MCP-2024--11--05%20to%202026--07--28%20%C2%B7%20streamable--http%20%7C%20sse%20%7C%20stdio-blue" alt="MCP">
@@ -30,6 +30,12 @@ separate token for Trino (OAuth 2.0 Token Exchange): the user's own token never
 leaves the server. Trino's access control (OPA, Ranger, or Trino's own rules)
 then decides what that user may read. Results are bounded in rows and in time,
 and every call leaves one audit line.
+
+> **Upgrading from 0.7.0?** 0.7.1 is a security release. `execute_query`
+> refuses `SHOW STATS`, `EXPLAIN`, `SHOW CREATE` and the other reads Trino
+> answers past a row filter or a column mask, and the user is read from `sub`.
+> With Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading.
+> See [MIGRATING.md](MIGRATING.md).
 
 > **Upgrading from 0.6?** 0.7.0 removes and renames nothing: it adds
 > `search_columns` and `describe_schema`, pages the listings, and gives every
@@ -129,7 +135,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 717 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
+- **Small and proven.** 826 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
 
 ## Documentation
 
@@ -1089,7 +1095,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 717 tests; line or branch coverage below 100 % fails the run
+pytest                        # 826 tests; line or branch coverage below 100 % fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start

@@ -8,7 +8,7 @@ environment, as Cursor resolves them.
 
     git clone https://github.com/AKKO-p/akko-mcp-trino.git && cd akko-mcp-trino
     python3 -m venv .venv && . .venv/bin/activate      # Python 3.12 or later
-    pip install akko-mcp-trino==0.7.0
+    pip install akko-mcp-trino==0.7.1
     python3 examples/check_host_config.py ~/.cursor/mcp.json
     python3 examples/check_host_config.py claude_desktop_config.json --server trino --search email
 
