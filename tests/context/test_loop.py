@@ -9,14 +9,6 @@ import pytest
 from akko_mcp_trino.context.loop import ContextLoop
 
 
-@pytest.fixture
-def loop():
-    started = ContextLoop()
-    started.start()
-    yield started
-    started.close()
-
-
 def test_a_submitted_coroutine_runs_on_the_loop_thread(loop):
     async def where():
         return threading.current_thread().name

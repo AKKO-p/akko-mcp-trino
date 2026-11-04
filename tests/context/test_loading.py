@@ -1,5 +1,6 @@
 """Provider loading, the check lines and the start of the context machinery."""
 
+import dataclasses
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
@@ -340,6 +341,8 @@ def test_the_visibility_switch_is_a_problem_in_check(monkeypatch, capsys):
     assert "MCP_VISIBILITY_ENABLED was removed in 0.8" in capsys.readouterr().out
 
 
-def test_the_setup_is_a_plain_pair():
+def test_the_setup_is_a_frozen_pair():
     setup = ContextSetup(chain=SimpleNamespace(), config=_config())
-    assert setup.chain is not None
+    assert [f.name for f in dataclasses.fields(setup)] == ["chain", "config"]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setup.chain = None  # type: ignore[misc]

@@ -75,7 +75,7 @@ CORE_MODULES = {
 }
 
 # The sub-packages of the core, named as ``akko_mcp_trino.<package>``.
-CORE_PACKAGES = {"context"}
+CORE_PACKAGES = {m.split("/")[0] for m in CORE_MODULES if "/" in m}
 
 # The entry-point groups the core reads: its tool plugins and its extensions.
 CORE_GROUPS = {"akko_mcp_trino.tools", "akko_mcp_trino.extensions", "akko_mcp_trino.context"}

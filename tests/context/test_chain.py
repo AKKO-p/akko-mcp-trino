@@ -10,7 +10,6 @@ import pytest
 
 from akko_mcp_trino.context import (
     ContextChain,
-    ContextLoop,
     ContextSettings,
     Gathered,
     ProviderRefused,
@@ -128,14 +127,6 @@ class Fake:
         if self.stamp_error is not None:
             raise self.stamp_error
         return self.stamp
-
-
-@pytest.fixture
-def loop():
-    started = ContextLoop()
-    started.start()
-    yield started
-    started.close()
 
 
 def _chain(loop, *providers, clock=None, metrics=None, **settings):
@@ -583,5 +574,7 @@ def test_an_open_breaker_shows_in_its_gauge(loop):
     assert value("mcp_trino_context_errors_total", {"provider": "down", "status": "refused"}) == 1
 
 
-def test_the_loop_thread_is_the_only_one_left_running(loop):
+def test_a_chain_in_use_runs_on_exactly_one_context_thread(loop):
+    chain = _chain(loop, Fake("up", known={ORDERS: TableContext()}))
+    chain.gather([ORDERS], deadline=chain._clock() + 5)
     assert [t.name for t in threading.enumerate()].count("mcp-context") == 1

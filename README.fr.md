@@ -569,8 +569,7 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bornes du profil d'une table, 1 au moins | `50`, `100000` |
 | `MCP_VISIBILITY_ENABLED` | supprimé en 0.8 : le filtre par les droits de Trino ne se désactive pas, et `false` refuse de démarrer | aucune |
 
-`MCP_VISIBILITY_ENABLED=false` refuse de démarrer : le filtre par les droits de Trino ne se
-désactive pas. Avec un fournisseur chargé, le serveur expose aussi les métriques
+Avec un fournisseur chargé, le serveur expose aussi les métriques
 `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total`,
 `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total`,
 `mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`, par fournisseur. Aucun outil
