@@ -123,6 +123,17 @@ def test_a_provider_named_twice_refuses_to_start(monkeypatch):
         load_providers(_config(context_providers="catalog,catalog"), {})
 
 
+def test_two_providers_reporting_the_same_name_refuse_to_start(monkeypatch):
+    _install(monkeypatch, a=lambda env: _Provider("same"), b=lambda env: _Provider("same"))
+    with pytest.raises(ValueError, match="more than one context provider reports the name 'same'"):
+        load_providers(_config(context_providers="a,b"), {})
+
+
+def test_a_list_of_nothing_loads_nothing(monkeypatch):
+    monkeypatch.setattr(loading_module, "_entry_points", lambda: pytest.fail("looked up"))
+    assert load_providers(_config(context_providers=" , "), {}) == []
+
+
 def test_an_unreachable_catalogue_does_not_stop_the_load(monkeypatch):
     _install(monkeypatch, catalog=lambda env: _Provider(lines=["UNREACHABLE: down"]))
     assert len(load_providers(_config(context_providers="catalog"), {})) == 1
@@ -167,6 +178,22 @@ def test_providers_given_to_the_server_start_the_loop_and_the_chain(loops):
     assert isinstance(setup.chain, ContextChain) and setup.config is config
     assert setup.chain.names == ("catalog",)
     assert len(loops) == 1 and "mcp-context" in {t.name for t in threading.enumerate()}
+
+
+def test_a_registrar_that_fails_leaves_no_loop_and_no_callback(loops):
+    def broken(mcp, client):
+        raise RuntimeError("registrar failed")
+
+    seen = []
+    with pytest.raises(RuntimeError, match="registrar failed"):
+        build_server(
+            _config(),
+            mcp_factory=lambda name, **_: FakeMCP(),
+            extra_tool_registrars=[broken],
+            context_providers=[_Provider()],
+            context_started=seen.append,
+        )
+    assert seen == [] and "mcp-context" not in {t.name for t in threading.enumerate()}
 
 
 def test_providers_without_a_callback_still_start(loops):

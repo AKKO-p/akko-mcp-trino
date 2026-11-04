@@ -548,15 +548,32 @@ servir ses réglages empêchent le démarrage ; un catalogue injoignable, non (`
 quand un fournisseur se dit injoignable). Un secret peut être donné en fichier (`<NOM>_FILE`, relu
 quand le fichier change).
 
-Le contexte suit ce que Trino liste pour l'appelant. Les réglages (`MCP_CONTEXT_TIMEOUT_SECONDS` 5,
-`MCP_CONTEXT_RESERVE_SECONDS` 0,5, `MCP_CONTEXT_MAX_CONCURRENCY` 32, `MCP_CONTEXT_RETRY_AFTER_SECONDS` 30,
-`MCP_CONTEXT_REFUSED_RETRY_SECONDS` 3600, `MCP_CONTEXT_BATCH` 50, `MCP_CONTEXT_TTL_SECONDS` 900,
-`MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES`, `MCP_VISIBILITY_TTL_SECONDS` 60,
-`MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES`, `MCP_CONTEXT_REQUIRE_SELECT` `false`,
-`MCP_CONTEXT_CANARY`, `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS`,
-`MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS`) sont décrits dans le [README](README.md).
-`MCP_VISIBILITY_ENABLED=false` refuse de démarrer : le filtre par les droits de Trino ne se désactive
-pas. Aucun outil n'utilise encore le contexte.
+Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs valeurs par défaut :
+
+| Variable | Rôle | Défaut |
+|---|---|---|
+| `MCP_CONTEXT_PROVIDERS` | noms des fournisseurs, séparés par des virgules | aucun |
+| `MCP_CONTEXT_TIMEOUT_SECONDS` | budget de temps d'une lecture de contexte, plus de 0 | `5` |
+| `MCP_CONTEXT_RESERVE_SECONDS` | secondes du budget d'un appel gardées en réserve, 0 ou plus | `0.5` |
+| `MCP_CONTEXT_MAX_CONCURRENCY` | lectures de contexte simultanées au plus, 1 au moins | `32` |
+| `MCP_CONTEXT_RETRY_AFTER_SECONDS` | délai avant de rappeler une source en panne | `30` |
+| `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | délai avant de rappeler une source qui a refusé le compte (`SIGHUP` le lève aussitôt) | `3600` |
+| `MCP_CONTEXT_BATCH` | tables par lecture d'une source | `50` |
+| `MCP_CONTEXT_TTL_SECONDS` | durée de conservation d'une lecture | `900` |
+| `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | octets des caches des tables et des termes de glossaire | `536870912`, `67108864` |
+| `MCP_VISIBILITY_TTL_SECONDS` | durée de conservation de ce que Trino a listé pour un appelant | `60` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | octets de ce cache, et noms gardés au plus pour un appelant | `134217728`, `10000` |
+| `MCP_CONTEXT_REQUIRE_SELECT` | `true` : contexte servi seulement pour les tables que l'appelant peut lire | `false` |
+| `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'un compte sentinelle ne doit pas voir | aucune |
+| `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, au plus | `500`, `60000`, `500` |
+| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bornes du profil d'une table | `50`, `100000` |
+
+`MCP_VISIBILITY_ENABLED=false` refuse de démarrer : le filtre par les droits de Trino ne se
+désactive pas. Avec un fournisseur chargé, le serveur expose aussi les métriques
+`mcp_trino_context_calls_total`, `mcp_trino_context_errors_total`,
+`mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total`,
+`mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`, par fournisseur. Aucun outil
+n'utilise encore le contexte.
 
 ## Configuration, extensions, exploitation
 

@@ -133,16 +133,14 @@ def build_server(
     if audit is not None:
         for ext in exts:
             audit = ext.wrap_audit(audit)
+    # The loop is only built here: its thread starts once every tool is registered.
+    loop = ContextLoop()
     context = None
     if context_providers:
-        loop = ContextLoop()
-        loop.start()
         chain = ContextChain(
             context_providers, ContextSettings.from_config(config), loop=loop, metrics=metrics
         )
         context = ContextSetup(chain, config)
-        if context_started is not None:
-            context_started(context)
     tools = register_query_tools(
         mcp,
         client,
@@ -169,4 +167,8 @@ def build_server(
             registrar(plugin_view, client, tools)
         else:
             registrar(plugin_view, client)
+    if context is not None:
+        loop.start()
+        if context_started is not None:
+            context_started(context)
     return mcp, client

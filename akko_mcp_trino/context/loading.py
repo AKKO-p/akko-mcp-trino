@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from importlib.metadata import entry_points
 from typing import Any
 
-from ..config import Config
+from ..config import Config, provider_names
 from . import CONTEXT_API
 from .provider import ContextProvider
 
@@ -26,17 +26,12 @@ def _entry_points() -> Sequence[Any]:
     return list(entry_points(group=ENTRY_POINT_GROUP))
 
 
-def provider_names(value: str) -> list[str]:
-    """The names a ``MCP_CONTEXT_PROVIDERS`` value lists, in order."""
-    return [n.strip() for n in value.split(",") if n.strip()]
-
-
 def load_providers(config: Config, env: Mapping[str, str]) -> list[ContextProvider]:
     """The providers named by ``config.context_providers``, built from ``env``, in that order.
 
-    Raises ValueError on an unknown or repeated name and on a provider of another
-    ``context_api``, and lets through the ValueError of a factory that cannot serve its
-    settings: either way the server refuses to start.
+    Raises ValueError on an unknown or repeated name, on two providers that report the same
+    name and on a provider of another ``context_api``, and lets through the ValueError of
+    a factory that cannot serve its settings: either way the server refuses to start.
     """
     names = provider_names(config.context_providers)
     if not names:
@@ -57,5 +52,7 @@ def load_providers(config: Config, env: Mapping[str, str]) -> list[ContextProvid
                 f"context provider {name!r} speaks context_api {provider.context_api}; "
                 f"this server expects {CONTEXT_API}"
             )
+        if any(other.name == provider.name for other in loaded):
+            raise ValueError(f"more than one context provider reports the name {provider.name!r}")
         loaded.append(provider)
     return loaded

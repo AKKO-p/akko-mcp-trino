@@ -29,9 +29,9 @@ from . import __version__
 from .app import build_asgi_app, run_stdio, transports_supported
 from .audit import LoggingAudit
 from .auth import accepted_audiences, build_auth
-from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config, parse_jwt_algorithms
+from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config, parse_jwt_algorithms, provider_names
 from .context import ContextProvider, ContextSetup
-from .context.loading import load_providers, provider_names
+from .context.loading import load_providers
 from .extensions import Extension, extension_names, load_extensions
 from .health import build_health_app
 from .metrics import Metrics

@@ -581,3 +581,8 @@ def test_context_warnings_come_only_with_a_provider(monkeypatch):
     assert Config.from_env().warnings()[-1] == "context visibility is the service account's"
     monkeypatch.delenv("MCP_CONTEXT_PROVIDERS")
     assert "context visibility" not in " ".join(Config.from_env().warnings())
+
+
+def test_a_providers_list_of_nothing_warns_of_nothing(monkeypatch):
+    monkeypatch.setenv("MCP_CONTEXT_PROVIDERS", " , ")
+    assert Config.from_env().warnings() == []

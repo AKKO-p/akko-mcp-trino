@@ -56,6 +56,11 @@ DEFAULT_SEARCH_MAX_WORD_LENGTH = 64
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
 
 
+def provider_names(value: str) -> list[str]:
+    """The names a ``MCP_CONTEXT_PROVIDERS`` value lists, in order."""
+    return [n.strip() for n in value.split(",") if n.strip()]
+
+
 def _is_table_name(text: str) -> bool:
     """Whether ``text`` is ``catalog.schema.table``: three valid identifiers, the first
     outside the ``system`` catalog."""
@@ -392,7 +397,7 @@ class Config:
                 f"MCP_EXTRA_READ_COMMANDS={', '.join(extra)}: these reads can show facts "
                 "beyond a row filter or a column mask"
             )
-        if self.context_providers.strip():
+        if provider_names(self.context_providers):
             if not self.context_canary:
                 found.append(
                     "MCP_CONTEXT_CANARY is not set: nothing checks that Trino filters its "
