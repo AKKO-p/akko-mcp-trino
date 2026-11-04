@@ -17,12 +17,25 @@ spec:
       port: {{ .Values.ports.mcp }}
       targetPort: mcp
       protocol: TCP
-    {{- if .Values.service.exposeHealthPort }}
+    {{- with .Values.service.extraPorts }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- if .Values.service.exposeHealthPort }}
+---
+# The health port, in the cluster only, whatever the MCP Service's type.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mcp-trino.fullname" . }}-health
+  labels:
+    {{- include "mcp-trino.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "mcp-trino.serverSelectorLabels" . | nindent 4 }}
+  ports:
     - name: health
       port: {{ .Values.ports.health }}
       targetPort: health
       protocol: TCP
-    {{- end }}
-    {{- with .Values.service.extraPorts }}
-    {{- toYaml . | nindent 4 }}
-    {{- end }}
+{{- end }}

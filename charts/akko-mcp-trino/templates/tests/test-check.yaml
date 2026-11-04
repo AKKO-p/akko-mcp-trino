@@ -1,5 +1,5 @@
 {{- if .Values.tests.enabled }}
-{{- $url := printf "http://%s:%v" (include "mcp-trino.fullname" .) .Values.ports.health }}
+{{- $url := printf "http://%s-health:%v" (include "mcp-trino.fullname" .) .Values.ports.health }}
 # helm test: the server answers /health (and /ready) through its Service, and
 # `akko-mcp-trino --check` accepts the release's configuration (exit 0), with the same
 # settings, secrets and mounts as the server.

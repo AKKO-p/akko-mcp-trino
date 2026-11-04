@@ -133,9 +133,13 @@ auth:
   enabled: true
   required: true
   acknowledgeNoAuth: false
-  # The provider's JWKS endpoint (MCP_JWKS_URL). Required when auth is enabled.
+  # The provider's JWKS endpoint (MCP_JWKS_URL), over https. Required when auth is enabled.
   jwksUrl: ""
-  # The issuer a token must carry (MCP_OIDC_ISSUER).
+  # The JWKS is the trust anchor of the door: fetched over http, anyone on the path could
+  # substitute keys. A non-https jwksUrl refuses to render unless this is true.
+  acknowledgeInsecureJwks: false
+  # The issuer a token must carry (MCP_OIDC_ISSUER). Set it: without it, a token from any
+  # issuer that shares the JWKS and the audience is accepted (NOTES warns).
   issuer: ""
   # The audience the provider gives tokens issued for this server (MCP_OIDC_AUDIENCE).
   # This or `resourceUrl` is required when auth is enabled.
@@ -150,6 +154,8 @@ auth:
   # Clock drift tolerance (MCP_JWT_LEEWAY_SECONDS); null keeps 30.
   leewaySeconds: null
   # Host header filter (MCP_ALLOWED_HOSTS), `host` or `host:port` entries; empty is off.
+  # Behind an Ingress or a Route, list its host and the Service's name for callers in the
+  # cluster (DNS rebinding protection).
   allowedHosts: []
 
 # Limits of the tools; null keeps the server's default.
@@ -190,7 +196,10 @@ ca:
   setSslCertFile: true
 
 # Extra environment variables (an extension's own settings, for example), as container
-# env entries. Never a secret value: use valueFrom.secretKeyRef.
+# env entries. Never a secret value: use valueFrom.secretKeyRef. A variable the chart
+# manages (TRINO_HOST, MCP_AUTH_ENABLED...) refuses to render, naming the value to set
+# instead. extraEnvFrom comes before the chart's ConfigMap, so the chart's settings win;
+# it must not carry those variables either.
 extraEnv: []
 extraEnvFrom: []
 extraVolumes: []
@@ -230,11 +239,16 @@ startupProbe:
 
 terminationGracePeriodSeconds: 30
 
+# The MCP Service. NodePort or LoadBalancer publish the server in plain HTTP outside the
+# cluster (bearer tokens in clear): refused unless `acknowledgePlainHttp` is true, for a
+# TLS-terminating load balancer in front.
 service:
   type: ClusterIP
+  acknowledgePlainHttp: false
   annotations: {}
-  # The health port (/health, /ready, /metrics) is exposed on the Service for the helm
-  # test and for metrics scraping; Ingress and Route only ever target the MCP port.
+  # The health port (/health, /ready, /metrics) is served by a second Service,
+  # `<fullname>-health`, always ClusterIP, for the helm test and metrics scraping.
+  # Ingress and Route only ever target the MCP port. The helm test needs it.
   exposeHealthPort: true
   # More ports, for a sidecar (see route.tls.termination), as Service port entries.
   extraPorts: []
@@ -243,20 +257,24 @@ ingress:
   enabled: false
   className: ""
   annotations: {}
-  # Example:
+  # Example (ingress-nginx; its 60 s default read timeout would cut a long tool call):
+  #   annotations:
+  #     nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
   #   hosts:
   #     - host: mcp.example.com
-  #       paths:
-  #         - path: /mcp
-  #           pathType: Prefix
+  # Without `paths`, a host routes the transport's endpoint (/mcp or /sse), the protected
+  # resource metadata (/.well-known/oauth-protected-resource) when auth.resourceUrl is
+  # set, and /messages/ with sse.
   hosts: []
+  # Without TLS here, terminate it in front: NOTES warns, since tokens would cross in clear.
   tls: []
 
 # OpenShift Route (route.openshift.io/v1).
 route:
   enabled: false
   host: ""
-  # Defaults to the transport's endpoint (/mcp or /sse); "/" routes every path.
+  # Empty routes every path of the MCP port: the endpoint, the protected resource
+  # metadata (/.well-known/oauth-protected-resource) and, with sse, /messages/.
   path: ""
   annotations:
     # Long tool calls: above MCP_CALL_TIMEOUT_SECONDS (120 by default).
@@ -268,10 +286,11 @@ route:
     # itself listens in plain HTTP.
     termination: edge
     insecureEdgeTerminationPolicy: Redirect
-    # Inline PEM; empty uses the router's default certificate.
-    certificate: ""
-    key: ""
-    caCertificate: ""
+    # The certificate is never inline (a private key in the values): name a
+    # kubernetes.io/tls Secret the router may read (spec.tls.externalCertificate, on an
+    # OpenShift version whose Route API has it), or leave empty for the router's default
+    # certificate.
+    externalCertificate: ""
     # `reencrypt`: the CA the router checks the backend against; empty uses the service CA.
     destinationCACertificate: ""
   # The Service port the Route targets; defaults to the MCP port.
@@ -303,6 +322,9 @@ networkPolicy:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: openshift-dns
@@ -330,8 +352,8 @@ networkPolicy:
 
 podDisruptionBudget:
   enabled: false
-  # One of the two.
-  minAvailable: 1
+  # One of the two; with both null, minAvailable is 1.
+  minAvailable: null
   maxUnavailable: null
 
 # `soft` spreads the replicas over nodes when it can (preferred anti-affinity); `""` sets

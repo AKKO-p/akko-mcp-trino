@@ -40,6 +40,9 @@ render time with a message that names the value to change.
 {{- if not $v.auth.jwksUrl }}
 {{- fail "auth.jwksUrl is required when auth is enabled: the identity provider's JWKS endpoint." }}
 {{- end }}
+{{- if and (not (hasPrefix "https://" $v.auth.jwksUrl)) (not $v.auth.acknowledgeInsecureJwks) }}
+{{- fail (printf "auth.jwksUrl=%s is not https: the JWKS is the door's trust anchor, and over http anyone on the path could substitute keys. Use https, or set auth.acknowledgeInsecureJwks=true (a test only)." $v.auth.jwksUrl) }}
+{{- end }}
 {{- if not (or $v.auth.audience $v.auth.resourceUrl) }}
 {{- fail "auth.audience or auth.resourceUrl is required when auth is enabled: the audience of the tokens issued for this server." }}
 {{- end }}
@@ -50,7 +53,7 @@ render time with a message that names the value to change.
 {{- end }}
 {{- $endpoint := include "mcp-trino.endpoint" $ }}
 {{- $path := (urlParse .).path | trimSuffix "/" }}
-{{- if and $path (ne $path $endpoint) }}
+{{- if ne $path $endpoint }}
 {{- fail (printf "auth.resourceUrl has the path %q, but transport=%s serves %s: the published resource must be the URL hosts call." $path $v.transport $endpoint) }}
 {{- end }}
 {{- end }}
@@ -106,7 +109,22 @@ render time with a message that names the value to change.
 {{- if and $v.ingress.enabled (not $v.ingress.hosts) }}
 {{- fail "ingress.enabled=true requires ingress.hosts." }}
 {{- end }}
+{{- if and (ne $v.service.type "ClusterIP") (not $v.service.acknowledgePlainHttp) }}
+{{- fail (printf "service.type=%s publishes the MCP port in plain HTTP outside the cluster, bearer tokens in clear. Use an Ingress or a Route with TLS, or set service.acknowledgePlainHttp=true when a TLS-terminating load balancer is in front." $v.service.type) }}
+{{- end }}
+{{- if and $v.tests.enabled (not $v.service.exposeHealthPort) }}
+{{- fail "tests.enabled=true calls the health Service: keep service.exposeHealthPort=true, or set tests.enabled=false." }}
+{{- end }}
+{{- $managed := include "mcp-trino.managedEnv" . | fromJson }}
+{{- range $v.extraEnv }}
+{{- if hasKey $managed (.name | default "") }}
+{{- fail (printf "extraEnv sets %s, which the chart manages: set %s instead, so that the render-time checks apply." .name (get $managed .name)) }}
+{{- end }}
+{{- end }}
 {{- if $v.networkPolicy.enabled }}
+{{- if and (or $v.ingress.enabled (and $v.route.enabled (not $v.networkPolicy.ingress.openshiftRouter))) (not $v.networkPolicy.ingress.from) }}
+{{- fail "networkPolicy.enabled=true with an Ingress (or a Route without networkPolicy.ingress.openshiftRouter) requires networkPolicy.ingress.from: the ingress controller's peers; without them the MCP port admits no one." }}
+{{- end }}
 {{- if not $v.networkPolicy.egress.trino }}
 {{- fail "networkPolicy.enabled=true requires networkPolicy.egress.trino: the peers of Trino (an ipBlock, or a namespace and pod selector)." }}
 {{- end }}
@@ -119,8 +137,9 @@ render time with a message that names the value to change.
 {{- if and (not (kindIs "invalid" $pdb.minAvailable)) (not (kindIs "invalid" $pdb.maxUnavailable)) }}
 {{- fail "podDisruptionBudget: set minAvailable or maxUnavailable, not both." }}
 {{- end }}
-{{- if and (not (kindIs "invalid" $pdb.minAvailable)) (not (kindIs "string" $pdb.minAvailable)) (ge (int $pdb.minAvailable) (int $v.replicaCount)) }}
-{{- fail (printf "podDisruptionBudget.minAvailable=%v with replicaCount=%v blocks every node drain: raise replicaCount or lower minAvailable." $pdb.minAvailable $v.replicaCount) }}
+{{- $min := ternary 1 $pdb.minAvailable (and (kindIs "invalid" $pdb.minAvailable) (kindIs "invalid" $pdb.maxUnavailable)) }}
+{{- if and (not (kindIs "invalid" $min)) (not (kindIs "string" $min)) (ge (int $min) (int $v.replicaCount)) }}
+{{- fail (printf "podDisruptionBudget.minAvailable=%v with replicaCount=%v blocks every node drain: raise replicaCount, lower minAvailable or set maxUnavailable." $min $v.replicaCount) }}
 {{- end }}
 {{- end }}
 {{- end }}

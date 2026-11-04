@@ -29,7 +29,32 @@ refuses "a resource URL off the endpoint" "the published resource must be the UR
 refuses "reencrypt to the plain HTTP port" "the server listens in plain HTTP" -f values.yaml --set route.enabled=true,route.tls.termination=reencrypt
 refuses "impersonation without a credential" "requires trino.credential=password or clientCertificate" -f values.yaml --set trino.identityMode=impersonation,trino.httpScheme=https
 refuses "a disruption budget that blocks every drain" "blocks every node drain" -f values.yaml --set podDisruptionBudget.enabled=true
+refuses "a JWKS over http without acknowledgeInsecureJwks" "is not https" -f values.yaml --set auth.acknowledgeInsecureJwks=false
+refuses "a NodePort without acknowledgePlainHttp" "service.acknowledgePlainHttp=true" -f values.yaml --set service.type=NodePort
+refuses "helm test without the health Service" "keep service.exposeHealthPort=true" -f values.yaml --set service.exposeHealthPort=false
+refuses "extraEnv overriding the door" "set auth.enabled instead" -f values.yaml --set 'extraEnv[0].name=MCP_AUTH_ENABLED,extraEnv[0].value=false'
+refuses "a resource URL without a path" "the published resource must be the URL hosts call" -f values.yaml --set auth.resourceUrl=https://mcp.example.com
+refuses "an Ingress the NetworkPolicy admits no one to" "requires networkPolicy.ingress.from" -f values.yaml --set 'networkPolicy.ingress.from=null,ingress.enabled=true,ingress.hosts[0].host=mcp.example.com'
+refuses "an inline Route key" "additional properties 'key' not allowed" -f values.yaml --set route.tls.key=x
 refuses "a value the schema does not know" "additional properties" -f values.yaml --set trino.hots=x
+renders() {  # renders <what> <template> <expected text...> -- <helm template arguments...>
+  local what="$1" template="$2"; shift 2
+  local expected=(); while [ "$1" != "--" ]; do expected+=("$1"); shift; done; shift
+  local out; out="$(helm template t "$CHART" -s "$template" "$@" 2>&1)" || { fail "$what: $(grep -m1 Error <<<"$out")"; return; }
+  for e in "${expected[@]}"; do grep -qF -- "$e" <<<"$out" || { fail "$what: no '$e' in $template"; return; }; done
+  pass "$what"
+}
+renders "the Ingress routes the endpoint and the protected resource metadata" templates/ingress.yaml \
+  'path: "/mcp"' 'path: "/.well-known/oauth-protected-resource"' -- -f values.yaml \
+  --set 'ingress.enabled=true,ingress.hosts[0].host=mcp.example.com,auth.resourceUrl=https://mcp.example.com/mcp,networkPolicy.enabled=false'
+renders "the Ingress routes /sse and /messages/ with sse" templates/ingress.yaml \
+  'path: "/sse"' 'path: "/messages/"' -- -f values.yaml --set 'transport=sse,ingress.enabled=true,ingress.hosts[0].host=mcp.example.com,networkPolicy.enabled=false'
+out="$(helm template t "$CHART" -s templates/route.yaml -f values.yaml --set route.enabled=true,route.host=mcp.example.com,route.tls.externalCertificate=mcp-tls 2>&1)"
+if ! grep -q '^  path:' <<<"$out" && grep -q 'name: "mcp-tls"' <<<"$out"; then pass "the Route routes every path of the MCP port, certificate from a Secret"
+else fail "the Route: $out"; fi
+renders "the health port on its own ClusterIP Service" templates/service.yaml \
+  'name: t-akko-mcp-trino-health' 'type: ClusterIP' -- -f values.yaml --set service.type=LoadBalancer,service.acknowledgePlainHttp=true
+renders "maxUnavailable alone" templates/pdb.yaml 'maxUnavailable: 1' -- -f values.yaml --set podDisruptionBudget.enabled=true,podDisruptionBudget.maxUnavailable=1
 if helm template t "$CHART" -f values.yaml --set auth.enabled=false,auth.required=false,auth.acknowledgeNoAuth=true >/dev/null 2>&1; then
   pass "the door off renders with acknowledgeNoAuth=true (service mode)"
 else fail "the door off with acknowledgeNoAuth=true does not render"; fi

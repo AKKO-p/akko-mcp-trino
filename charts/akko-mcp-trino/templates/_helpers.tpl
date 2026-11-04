@@ -66,6 +66,47 @@ app.kubernetes.io/component: server
 {{- ternary "/sse" "/mcp" (eq .Values.transport "sse") }}
 {{- end }}
 
+{{/*
+The variables the chart manages, and the value that sets each: refused in extraEnv, where
+they would silently override the render-time checks.
+*/}}
+{{- define "mcp-trino.managedEnv" -}}
+{{- toJson (dict
+  "MCP_TRANSPORT" "transport" "MCP_PORT" "ports.mcp" "MCP_HEALTH_PORT" "ports.health"
+  "MCP_SERVER_NAME" "server.name" "MCP_TOOL_PLUGINS" "server.toolPlugins" "MCP_EXTENSIONS" "server.extensions"
+  "TRINO_HOST" "trino.host" "TRINO_PORT" "trino.port" "TRINO_HTTP_SCHEME" "trino.httpScheme"
+  "TRINO_CATALOG" "trino.catalog" "TRINO_IDENTITY_MODE" "trino.identityMode" "TRINO_READ_ONLY" "trino.readOnly"
+  "TRINO_VERIFY" "trino.verify and ca" "TRINO_SOURCE" "trino.source" "TRINO_USER" "trino.user"
+  "TRINO_PASSWORD" "trino.credential and existingSecret" "TRINO_CLIENT_CERT" "trino.clientCertificate"
+  "TRINO_CLIENT_KEY" "trino.clientCertificate" "TRINO_MAX_ROWS" "trino.maxRows"
+  "TRINO_QUERY_TIMEOUT_SECONDS" "trino.queryTimeoutSeconds" "TRINO_REQUEST_TIMEOUT_SECONDS" "trino.requestTimeoutSeconds"
+  "TRINO_TOKEN_EXCHANGE_URL" "trino.tokenExchange.url" "TRINO_TOKEN_EXCHANGE_CLIENT_ID" "trino.tokenExchange.clientId"
+  "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET" "existingSecret" "TRINO_TOKEN_EXCHANGE_AUDIENCE" "trino.tokenExchange.audience"
+  "TRINO_TOKEN_EXCHANGE_SCOPE" "trino.tokenExchange.scope" "TRINO_TOKEN_EXCHANGE_VERIFY" "trino.tokenExchange.verify and ca"
+  "MCP_AUTH_ENABLED" "auth.enabled" "MCP_AUTH_REQUIRED" "auth.required" "MCP_JWKS_URL" "auth.jwksUrl"
+  "MCP_OIDC_ISSUER" "auth.issuer" "MCP_OIDC_AUDIENCE" "auth.audience" "MCP_RESOURCE_URL" "auth.resourceUrl"
+  "MCP_JWT_USER_CLAIM" "auth.userClaim" "MCP_JWT_ALGORITHMS" "auth.algorithms" "MCP_JWT_LEEWAY_SECONDS" "auth.leewaySeconds"
+  "MCP_ALLOWED_HOSTS" "auth.allowedHosts" "MCP_EXTRA_READ_COMMANDS" "extraReadCommands"
+  "MCP_CALL_TIMEOUT_SECONDS" "limits.callTimeoutSeconds" "MCP_MAX_CATALOGS" "limits.maxCatalogs"
+  "MCP_DESCRIBE_SCHEMA_TABLES" "limits.describeSchemaTables" "MCP_DESCRIBE_SCHEMA_COLUMNS" "limits.describeSchemaColumns"
+  "MCP_SEARCH_MIN_LENGTH" "limits.searchMinLength" "MCP_SEARCH_MAX_WORDS" "limits.searchMaxWords"
+  "MCP_SEARCH_MAX_WORD_LENGTH" "limits.searchMaxWordLength" "MCP_SEARCH_RESERVE_SECONDS" "limits.searchReserveSeconds"
+  "MCP_USER_TOKEN" "nothing: stdio only" "SSL_CERT_FILE" "ca and ca.setSslCertFile" "PYTHONDONTWRITEBYTECODE" "nothing: always set"
+) }}
+{{- end }}
+
+{{/* The paths an Ingress host routes by default. */}}
+{{- define "mcp-trino.defaultPaths" -}}
+{{- $paths := list (dict "path" (include "mcp-trino.endpoint" .) "pathType" "Prefix") }}
+{{- if .Values.auth.resourceUrl }}
+{{- $paths = append $paths (dict "path" "/.well-known/oauth-protected-resource" "pathType" "Prefix") }}
+{{- end }}
+{{- if eq .Values.transport "sse" }}
+{{- $paths = append $paths (dict "path" "/messages/" "pathType" "Prefix") }}
+{{- end }}
+{{- toJson $paths }}
+{{- end }}
+
 {{/* Mount paths. */}}
 {{- define "mcp-trino.caPath" -}}
 /etc/mcp-trino/ca/{{ .Values.ca.key }}
@@ -94,11 +135,12 @@ The environment shared by the server and the test pod: the ConfigMap, the secret
 secretKeyRef (the server reads no *_FILE variable), and the extra entries.
 */}}
 {{- define "mcp-trino.envFrom" -}}
-- configMapRef:
-    name: {{ include "mcp-trino.fullname" . }}
+{{- /* The chart's ConfigMap comes last: on a duplicate key, the last source wins. */}}
 {{- with .Values.extraEnvFrom }}
 {{ toYaml . }}
 {{- end }}
+- configMapRef:
+    name: {{ include "mcp-trino.fullname" . }}
 {{- end }}
 
 {{- define "mcp-trino.env" -}}

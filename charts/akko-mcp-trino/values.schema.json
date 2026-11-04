@@ -302,6 +302,9 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "acknowledgeInsecureJwks": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -494,6 +497,9 @@
           "items": {
             "type": "object"
           }
+        },
+        "acknowledgePlainHttp": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -588,16 +594,10 @@
                 "None"
               ]
             },
-            "certificate": {
-              "type": "string"
-            },
-            "key": {
-              "type": "string"
-            },
-            "caCertificate": {
-              "type": "string"
-            },
             "destinationCACertificate": {
+              "type": "string"
+            },
+            "externalCertificate": {
               "type": "string"
             }
           },

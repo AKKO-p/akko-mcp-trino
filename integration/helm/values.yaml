@@ -11,6 +11,7 @@ trino:
   credential: none
 auth:
   jwksUrl: http://jwks-test:8080/jwks.json
+  acknowledgeInsecureJwks: true   # the static test JWKS serves plain HTTP
   issuer: https://idp.example.internal/realms/test
   audience: mcp-trino
 networkPolicy:

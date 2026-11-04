@@ -19,7 +19,7 @@ env:
 jobs:
   chart:
     name: helm lint, template, kubeconform, ct lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -41,14 +41,14 @@ jobs:
           for f in charts/akko-mcp-trino/ci/*-values.yaml; do helm lint --strict charts/akko-mcp-trino -f "$f"; done
       - name: The render refusals
         run: bash integration/helm/refusals.sh
-      - name: helm template and kubeconform (Kubernetes 1.32 to 1.36, OpenShift Route)
+      - name: helm template and kubeconform (Kubernetes 1.27 to 1.36, OpenShift Route)
         run: |
           mkdir -p rendered
           for f in charts/akko-mcp-trino/ci/*-values.yaml integration/helm/values.yaml; do
             name="$(basename "$(dirname "$f")")-$(basename "$f" .yaml)"
             helm template mcp charts/akko-mcp-trino -f "$f" > "rendered/$name.yaml"
           done
-          for k8s in 1.32.0 1.33.0 1.34.0 1.35.0 1.36.0; do
+          for k8s in 1.27.0 1.28.0 1.29.0 1.30.0 1.31.0 1.32.0 1.33.0 1.34.0 1.35.0 1.36.0; do
             echo "== Kubernetes $k8s"
             kubeconform -strict -summary -kubernetes-version "$k8s" \
               -schema-location "$K8S_SCHEMAS" -schema-location "$OPENSHIFT_SCHEMAS" rendered/*.yaml

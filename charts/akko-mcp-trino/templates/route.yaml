@@ -14,7 +14,9 @@ spec:
   {{- with .Values.route.host }}
   host: {{ . | quote }}
   {{- end }}
-  path: {{ .Values.route.path | default (include "mcp-trino.endpoint" .) | quote }}
+  {{- with .Values.route.path }}
+  path: {{ . | quote }}
+  {{- end }}
   to:
     kind: Service
     name: {{ include "mcp-trino.fullname" . }}
@@ -24,17 +26,9 @@ spec:
   tls:
     termination: {{ $tls.termination }}
     insecureEdgeTerminationPolicy: {{ $tls.insecureEdgeTerminationPolicy }}
-    {{- with $tls.certificate }}
-    certificate: |
-      {{- . | nindent 6 }}
-    {{- end }}
-    {{- with $tls.key }}
-    key: |
-      {{- . | nindent 6 }}
-    {{- end }}
-    {{- with $tls.caCertificate }}
-    caCertificate: |
-      {{- . | nindent 6 }}
+    {{- with $tls.externalCertificate }}
+    externalCertificate:
+      name: {{ . | quote }}
     {{- end }}
     {{- if eq $tls.termination "reencrypt" }}
     {{- with $tls.destinationCACertificate }}
