@@ -240,10 +240,11 @@ class Config:
             parse_jwt_algorithms(self.jwt_algorithms)
         except ValueError as exc:
             found.append(str(exc))
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_:.-]*", self.jwt_user_claim):
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_:./#-]*", self.jwt_user_claim):
             found.append(
-                f"MCP_JWT_USER_CLAIM={self.jwt_user_claim!r}: a claim name is letters, digits, "
-                "_ : . and - (sub, upn, preferred_username...)"
+                f"MCP_JWT_USER_CLAIM={self.jwt_user_claim!r}: a claim name is a top-level claim, "
+                "letters, digits and _ : . / # - (sub, upn, preferred_username, "
+                "https://example.com/uid)"
             )
         for name, value in (
             ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),

@@ -84,7 +84,7 @@ docker run -d --name akko-mcp-trino -p 3000:3000 -p 3001:3001 \
   -e TRINO_CATALOG=iceberg \
   -e MCP_JWKS_URL=https://idp.example.com/realms/data/protocol/openid-connect/certs \
   -e MCP_OIDC_ISSUER=https://idp.example.com/realms/data \
-  -e MCP_OIDC_AUDIENCE=akko-mcp \
+  -e MCP_OIDC_AUDIENCE=akko-mcp -e MCP_JWT_USER_CLAIM=preferred_username \
   -e TRINO_TOKEN_EXCHANGE_URL=https://idp.example.com/realms/data/protocol/openid-connect/token \
   -e TRINO_TOKEN_EXCHANGE_CLIENT_ID=akko-mcp -e TRINO_TOKEN_EXCHANGE_CLIENT_SECRET=... \
   -e TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \

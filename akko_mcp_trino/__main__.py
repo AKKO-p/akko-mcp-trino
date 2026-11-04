@@ -27,7 +27,7 @@ from . import __version__
 from .app import build_asgi_app, run_stdio, transports_supported
 from .audit import LoggingAudit
 from .auth import accepted_audiences, build_auth
-from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config
+from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config, parse_jwt_algorithms
 from .extensions import Extension, extension_names, load_extensions
 from .health import build_health_app
 from .metrics import Metrics
@@ -55,6 +55,14 @@ def _audiences(extensions: list[Extension]) -> list[str]:
     return [a for ext in extensions for a in ext.audiences()]
 
 
+def _algorithms(config: Config) -> list[str]:
+    """The token algorithms the server applies, or the raw setting when it is a problem."""
+    try:
+        return parse_jwt_algorithms(config.jwt_algorithms)
+    except ValueError:
+        return [config.jwt_algorithms]
+
+
 def check_config(config: Config) -> int:
     """Print the effective configuration without secrets; 0 if it would start, 2 otherwise."""
     problems: list[str] = list(config.problems())
@@ -80,7 +88,7 @@ def check_config(config: Config) -> int:
         f"audience={config.oidc_audience or '-'} resource={config.resource_url or '-'}",
         "audiences accepted: "
         + (", ".join(accepted_audiences(config, _audiences(extensions))) or "-"),
-        f"token signatures: {config.jwt_algorithms}; user from: {config.jwt_user_claim}",
+        f"token signatures: {','.join(_algorithms(config))}; user from: {config.jwt_user_claim}",
         f"user token (stdio): {'set' if config.user_token else '-'}",
         f"trino identity mode: {config.trino_identity_mode} over {config.trino_http_scheme}",
         *identity,

@@ -225,7 +225,13 @@ python -m akko_mcp_trino
 Côté IdP, ce serveur a un client confidentiel autorisé à échanger des tokens, et
 l'audience de Trino lui est accessible. Avec Keycloak 26, activez *Standard token exchange* sur ce
 client et ajoutez-lui un mappeur d'audience vers le client Trino. Les clients des MCP hosts
-placent ce serveur dans l'audience de leurs tokens. Le dossier [`integration/`](integration/)
+placent ce serveur dans l'audience de leurs tokens. Le `sub` de Keycloak est un UUID que les
+règles de Trino ne connaissent pas : posez `MCP_JWT_USER_CLAIM=preferred_username` sur le serveur,
+et la même revendication dans le `principal-field` de Trino. Entra ID, Okta et Dex donnent aussi
+au `sub` une valeur opaque : nommez la revendication que vos règles connaissent (`upn`,
+`preferred_username`, `uid`...). Le serveur lit l'utilisateur dans `sub` par défaut
+(`MCP_JWT_USER_CLAIM`), et accepte les signatures RS256 par défaut (`MCP_JWT_ALGORITHMS`, par exemple
+`RS256,RS512`). Le dossier [`integration/`](integration/)
 contient un tel realm, testé à chaque pull request.
 
 Côté Trino : `http-server.authentication.type=JWT`, `http-server.authentication.jwt.key-file`

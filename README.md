@@ -301,7 +301,11 @@ On the provider, give this server a confidential client allowed to exchange
 tokens, and make Trino's audience available to it. With Keycloak 26: enable
 *Standard token exchange* on the server's client, add an audience mapper for the
 Trino client to it, and have the clients of your MCP hosts put the server's
-client in the audience of the tokens they get (an audience mapper too). The
+client in the audience of the tokens they get (an audience mapper too). Keycloak's
+`sub` is a UUID that Trino's rules do not know: set
+`MCP_JWT_USER_CLAIM=preferred_username` on the server, and point Trino's
+`principal-field` at the same claim. Entra ID, Okta and Dex give `sub` an opaque value
+too; name the claim your access rules know (`upn`, `preferred_username`, `uid`...). The
 [`integration/`](integration/) folder holds such a realm, tested on every pull
 request.
 
@@ -989,7 +993,7 @@ reads its own variables from the same environment.
 | `MCP_OIDC_AUDIENCE` | the audience a token must carry: the one the provider gives tokens issued for this server (RFC 8707); never Trino's | none (this or `MCP_RESOURCE_URL` is required when auth is enabled) |
 | `MCP_RESOURCE_URL` | this server's canonical URL, such as `https://mcp.example.com/mcp`: accepted as an audience, named in the protected resource metadata the server then publishes (RFC 9728) and in the challenge of a `401` | none |
 | `MCP_JWT_LEEWAY_SECONDS` | tolerance on `exp`/`nbf`/`iat` for clock drift between the issuer and this server | `30` |
-| `MCP_JWT_USER_CLAIM` | the claim of a caller's token that names the user, as the access rules know them. `sub` is the OpenID Connect standard: the stable, unique identifier the issuer gives the user. An issuer whose `sub` is an opaque id the rules do not know (Keycloak gives a UUID) names another claim: `preferred_username`, `upn`, `uid`... A token without it is refused, never read from another claim | `sub` |
+| `MCP_JWT_USER_CLAIM` | the claim of a caller's token that names the user, as the access rules know them. `sub` is the OpenID Connect standard: the stable, unique identifier the issuer gives the user. An issuer whose `sub` is an opaque id the rules do not know (Keycloak gives a UUID; Entra ID, Okta and Dex an opaque id too) names another claim: `preferred_username`, `upn`, `uid`... A token without it is refused, never read from another claim | `sub` |
 | `MCP_JWT_ALGORITHMS` | the signature algorithms a caller's token may use, comma-separated, among `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512` (for example `RS256,RS512` for an identity provider that signs with either); a shared-secret algorithm (`HS256`...) or `none` refuses to start | `RS256` |
 | `MCP_ALLOWED_HOSTS` | Host header filter (the SDK's DNS rebinding protection): `host` or `host:port` entries, comma-separated, `host:*` for any port (the only wildcard); once the filter is on, a request that carries an `Origin` header is refused (403); empty serves any Host | none (off) |
 
