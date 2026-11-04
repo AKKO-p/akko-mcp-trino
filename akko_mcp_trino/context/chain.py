@@ -35,7 +35,10 @@ from .types import TableContext, TableRef, Term
 
 log = logging.getLogger(__name__)
 
-# The time the loop is given past the deadline to cancel the late reads and answer.
+# Internal scheduling margins, not operating settings. A late read is given
+# _CANCEL_WAIT_SECONDS to end once cancelled, and an outage reported that close to
+# the deadline is the deadline; the caller waits _GRACE_SECONDS past it, more than that.
+_CANCEL_WAIT_SECONDS = 0.1
 _GRACE_SECONDS = 0.25
 
 _NOT_WELL = frozenset({PARTIAL, UNAVAILABLE, REFUSED, ERROR})
@@ -170,13 +173,19 @@ class ContextChain:
         jobs: dict[str, tuple[ContextProvider, list[Any]]] = {}
         statuses: dict[str, str] = {}
         for provider in self._providers:
-            mine = [ref for ref in refs if provider.maps(ref.catalog)]
+            try:
+                mine = [ref for ref in refs if provider.maps(ref.catalog)]
+            except Exception as exc:
+                _trace(provider.name, exc)
+                statuses[provider.name] = ERROR
+                continue
             if mine:
                 jobs[provider.name] = (provider, mine)
             else:
                 statuses[provider.name] = NOT_MAPPED
         found, read = await self._collect(jobs, self._tables, _describe, deadline)
         statuses.update(read)
+        self._count(statuses)
         tables = {
             ref: tuple(
                 (name, context)
@@ -198,7 +207,8 @@ class ContextChain:
             for p in self._providers
             if wanted.get(p.name)
         }
-        found, _ = await self._collect(jobs, self._terms, _terms, deadline)
+        found, statuses = await self._collect(jobs, self._terms, _terms, deadline)
+        self._count(statuses)
         return MappingProxyType(
             {
                 (name, key): term
@@ -217,7 +227,7 @@ class ContextChain:
     ) -> tuple[dict[str, dict[Any, Any]], dict[str, str]]:
         found: dict[str, dict[Any, Any]] = {}
         statuses: dict[str, str] = {}
-        tasks: dict[asyncio.Task, ContextProvider] = {}
+        tasks: dict[asyncio.Task, tuple[ContextProvider, str]] = {}
         for name, (provider, items) in jobs.items():
             mine: dict[Any, Any] = {}
             found[name] = mine
@@ -235,7 +245,12 @@ class ContextChain:
             if self._clock() >= deadline:
                 statuses[name] = PARTIAL if mine else UNAVAILABLE
                 continue
-            blocked = self._blocked(provider)
+            # Taken before the call: a secret changed during a refused call is tried at once.
+            stamp = self._stamp(provider)
+            if stamp is None:
+                statuses[name] = ERROR
+                continue
+            blocked = self._blocked(provider, stamp)
             if blocked is not None:
                 statuses[name] = blocked
                 continue
@@ -244,24 +259,24 @@ class ContextChain:
                 continue
             self._active[name] += 1
             task = asyncio.create_task(self._read(provider, cache, fetch, missing, mine, deadline))
-            task.add_done_callback(functools.partial(self._release, name))
-            tasks[task] = provider
+            task.add_done_callback(_retrieve)
+            tasks[task] = (provider, stamp)
         try:
             if tasks:
                 done, late = await asyncio.wait(tasks, timeout=max(deadline - self._clock(), 0.0))
                 for task in late:
                     task.cancel()
-                await asyncio.gather(*late, return_exceptions=True)
-                for task, provider in tasks.items():
+                if late:
+                    # A source that ignores its cancellation is left behind, not awaited.
+                    await asyncio.wait(late, timeout=_CANCEL_WAIT_SECONDS)
+                for task, (provider, stamp) in tasks.items():
                     statuses[provider.name] = self._outcome(
-                        provider, task, task in done, found[provider.name]
+                        provider, stamp, task, task in done, found[provider.name], deadline
                     )
         finally:
-            for task in tasks:
+            for task, (provider, _) in tasks.items():
                 task.cancel()
-        for name, status in statuses.items():
-            if status in _NOT_WELL and self._metrics is not None:
-                self._metrics.context_errors.labels(provider=name, status=status).inc()
+                self._active[provider.name] -= 1
         return found, statuses
 
     async def _read(
@@ -297,34 +312,45 @@ class ContextChain:
                 mine[index[key]] = value
 
     def _outcome(
-        self, provider: ContextProvider, task: asyncio.Task, in_time: bool, mine: dict
+        self,
+        provider: ContextProvider,
+        stamp: str,
+        task: asyncio.Task,
+        in_time: bool,
+        mine: dict,
+        deadline: float,
     ) -> str:
-        if not in_time:
-            return PARTIAL if mine else UNAVAILABLE
+        cut_short = PARTIAL if mine else UNAVAILABLE
+        if not in_time or task.cancelled():
+            return cut_short
         exc = task.exception()
         if exc is None:
             return _settled(mine)
         status = status_of(exc)
         if status == REFUSED:
-            self._open(provider, REFUSED, self._settings.refused_retry_seconds)
+            self._open(provider, stamp, REFUSED, self._settings.refused_retry_seconds)
         elif status == UNAVAILABLE:
-            self._open(provider, UNAVAILABLE, self._settings.retry_after_seconds)
+            # A source that keeps the deadline itself is not down: nothing opens.
+            if self._clock() >= deadline - _CANCEL_WAIT_SECONDS:
+                return cut_short
+            self._open(provider, stamp, UNAVAILABLE, self._settings.retry_after_seconds)
         else:
-            log.error(
-                "context source %s failed with %s\n%s",
-                provider.name,
-                type(exc).__name__,
-                "".join(traceback.format_tb(exc.__traceback__)).rstrip(),
-            )
+            _trace(provider.name, exc)
         return status
 
-    def _open(self, provider: ContextProvider, status: str, delay: float) -> None:
-        if self._blocked(provider) == status:
+    def _open(self, provider: ContextProvider, stamp: str, status: str, delay: float) -> None:
+        current = self._breakers.get(provider.name)
+        # One opening at a time, and an outage never shortens a refusal.
+        if (
+            current is not None
+            and self._live(current, stamp)
+            and current.status in (status, REFUSED)
+        ):
             return
         self._breakers[provider.name] = _Breaker(
             status=status,
             until=self._clock() + delay,
-            stamp=provider.credentials_stamp(),
+            stamp=stamp,
             generation=self._refused_generation,
         )
         if status == REFUSED:
@@ -332,25 +358,36 @@ class ContextChain:
         if self._metrics is not None:
             self._metrics.context_breaker_open.labels(provider=provider.name).set(1)
 
-    def _blocked(self, provider: ContextProvider) -> str | None:
+    def _live(self, breaker: _Breaker, stamp: str) -> bool:
+        return self._clock() < breaker.until and (
+            breaker.status != REFUSED
+            or (breaker.generation == self._refused_generation and breaker.stamp == stamp)
+        )
+
+    def _blocked(self, provider: ContextProvider, stamp: str) -> str | None:
         breaker = self._breakers.get(provider.name)
         if breaker is None:
             return None
-        if self._clock() < breaker.until and (
-            breaker.status != REFUSED
-            or (
-                breaker.generation == self._refused_generation
-                and breaker.stamp == provider.credentials_stamp()
-            )
-        ):
+        if self._live(breaker, stamp):
             return breaker.status
         del self._breakers[provider.name]
         if self._metrics is not None:
             self._metrics.context_breaker_open.labels(provider=provider.name).set(0)
         return None
 
-    def _release(self, name: str, _: asyncio.Task) -> None:
-        self._active[name] -= 1
+    def _stamp(self, provider: ContextProvider) -> str | None:
+        try:
+            return provider.credentials_stamp()
+        except Exception as exc:
+            _trace(provider.name, exc)
+            return None
+
+    def _count(self, statuses: Mapping[str, str]) -> None:
+        if self._metrics is None:
+            return
+        for name, status in statuses.items():
+            if status in _NOT_WELL:
+                self._metrics.context_errors.labels(provider=name, status=status).inc()
 
     def _held(self, name: str) -> float:
         return self._tables.bytes_of(name) + self._terms.bytes_of(name)
@@ -359,6 +396,22 @@ class ContextChain:
         if self._metrics is not None:
             result = "hit" if hit else "miss"
             self._metrics.context_cache.labels(provider=name, result=result).inc()
+
+
+def _trace(name: str, exc: BaseException) -> None:
+    """Log where a source failed, by type and frames, never with the text of the error."""
+    log.error(
+        "context source %s failed with %s\n%s",
+        name,
+        type(exc).__name__,
+        "".join(traceback.format_tb(exc.__traceback__)).rstrip(),
+    )
+
+
+def _retrieve(task: asyncio.Task) -> None:
+    # A source left behind may fail later: its error is read so that it does not warn.
+    if not task.cancelled():
+        task.exception()
 
 
 def _source(key: Any) -> Hashable:

@@ -65,10 +65,18 @@ class Fake:
         self.slow_after = None
         self.cancelled = 0
         self.gate = None
+        self.gates = {}
+        self.fails = {}
+        self.swallow = 0.0
         self.stamp = ""
+        self.stamp_during_call = None
+        self.maps_error = None
+        self.stamp_error = None
         self.closed = False
 
     def maps(self, catalog):
+        if self.maps_error is not None:
+            raise self.maps_error
         return catalog in self.catalogs
 
     def served_sets(self):
@@ -78,13 +86,22 @@ class Fake:
         self.calls.append(tuple(refs))
         if self.gate is not None:
             await self.gate.wait()
+        if refs[0] in self.gates:
+            await self.gates[refs[0]].wait()
+        if self.stamp_during_call is not None:
+            self.stamp = self.stamp_during_call
         slow = self.delay and (self.slow_after is None or len(self.calls) > self.slow_after)
         if slow:
             try:
                 await asyncio.sleep(self.delay)
             except asyncio.CancelledError:
                 self.cancelled += 1
-                raise
+                if not self.swallow:
+                    raise
+                await asyncio.sleep(self.swallow)
+                return {}
+        if refs[0] in self.fails:
+            raise self.fails[refs[0]]
         if self.fail is not None:
             raise self.fail
         return {ref: self.known[ref] for ref in refs if ref in self.known}
@@ -103,6 +120,8 @@ class Fake:
         raise RuntimeError("already closed")
 
     def credentials_stamp(self):
+        if self.stamp_error is not None:
+            raise self.stamp_error
         return self.stamp
 
 
@@ -136,6 +155,10 @@ def _gate(loop, fake):
         fake.gate = asyncio.Event()
 
     loop.submit(make(), timeout=2)
+
+
+def _set(loop, event):
+    loop._loop.call_soon_threadsafe(event.set)
 
 
 def test_an_unmapped_catalog_calls_nothing(loop):
@@ -319,6 +342,104 @@ def test_an_unexpected_error_says_error_and_logs_a_trace_without_its_message(loo
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert "KeyError" in text and "describe" in text
     assert "s3cr3t" not in text and "password" not in text
+
+
+def test_an_outage_raised_by_the_source_at_the_deadline_opens_no_breaker(loop):
+    fake = Fake("one", known={ORDERS: TableContext()})
+    clock = Clock()
+    chain = _chain(loop, fake, clock=clock)
+
+    async def keeps_the_deadline(refs, *, deadline, on_behalf_of=None):
+        fake.calls.append(tuple(refs))
+        if len(fake.calls) == 1:
+            clock.now = deadline
+            raise ProviderUnavailable("read timed out")
+        return {ORDERS: TableContext()}
+
+    fake.describe = keeps_the_deadline
+    assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["one"] == "unavailable"
+    assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["one"] == "ok"
+    assert len(fake.calls) == 2
+
+
+def test_a_source_whose_mapping_fails_says_error_without_hiding_the_others(loop, caplog):
+    broken = Fake("broken")
+    broken.maps_error = OSError("/run/secrets/token: No such file")
+    up = Fake("up", known={ORDERS: TableContext(description="B")})
+    chain = _chain(loop, broken, up)
+    with caplog.at_level(logging.ERROR, logger="akko_mcp_trino.context.chain"):
+        got = chain.gather([ORDERS], deadline=chain._clock() + 5)
+    assert dict(got.statuses) == {"broken": "error", "up": "ok"}
+    assert got.tables[ORDERS] == (("up", TableContext(description="B")),)
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "OSError" in text and "/run/secrets" not in text
+
+
+def test_a_source_whose_secret_stamp_fails_says_error_without_hiding_the_others(loop, caplog):
+    broken = Fake("broken")
+    broken.stamp_error = OSError("/run/secrets/token: No such file")
+    up = Fake("up", known={ORDERS: TableContext(description="B")})
+    chain = _chain(loop, broken, up)
+    with caplog.at_level(logging.ERROR, logger="akko_mcp_trino.context.chain"):
+        got = chain.gather([ORDERS], deadline=chain._clock() + 5)
+    assert dict(got.statuses) == {"broken": "error", "up": "ok"}
+    assert broken.calls == []
+    text = "\n".join(r.getMessage() for r in caplog.records)
+    assert "OSError" in text and "/run/secrets" not in text
+
+
+def test_a_source_that_ignores_its_cancellation_neither_blocks_nor_stays_in_flight(loop):
+    stubborn = Fake("stubborn", known={ORDERS: TableContext()})
+    stubborn.delay, stubborn.swallow = 10.0, 0.5
+    up = Fake("up", known={ORDERS: TableContext()})
+    chain = _chain(loop, stubborn, up, clock=time.monotonic, max_concurrency=1)
+    deadline = time.monotonic() + 0.2
+    got = chain.gather([ORDERS], deadline=deadline)
+    assert time.monotonic() < deadline + 0.5
+    assert dict(got.statuses) == {"stubborn": "unavailable", "up": "ok"}
+    stubborn.delay = 0.0
+    again = chain.gather([CLIENTS], deadline=time.monotonic() + 2)
+    assert again.statuses["stubborn"] == "not_found" and len(stubborn.calls) == 2
+
+
+def test_a_secret_changed_during_a_refused_call_is_tried_at_once(loop):
+    fake = Fake("one")
+    fake.fail = ProviderRefused("401")
+    fake.stamp, fake.stamp_during_call = "old", "new"
+    clock = Clock()
+    chain = _chain(loop, fake, clock=clock)
+    assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["one"] == "refused"
+    fake.fail = None
+    assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["one"] == "not_found"
+    assert len(fake.calls) == 2
+
+
+def test_an_outage_never_shortens_an_open_refusal(loop):
+    fake = Fake("one")
+    fake.fails = {ORDERS: ProviderRefused("401"), CLIENTS: ProviderUnavailable("down")}
+    fake.gates = {ORDERS: asyncio.Event(), CLIENTS: asyncio.Event()}
+    clock = Clock()
+    chain = _chain(loop, fake, clock=clock)
+    with ThreadPoolExecutor(2) as pool:
+        refused = pool.submit(chain.gather, [ORDERS], deadline=clock.now + 5)
+        down = pool.submit(chain.gather, [CLIENTS], deadline=clock.now + 5)
+        _until(lambda: len(fake.calls) == 2)
+        _set(loop, fake.gates[ORDERS])
+        assert refused.result().statuses["one"] == "refused"
+        _set(loop, fake.gates[CLIENTS])
+        assert down.result().statuses["one"] == "unavailable"
+    clock.now += 31
+    assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["one"] == "refused"
+    assert len(fake.calls) == 2
+
+
+def test_a_source_that_cancels_itself_says_unavailable_without_hiding_the_others(loop):
+    quitter = Fake("quitter")
+    quitter.fail = asyncio.CancelledError()
+    up = Fake("up", known={ORDERS: TableContext()})
+    chain = _chain(loop, quitter, up)
+    got = chain.gather([ORDERS], deadline=chain._clock() + 5)
+    assert dict(got.statuses) == {"quitter": "unavailable", "up": "ok"}
 
 
 def test_two_callers_of_the_same_table_share_one_read(loop):
