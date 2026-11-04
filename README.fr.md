@@ -536,6 +536,28 @@ nommer.
 
 La ligne d'audit garde seulement le code de l'erreur, inchangé.
 
+## Contexte d'un catalogue
+
+Un catalogue de données peut décrire ce que Trino liste : le propriétaire d'une table, sa
+classification, les termes du glossaire d'une colonne. Un fournisseur de contexte est un paquet qui
+lit un tel catalogue pour le serveur. Il enregistre une fabrique `(env) -> ContextProvider` dans le
+groupe d'entrée `akko_mcp_trino.context`, et l'administrateur le nomme dans `MCP_CONTEXT_PROVIDERS`.
+**Aucun fournisseur n'est chargé par défaut** : sans fournisseur, rien ne démarre, pas même un fil.
+Un nom inconnu, un fournisseur d'une autre version de `context_api` ou une fabrique qui ne peut pas
+servir ses réglages empêchent le démarrage ; un catalogue injoignable, non (`--check --strict` rend 2
+quand un fournisseur se dit injoignable). Un secret peut être donné en fichier (`<NOM>_FILE`, relu
+quand le fichier change).
+
+Le contexte suit ce que Trino liste pour l'appelant. Les réglages (`MCP_CONTEXT_TIMEOUT_SECONDS` 5,
+`MCP_CONTEXT_RESERVE_SECONDS` 0,5, `MCP_CONTEXT_MAX_CONCURRENCY` 32, `MCP_CONTEXT_RETRY_AFTER_SECONDS` 30,
+`MCP_CONTEXT_REFUSED_RETRY_SECONDS` 3600, `MCP_CONTEXT_BATCH` 50, `MCP_CONTEXT_TTL_SECONDS` 900,
+`MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES`, `MCP_VISIBILITY_TTL_SECONDS` 60,
+`MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES`, `MCP_CONTEXT_REQUIRE_SELECT` `false`,
+`MCP_CONTEXT_CANARY`, `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS`,
+`MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS`) sont décrits dans le [README](README.md).
+`MCP_VISIBILITY_ENABLED=false` refuse de démarrer : le filtre par les droits de Trino ne se désactive
+pas. Aucun outil n'utilise encore le contexte.
+
 ## Configuration, extensions, exploitation
 
 Toutes les variables, leurs valeurs par défaut, les points d'extension (identités, gardes, audit,

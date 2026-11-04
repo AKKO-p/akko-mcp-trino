@@ -57,6 +57,7 @@ from .config import (
     DEFAULT_SEARCH_MIN_LENGTH,
     DEFAULT_SEARCH_RESERVE_SECONDS,
 )
+from .context import ContextSetup
 from .errors import INVALID_ARGUMENT, READ_ONLY, TIME_BUDGET, explain_error, metadata_view_error
 from .identity import current_principal, current_subject
 from .search import search
@@ -525,6 +526,7 @@ def register_query_tools(
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH,
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS,
     extra_reads: frozenset[str] = frozenset(),
+    context: ContextSetup | None = None,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -535,8 +537,10 @@ def register_query_tools(
     catalog in (`TRINO_CATALOG`): the read-only guard refuses such names when it is
     `system`. `describe_notes` are appended to the description of `describe_table`,
     one per describer an extension will add (see `ToolContext.add_describer`).
-    `max_rows` is the server's row cap (`TRINO_MAX_ROWS`), the size of one page of a
-    list; `max_catalogs` bounds what `list_catalogs` reads (`MCP_MAX_CATALOGS`).
+    `context`, when context providers are loaded, is the chain the tools will read them
+    through; no tool uses it yet. `max_rows` is the server's row cap (`TRINO_MAX_ROWS`), the
+    size of one page of a list; `max_catalogs` bounds what `list_catalogs` reads
+    (`MCP_MAX_CATALOGS`).
     A page of `describe_schema` holds up to `describe_schema_tables` whole tables, while
     their columns add up to `describe_schema_columns` at most (`MCP_DESCRIBE_SCHEMA_TABLES`,
     `MCP_DESCRIBE_SCHEMA_COLUMNS`). `search_columns` ignores words shorter than

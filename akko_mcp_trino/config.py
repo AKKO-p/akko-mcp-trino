@@ -12,7 +12,7 @@ import os
 import re
 from dataclasses import dataclass
 
-from .sql_guard import parse_extra_reads
+from .sql_guard import governed_catalog, parse_extra_reads, validate_identifier
 
 # The token signature algorithms the server may accept: public-key ones only, verified
 # against the issuer's JWKS.
@@ -54,6 +54,21 @@ DEFAULT_SEARCH_MIN_LENGTH = 3
 DEFAULT_SEARCH_MAX_WORDS = 8
 DEFAULT_SEARCH_MAX_WORD_LENGTH = 64
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
+
+
+def _is_table_name(text: str) -> bool:
+    """Whether ``text`` is ``catalog.schema.table``: three valid identifiers, the first
+    outside the ``system`` catalog."""
+    parts = text.split(".")
+    if len(parts) != 3:
+        return False
+    try:
+        governed_catalog(parts[0])
+        validate_identifier(parts[1], "schema")
+        validate_identifier(parts[2], "table")
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -174,6 +189,40 @@ class Config:
     # mask. Empty, the default,
     # opens none, and explain_query checks a statement without printing its plan.
     extra_read_commands: str = ""
+    # Context from a catalogue (entry point group `akko_mcp_trino.context`): the providers
+    # to load, by name, comma-separated; empty, the default, loads none and starts nothing.
+    context_providers: str = ""
+    # One context read: its time budget, the part of a tool call's budget kept in reserve,
+    # the most reads in flight, the delays before a source that is down or that refused the
+    # account is called again, the tables of one batch and the lifetime of a cached read.
+    context_timeout_seconds: float = 5.0
+    context_reserve_seconds: float = 0.5
+    context_max_concurrency: int = 32
+    context_retry_after_seconds: float = 30.0
+    context_refused_retry_seconds: float = 3600.0
+    context_batch: int = 50
+    context_ttl_seconds: float = 900.0
+    # Bytes the caches of tables and of glossary terms may hold, in all.
+    context_cache_bytes: int = 536870912
+    context_terms_cache_bytes: int = 67108864
+    # What Trino listed for a caller: how long it is kept, the bytes it may hold and the
+    # most names kept for one caller.
+    visibility_ttl_seconds: float = 60.0
+    visibility_cache_bytes: int = 134217728
+    visibility_max_names: int = 10000
+    context_require_select: bool = False
+    # One table, `catalog.schema.table`, that a canary account must not see: it checks
+    # that Trino filters its listings.
+    context_canary: str = ""
+    # Bounds on what context adds to a response.
+    context_text_chars: int = 500
+    context_response_chars: int = 60000
+    context_max_columns: int = 500
+    profile_max_columns: int = 50
+    profile_sample_rows: int = 100000
+    # The raw `MCP_VISIBILITY_ENABLED`, kept only to refuse `false`: the filter by Trino's
+    # rights cannot be turned off.
+    visibility_switch: str = ""
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -252,6 +301,59 @@ class Config:
         ):
             if value < 0:
                 found.append(f"{name}={value:g}: a time budget is 0 (none) or more")
+        found.extend(self._context_problems())
+        return found
+
+    def _context_problems(self) -> list[str]:
+        found = []
+        if self.visibility_switch.strip().lower() == "false":
+            found.append(
+                "MCP_VISIBILITY_ENABLED was removed in 0.8: the filter by Trino's rights "
+                "cannot be turned off"
+            )
+        if self.context_timeout_seconds <= 0:
+            found.append(
+                f"MCP_CONTEXT_TIMEOUT_SECONDS={self.context_timeout_seconds:g}: "
+                "a context read needs more than 0 seconds"
+            )
+        if self.context_reserve_seconds < 0:
+            found.append(
+                f"MCP_CONTEXT_RESERVE_SECONDS={self.context_reserve_seconds:g}: "
+                "a reserve is 0 seconds or more"
+            )
+        for name, value in (
+            ("MCP_CONTEXT_RETRY_AFTER_SECONDS", self.context_retry_after_seconds),
+            ("MCP_CONTEXT_REFUSED_RETRY_SECONDS", self.context_refused_retry_seconds),
+        ):
+            if value < 0:
+                found.append(f"{name}={value:g}: a delay is 0 seconds or more")
+        for name, value in (
+            ("MCP_CONTEXT_TTL_SECONDS", self.context_ttl_seconds),
+            ("MCP_VISIBILITY_TTL_SECONDS", self.visibility_ttl_seconds),
+        ):
+            if value < 0:
+                found.append(f"{name}={value:g}: a lifetime is 0 seconds or more")
+        for name, count in (
+            ("MCP_CONTEXT_MAX_CONCURRENCY", self.context_max_concurrency),
+            ("MCP_CONTEXT_BATCH", self.context_batch),
+            ("MCP_CONTEXT_CACHE_BYTES", self.context_cache_bytes),
+            ("MCP_CONTEXT_TERMS_CACHE_BYTES", self.context_terms_cache_bytes),
+            ("MCP_VISIBILITY_CACHE_BYTES", self.visibility_cache_bytes),
+            ("MCP_VISIBILITY_MAX_NAMES", self.visibility_max_names),
+            ("MCP_CONTEXT_TEXT_CHARS", self.context_text_chars),
+            ("MCP_CONTEXT_RESPONSE_CHARS", self.context_response_chars),
+            ("MCP_CONTEXT_MAX_COLUMNS", self.context_max_columns),
+            ("MCP_PROFILE_MAX_COLUMNS", self.profile_max_columns),
+            ("MCP_PROFILE_SAMPLE_ROWS", self.profile_sample_rows),
+        ):
+            if count < 1:
+                found.append(f"{name}={count}: a bound is 1 or more")
+        if self.context_canary and not _is_table_name(self.context_canary):
+            found.append(
+                f"MCP_CONTEXT_CANARY={self.context_canary!r}: name one table as "
+                "catalog.schema.table, three identifiers (letters, digits, _ and -), "
+                "outside the system catalog"
+            )
         return found
 
     def warnings(self) -> list[str]:
@@ -290,6 +392,14 @@ class Config:
                 f"MCP_EXTRA_READ_COMMANDS={', '.join(extra)}: these reads can show facts "
                 "beyond a row filter or a column mask"
             )
+        if self.context_providers.strip():
+            if not self.context_canary:
+                found.append(
+                    "MCP_CONTEXT_CANARY is not set: nothing checks that Trino filters its "
+                    "listings, and context follows what Trino lists"
+                )
+            if self.trino_identity_mode == "service":
+                found.append("context visibility is the service account's")
         return found
 
     @staticmethod
@@ -355,4 +465,32 @@ class Config:
             search_reserve_seconds=float(
                 os.environ.get("MCP_SEARCH_RESERVE_SECONDS", str(DEFAULT_SEARCH_RESERVE_SECONDS))
             ),
+            context_providers=os.environ.get("MCP_CONTEXT_PROVIDERS", ""),
+            context_timeout_seconds=float(os.environ.get("MCP_CONTEXT_TIMEOUT_SECONDS", "5")),
+            context_reserve_seconds=float(os.environ.get("MCP_CONTEXT_RESERVE_SECONDS", "0.5")),
+            context_max_concurrency=int(os.environ.get("MCP_CONTEXT_MAX_CONCURRENCY", "32")),
+            context_retry_after_seconds=float(
+                os.environ.get("MCP_CONTEXT_RETRY_AFTER_SECONDS", "30")
+            ),
+            context_refused_retry_seconds=float(
+                os.environ.get("MCP_CONTEXT_REFUSED_RETRY_SECONDS", "3600")
+            ),
+            context_batch=int(os.environ.get("MCP_CONTEXT_BATCH", "50")),
+            context_ttl_seconds=float(os.environ.get("MCP_CONTEXT_TTL_SECONDS", "900")),
+            context_cache_bytes=int(os.environ.get("MCP_CONTEXT_CACHE_BYTES", "536870912")),
+            context_terms_cache_bytes=int(
+                os.environ.get("MCP_CONTEXT_TERMS_CACHE_BYTES", "67108864")
+            ),
+            visibility_ttl_seconds=float(os.environ.get("MCP_VISIBILITY_TTL_SECONDS", "60")),
+            visibility_cache_bytes=int(os.environ.get("MCP_VISIBILITY_CACHE_BYTES", "134217728")),
+            visibility_max_names=int(os.environ.get("MCP_VISIBILITY_MAX_NAMES", "10000")),
+            context_require_select=os.environ.get("MCP_CONTEXT_REQUIRE_SELECT", "false").lower()
+            == "true",
+            context_canary=os.environ.get("MCP_CONTEXT_CANARY", "").strip(),
+            context_text_chars=int(os.environ.get("MCP_CONTEXT_TEXT_CHARS", "500")),
+            context_response_chars=int(os.environ.get("MCP_CONTEXT_RESPONSE_CHARS", "60000")),
+            context_max_columns=int(os.environ.get("MCP_CONTEXT_MAX_COLUMNS", "500")),
+            profile_max_columns=int(os.environ.get("MCP_PROFILE_MAX_COLUMNS", "50")),
+            profile_sample_rows=int(os.environ.get("MCP_PROFILE_SAMPLE_ROWS", "100000")),
+            visibility_switch=os.environ.get("MCP_VISIBILITY_ENABLED", ""),
         )

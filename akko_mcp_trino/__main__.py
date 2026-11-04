@@ -16,8 +16,10 @@ decision that matters — the guard on the served transport — lives in
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
+import signal
 import sys
 import threading
 
@@ -28,6 +30,8 @@ from .app import build_asgi_app, run_stdio, transports_supported
 from .audit import LoggingAudit
 from .auth import accepted_audiences, build_auth
 from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config, parse_jwt_algorithms
+from .context import ContextProvider, ContextSetup
+from .context.loading import load_providers, provider_names
 from .extensions import Extension, extension_names, load_extensions
 from .health import build_health_app
 from .metrics import Metrics
@@ -48,6 +52,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="validate the configuration, print the effective settings without secrets, exit",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="with --check: exit 2 also when a context provider says it is unreachable",
+    )
     return parser.parse_args(argv)
 
 
@@ -63,8 +72,20 @@ def _algorithms(config: Config) -> list[str]:
         return [config.jwt_algorithms]
 
 
-def check_config(config: Config) -> int:
-    """Print the effective configuration without secrets; 0 if it would start, 2 otherwise."""
+def _close_providers(providers: list[ContextProvider]) -> None:
+    """Release what the providers built by ``--check`` hold open; a failure is not raised."""
+    for provider in providers:
+        try:
+            asyncio.run(provider.aclose())
+        except Exception:  # noqa: BLE001 - a check never fails on closing
+            pass
+
+
+def check_config(config: Config, *, strict: bool = False) -> int:
+    """Print the effective configuration without secrets; 0 if it would start, 2 otherwise.
+
+    With ``strict``, a context provider that reports itself unreachable (a check line
+    that starts with ``UNREACHABLE:``) also makes it 2."""
     problems: list[str] = list(config.problems())
     extensions: list[Extension] = []
     loaded = True
@@ -73,6 +94,12 @@ def check_config(config: Config) -> int:
     except ValueError as exc:
         problems.append(str(exc))
         loaded = False
+    providers: list[ContextProvider] = []
+    try:
+        providers = load_providers(config, os.environ)
+    except ValueError as exc:
+        problems.append(str(exc))
+    provider_lines = [line for provider in providers for line in provider.check_lines()]
     identity: list[str] = []
     try:
         identity = resolve_identity(config, extensions).describe()
@@ -113,7 +140,17 @@ def check_config(config: Config) -> int:
         f"tool plugins: {config.tool_plugins or 'none'}",
         f"extensions: {', '.join(extension_names(config.extensions)) or 'none'}",
         *[line for ext in extensions for line in ext.check_lines()],
+        f"context: {', '.join(provider_names(config.context_providers)) or 'none'} "
+        f"(timeout {config.context_timeout_seconds:g} s, reserve "
+        f"{config.context_reserve_seconds:g} s, batch {config.context_batch}, caches "
+        f"{config.context_cache_bytes} + {config.context_terms_cache_bytes} bytes)",
+        f"visibility: ttl {config.visibility_ttl_seconds:g} s, "
+        f"canary {'set' if config.context_canary else '-'}, "
+        f"require select {str(config.context_require_select).lower()}",
+        *provider_lines,
     ]
+    if strict:
+        problems.extend(line for line in provider_lines if line.startswith("UNREACHABLE:"))
     if config.transport not in transports_supported():
         problems.append(
             f"MCP_TRANSPORT {config.transport!r} is not one of {', '.join(transports_supported())}"
@@ -128,6 +165,7 @@ def check_config(config: Config) -> int:
         tool_registrars({"MCP_TOOL_PLUGINS": config.tool_plugins})
     except ValueError as exc:
         problems.append(str(exc))
+    _close_providers(providers)
     print("\n".join(lines))
     for warning in config.warnings():
         print(f"WARNING: {warning}")
@@ -140,19 +178,28 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
     """Read the configuration, assemble the server and serve on the configured transport."""
     args = parse_args()
     if args.check:
-        sys.exit(check_config(Config.from_env()))
+        sys.exit(check_config(Config.from_env(), strict=args.strict))
     logging.basicConfig(level=logging.INFO)
     log = logging.getLogger(__name__)
 
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines carry request URLs
     config = Config.from_env()
     extensions = load_extensions(config, os.environ)
+    providers = load_providers(config, os.environ)
     metrics = Metrics()
+
+    def on_context(setup: ContextSetup) -> None:
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, lambda *_: setup.chain.reset_refused())
+
     mcp, client = build_server(
         config,
         extra_tool_registrars=tool_registrars({"MCP_TOOL_PLUGINS": config.tool_plugins}),
         metrics=metrics,
         audit=LoggingAudit(),
         extensions=extensions,
+        context_providers=providers,
+        context_started=on_context,
     )
     auth_provider = build_auth(config, _audiences(extensions))
     for warning in config.warnings():

@@ -42,6 +42,27 @@ _ENV_KEYS = [
     "MCP_SEARCH_MAX_WORDS",
     "MCP_SEARCH_MAX_WORD_LENGTH",
     "MCP_SEARCH_RESERVE_SECONDS",
+    "MCP_CONTEXT_PROVIDERS",
+    "MCP_CONTEXT_TIMEOUT_SECONDS",
+    "MCP_CONTEXT_RESERVE_SECONDS",
+    "MCP_CONTEXT_MAX_CONCURRENCY",
+    "MCP_CONTEXT_RETRY_AFTER_SECONDS",
+    "MCP_CONTEXT_REFUSED_RETRY_SECONDS",
+    "MCP_CONTEXT_BATCH",
+    "MCP_CONTEXT_TTL_SECONDS",
+    "MCP_CONTEXT_CACHE_BYTES",
+    "MCP_CONTEXT_TERMS_CACHE_BYTES",
+    "MCP_VISIBILITY_TTL_SECONDS",
+    "MCP_VISIBILITY_CACHE_BYTES",
+    "MCP_VISIBILITY_MAX_NAMES",
+    "MCP_CONTEXT_REQUIRE_SELECT",
+    "MCP_CONTEXT_CANARY",
+    "MCP_CONTEXT_TEXT_CHARS",
+    "MCP_CONTEXT_RESPONSE_CHARS",
+    "MCP_CONTEXT_MAX_COLUMNS",
+    "MCP_PROFILE_MAX_COLUMNS",
+    "MCP_PROFILE_SAMPLE_ROWS",
+    "MCP_VISIBILITY_ENABLED",
 ]
 
 
@@ -399,3 +420,164 @@ def test_an_unknown_extra_read_command_refuses_to_start(monkeypatch):
     c = Config.from_env()
     assert len(c.problems()) == 1 and "unknown command 'DROP'" in c.problems()[0]
     assert not any("MCP_EXTRA_READ_COMMANDS" in w for w in c.warnings())
+
+
+def test_the_context_settings_have_their_defaults_and_names():
+    c = Config.from_env()
+    assert (c.context_providers, c.context_timeout_seconds, c.context_reserve_seconds) == (
+        "",
+        5.0,
+        0.5,
+    )
+    assert (c.context_max_concurrency, c.context_retry_after_seconds) == (32, 30.0)
+    assert (c.context_refused_retry_seconds, c.context_batch, c.context_ttl_seconds) == (
+        3600.0,
+        50,
+        900.0,
+    )
+    assert (c.context_cache_bytes, c.context_terms_cache_bytes) == (536870912, 67108864)
+    assert (c.visibility_ttl_seconds, c.visibility_cache_bytes) == (60.0, 134217728)
+    assert (c.visibility_max_names, c.context_require_select, c.context_canary) == (
+        10000,
+        False,
+        "",
+    )
+    assert (c.context_text_chars, c.context_response_chars, c.context_max_columns) == (
+        500,
+        60000,
+        500,
+    )
+    assert (c.profile_max_columns, c.profile_sample_rows, c.visibility_switch) == (50, 100000, "")
+    assert c.problems() == [] and c.warnings() == []
+
+
+def test_every_context_setting_is_read_from_its_variable(monkeypatch):
+    for name, value in {
+        "MCP_CONTEXT_PROVIDERS": "catalog",
+        "MCP_CONTEXT_TIMEOUT_SECONDS": "7",
+        "MCP_CONTEXT_RESERVE_SECONDS": "1.5",
+        "MCP_CONTEXT_MAX_CONCURRENCY": "3",
+        "MCP_CONTEXT_RETRY_AFTER_SECONDS": "4",
+        "MCP_CONTEXT_REFUSED_RETRY_SECONDS": "5",
+        "MCP_CONTEXT_BATCH": "6",
+        "MCP_CONTEXT_TTL_SECONDS": "8",
+        "MCP_CONTEXT_CACHE_BYTES": "9",
+        "MCP_CONTEXT_TERMS_CACHE_BYTES": "10",
+        "MCP_VISIBILITY_TTL_SECONDS": "11",
+        "MCP_VISIBILITY_CACHE_BYTES": "12",
+        "MCP_VISIBILITY_MAX_NAMES": "13",
+        "MCP_CONTEXT_REQUIRE_SELECT": "TRUE",
+        "MCP_CONTEXT_CANARY": "a.b.c",
+        "MCP_CONTEXT_TEXT_CHARS": "14",
+        "MCP_CONTEXT_RESPONSE_CHARS": "15",
+        "MCP_CONTEXT_MAX_COLUMNS": "16",
+        "MCP_PROFILE_MAX_COLUMNS": "17",
+        "MCP_PROFILE_SAMPLE_ROWS": "18",
+        "MCP_VISIBILITY_ENABLED": "true",
+    }.items():
+        monkeypatch.setenv(name, value)
+    c = Config.from_env()
+    assert (c.context_providers, c.context_timeout_seconds, c.context_reserve_seconds) == (
+        "catalog",
+        7.0,
+        1.5,
+    )
+    assert (c.context_max_concurrency, c.context_retry_after_seconds) == (3, 4.0)
+    assert (c.context_refused_retry_seconds, c.context_batch, c.context_ttl_seconds) == (
+        5.0,
+        6,
+        8.0,
+    )
+    assert (c.context_cache_bytes, c.context_terms_cache_bytes) == (9, 10)
+    assert (c.visibility_ttl_seconds, c.visibility_cache_bytes, c.visibility_max_names) == (
+        11.0,
+        12,
+        13,
+    )
+    assert c.context_require_select is True and c.context_canary == "a.b.c"
+    assert (c.context_text_chars, c.context_response_chars, c.context_max_columns) == (14, 15, 16)
+    assert (c.profile_max_columns, c.profile_sample_rows, c.visibility_switch) == (17, 18, "true")
+    assert c.problems() == []
+
+
+def test_the_visibility_switch_of_the_old_extension_refuses_to_start(monkeypatch):
+    monkeypatch.setenv("MCP_VISIBILITY_ENABLED", "false")
+    assert Config.from_env().problems() == [
+        "MCP_VISIBILITY_ENABLED was removed in 0.8: the filter by Trino's rights cannot be "
+        "turned off"
+    ]
+    monkeypatch.setenv("MCP_VISIBILITY_ENABLED", " False ")
+    assert len(Config.from_env().problems()) == 1
+
+
+def test_a_context_timeout_of_zero_is_refused(monkeypatch):
+    monkeypatch.setenv("MCP_CONTEXT_TIMEOUT_SECONDS", "0")
+    assert Config.from_env().problems() == [
+        "MCP_CONTEXT_TIMEOUT_SECONDS=0: a context read needs more than 0 seconds"
+    ]
+
+
+def test_a_negative_reserve_or_ttl_is_refused(monkeypatch):
+    monkeypatch.setenv("MCP_CONTEXT_RESERVE_SECONDS", "-1")
+    monkeypatch.setenv("MCP_CONTEXT_TTL_SECONDS", "-2")
+    monkeypatch.setenv("MCP_VISIBILITY_TTL_SECONDS", "-3")
+    monkeypatch.setenv("MCP_CONTEXT_RETRY_AFTER_SECONDS", "-4")
+    monkeypatch.setenv("MCP_CONTEXT_REFUSED_RETRY_SECONDS", "-5")
+    assert Config.from_env().problems() == [
+        "MCP_CONTEXT_RESERVE_SECONDS=-1: a reserve is 0 seconds or more",
+        "MCP_CONTEXT_RETRY_AFTER_SECONDS=-4: a delay is 0 seconds or more",
+        "MCP_CONTEXT_REFUSED_RETRY_SECONDS=-5: a delay is 0 seconds or more",
+        "MCP_CONTEXT_TTL_SECONDS=-2: a lifetime is 0 seconds or more",
+        "MCP_VISIBILITY_TTL_SECONDS=-3: a lifetime is 0 seconds or more",
+    ]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "MCP_CONTEXT_MAX_CONCURRENCY",
+        "MCP_CONTEXT_BATCH",
+        "MCP_CONTEXT_CACHE_BYTES",
+        "MCP_CONTEXT_TERMS_CACHE_BYTES",
+        "MCP_VISIBILITY_CACHE_BYTES",
+        "MCP_VISIBILITY_MAX_NAMES",
+        "MCP_CONTEXT_TEXT_CHARS",
+        "MCP_CONTEXT_RESPONSE_CHARS",
+        "MCP_CONTEXT_MAX_COLUMNS",
+        "MCP_PROFILE_MAX_COLUMNS",
+        "MCP_PROFILE_SAMPLE_ROWS",
+    ],
+)
+def test_a_bound_below_one_is_refused(monkeypatch, name):
+    monkeypatch.setenv(name, "0")
+    assert Config.from_env().problems() == [f"{name}=0: a bound is 1 or more"]
+
+
+@pytest.mark.parametrize(
+    "canary", ["orders", "a.b", "a.b.c.d", "a..c", "a.b.c d", "a.b;c.d", "system.runtime.queries"]
+)
+def test_a_canary_must_name_one_table(monkeypatch, canary):
+    monkeypatch.setenv("MCP_CONTEXT_CANARY", canary)
+    (problem,) = Config.from_env().problems()
+    assert problem.startswith("MCP_CONTEXT_CANARY=")
+    assert "catalog.schema.table" in problem
+
+
+def test_a_canary_of_three_identifiers_is_accepted(monkeypatch):
+    monkeypatch.setenv("MCP_CONTEXT_CANARY", "sales.crm.accounts")
+    assert Config.from_env().problems() == []
+
+
+def test_context_warnings_come_only_with_a_provider(monkeypatch):
+    monkeypatch.setenv("MCP_CONTEXT_PROVIDERS", "catalog")
+    assert Config.from_env().warnings() == [
+        "MCP_CONTEXT_CANARY is not set: nothing checks that Trino filters its listings, "
+        "and context follows what Trino lists"
+    ]
+    monkeypatch.setenv("MCP_CONTEXT_CANARY", "a.b.c")
+    assert Config.from_env().warnings() == []
+    monkeypatch.setenv("TRINO_IDENTITY_MODE", "service")
+    monkeypatch.setenv("TRINO_USER", "svc")
+    assert Config.from_env().warnings()[-1] == "context visibility is the service account's"
+    monkeypatch.delenv("MCP_CONTEXT_PROVIDERS")
+    assert "context visibility" not in " ".join(Config.from_env().warnings())

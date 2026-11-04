@@ -50,9 +50,11 @@ CORE_MODULES = {
     "context/caches",
     "context/chain",
     "context/errors",
+    "context/loading",
     "context/loop",
     "context/merge",
     "context/provider",
+    "context/secrets",
     "context/status",
     "context/text",
     "context/types",
@@ -76,7 +78,7 @@ CORE_MODULES = {
 CORE_PACKAGES = {"context"}
 
 # The entry-point groups the core reads: its tool plugins and its extensions.
-CORE_GROUPS = {"akko_mcp_trino.tools", "akko_mcp_trino.extensions"}
+CORE_GROUPS = {"akko_mcp_trino.tools", "akko_mcp_trino.extensions", "akko_mcp_trino.context"}
 
 
 def _config(**over) -> Config:

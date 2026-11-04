@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from ..config import Config
 from ..metrics import Metrics
 from .caches import ByteCache, serialized_size
 from .loop import ContextLoop
@@ -63,6 +64,21 @@ class ContextSettings:
     ttl_seconds: float
     cache_bytes: int
     terms_cache_bytes: int
+
+    @classmethod
+    def from_config(cls, config: Config) -> "ContextSettings":
+        """Read the limits of the chain from the server configuration."""
+        return cls(
+            timeout_seconds=config.context_timeout_seconds,
+            reserve_seconds=config.context_reserve_seconds,
+            max_concurrency=config.context_max_concurrency,
+            retry_after_seconds=config.context_retry_after_seconds,
+            refused_retry_seconds=config.context_refused_retry_seconds,
+            batch=config.context_batch,
+            ttl_seconds=config.context_ttl_seconds,
+            cache_bytes=config.context_cache_bytes,
+            terms_cache_bytes=config.context_terms_cache_bytes,
+        )
 
 
 @dataclass(frozen=True)

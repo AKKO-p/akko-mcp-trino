@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Context providers (entry point group `akko_mcp_trino.context`, named in `MCP_CONTEXT_PROVIDERS`, none by default): the `akko_mcp_trino.context` package holds the provider interface (`CONTEXT_API = 1`), the types a catalogue's description is made of, the chain that reads the providers in parallel on a dedicated loop behind byte-bounded caches, deadlines, a concurrency bound and breakers, and the statuses an agent sees in place of a provider's error text. Nothing is wired into a tool yet, and without a provider nothing is started.
+- Settings for it, all documented in the README: `MCP_CONTEXT_TIMEOUT_SECONDS`, `MCP_CONTEXT_RESERVE_SECONDS`, `MCP_CONTEXT_MAX_CONCURRENCY`, `MCP_CONTEXT_RETRY_AFTER_SECONDS`, `MCP_CONTEXT_REFUSED_RETRY_SECONDS`, `MCP_CONTEXT_BATCH`, `MCP_CONTEXT_TTL_SECONDS`, `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES`, `MCP_VISIBILITY_TTL_SECONDS`, `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES`, `MCP_CONTEXT_REQUIRE_SELECT`, `MCP_CONTEXT_CANARY`, `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS`, `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS`. `MCP_VISIBILITY_ENABLED=false` refuses to start: the filter by Trino's rights cannot be turned off. With a provider loaded, a missing canary and the `service` identity mode are warned of.
+- Secrets can be read from a file: `FileSecret` and `secret_setting(env, name)` (`<NAME>_FILE` before `<NAME>`, read again when the file changes) in `akko_mcp_trino.context.secrets`.
+- `--check` prints a `context:` line, a `visibility:` line and the lines of each provider; `--check --strict` exits 2 when a provider says it is unreachable (`UNREACHABLE:`). The server sets the `httpx` log to `WARNING` and resets the providers that refused the account on `SIGHUP`.
+- Metrics, by provider: `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total` (by status), `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total` (hit or miss), `mcp_trino_context_cache_bytes` and `mcp_trino_context_breaker_open`.
+- For plugins: `build_server` takes `context_providers` and `register_query_tools` takes `context`.
+
 ## [0.7.2] - 2026-11-04
 
 The code of 0.7.1, with a shorter description of the reads the allow-list refuses. 0.7.1 is not published on PyPI.
