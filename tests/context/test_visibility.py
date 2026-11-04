@@ -219,11 +219,25 @@ def test_the_cache_expires_after_its_ttl_and_zero_disables_it():
     assert len(off.statements) == 2 * asked
 
 
-def test_the_cache_is_bounded_in_bytes():
+def test_the_cache_is_bounded_in_bytes_and_an_evicted_proof_is_read_again():
     fake = FakeTrino()
     vis = _visibility(fake, max_bytes=40)
-    vis.proven(KEY, TableRef("demo", "crm", "customers"))
+    assert vis.proven(KEY, TableRef("demo", "crm", "customers"))
     assert vis.bytes <= 40
+    assert fake.statements.count("SHOW CATALOGS") == 1
+    # The lists of catalogs and schemas were evicted to keep the tables of crm.
+    assert vis.proven(KEY, TableRef("demo", "sales", "orders"))
+    assert fake.statements.count("SHOW CATALOGS") == 2, "read again, never assumed"
+    assert not vis.proven(KEY, TableRef("demo", "crm", "absent"))
+    assert not vis.proven(KEY, TableRef("demo", "hr", "salaries"))
+    assert vis.bytes <= 40
+
+
+def test_a_mixed_case_reference_is_not_proven_and_never_queried():
+    fake = FakeTrino()
+    vis = _visibility(fake)
+    assert not vis.proven(KEY, TableRef("demo", "CRM", "Customers"))
+    assert not any("CRM" in sql or "Customers" in sql for sql in fake.statements)
 
 
 @pytest.mark.parametrize("warm", [0, 1, 2])
@@ -281,7 +295,7 @@ def test_every_statement_goes_through_the_run_it_was_given():
     ref = TableRef("demo", "crm", "customers")
     vis.proven(KEY, ref)
     vis.canary_clear(KEY)
-    vis.selectable(KEY, ref, ["id"])
+    vis.selectable(KEY, ref, ["id"], listed=["id"])
     assert len(seen) == 5
     assert seen[-1].startswith("EXPLAIN (TYPE VALIDATE) SELECT ")
 
@@ -328,6 +342,16 @@ def test_a_visible_canary_stops_the_context_and_logs_no_user_name(caplog):
     assert len(fake.statements) == 2
 
 
+def test_a_mixed_case_canary_is_read_as_trino_folds_it():
+    fake = FakeTrino(catalogs=["demo"], canary=True)
+    vis = _visibility(fake, canary="Demo.Secret.Canary")
+    assert not vis.canary_clear(KEY)
+    assert fake.statements[-1] == (
+        'SELECT table_name FROM "demo".information_schema.tables '
+        "WHERE table_schema = 'secret' AND table_name = 'canary'"
+    )
+
+
 def test_a_canary_check_that_fails_is_not_clear_and_not_cached(caplog):
     fake = FakeTrino(canary=False)
     vis = _visibility(fake, canary="demo.crm.canary_t")
@@ -343,25 +367,36 @@ def test_selectable_quotes_columns_and_validates_only_the_visible_ones():
     vis = _visibility(fake)
     ref = TableRef("demo", "crm", "customers")
     vis.listed(KEY, [ref])
-    assert vis.selectable(KEY, ref, ["id", 'odd"name'])
+    described = ["id", 'odd"name']
+    asked = ["id", "catalogue_only", 'odd"name']
+    assert vis.selectable(KEY, ref, asked, listed=described)
     assert fake.statements == [
         'EXPLAIN (TYPE VALIDATE) SELECT "id", "odd""name" FROM "demo"."crm"."customers"'
     ]
-    assert vis.selectable(KEY, ref, ["id", 'odd"name'])
-    assert len(fake.statements) == 1, "cached for the caller and the table"
-    assert not any("*" in sql for sql in fake.statements)
+    assert vis.selectable(KEY, ref, ["id", 'odd"name'], listed=described)
+    assert len(fake.statements) == 1, "cached under the columns validated"
+    assert not any("catalogue_only" in sql or "*" in sql for sql in fake.statements)
+
+
+def test_selectable_asks_nothing_when_no_column_was_listed():
+    fake = FakeTrino()
+    vis = _visibility(fake)
+    ref = TableRef("demo", "crm", "customers")
+    vis.listed(KEY, [ref])
+    assert not vis.selectable(KEY, ref, ["catalogue_only"], listed=["id"])
+    assert fake.statements == []
 
 
 def test_selectable_asks_nothing_for_an_unproven_table_or_no_column():
     fake = FakeTrino()
     vis = _visibility(fake)
     hidden = TableRef("demo", "hr", "salaries")
-    assert not vis.selectable(KEY, hidden, ["amount"])
+    assert not vis.selectable(KEY, hidden, ["amount"], listed=["amount"])
     assert not any("salaries" in sql for sql in fake.statements)
     ref = TableRef("demo", "crm", "customers")
     vis.listed(KEY, [ref])
     asked = len(fake.statements)
-    assert not vis.selectable(KEY, ref, [])
+    assert not vis.selectable(KEY, ref, [], listed=["id"])
     assert len(fake.statements) == asked
 
 
@@ -371,6 +406,6 @@ def test_a_refused_select_is_not_selectable_and_not_cached():
     ref = TableRef("demo", "crm", "customers")
     vis.listed(KEY, [ref])
     fake.fail = 1
-    assert not vis.selectable(KEY, ref, ["id"])
-    assert vis.selectable(KEY, ref, ["id"])
+    assert not vis.selectable(KEY, ref, ["id"], listed=["id"])
+    assert vis.selectable(KEY, ref, ["id"], listed=["id"])
     assert len(fake.statements) == 2

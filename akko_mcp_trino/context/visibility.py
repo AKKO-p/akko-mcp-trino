@@ -16,7 +16,7 @@ proves nothing. Nothing logged names a caller or an object.
 import logging
 import threading
 import time
-from collections.abc import Callable, Hashable, Iterable, Sequence
+from collections.abc import Callable, Collection, Hashable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -71,12 +71,15 @@ class Visibility:
     ) -> None:
         """Ask through ``run``, keep answers ``ttl_seconds`` within ``max_bytes``.
 
-        A schema of more than ``max_names`` tables proves none of them. ``canary``
-        is the ``catalog.schema.table`` no caller may see, or empty.
+        A schema of more than ``max_names`` tables proves none of them. A list of
+        catalogs or schemas cut at ``max_names`` keeps whatever Trino returned first,
+        so above the bound proofs may vary between calls, never beyond what Trino
+        lists. ``canary`` is the ``catalog.schema.table`` no caller may see, or
+        empty; it is folded to lower case, as Trino folds an unquoted name.
         """
         self._run = run
         self._max_names = max_names
-        self._canary = tuple(canary.split(".")) if canary else ()
+        self._canary = tuple(canary.lower().split(".")) if canary else ()
         self._cache = ByteCache(max_bytes, ttl_seconds, clock=clock)
         self._lock = threading.Lock()
 
@@ -146,7 +149,8 @@ class Visibility:
     def listed(self, key: VisibilityKey, refs: Iterable[TableRef]) -> None:
         """Record tables Trino has just listed or described to the caller.
 
-        Such a table is proven whatever an older entry says.
+        Such a table is proven whatever an older entry says, for the TTL: with a
+        TTL of 0 nothing is kept.
         """
         caller = replace(key, catalog="")
         for ref in refs:
@@ -200,18 +204,28 @@ class Visibility:
         self._put(entry, clear)
         return clear
 
-    def selectable(self, key: VisibilityKey, ref: TableRef, columns: Sequence[str]) -> bool:
+    def selectable(
+        self,
+        key: VisibilityKey,
+        ref: TableRef,
+        columns: Sequence[str],
+        *,
+        listed: Collection[str],
+    ) -> bool:
         """Return whether Trino validates a read of ``columns`` of ``ref`` by the caller.
 
-        ``EXPLAIN (TYPE VALIDATE)`` returns no plan. Only a proven table and its
-        visible columns are named; a refusal or a failure is not kept.
+        ``listed`` are the columns Trino has just listed for ``ref`` (``DESCRIBE``):
+        only the columns of ``columns`` also in ``listed`` are named, and none left
+        means not selectable, without a statement. Only a proven table is named.
+        ``EXPLAIN (TYPE VALIDATE)`` returns no plan; a refusal or a failure is not kept.
         """
-        if not columns or not self.proven(key, ref):
+        validated = tuple(c for c in columns if c in listed)
+        if not validated or not self.proven(key, ref):
             return False
-        entry = ("select", replace(key, catalog=""), ref, tuple(columns))
+        entry = ("select", replace(key, catalog=""), ref, validated)
         if self._get(entry)[0]:
             return True
-        names = ", ".join(_ident(c) for c in columns)
+        names = ", ".join(_ident(c) for c in validated)
         table = ".".join(_ident(n) for n in (ref.catalog, ref.schema, ref.table))
         try:
             self._run(f"EXPLAIN (TYPE VALIDATE) SELECT {names} FROM {table}")
