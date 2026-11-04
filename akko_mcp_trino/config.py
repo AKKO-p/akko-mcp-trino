@@ -127,9 +127,11 @@ class Config:
     # start: the server verifies against the issuer's published public keys.
     jwt_algorithms: str = "RS256"
     # The claim of a caller's token that names the user, as the identity provider and the
-    # access rules know them (`sub`, the OpenID Connect standard, or `upn`, `uid`...). A
-    # token without it is refused. Empty, the default: `preferred_username`, else `sub`.
-    jwt_user_claim: str = ""
+    # access rules know them. `sub`, the default, is the OpenID Connect standard: the
+    # stable, unique identifier the issuer gives the user. An issuer whose `sub` is an
+    # opaque id the access rules do not know (Keycloak's UUID) names another claim
+    # (`preferred_username`, `upn`, `uid`...). A token without it is refused.
+    jwt_user_claim: str = "sub"
     # This server's canonical URI (RFC 8707, RFC 9728), such as https://mcp.example.com/mcp.
     # Accepted as a token audience besides `MCP_OIDC_AUDIENCE`, named in the protected
     # resource metadata the server then publishes, and in the challenge of a 401.
@@ -238,9 +240,7 @@ class Config:
             parse_jwt_algorithms(self.jwt_algorithms)
         except ValueError as exc:
             found.append(str(exc))
-        if self.jwt_user_claim and not re.fullmatch(
-            r"[A-Za-z_][A-Za-z0-9_:.-]*", self.jwt_user_claim
-        ):
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_:.-]*", self.jwt_user_claim):
             found.append(
                 f"MCP_JWT_USER_CLAIM={self.jwt_user_claim!r}: a claim name is letters, digits, "
                 "_ : . and - (sub, upn, preferred_username...)"
@@ -326,7 +326,7 @@ class Config:
             jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
             extra_read_commands=os.environ.get("MCP_EXTRA_READ_COMMANDS", ""),
             jwt_algorithms=os.environ.get("MCP_JWT_ALGORITHMS", "RS256"),
-            jwt_user_claim=os.environ.get("MCP_JWT_USER_CLAIM", "").strip(),
+            jwt_user_claim=os.environ.get("MCP_JWT_USER_CLAIM", "sub").strip() or "sub",
             resource_url=os.environ.get("MCP_RESOURCE_URL", ""),
             token_exchange_url=os.environ.get("TRINO_TOKEN_EXCHANGE_URL", ""),
             token_exchange_client_id=os.environ.get("TRINO_TOKEN_EXCHANGE_CLIENT_ID", ""),

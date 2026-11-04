@@ -362,10 +362,24 @@ def test_a_token_without_the_named_claim_is_refused_not_read_from_another():
     assert provider.verify(_bearer(_sign({"upn": "A12345"}))).subject == "A12345"
 
 
-def test_without_mcp_jwt_user_claim_preferred_username_then_sub_as_before():
+def test_sub_names_the_user_by_default_the_openid_connect_standard():
+    """sub is the stable, unique identifier OpenID Connect gives the user: the default. A
+    token without it is refused, never read from preferred_username."""
     provider = _built_for()
-    assert provider.verify(_bearer(_sign({"sub": "s", "preferred_username": "p"}))).subject == "p"
-    assert provider.verify(_bearer(_sign({"sub": "s"}))).subject == "s"
+    assert provider.verify(_bearer(_sign({"sub": "s", "preferred_username": "p"}))).subject == "s"
+    assert provider.verify(_bearer(_sign({"preferred_username": "p"}))) is None
+
+
+def test_an_issuer_whose_sub_is_an_opaque_id_names_preferred_username():
+    """Keycloak gives sub a UUID the access rules do not know."""
+    provider = _built_for(jwt_user_claim="preferred_username")
+    p = provider.verify(_bearer(_sign({"sub": "5f2c-uuid", "preferred_username": "carol"})))
+    assert p.subject == "carol"
+
+
+def test_an_empty_setting_falls_back_to_sub(monkeypatch):
+    monkeypatch.setenv("MCP_JWT_USER_CLAIM", "  ")
+    assert Config.from_env().jwt_user_claim == "sub"
 
 
 @pytest.mark.parametrize("value", ["sub", "upn", "preferred_username", "urn:oid:0.9.1", "x-uid"])

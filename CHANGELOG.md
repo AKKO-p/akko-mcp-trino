@@ -11,12 +11,15 @@ All notable changes to this project are documented here. The format follows
 - A comment before the statement no longer hides its first word: the guard reads it as Trino does. `DESCRIBE` accepts a table name of one to three parts and nothing else (`DESCRIBE FORMATTED`, `DESCRIBE HISTORY`, `DESCRIBE INPUT`, `DESCRIBE OUTPUT` are refused).
 - `explain_query` checks a statement without printing its plan: it asks Trino for `EXPLAIN (TYPE VALIDATE)`, as the caller, and answers `{"valid": true}` or the error, with its `kind`, as before.
 
+### Changed
+- **The user is read from `sub` by default**, the OpenID Connect standard. Before, the server read `preferred_username`, else `sub`. An identity provider whose `sub` is an opaque id the access rules do not know, such as Keycloak, sets `MCP_JWT_USER_CLAIM=preferred_username` (see MIGRATING.md).
+
 ### Fixed
 - `execute_query` accepts the reads it refused although its description promised them: `EXCEPT`, `INTERSECT`, `VALUES`, a parenthesized `SELECT`, and a read preceded by a comment. A write or a table function nested in them is still refused.
 
 ### Added
 - `MCP_EXTRA_READ_COMMANDS` (none by default): the read commands the allow-list refuses, opened one by one by the administrator, comma-separated: `EXPLAIN` (which also brings back the plan in `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES` (with `SHOW CURRENT ROLES` and `SHOW ROLE GRANTS`), `SHOW SESSION`. Open one only where no row filter or column mask needs to hold. The server says which are open at start, in `--check` and to every MCP host; an unknown name refuses to start. The `system` catalog and `EXPLAIN ANALYZE` stay refused whatever is opened.
-- `MCP_JWT_USER_CLAIM` (none by default): the claim of a caller's token that names the user, for an identity provider whose user is in `sub` (the OpenID Connect standard) or another claim while `preferred_username` holds something else. A token without it is refused, never read from another claim. Without it, the server reads `preferred_username`, else `sub`, as before.
+- `MCP_JWT_USER_CLAIM` (`sub` by default): the claim of a caller's token that names the user. `sub` is the OpenID Connect standard, the stable and unique identifier the issuer gives the user. A token without it is refused, never read from another claim.
 - `MCP_JWT_ALGORITHMS` (`RS256` by default): the signature algorithms a caller's token may use, comma-separated, public-key algorithms only (`RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512`), for an identity provider that signs with RS512 or rotates between two. A shared-secret algorithm (`HS256`...), `none` or an empty list refuses to start.
 - For plugins: `akko_mcp_trino.sql_guard.is_read_only_sql` takes `extra_reads`, and `parse_extra_reads(text)` reads the setting.
 

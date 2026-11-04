@@ -218,7 +218,7 @@ refuse to start unless the door requires a valid token. An extension (see
 |---|---|---|
 | Python 3.12 or later | runtime | `pip` and a virtual environment |
 | A reachable Trino coordinator | the engine | any recent version; https for `jwt` and `impersonation`, and whenever a secret is sent |
-| An OIDC provider with a JWKS endpoint | the door | Keycloak, Entra ID, Okta, Dex… Tokens must carry `iss`, an `aud` naming this server, `exp`, and a subject (`preferred_username` or `sub`) |
+| An OIDC provider with a JWKS endpoint | the door | Keycloak, Entra ID, Okta, Dex… Tokens must carry `iss`, an `aud` naming this server, `exp`, and the claim that names the user (`sub` by default, `MCP_JWT_USER_CLAIM`) |
 | `jwt`: token exchange at the provider, and Trino's JWT authenticator | each user reads with their own rights | a confidential client for this server, allowed to exchange a token issued for it for one whose audience is Trino; `http-server.authentication.type=JWT` with the provider's JWKS and `required-audience` set to that audience |
 | Or `impersonation`: an account for this server, and an impersonation rule | each user reads with their own rights, without token exchange | `TRINO_USER` with `TRINO_PASSWORD` or a client certificate; a Trino rule letting that account, and only it, impersonate users |
 | Or `service`: one Trino identity | the rights of every caller | `TRINO_USER`, and `TRINO_PASSWORD` or a client certificate; give it read rights only on what every caller may read |
@@ -308,7 +308,7 @@ request.
 On the Trino side, `http-server.authentication.type=JWT`,
 `http-server.authentication.jwt.key-file` set to the provider's JWKS URL,
 `http-server.authentication.jwt.principal-field` naming the same claim the
-server reads (`preferred_username` or `sub`), and `required-issuer` and
+server reads (`MCP_JWT_USER_CLAIM`, `sub` by default), and `required-issuer` and
 `required-audience` pinning the token to your provider and to Trino's audience.
 Two users asking the same question then get the answers their own rights allow.
 `/ready` asks Trino's public `/v1/info`, since there is no identity of the
@@ -989,7 +989,7 @@ reads its own variables from the same environment.
 | `MCP_OIDC_AUDIENCE` | the audience a token must carry: the one the provider gives tokens issued for this server (RFC 8707); never Trino's | none (this or `MCP_RESOURCE_URL` is required when auth is enabled) |
 | `MCP_RESOURCE_URL` | this server's canonical URL, such as `https://mcp.example.com/mcp`: accepted as an audience, named in the protected resource metadata the server then publishes (RFC 9728) and in the challenge of a `401` | none |
 | `MCP_JWT_LEEWAY_SECONDS` | tolerance on `exp`/`nbf`/`iat` for clock drift between the issuer and this server | `30` |
-| `MCP_JWT_USER_CLAIM` | the claim of a caller's token that names the user, as the access rules know them: `sub` (the OpenID Connect standard, stable and unique), `upn`, `uid`...; a token without it is refused, never read from another claim | `preferred_username`, else `sub` |
+| `MCP_JWT_USER_CLAIM` | the claim of a caller's token that names the user, as the access rules know them. `sub` is the OpenID Connect standard: the stable, unique identifier the issuer gives the user. An issuer whose `sub` is an opaque id the rules do not know (Keycloak gives a UUID) names another claim: `preferred_username`, `upn`, `uid`... A token without it is refused, never read from another claim | `sub` |
 | `MCP_JWT_ALGORITHMS` | the signature algorithms a caller's token may use, comma-separated, among `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512` (for example `RS256,RS512` for an identity provider that signs with either); a shared-secret algorithm (`HS256`...) or `none` refuses to start | `RS256` |
 | `MCP_ALLOWED_HOSTS` | Host header filter (the SDK's DNS rebinding protection): `host` or `host:port` entries, comma-separated, `host:*` for any port (the only wildcard); once the filter is on, a request that carries an `Origin` header is refused (403); empty serves any Host | none (off) |
 

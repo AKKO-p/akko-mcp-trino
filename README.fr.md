@@ -230,7 +230,7 @@ contient un tel realm, testé à chaque pull request.
 
 Côté Trino : `http-server.authentication.type=JWT`, `http-server.authentication.jwt.key-file`
 réglé sur l'URL JWKS de l'IdP, `http-server.authentication.jwt.principal-field` sur la même
-revendication que celle lue par le serveur (`preferred_username` ou `sub`), et `required-audience`
+revendication que celle lue par le serveur (`MCP_JWT_USER_CLAIM`, `sub` par défaut), et `required-audience`
 sur l'audience de Trino. Deux personnes qui posent la même question obtiennent alors les réponses
 que leurs droits permettent. Un token dont l'audience est celle de Trino est refusé par le
 serveur.

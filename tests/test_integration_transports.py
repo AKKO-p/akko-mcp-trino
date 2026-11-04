@@ -49,7 +49,7 @@ def _token(user: str) -> str:
             "iss": _ISS,
             "aud": _AUD,
             "exp": int(time.time()) + 600,
-            "preferred_username": user,
+            "sub": user,
             "jti": f"j-{user}",
         },
         _KEY,
