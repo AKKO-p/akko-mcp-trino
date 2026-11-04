@@ -9,7 +9,8 @@ spec:
   {{- if not (kindIs "invalid" .Values.podDisruptionBudget.maxUnavailable) }}
   maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
   {{- else }}
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable | default 1 }}
+  {{- /* An explicit 0 stays 0; only an unset value becomes 1. */}}
+  minAvailable: {{ ternary 1 .Values.podDisruptionBudget.minAvailable (kindIs "invalid" .Values.podDisruptionBudget.minAvailable) }}
   {{- end }}
   selector:
     matchLabels:

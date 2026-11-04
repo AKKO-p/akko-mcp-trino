@@ -54,6 +54,14 @@ if ! grep -q '^  path:' <<<"$out" && grep -q 'name: "mcp-tls"' <<<"$out"; then p
 else fail "the Route: $out"; fi
 renders "the health port on its own ClusterIP Service" templates/service.yaml \
   'name: t-akko-mcp-trino-health' 'type: ClusterIP' -- -f values.yaml --set service.type=LoadBalancer,service.acknowledgePlainHttp=true
+renders "the router may read the Route's certificate Secret" templates/route.yaml \
+  'kind: RoleBinding' 'resourceNames: ["mcp-tls"]' 'namespace: openshift-ingress' -- -f values.yaml \
+  --set route.enabled=true,route.tls.externalCertificate=mcp-tls
+long="$(printf 'm%.0s' $(seq 63))"
+renders "a 63-character name keeps the health Service within 63" templates/service.yaml \
+  "name: $(printf 'm%.0s' $(seq 56))-health" -- -f values.yaml --set fullnameOverride="$long"
+renders "an explicit minAvailable of 0 stays 0" templates/pdb.yaml 'minAvailable: 0' -- -f values.yaml \
+  --set podDisruptionBudget.enabled=true,podDisruptionBudget.minAvailable=0
 renders "maxUnavailable alone" templates/pdb.yaml 'maxUnavailable: 1' -- -f values.yaml --set podDisruptionBudget.enabled=true,podDisruptionBudget.maxUnavailable=1
 if helm template t "$CHART" -f values.yaml --set auth.enabled=false,auth.required=false,auth.acknowledgeNoAuth=true >/dev/null 2>&1; then
   pass "the door off renders with acknowledgeNoAuth=true (service mode)"

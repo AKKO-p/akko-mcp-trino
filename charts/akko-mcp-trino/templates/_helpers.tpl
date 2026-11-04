@@ -17,6 +17,11 @@
 {{- end }}
 {{- end }}
 
+{{/* The health Service's name, within the 63 characters a Service name may have. */}}
+{{- define "mcp-trino.healthName" -}}
+{{- printf "%s-health" (include "mcp-trino.fullname" . | trunc 56 | trimSuffix "-") }}
+{{- end }}
+
 {{- define "mcp-trino.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}

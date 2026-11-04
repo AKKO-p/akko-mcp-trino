@@ -36,4 +36,35 @@ spec:
       {{- . | nindent 6 }}
     {{- end }}
     {{- end }}
+{{- with $tls.externalCertificate }}
+---
+# The router reads the certificate's Secret only with this permission, as OpenShift
+# documents for spec.tls.externalCertificate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "mcp-trino.fullname" $ }}-route-certificate
+  labels:
+    {{- include "mcp-trino.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ . | quote }}]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "mcp-trino.fullname" $ }}-route-certificate
+  labels:
+    {{- include "mcp-trino.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "mcp-trino.fullname" $ }}-route-certificate
+subjects:
+  - kind: ServiceAccount
+    name: router
+    namespace: openshift-ingress
+{{- end }}
 {{- end }}
