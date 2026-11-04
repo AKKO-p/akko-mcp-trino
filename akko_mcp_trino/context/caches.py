@@ -40,6 +40,9 @@ def _being_cancelled() -> bool:
 
 
 def _fail(future: asyncio.Future, exc: BaseException) -> None:
+    if future.done():
+        # Abandoned: its waiters were already sent to read again.
+        return
     if isinstance(exc, asyncio.CancelledError):
         future.cancel()
         return
@@ -75,6 +78,7 @@ class ByteCache:
         self._bytes = 0
         self._group_bytes: defaultdict[Hashable, int] = defaultdict(int)
         self._inflight: dict[Hashable, asyncio.Future] = {}
+        self._leaders: dict[Hashable, asyncio.Task | None] = {}
 
     @property
     def bytes(self) -> int:
@@ -108,6 +112,16 @@ class ByteCache:
         self._group_bytes[self._group(key)] += size
         while self._bytes > self._max_bytes:
             self._drop(next(iter(self._entries)))
+
+    def abandon(self, owner: asyncio.Task) -> None:
+        """Stop treating the reads led by ``owner`` as in flight.
+
+        Their waiters read again, and so do later callers; what ``owner`` returns
+        if it ever ends is still kept.
+        """
+        for key in [key for key, leader in self._leaders.items() if leader is owner]:
+            del self._leaders[key]
+            self._inflight.pop(key).cancel()
 
     async def load(
         self,
@@ -168,6 +182,8 @@ class ByteCache:
         loop = asyncio.get_running_loop()
         futures = {key: loop.create_future() for key in keys}
         self._inflight.update(futures)
+        owner = asyncio.current_task()
+        self._leaders.update(dict.fromkeys(keys, owner))
         try:
             got = await loader(keys)
             values = {key: got.get(key) for key in keys}
@@ -178,10 +194,13 @@ class ByteCache:
             raise
         finally:
             for key in keys:
-                self._inflight.pop(key, None)
+                if self._inflight.get(key) is futures[key]:
+                    del self._inflight[key]
+                    del self._leaders[key]
         for key, value in values.items():
             self.put(key, value, sizes[key])
-            futures[key].set_result(value)
+            if not futures[key].done():
+                futures[key].set_result(value)
         return values
 
     def _drop(self, key: Hashable) -> None:

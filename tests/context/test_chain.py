@@ -67,7 +67,7 @@ class Fake:
         self.gate = None
         self.gates = {}
         self.fails = {}
-        self.swallow = 0.0
+        self.hold = None
         self.stamp = ""
         self.stamp_during_call = None
         self.maps_error = None
@@ -96,9 +96,14 @@ class Fake:
                 await asyncio.sleep(self.delay)
             except asyncio.CancelledError:
                 self.cancelled += 1
-                if not self.swallow:
+                if self.hold is None:
                     raise
-                await asyncio.sleep(self.swallow)
+                # Ignores every cancellation until the test lets it go.
+                while not self.hold.is_set():
+                    try:
+                        await self.hold.wait()
+                    except asyncio.CancelledError:
+                        self.cancelled += 1
                 return {}
         if refs[0] in self.fails:
             raise self.fails[refs[0]]
@@ -388,18 +393,54 @@ def test_a_source_whose_secret_stamp_fails_says_error_without_hiding_the_others(
     assert "OSError" in text and "/run/secrets" not in text
 
 
-def test_a_source_that_ignores_its_cancellation_neither_blocks_nor_stays_in_flight(loop):
-    stubborn = Fake("stubborn", known={ORDERS: TableContext()})
-    stubborn.delay, stubborn.swallow = 10.0, 0.5
+def _tasks_left(loop):
+    async def count():
+        return len(asyncio.all_tasks()) - 1
+
+    return loop.submit(count(), timeout=2)
+
+
+@pytest.fixture
+def stubborn(loop):
+    fake = Fake("stubborn", known={ORDERS: TableContext()})
+    fake.delay, fake.hold = 60.0, asyncio.Event()
+    yield fake
+    # Let it go even when the test failed, so that the loop can close.
+    _set(loop, fake.hold)
+
+
+def test_a_read_left_behind_no_longer_holds_its_table(loop, stubborn):
     up = Fake("up", known={ORDERS: TableContext()})
-    chain = _chain(loop, stubborn, up, clock=time.monotonic, max_concurrency=1)
+    chain = _chain(loop, stubborn, up, clock=time.monotonic, max_concurrency=2)
     deadline = time.monotonic() + 0.2
     got = chain.gather([ORDERS], deadline=deadline)
     assert time.monotonic() < deadline + 0.5
     assert dict(got.statuses) == {"stubborn": "unavailable", "up": "ok"}
     stubborn.delay = 0.0
-    again = chain.gather([CLIENTS], deadline=time.monotonic() + 2)
-    assert again.statuses["stubborn"] == "not_found" and len(stubborn.calls) == 2
+    start = time.monotonic()
+    again = chain.gather([ORDERS], deadline=start + 5)
+    assert time.monotonic() - start < 1
+    assert again.statuses["stubborn"] == "ok" and len(stubborn.calls) == 2
+    _set(loop, stubborn.hold)
+    _until(lambda: _tasks_left(loop) == 0)
+
+
+def test_reads_left_behind_count_against_the_cap_until_they_end(loop, stubborn):
+    chain = _chain(loop, stubborn, clock=time.monotonic, max_concurrency=1)
+    assert chain.gather([ORDERS], deadline=time.monotonic() + 0.2).statuses["stubborn"] == (
+        "unavailable"
+    )
+    stubborn.delay = 0.0
+    start = time.monotonic()
+    capped = chain.gather([ORDERS], deadline=start + 5)
+    assert time.monotonic() - start < 1
+    assert capped.statuses["stubborn"] == "unavailable" and len(stubborn.calls) == 1
+    _set(loop, stubborn.hold)
+    _until(lambda: _tasks_left(loop) == 0)
+    assert chain.gather([CLIENTS], deadline=time.monotonic() + 5).statuses["stubborn"] == (
+        "not_found"
+    )
+    assert len(stubborn.calls) == 2
 
 
 def test_a_secret_changed_during_a_refused_call_is_tried_at_once(loop):

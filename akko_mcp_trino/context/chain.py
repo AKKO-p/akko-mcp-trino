@@ -259,7 +259,8 @@ class ContextChain:
                 continue
             self._active[name] += 1
             task = asyncio.create_task(self._read(provider, cache, fetch, missing, mine, deadline))
-            task.add_done_callback(_retrieve)
+            # Counted until it really ends, even when the chain stopped waiting for it.
+            task.add_done_callback(functools.partial(self._finished, name))
             tasks[task] = (provider, stamp)
         try:
             if tasks:
@@ -267,16 +268,18 @@ class ContextChain:
                 for task in late:
                     task.cancel()
                 if late:
-                    # A source that ignores its cancellation is left behind, not awaited.
-                    await asyncio.wait(late, timeout=_CANCEL_WAIT_SECONDS)
+                    # A source that ignores its cancellation is left behind, not awaited,
+                    # and its reads no longer hold their keys.
+                    _, stuck = await asyncio.wait(late, timeout=_CANCEL_WAIT_SECONDS)
+                    for task in stuck:
+                        cache.abandon(task)
                 for task, (provider, stamp) in tasks.items():
                     statuses[provider.name] = self._outcome(
                         provider, stamp, task, task in done, found[provider.name], deadline
                     )
         finally:
-            for task, (provider, _) in tasks.items():
+            for task in tasks:
                 task.cancel()
-                self._active[provider.name] -= 1
         return found, statuses
 
     async def _read(
@@ -389,6 +392,12 @@ class ContextChain:
             if status in _NOT_WELL:
                 self._metrics.context_errors.labels(provider=name, status=status).inc()
 
+    def _finished(self, name: str, task: asyncio.Task) -> None:
+        self._active[name] -= 1
+        # A source left behind may fail later: its error is read so that it does not warn.
+        if not task.cancelled():
+            task.exception()
+
     def _held(self, name: str) -> float:
         return self._tables.bytes_of(name) + self._terms.bytes_of(name)
 
@@ -406,12 +415,6 @@ def _trace(name: str, exc: BaseException) -> None:
         type(exc).__name__,
         "".join(traceback.format_tb(exc.__traceback__)).rstrip(),
     )
-
-
-def _retrieve(task: asyncio.Task) -> None:
-    # A source left behind may fail later: its error is read so that it does not warn.
-    if not task.cancelled():
-        task.exception()
 
 
 def _source(key: Any) -> Hashable:

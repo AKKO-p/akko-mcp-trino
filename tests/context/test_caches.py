@@ -231,3 +231,54 @@ def test_a_waiter_cancelled_itself_leaves_the_read_running():
     first, second = asyncio.run(run())
     assert first == "value" and isinstance(second, asyncio.CancelledError)
     assert cache.get("k") == (True, "value")
+
+
+def test_an_abandoned_read_no_longer_holds_its_key():
+    cache = ByteCache(100, 60)
+    calls = []
+
+    async def run():
+        gate = asyncio.Event()
+
+        async def loader():
+            calls.append(1)
+            if len(calls) == 1:
+                await gate.wait()
+                return "late"
+            return "fresh"
+
+        leader = asyncio.create_task(cache.load("k", loader, serialized_size))
+        await asyncio.sleep(0)
+        waiter = asyncio.create_task(cache.load("k", loader, serialized_size))
+        await asyncio.sleep(0)
+        cache.abandon(leader)
+        cache.abandon(waiter)
+        fresh = await waiter
+        later = await cache.load("k", loader, serialized_size)
+        gate.set()
+        return fresh, later, await leader
+
+    assert asyncio.run(run()) == ("fresh", "fresh", "late")
+    assert calls == [1, 1]
+    assert cache.get("k") == (True, "late")
+
+
+def test_an_abandoned_read_that_fails_later_warns_nobody(recwarn):
+    cache = ByteCache(100, 60)
+
+    async def run():
+        gate = asyncio.Event()
+
+        async def loader():
+            await gate.wait()
+            raise ValueError("down")
+
+        leader = asyncio.create_task(cache.load("k", loader, serialized_size))
+        await asyncio.sleep(0)
+        cache.abandon(leader)
+        gate.set()
+        return await asyncio.gather(leader, return_exceptions=True)
+
+    assert [type(r) for r in asyncio.run(run())] == [ValueError]
+    assert cache.get("k") == (False, None)
+    assert not recwarn.list
