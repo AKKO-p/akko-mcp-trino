@@ -141,8 +141,7 @@ def test_explain_of_a_write_or_explain_analyze_is_refused(sql):
     ],
 )
 def test_explain_of_a_read_is_allowed_once_opened(sql):
-    """EXPLAIN prints the row filter's predicate, the mask's expression and the table's row
-    count: refused by default, allowed for a read once the administrator opens it."""
+    """EXPLAIN is refused by default, allowed for a read once the administrator opens it."""
     from akko_mcp_trino.sql_guard import is_read_only_sql
 
     assert is_read_only_sql(sql) is False
@@ -328,9 +327,8 @@ def test_other_commands_keep_their_verdict():
     ],
 )
 def test_reads_past_the_access_rules_are_refused_until_opened(sql, opened_by):
-    """The allow-list (0.7.1): Trino answers SHOW STATS from the whole table, past a row
-    filter; EXPLAIN and SHOW CREATE print the rules or a view's query. Refused by default,
-    each opened only by its own name."""
+    """The allow-list (0.7.1): reads that can show facts beyond a row filter or a column
+    mask are refused by default, each opened only by its own name."""
     from akko_mcp_trino.sql_guard import EXTRA_READ_COMMANDS, is_read_only_sql
 
     assert is_read_only_sql(sql, session_catalog="demo") is False

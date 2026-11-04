@@ -561,8 +561,7 @@ def test_describe_table_sample_is_capped_and_never_negative():
 
 
 def test_explain_query_checks_without_a_plan_by_default():
-    """0.7.1: a plan prints the row filter's predicate, the mask's expression and the
-    table's row count, so explain_query only asks Trino to analyze the statement."""
+    """0.7.1: by default explain_query only asks Trino to analyze the statement."""
     mcp, client = _registered(result={"columns": ["Valid"], "rows": [[True]], "row_count": 1})
     out = json.loads(mcp.tools["explain_query"]("SELECT 1;"))
     assert out == {"valid": True}

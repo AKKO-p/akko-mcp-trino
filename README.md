@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
   <img src="https://img.shields.io/badge/tests-826%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
-  <img src="https://img.shields.io/badge/version-0.7.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.7.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/trino-%E2%89%A5%20351-blue" alt="Trino">
   <img src="https://img.shields.io/badge/MCP-2024--11--05%20to%202026--07--28%20%C2%B7%20streamable--http%20%7C%20sse%20%7C%20stdio-blue" alt="MCP">
@@ -31,9 +31,9 @@ leaves the server. Trino's access control (OPA, Ranger, or Trino's own rules)
 then decides what that user may read. Results are bounded in rows and in time,
 and every call leaves one audit line.
 
-> **Upgrading from 0.7.0?** 0.7.1 is a security release. `execute_query`
-> refuses `SHOW STATS`, `EXPLAIN`, `SHOW CREATE` and the other reads Trino
-> answers past a row filter or a column mask, and the user is read from `sub`.
+> **Upgrading from 0.7.0?** 0.7.1 and 0.7.2 are a security release. `execute_query`
+> refuses `SHOW STATS`, `EXPLAIN`, `SHOW CREATE` and the other reads that can
+> show facts beyond a row filter or a column mask, and the user is read from `sub`.
 > With Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading.
 > See [MIGRATING.md](MIGRATING.md).
 
@@ -531,17 +531,11 @@ in SQL. `execute_query` accepts any SQL Trino accepts, **as long as it is a
 read**. Commands go by an allow-list: `SELECT`, `DESCRIBE` of a table, and
 `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` and
 `SHOW FUNCTIONS`. Any other command is refused, including one a later Trino
-adds. Some reads Trino answers past a row filter or a column mask, and they are
-refused unless the administrator names them in `MCP_EXTRA_READ_COMMANDS`:
-`SHOW STATS` gives the lowest and highest value and the row count of the whole
-table, rows a row filter hides included; `EXPLAIN` prints the row filter's
-predicate, the mask's expression and the table's row count; `SHOW CREATE`
-prints a view's query; `SHOW GRANTS`, `SHOW ROLES` and `SHOW SESSION` show the
-access setup. The server never returns Trino's statistics of a query
-(`processedRows`, `processedBytes`), which count the rows Trino read before a row
-filter. A row filter protects the rows of a result, not Trino's statistics: for a
-column whose values must stay hidden, a column mask holds where a row filter does
-not, including for users who query Trino directly. The statement is parsed into
+adds. Some reads, such as `SHOW STATS` or `EXPLAIN`, can show facts
+beyond a row filter or a column mask; they are refused unless the administrator
+names them in `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`,
+`SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`). An answer carries only columns and
+rows, never Trino's statistics of the query. The statement is parsed into
 an AST and refused if it is more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `DROP`,
 `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including
 inside a CTE, a subquery, or the statement an `EXPLAIN` explains. `EXPLAIN
