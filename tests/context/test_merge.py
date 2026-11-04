@@ -141,12 +141,12 @@ def test_invisible_characters_are_removed_from_every_catalogue_name():
                     joins=(Join((f"a{bidi}",), target, (f"b{zw}",)),),
                 ),
             ),
-            ("b", TableContext(terms=("k1",), tags=(Labelled("pii", "cat"),))),
+            ("b", TableContext(tags=(Labelled("pii", "cat"),))),
         ],
         text_chars=BIG,
     )
     assert merged["tags"] == [{"name": "pii", "set": "cat", "source": "a"}]
-    assert merged["terms"] == [{"key": "k1", "source": "a"}]
+    assert merged["terms"] == [{"key": f"k{zw}1", "source": "a"}]
     assert merged["properties"] == {"set.k": {"value": "val", "source": "a"}}
     assert merged["grain"] == ["id"]
     assert merged["joins"][0]["columns"] == ["a"]
@@ -170,3 +170,50 @@ def test_a_differing_property_value_is_kept_as_another_value_with_its_source():
     assert merged["properties"] == {
         "set.k": {"value": "one", "source": "a", "other_values": [{"value": "two", "source": "b"}]}
     }
+
+
+def test_joins_equal_once_cleaned_appear_once():
+    zw = "\u200b"
+    one = TableContext(joins=(Join((f"a{zw}",), TableRef("c", "s", "t"), ("b",)),))
+    two = TableContext(joins=(Join(("a",), TableRef("c", "s", f"t{zw}"), (f"b{zw}",)),))
+    merged = merge_table([("x", one), ("y", two)], text_chars=BIG)
+    assert merged["joins"] == [
+        {"columns": ["a"], "table": "c.s.t", "target_columns": ["b"], "source": "x"}
+    ]
+
+
+def test_an_element_empty_once_cleaned_is_dropped():
+    zw = "\u200b"
+    target = TableRef("c", "s", "t")
+    merged = merge_table(
+        [
+            (
+                "a",
+                TableContext(
+                    tags=(Labelled(zw, "cat"), Labelled("pii", zw), Labelled("ok", "cat")),
+                    properties=MappingProxyType(
+                        {
+                            zw: Labelled("v", "set"),
+                            "k": Labelled(zw, "set"),
+                            "j": Labelled("v", zw),
+                            "good": Labelled("v", "set"),
+                        }
+                    ),
+                    grain=(zw, "id"),
+                    joins=(
+                        Join((zw,), target, ("b",)),
+                        Join(("a",), target, (zw,)),
+                        Join(("a", zw), TableRef("c", zw, "t"), ("b",)),
+                        Join(("a", zw), target, ("b",)),
+                    ),
+                ),
+            )
+        ],
+        text_chars=BIG,
+    )
+    assert merged["tags"] == [{"name": "ok", "set": "cat", "source": "a"}]
+    assert merged["properties"] == {"set.good": {"value": "v", "source": "a"}}
+    assert merged["grain"] == ["id"]
+    assert merged["joins"] == [
+        {"columns": ["a"], "table": "c.s.t", "target_columns": ["b"], "source": "a"}
+    ]

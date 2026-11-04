@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from .text import clean_text
-from .types import ColumnContext, Join, TableContext
+from .types import ColumnContext, TableContext
 
 _SINGLE = ("owner", "tier")
 
@@ -32,10 +32,19 @@ def _plain(text: str) -> str:
     return clean_text(text, len(text))[0]
 
 
+def _plains(texts: Iterable[str]) -> tuple[str, ...]:
+    """The cleaned texts that are not empty once cleaned."""
+    return tuple(t for t in map(_plain, texts) if t)
+
+
 def _labels(entries, field: str) -> list[dict]:
+    def cleaned(context) -> list[tuple[str, str]]:
+        pairs = ((_plain(i.name), _plain(i.set)) for i in getattr(context, field))
+        return [(name, label_set) for name, label_set in pairs if name and label_set]
+
     return _union(
         entries,
-        lambda c: [(_plain(i.name), _plain(i.set)) for i in getattr(c, field)],
+        cleaned,
         lambda item: item,
         lambda item, source: {"name": item[0], "set": item[1], "source": source},
     )
@@ -44,7 +53,7 @@ def _labels(entries, field: str) -> list[dict]:
 def _terms(entries) -> list[dict]:
     return _union(
         entries,
-        lambda c: [_plain(t) for t in c.terms],
+        lambda c: c.terms,
         lambda key: key,
         lambda key, source: {"key": key, "source": source},
     )
@@ -55,8 +64,10 @@ def _properties(entries) -> dict:
     merged: dict[str, dict] = {}
     for source, context in entries:
         for name, labelled in context.properties.items():
-            key = f"{_plain(labelled.set)}.{_plain(name)}"
-            value = _plain(labelled.name)
+            label_set, prop, value = _plain(labelled.set), _plain(name), _plain(labelled.name)
+            if not (label_set and prop and value):
+                continue
+            key = f"{label_set}.{prop}"
             entry = merged.setdefault(key, {"value": value, "source": source})
             if value != entry["value"]:
                 others = entry.setdefault("other_values", [])
@@ -112,24 +123,30 @@ def merge_column(entries: Sequence[tuple[str, ColumnContext]], *, text_chars: in
 
 
 def _grain(entries) -> list[str]:
-    return list(dict.fromkeys(_plain(c) for _, context in entries for c in context.grain))
+    return list(dict.fromkeys(c for _, context in entries for c in _plains(context.grain)))
 
 
 def _joins(entries) -> list[dict]:
-    def shape(join: Join, source: str) -> dict:
-        target = join.target
-        return {
-            "columns": [_plain(c) for c in join.columns],
-            "table": _plain(f"{target.catalog}.{target.schema}.{target.table}"),
-            "target_columns": [_plain(c) for c in join.target_columns],
-            "source": source,
-        }
+    def cleaned(context) -> list[tuple[tuple[str, ...], str, tuple[str, ...]]]:
+        found = []
+        for join in context.joins:
+            target = join.target
+            parts = _plains((target.catalog, target.schema, target.table))
+            columns, target_columns = _plains(join.columns), _plains(join.target_columns)
+            if len(parts) == 3 and columns and target_columns:
+                found.append((columns, ".".join(parts), target_columns))
+        return found
 
     return _union(
         entries,
-        lambda c: c.joins,
-        lambda j: (j.columns, j.target, j.target_columns),
-        shape,
+        cleaned,
+        lambda j: j,
+        lambda j, source: {
+            "columns": list(j[0]),
+            "table": j[1],
+            "target_columns": list(j[2]),
+            "source": source,
+        },
     )
 
 
