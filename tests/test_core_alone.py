@@ -46,6 +46,18 @@ CORE_MODULES = {
     "audit",
     "auth",
     "config",
+    "context/__init__",
+    "context/caches",
+    "context/chain",
+    "context/errors",
+    "context/loading",
+    "context/loop",
+    "context/merge",
+    "context/provider",
+    "context/secrets",
+    "context/status",
+    "context/text",
+    "context/types",
     "errors",
     "extensions",
     "health",
@@ -62,8 +74,11 @@ CORE_MODULES = {
     "trino_client",
 }
 
+# The sub-packages of the core, named as ``akko_mcp_trino.<package>``.
+CORE_PACKAGES = {"context"}
+
 # The entry-point groups the core reads: its tool plugins and its extensions.
-CORE_GROUPS = {"akko_mcp_trino.tools", "akko_mcp_trino.extensions"}
+CORE_GROUPS = {"akko_mcp_trino.tools", "akko_mcp_trino.extensions", "akko_mcp_trino.context"}
 
 
 def _config(**over) -> Config:
@@ -92,8 +107,13 @@ def _config(**over) -> Config:
     return Config(**base)
 
 
+def _modules() -> list[pathlib.Path]:
+    """Every module of the core, sub-packages included, without bytecode caches."""
+    return sorted(p for p in CORE.rglob("*.py") if "__pycache__" not in p.parts)
+
+
 def _source() -> str:
-    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(CORE.glob("*.py")))
+    return "\n".join(p.read_text(encoding="utf-8") for p in _modules())
 
 
 def test_the_core_serves_eight_tools():
@@ -102,7 +122,7 @@ def test_the_core_serves_eight_tools():
 
 
 def test_the_core_ships_its_listed_modules_and_no_other():
-    assert {p.stem for p in CORE.glob("*.py")} == CORE_MODULES
+    assert {p.relative_to(CORE).with_suffix("").as_posix() for p in _modules()} == CORE_MODULES
 
 
 def test_every_setting_the_core_reads_is_documented():
@@ -192,5 +212,34 @@ def test_without_an_extension_no_public_document_is_served_and_no_challenge_is_s
 def test_the_core_reads_only_its_own_entry_point_groups():
     source = _source()
     named = set(re.findall(r"akko_mcp_trino\.[a-z_]+", source))
-    groups = {name for name in named if name.removeprefix("akko_mcp_trino.") not in CORE_MODULES}
+    groups = {
+        name
+        for name in named
+        if name.removeprefix("akko_mcp_trino.") not in CORE_MODULES | CORE_PACKAGES
+    }
     assert groups <= CORE_GROUPS
+
+
+def test_the_context_package_loads_neither_the_trino_client_nor_the_identity():
+    """A provider's contract test imports the package; it must not pull the core's Trino side."""
+    import subprocess
+    import sys
+
+    modules = sorted(
+        ["akko_mcp_trino.context"]
+        + [
+            f"akko_mcp_trino.context.{p.stem}"
+            for p in (CORE / "context").glob("*.py")
+            if p.stem != "__init__"
+        ]
+    )
+    code = (
+        "import importlib, sys\n"
+        f"for name in {modules!r}:\n"
+        "    importlib.import_module(name)\n"
+        "loaded = [m for m in ('akko_mcp_trino.trino_client', 'akko_mcp_trino.identity')"
+        " if m in sys.modules]\n"
+        "assert not loaded, loaded\n"
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT)
+    assert done.returncode == 0, done.stderr
