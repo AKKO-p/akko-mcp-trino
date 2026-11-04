@@ -2,7 +2,7 @@
 
 ## From 0.7.0 to 0.7.1
 
-A security release: reads that Trino answers past a row filter or a column mask are refused by default.
+A security release: reads that Trino answers past a row filter or a column mask are refused by default. It also reads the user from `sub`: **with Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading**, including when you follow the `0.7` image tag.
 
 - `execute_query` refuses every command outside its allow-list (`SELECT`, `DESCRIBE` of a table, `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS`, `SHOW FUNCTIONS`) with `kind` `read_only`. An agent that ran `SHOW STATS`, `EXPLAIN`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`, `DESCRIBE INPUT` or `DESCRIBE OUTPUT` now gets that refusal.
 - `explain_query` answers `{"valid": true}` instead of `{"plan": "..."}`, and its errors are unchanged. A client that only checked a statement keeps working; one that read the plan must ask the administrator to open `EXPLAIN`.

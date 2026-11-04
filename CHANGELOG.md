@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+A security release that also changes one default: the user is read from `sub`. With Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading, including when you follow the `0.7` image tag. See [MIGRATING.md](MIGRATING.md).
+
 ### Security
 - Read commands go by an allow-list: `SELECT`, `DESCRIBE` of a table, and `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` and `SHOW FUNCTIONS`. Any other command is refused with `kind` `read_only`, including one a later Trino adds. Before, any `SHOW`, `DESCRIBE` and `EXPLAIN` of a read was accepted. Trino answers some reads past a row filter or a column mask: `SHOW STATS` gives the lowest and highest value and the row count of the whole table, rows a row filter hides included; `EXPLAIN` prints the row filter's predicate, the mask's expression and the table's row count; `SHOW CREATE` prints a view's query; `SHOW GRANTS`, `SHOW ROLES` and `SHOW SESSION` show the access setup. `DESCRIBE INPUT` and `DESCRIBE OUTPUT` are refused too.
 - A comment before the statement no longer hides its first word: the guard reads it as Trino does. `DESCRIBE` accepts a table name of one to three parts and nothing else (`DESCRIBE FORMATTED`, `DESCRIBE HISTORY`, `DESCRIBE INPUT`, `DESCRIBE OUTPUT` are refused).
