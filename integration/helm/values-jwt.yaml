@@ -1,0 +1,42 @@
+# The chart as the live proof installs it in jwt mode, the default: Trino over https with
+# JWT authentication, the caller's token exchanged at the test Keycloak for a token issued
+# for Trino, the test CA mounted for Trino, the token endpoint and the JWKS fetch
+# (SSL_CERT_FILE), the door and the NetworkPolicy on.
+trino:
+  host: trino
+  port: 8443
+  catalog: tpch
+  tokenExchange:
+    url: https://keycloak:8443/realms/integration/protocol/openid-connect/token
+    clientId: akko-mcp
+    audience: trino
+auth:
+  jwksUrl: https://keycloak:8443/realms/integration/protocol/openid-connect/certs
+  issuer: https://keycloak:8443/realms/integration
+  audience: akko-mcp
+  userClaim: preferred_username   # Keycloak's sub is a UUID
+existingSecret:
+  name: mcp-credentials
+ca:
+  secret: it-certs
+  key: ca.crt
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - podSelector:
+          matchLabels:
+            mcp-chart-test/client: "true"
+  egress:
+    trino:
+      - podSelector:
+          matchLabels:
+            app: trino
+    identityProvider:
+      to:
+        - podSelector:
+            matchLabels:
+              app: keycloak
+      ports:
+        - port: 8443
+          protocol: TCP

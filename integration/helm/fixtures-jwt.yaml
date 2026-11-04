@@ -1,0 +1,122 @@
+# Disposable fixtures for the chart's live proof in jwt mode: the repository's integration
+# Keycloak (realm with token exchange, users alice and bob) and Trino over https with JWT
+# authentication (integration/trino, 768 MiB heap). Certificates and secrets are generated
+# by run.sh; both are removed with the namespace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: keycloak}
+  template:
+    metadata:
+      labels: {app: keycloak}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.7.5
+          args:
+            - start-dev
+            - --import-realm
+            - --https-certificate-file=/certs/keycloak.crt
+            - --https-certificate-key-file=/certs/keycloak.key
+          env:
+            - {name: KC_BOOTSTRAP_ADMIN_USERNAME, value: admin}
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: it-secrets, key: KEYCLOAK_ADMIN_PASSWORD}}
+            # Every token carries this issuer, whoever asked for it in the namespace.
+            - {name: KC_HOSTNAME, value: "https://keycloak:8443"}
+            - {name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC, value: "true"}
+            - {name: JAVA_OPTS_KC_HEAP, value: "-Xms64m -Xmx448m"}
+            - name: MCP_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: it-secrets, key: MCP_CLIENT_SECRET}}
+            - name: INTEGRATION_PASSWORD
+              valueFrom: {secretKeyRef: {name: it-secrets, key: INTEGRATION_PASSWORD}}
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: https, containerPort: 8443}
+          readinessProbe:
+            httpGet: {path: /realms/integration/protocol/openid-connect/certs, port: http}
+            periodSeconds: 5
+            failureThreshold: 60
+          resources:
+            requests: {cpu: 250m, memory: 768Mi}
+            limits: {memory: 768Mi}
+          volumeMounts:
+            - {name: realm, mountPath: /opt/keycloak/data/import, readOnly: true}
+            - {name: certs, mountPath: /certs, readOnly: true}
+      volumes:
+        - name: realm
+          configMap: {name: keycloak-realm}
+        - name: certs
+          secret: {secretName: it-certs, defaultMode: 0444}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+spec:
+  selector: {app: keycloak}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+    - {name: https, port: 8443, targetPort: https}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: trino}
+  template:
+    metadata:
+      labels: {app: trino}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: trino
+          image: trinodb/trino:482
+          env:
+            - name: TRINO_SHARED_SECRET
+              valueFrom: {secretKeyRef: {name: it-secrets, key: TRINO_SHARED_SECRET}}
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: https, containerPort: 8443}
+          readinessProbe:
+            exec: {command: [/usr/lib/trino/bin/health-check]}
+            periodSeconds: 5
+            failureThreshold: 60
+          resources:
+            requests: {cpu: 250m, memory: 1280Mi}
+            limits: {memory: 1280Mi}
+          volumeMounts:
+            - {name: etc, mountPath: /etc/trino, readOnly: true}
+            - {name: certs, mountPath: /certs, readOnly: true}
+      volumes:
+        - name: etc
+          configMap:
+            name: trino-etc
+            items:
+              - {key: config.properties, path: config.properties}
+              - {key: jvm.config, path: jvm.config}
+              - {key: node.properties, path: node.properties}
+              - {key: log.properties, path: log.properties}
+              - {key: access-control.properties, path: access-control.properties}
+              - {key: rules.json, path: rules.json}
+              - {key: tpch.properties, path: catalog/tpch.properties}
+        - name: certs
+          secret: {secretName: it-certs, defaultMode: 0444}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino
+spec:
+  selector: {app: trino}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+    - {name: https, port: 8443, targetPort: https}

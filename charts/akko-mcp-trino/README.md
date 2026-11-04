@@ -18,9 +18,13 @@ The defaults are the safe ones:
 `helm template` and `helm install` refuse a setting the server would refuse at start, or
 one that would leave something open, with a message that names the value to change: a
 missing Trino host, the `system` catalog, an identity mode other than `service` over
-`http`, the door turned off without `auth.acknowledgeNoAuth: true`, a resource URL whose
-path is not the transport's endpoint, and others. `values.schema.json` refuses a value
-the chart does not know.
+`http`, the door turned off without `auth.acknowledgeNoAuth: true`, a JWKS over `http`
+without `auth.acknowledgeInsecureJwks: true`, a NodePort or LoadBalancer Service without
+`service.acknowledgePlainHttp: true`, a resource URL whose path is not the transport's
+endpoint, an `extraEnv` entry that would override a variable the chart manages, and
+others. `values.schema.json` refuses a value the chart does not know. NOTES warns of what
+is left open on purpose: a JWKS over `http`, an empty issuer, TLS verification off,
+`trino.readOnly: false`, an Ingress without TLS.
 
 ## Install
 
@@ -131,11 +135,28 @@ networkPolicy:
 
 With `openshift` on, the chart sets no `runAsUser`, `runAsGroup` or `fsGroup`: the
 `restricted-v2` SCC assigns a UID from the project's range, with group `0`. The image
-runs as any UID. The Route terminates TLS at the router (`edge`) and reaches the pod in
-plain HTTP; `reencrypt` needs a TLS listener in front of the server (a sidecar in
+runs as any UID. `helm install` detects OpenShift; `helm template` offline (GitOps) does
+not, so set `openshift: true` there. The Route routes every path of the MCP port (the
+endpoint, the protected resource metadata and, with `sse`, `/messages/`). Its certificate
+is never inline in the values: name a `kubernetes.io/tls` Secret the router may read in
+`route.tls.externalCertificate` (on an OpenShift version whose Route API has
+`spec.tls.externalCertificate`), or leave it empty for the router's default certificate.
+The Route terminates TLS at the router (`edge`) and reaches the pod in plain HTTP; `reencrypt` needs a TLS listener in front of the server (a sidecar in
 `extraContainers`, its port in `service.extraPorts` and named in `route.targetPort`),
 since the server itself listens in plain HTTP. The Route's timeout annotation is above
 the server's tool call budget (120 s by default).
+
+## Ingress
+
+Without `paths`, an Ingress host routes the transport's endpoint (`/mcp` or `/sse`), the
+protected resource metadata (`/.well-known/oauth-protected-resource`, when
+`auth.resourceUrl` is set, for the hosts' OAuth discovery) and `/messages/` with `sse`.
+Set `ingress.tls`, or terminate TLS in front: tokens must not cross the network in clear.
+A tool call may last up to `MCP_CALL_TIMEOUT_SECONDS` (120 s by default): raise the
+controller's read timeout above it, for example
+`nginx.ingress.kubernetes.io/proxy-read-timeout: "180"` with ingress-nginx. List the
+Ingress host, and the Service's name for callers in the cluster, in `auth.allowedHosts`
+(the Host header filter against DNS rebinding).
 
 ## NetworkPolicy
 
@@ -148,7 +169,36 @@ With `networkPolicy.enabled: true`, the server's pods accept:
 and reach only the cluster DNS, Trino (`networkPolicy.egress.trino`, on `trino.port`),
 the identity provider (`networkPolicy.egress.identityProvider`) and
 `networkPolicy.egress.extra`. Trino's peers are required, and so are the identity
-provider's when the door is on.
+provider's when the door is on, and the ingress controller's with an Ingress. The health
+port admits a pod of the namespace that carries the release's test labels: anyone who
+may create pods in the namespace can do so, so keep the release in a namespace of its own.
+
+## Environment
+
+`extraEnv` adds variables, an extension's own settings for example; one the chart
+manages (`TRINO_HOST`, `MCP_AUTH_ENABLED`...) refuses to render and names the value to set
+instead, so that the render-time checks cannot be bypassed. `extraEnvFrom` comes before
+the chart's ConfigMap, so the chart's settings win on a duplicate; it must not carry
+those variables either.
+
+## What is proven live, and what is only rendered
+
+[`integration/helm/run.sh`](../../integration/helm/run.sh) installs the chart on a
+cluster in two passes:
+
+- **`service` mode**, against a disposable Trino over `http` and a static JWKS: the door
+  (401 without a token or with one for another audience), tool calls, a refused write,
+  the NetworkPolicy (an unlisted pod reaches neither port), the pod's security, an
+  arbitrary UID with group `0`, `helm test` and `--check`;
+- **`jwt` mode, the default**, against a disposable Keycloak with token exchange and
+  Trino over `https` with JWT authentication: the client secret from `existingSecret`,
+  the internal CA for Trino, the token endpoint and the JWKS fetch (`SSL_CERT_FILE`), 401
+  without a token or with a token issued for Trino, two users through the Service, each
+  seen by Trino as themselves (a row filter applies to one), `helm test` and `--check`.
+
+Only rendered and validated (`helm template`, kubeconform, the render refusals):
+`impersonation` with a client certificate or a password, the Ingress, the OpenShift
+Route, `openshift: true` under a real SCC, the PodDisruptionBudget and the anti-affinity.
 
 ## Values
 
@@ -174,6 +224,7 @@ provider's when the door is on.
 | `trino.tokenExchange.url`, `clientId`, `audience`, `scope`, `verify` | `jwt`: the token exchange (`TRINO_TOKEN_EXCHANGE_*`) | required, required, required, `""`, `true` |
 | `auth.enabled`, `auth.required` | the door (`MCP_AUTH_ENABLED`, `MCP_AUTH_REQUIRED`) | `true`, `true` |
 | `auth.acknowledgeNoAuth` | render with the door off (`service` mode, local tests) | `false` |
+| `auth.acknowledgeInsecureJwks` | accept a JWKS URL that is not `https` (tests) | `false` |
 | `auth.jwksUrl`, `auth.issuer`, `auth.audience`, `auth.resourceUrl` | `MCP_JWKS_URL`, `MCP_OIDC_ISSUER`, `MCP_OIDC_AUDIENCE`, `MCP_RESOURCE_URL` | the JWKS URL and an audience are required with the door on |
 | `auth.userClaim`, `auth.algorithms`, `auth.leewaySeconds`, `auth.allowedHosts` | `MCP_JWT_USER_CLAIM`, `MCP_JWT_ALGORITHMS`, `MCP_JWT_LEEWAY_SECONDS`, `MCP_ALLOWED_HOSTS` | the server's |
 | `limits.*` | `MCP_CALL_TIMEOUT_SECONDS`, `MCP_MAX_CATALOGS`, `MCP_DESCRIBE_SCHEMA_TABLES`, `MCP_DESCRIBE_SCHEMA_COLUMNS`, `MCP_SEARCH_MIN_LENGTH`, `MCP_SEARCH_MAX_WORDS`, `MCP_SEARCH_MAX_WORD_LENGTH`, `MCP_SEARCH_RESERVE_SECONDS`; `null` keeps the server's default | `null` |
@@ -184,11 +235,12 @@ provider's when the door is on.
 | `podSecurityContext`, `securityContext` | see [values.yaml](values.yaml) | non-root, read-only, no capability |
 | `resources` | requests and limits | `100m`/`128Mi`, `1`/`384Mi` |
 | `livenessProbe`, `readinessProbe`, `startupProbe` | `/health` (never touches Trino), `/ready` (reaches Trino), `/health` | on the health port |
-| `service.type`, `service.exposeHealthPort`, `service.extraPorts` | the Service | `ClusterIP`, `true`, `[]` |
+| `service.type`, `service.acknowledgePlainHttp` | the MCP Service; a type other than `ClusterIP` needs the acknowledgement | `ClusterIP`, `false` |
+| `service.exposeHealthPort`, `service.extraPorts` | the health Service (`<fullname>-health`, always `ClusterIP`), more MCP Service ports | `true`, `[]` |
 | `ingress.*` | an Ingress to the MCP port; paths default to the transport's endpoint | off |
-| `route.*` | an OpenShift Route, `edge` or `reencrypt` | off, `edge` |
+| `route.*` | an OpenShift Route, `edge` or `reencrypt`; `route.tls.externalCertificate` names the certificate's Secret | off, `edge` |
 | `networkPolicy.*` | see above | off |
-| `podDisruptionBudget.enabled`, `minAvailable`, `maxUnavailable` | a PodDisruptionBudget; `minAvailable` below `replicaCount` | off, `1`, `null` |
+| `podDisruptionBudget.enabled`, `minAvailable`, `maxUnavailable` | a PodDisruptionBudget; `minAvailable` (1 when both are `null`) below `replicaCount` | off, `null`, `null` |
 | `podAntiAffinity` | `soft` spreads the replicas over nodes when it can | `""` |
 | `affinity`, `nodeSelector`, `tolerations`, `topologySpreadConstraints`, `priorityClassName` | scheduling | none |
 | `serviceAccount.create`, `name`, `annotations`, `automountServiceAccountToken` | the ServiceAccount | `true`, the full name, `{}`, `false` |
@@ -198,10 +250,7 @@ provider's when the door is on.
 
 `helm lint` and `helm template` run in CI on every value set in [`ci/`](ci/) (the
 defaults with the required values, OpenShift, impersonation, Trino Gateway), the output
-is validated by `kubeconform` against recent Kubernetes versions and the OpenShift
-schema of the Route, and `ct lint` checks the chart.
-[`integration/helm/run.sh`](../../integration/helm/run.sh) is the live proof on a
-cluster: the render refusals, then in a new namespace a test Trino and JWKS endpoint, the
-chart with the door and the NetworkPolicy on, `helm test`, `--check`, an MCP client, a pod
-the NetworkPolicy keeps out, and an arbitrary UID as OpenShift assigns one; then
-everything removed.
+is validated by `kubeconform` against Kubernetes 1.27 to 1.36 and the OpenShift schema of
+the Route, and `ct lint` checks the chart.
+[`integration/helm/run.sh`](../../integration/helm/run.sh) is the live proof on a cluster
+(see above); it removes everything it created.
