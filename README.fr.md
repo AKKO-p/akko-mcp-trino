@@ -553,6 +553,46 @@ nommer.
 
 La ligne d'audit garde seulement le code de l'erreur, inchangé.
 
+## Contexte d'un catalogue
+
+Un catalogue de données peut décrire ce que Trino liste : le propriétaire d'une table, sa
+classification, les termes du glossaire d'une colonne. Un fournisseur de contexte est un paquet qui
+lit un tel catalogue pour le serveur. Il enregistre une fabrique `(env) -> ContextProvider` dans le
+groupe d'entrée `akko_mcp_trino.context`, et l'administrateur le nomme dans `MCP_CONTEXT_PROVIDERS`.
+**Aucun fournisseur n'est chargé par défaut** : sans fournisseur, rien ne démarre, pas même un fil.
+Un nom inconnu, un fournisseur d'une autre version de `context_api` ou une fabrique qui ne peut pas
+servir ses réglages empêchent le démarrage ; un catalogue injoignable, non (`--check --strict` rend 2
+quand un fournisseur se dit injoignable). Un secret peut être donné en fichier (`<NOM>_FILE`, relu
+quand le fichier change).
+
+Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs valeurs par défaut :
+
+| Variable | Rôle | Défaut |
+|---|---|---|
+| `MCP_CONTEXT_PROVIDERS` | noms des fournisseurs, séparés par des virgules | aucun |
+| `MCP_CONTEXT_TIMEOUT_SECONDS` | budget de temps d'une lecture de contexte, plus de 0 | `5` |
+| `MCP_CONTEXT_RESERVE_SECONDS` | secondes du budget d'un appel gardées en réserve, 0 ou plus | `0.5` |
+| `MCP_CONTEXT_MAX_CONCURRENCY` | lectures de contexte simultanées au plus par fournisseur, 1 au moins | `32` |
+| `MCP_CONTEXT_RETRY_AFTER_SECONDS` | délai avant de rappeler une source en panne, 0 ou plus | `30` |
+| `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | délai avant de rappeler une source qui a refusé le compte (`SIGHUP` le lève aussitôt), 0 ou plus | `3600` |
+| `MCP_CONTEXT_BATCH` | tables par lecture d'une source, 1 au moins | `50` |
+| `MCP_CONTEXT_TTL_SECONDS` | durée de conservation d'une lecture, 0 ou plus | `900` |
+| `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | borne des caches des tables et des termes de glossaire, 1 au moins ; chaque borne compte la longueur de la forme JSON des entrées gardées, et le processus en tient environ trois à quatre fois plus en mémoire, dimensionner le pod en conséquence | `134217728`, `16777216` |
+| `MCP_VISIBILITY_TTL_SECONDS` | durée de conservation de ce que Trino a listé pour un appelant, 0 ou plus | `60` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | borne de ce cache (comptée comme ci-dessus, soit environ trois à quatre fois plus en mémoire), et noms gardés au plus pour un appelant, 1 au moins | `33554432`, `10000` |
+| `MCP_CONTEXT_REQUIRE_SELECT` | `true` : contexte servi seulement pour les tables que l'appelant peut lire | `false` |
+| `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'aucun appelant de ce serveur ne doit voir : le contexte n'est servi à un appelant que tant que Trino la lui cache | aucune |
+| `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, 1 au moins | `500`, `60000`, `500` |
+| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bornes du profil d'une table, 1 au moins | `50`, `100000` |
+| `MCP_VISIBILITY_ENABLED` | supprimé en 0.8 : le filtre par les droits de Trino ne se désactive pas, et `false` refuse de démarrer | aucune |
+
+`MCP_VISIBILITY_ENABLED=false` refuse de démarrer : le filtre par les droits de Trino ne se
+désactive pas. Avec un fournisseur chargé, le serveur expose aussi les métriques
+`mcp_trino_context_calls_total`, `mcp_trino_context_errors_total`,
+`mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total`,
+`mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`, par fournisseur. Aucun outil
+n'utilise encore le contexte.
+
 ## Configuration, extensions, exploitation
 
 Toutes les variables, leurs valeurs par défaut, les points d'extension (identités, gardes, audit,

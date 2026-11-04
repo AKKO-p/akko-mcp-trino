@@ -21,6 +21,7 @@ from typing import Any, Callable, Iterable, Sequence, Tuple
 
 from . import __version__
 from .config import Config
+from .context import ContextChain, ContextLoop, ContextProvider, ContextSettings, ContextSetup
 from .extensions import Extension
 from .sql_guard import parse_extra_reads
 from .tools import audited, register_query_tools
@@ -94,6 +95,8 @@ def build_server(
     metrics: Any = None,
     audit: Any = None,
     extensions: Sequence[Extension] = (),
+    context_providers: Sequence[ContextProvider] = (),
+    context_started: Callable[[ContextSetup], None] | None = None,
 ) -> Tuple[Any, TrinoClient]:
     """Assemble the server. `mcp_factory` is injectable so assembly can be tested
     without depending on an SDK version. `metrics`, when given, instruments the client;
@@ -103,7 +106,10 @@ def build_server(
     settings refuses to start, and so does a setting no server can serve
     (``Config.problems``). The warnings of the configuration (``Config.warnings``) go to
     every host in the instructions of the initialization: ``mcp_factory`` then
-    receives them as ``instructions``."""
+    receives them as ``instructions``. `context_providers`, when given, start the context
+    loop (one thread) and build the chain the tools read them through; `context_started`
+    receives that setup, for whoever must reset or close the chain. Without providers
+    nothing is started."""
     problems = config.problems()
     if problems:
         raise ValueError("; ".join(problems))
@@ -127,6 +133,14 @@ def build_server(
     if audit is not None:
         for ext in exts:
             audit = ext.wrap_audit(audit)
+    # The loop is only built here: its thread starts once every tool is registered.
+    loop = ContextLoop()
+    context = None
+    if context_providers:
+        chain = ContextChain(
+            context_providers, ContextSettings.from_config(config), loop=loop, metrics=metrics
+        )
+        context = ContextSetup(chain, config)
     tools = register_query_tools(
         mcp,
         client,
@@ -144,6 +158,7 @@ def build_server(
         search_max_word_length=config.search_max_word_length,
         search_reserve_seconds=config.search_reserve_seconds,
         extra_reads=parse_extra_reads(config.extra_read_commands),
+        context=context,
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)
     registrars = [r for ext in exts for r in ext.tool_registrars()]
@@ -152,4 +167,8 @@ def build_server(
             registrar(plugin_view, client, tools)
         else:
             registrar(plugin_view, client)
+    if context is not None:
+        loop.start()
+        if context_started is not None:
+            context_started(context)
     return mcp, client
