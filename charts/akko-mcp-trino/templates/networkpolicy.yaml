@@ -1,0 +1,62 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "mcp-trino.fullname" . }}
+  labels:
+    {{- include "mcp-trino.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "mcp-trino.serverSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- $mcpPeers := $np.ingress.from }}
+    {{- if and .Values.route.enabled $np.ingress.openshiftRouter }}
+    {{- $mcpPeers = concat $mcpPeers (list
+      (dict "namespaceSelector" (dict "matchLabels" (dict "policy-group.network.openshift.io/ingress" "")))
+      (dict "namespaceSelector" (dict "matchLabels" (dict "network.openshift.io/policy-group" "ingress")))) }}
+    {{- end }}
+    {{- if $mcpPeers }}
+    # The MCP port, from the ingress controller or the router only.
+    - from:
+        {{- toYaml $mcpPeers | nindent 8 }}
+      ports:
+        - port: {{ .Values.ports.mcp }}
+          protocol: TCP
+    {{- end }}
+    # The health port, from the release's helm test and the metrics peers.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "mcp-trino.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: test
+        {{- with $np.metrics.from }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - port: {{ .Values.ports.health }}
+          protocol: TCP
+  egress:
+    - to:
+        {{- toYaml $np.egress.dns.to | nindent 8 }}
+      ports:
+        {{- toYaml $np.egress.dns.ports | nindent 8 }}
+    - to:
+        {{- toYaml $np.egress.trino | nindent 8 }}
+      ports:
+        - port: {{ .Values.trino.port }}
+          protocol: TCP
+    {{- if $np.egress.identityProvider.to }}
+    - to:
+        {{- toYaml $np.egress.identityProvider.to | nindent 8 }}
+      ports:
+        {{- toYaml $np.egress.identityProvider.ports | nindent 8 }}
+    {{- end }}
+    {{- with $np.egress.extra }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

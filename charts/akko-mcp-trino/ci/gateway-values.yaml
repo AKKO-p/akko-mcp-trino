@@ -1,0 +1,18 @@
+# Behind Trino Gateway: the gateway terminates TLS, so a client certificate does not
+# reach the cluster; the server's account authenticates with a password instead.
+trino:
+  host: trino-gateway.example.internal
+  port: 443
+  catalog: lakehouse
+  identityMode: impersonation
+  user: mcp-service
+  credential: password
+  source: mcp-trino
+auth:
+  jwksUrl: https://idp.example.internal/realms/data/protocol/openid-connect/certs
+  issuer: https://idp.example.internal/realms/data
+  audience: mcp-trino
+existingSecret:
+  name: mcp-trino-credentials
+ca:
+  configMap: internal-ca
