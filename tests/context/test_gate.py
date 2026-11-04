@@ -2,6 +2,8 @@
 
 from types import MappingProxyType
 
+import pytest
+
 from akko_mcp_trino.context import (
     CLASSIFICATION,
     GLOSSARY,
@@ -28,17 +30,24 @@ SERVED = {
 }
 
 
-def _proven(*refs: TableRef):
-    return lambda target: target in refs
+# What the fake Trino lists to the caller: each proven table with its columns.
+LISTED = {ORDERS: frozenset({"id", "amount"})}
 
 
-def _gate(ctx: TableContext, visible=("id", "amount"), served=None, proven=(ORDERS,), **kw):
+def _proven(listed):
+    def proven(target: TableRef, columns: tuple[str, ...]) -> bool:
+        return target in listed and all(name in listed[target] for name in columns)
+
+    return proven
+
+
+def _gate(ctx: TableContext, visible=("id", "amount"), served=None, terms=None):
     return filter_table(
         ctx,
         visible_columns=visible,
         served=SERVED if served is None else served,
-        join_proven=_proven(*proven),
-        **kw,
+        join_proven=_proven(LISTED),
+        terms=terms,
     )
 
 
@@ -74,6 +83,11 @@ def test_a_join_to_an_unproven_table_is_removed():
     assert _gate(TableContext(joins=(join,))).joins == ()
 
 
+def test_a_join_naming_a_hidden_column_of_the_target_is_removed():
+    join = Join(("id",), ORDERS, ("secret",))
+    assert _gate(TableContext(joins=(join,))).joins == ()
+
+
 def test_a_join_from_an_invisible_column_is_removed():
     join = Join(("secret",), ORDERS, ("id",))
     assert _gate(TableContext(joins=(join,))).joins == ()
@@ -81,17 +95,21 @@ def test_a_join_from_an_invisible_column_is_removed():
 
 def test_a_join_from_visible_columns_to_a_proven_table_is_kept():
     join = Join(("id",), ORDERS, ("id",))
-    asked: list[TableRef] = []
+    asked: list[tuple[TableRef, tuple[str, ...]]] = []
 
-    def proven(target: TableRef) -> bool:
-        asked.append(target)
+    def proven(target: TableRef, columns: tuple[str, ...]) -> bool:
+        asked.append((target, columns))
         return True
 
     gated = filter_table(
-        TableContext(joins=(join,)), visible_columns=("id",), served=SERVED, join_proven=proven
+        TableContext(joins=(join,)),
+        visible_columns=("id",),
+        served=SERVED,
+        join_proven=proven,
+        terms=None,
     )
     assert gated.joins == (join,)
-    assert asked == [ORDERS]
+    assert asked == [(ORDERS, ("id",))]
 
 
 def test_the_proof_is_not_asked_for_a_join_from_an_invisible_column():
@@ -100,7 +118,8 @@ def test_the_proof_is_not_asked_for_a_join_from_an_invisible_column():
         TableContext(joins=(Join(("secret",), HIDDEN, ("id",)),)),
         visible_columns=("id",),
         served=SERVED,
-        join_proven=lambda target: asked.append(target) or True,
+        join_proven=lambda target, columns: asked.append(target) or True,
+        terms=None,
     )
     assert asked == []
 
@@ -131,6 +150,23 @@ def test_no_term_key_is_kept_when_no_glossary_is_served():
     gated = _gate(ctx, served={**SERVED, GLOSSARY: frozenset()})
     assert gated.terms == ()
     assert gated.columns["id"].terms == ()
+
+
+def test_a_term_read_under_another_key_is_treated_as_unknown():
+    ctx = TableContext(terms=("t-fin",), columns=_columns(id=ColumnContext(terms=("t-fin",))))
+    gated = _gate(ctx, terms={"t-fin": Term("t-other", "Revenue", "finance")})
+    assert gated.terms == ()
+    assert gated.columns["id"].terms == ()
+
+
+def test_the_pass_is_always_named():
+    with pytest.raises(TypeError):
+        filter_table(
+            TableContext(),
+            visible_columns=(),
+            served=SERVED,
+            join_proven=_proven(LISTED),
+        )
 
 
 def test_term_keys_wait_for_their_terms_when_a_glossary_is_served():
@@ -175,6 +211,33 @@ def test_nothing_is_served_from_a_kind_the_allow_list_does_not_name():
     )
     gated = _gate(ctx, served={})
     assert gated == TableContext(columns=_columns(id=ColumnContext(description="key")))
+
+
+def test_an_empty_set_name_serves_nothing():
+    ctx = TableContext(
+        owner="ann",
+        tags=(Labelled("PII", ""),),
+        terms=("t-blank",),
+        properties=MappingProxyType({"score": Labelled("high", "")}),
+        columns=_columns(id=ColumnContext(classifications=(Labelled("PII", ""),))),
+    )
+    blank = frozenset({""})
+    served = {GLOSSARY: blank, CLASSIFICATION: blank, PROPERTY: blank, OWNER: blank}
+    gated = _gate(ctx, served=served, terms={"t-blank": Term("t-blank", "Blank", "")})
+    assert gated == TableContext(columns=_columns(id=ColumnContext()))
+    assert _gate(TableContext(terms=("t-blank",)), served=served).terms == ()
+
+
+def test_a_set_that_differs_only_by_case_is_removed():
+    ctx = TableContext(
+        tags=(Labelled("PII", "PII"),),
+        terms=("t-fin",),
+        properties=MappingProxyType({"score": Labelled("high", "Quality")}),
+    )
+    gated = _gate(ctx, terms={"t-fin": Term("t-fin", "Revenue", "Finance")})
+    assert gated.tags == ()
+    assert gated.terms == ()
+    assert dict(gated.properties) == {}
 
 
 def test_the_owner_is_not_served_unless_declared():
