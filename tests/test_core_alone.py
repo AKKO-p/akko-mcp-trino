@@ -50,6 +50,7 @@ CORE_MODULES = {
     "context/caches",
     "context/chain",
     "context/errors",
+    "context/file",
     "context/gate",
     "context/loading",
     "context/loop",

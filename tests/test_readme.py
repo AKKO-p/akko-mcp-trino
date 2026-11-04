@@ -26,6 +26,11 @@ def test_every_variable_the_readme_lists_is_read_by_config():
         pathlib.Path(__file__).resolve().parents[1] / "akko_mcp_trino" / "config.py"
     ).read_text(encoding="utf-8")
     read_by_code = set(re.findall(r'os\.environ\.get\("([A-Z_]+)"', source))
+    # a provider reads its own settings from the environment it is given
+    provider = (
+        pathlib.Path(__file__).resolve().parents[1] / "akko_mcp_trino" / "context" / "file.py"
+    ).read_text(encoding="utf-8")
+    read_by_code |= set(re.findall(r'"(MCP_[A-Z_]+)"', provider))
     unknown = sorted(v for v in listed if v not in read_by_code)
     assert unknown == [], f"README lists variables the code never reads: {unknown}"
 

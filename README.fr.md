@@ -575,6 +575,35 @@ Avec un fournisseur chargé, le serveur expose aussi les métriques
 `mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`, par fournisseur. Aucun outil
 n'utilise encore le contexte.
 
+### Le fournisseur `file`
+
+`file` est le fournisseur livré avec le serveur, et la référence du contrat. Il n'a besoin d'aucun
+service : un fichier JSON décrit des tables, des colonnes et des termes de glossaire par leur nom.
+On l'active avec `MCP_CONTEXT_PROVIDERS=file`.
+
+| Variable | Rôle | Défaut |
+|---|---|---|
+| `MCP_CONTEXT_FILE` | chemin du fichier JSON ; obligatoire, un fichier illisible ou invalide empêche le démarrage | aucune |
+| `MCP_CONTEXT_FILE_GLOSSARIES` | noms des glossaires servis, séparés par des virgules | aucune |
+| `MCP_CONTEXT_FILE_CLASSIFICATIONS` | noms des ensembles de classifications et d'étiquettes servis | aucune |
+| `MCP_CONTEXT_FILE_PROPERTIES` | noms des ensembles de propriétés servis | aucune |
+| `MCP_CONTEXT_FILE_SERVE_OWNER` | `true` : le propriétaire d'une table est servi | `false` |
+
+Les listes autorisées sont des noms exacts : `*` est le nom `*`, jamais un joker, et les entrées
+vides sont ignorées. Le fichier peut déclarer plus qu'il ne sert ; seul ce qui est déclaré et
+autorisé est servi. `--check` affiche le fichier, le nombre de tables et de termes, et les
+ensembles servis.
+
+Le fichier est relu, hors de la boucle d'événements, quand il change. Un fichier modifié qui
+devient invalide garde le dernier contenu valide, et un avertissement nomme le réglage et le
+chemin. Une clé `values` ou `samples`, où que ce soit, refuse le fichier : un contexte ne porte
+jamais de données.
+
+Les noms s'écrivent en minuscules, comme Trino les liste : le catalogue, le schéma, la table et les
+clés de colonnes. Le cœur les compare exactement. Un fichier qui contient deux fois la même table,
+ou la même colonne, une fois passé en minuscules est refusé au lieu d'être fusionné. Le format est
+celui de l'exemple du [README](README.md#the-file-provider).
+
 ## Configuration, extensions, exploitation
 
 Toutes les variables, leurs valeurs par défaut, les points d'extension (identités, gardes, audit,

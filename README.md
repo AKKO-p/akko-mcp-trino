@@ -1050,6 +1050,63 @@ caches), a `visibility:` line (the lifetime, whether a canary is set, whether `s
 and the lines of each provider. `MCP_CONTEXT_PROVIDERS` without a canary, or in `service` mode, is
 warned of.
 
+### The file provider
+
+`file` is the provider that comes with the server, and the reference for the contract. It needs no
+service: a JSON file describes tables, columns and glossary terms by name. Turn it on with
+`MCP_CONTEXT_PROVIDERS=file`.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `MCP_CONTEXT_FILE` | the path of the JSON file; required, and a file that cannot be read or is not valid refuses to start | none |
+| `MCP_CONTEXT_FILE_GLOSSARIES` | comma-separated names of the glossaries served | none |
+| `MCP_CONTEXT_FILE_CLASSIFICATIONS` | comma-separated names of the classification and tag sets served | none |
+| `MCP_CONTEXT_FILE_PROPERTIES` | comma-separated names of the property sets served | none |
+| `MCP_CONTEXT_FILE_SERVE_OWNER` | `true`: the owner of a table is served | `false` |
+
+The allow lists are exact names: `*` is the name `*`, never a wildcard, and empty entries are
+ignored. The file may declare more than it serves; only what is declared and allowed is served.
+`--check` prints the file, how many tables and terms it holds, and the sets served.
+
+The file is read again, off the event loop, when it changes. A changed file that is no longer valid
+keeps the last good content, and one warning names the setting and the path. A `values` or
+`samples` key anywhere in the file refuses it: a context never holds data.
+
+Names are written in lower case, as Trino lists them: the catalog, the schema, the table and the
+column keys. The core compares them exactly. A file that holds the same table, or the same column,
+twice once folded to lower case is refused instead of merged.
+
+```json
+{
+  "version": 1,
+  "catalogs": ["demo"],
+  "tables": [
+    {
+      "catalog": "demo", "schema": "sales", "table": "orders",
+      "description": "One row per order", "owner": "sales-team", "tier": "gold",
+      "tags": [{"name": "internal", "set": "visibility"}],
+      "terms": ["order"],
+      "properties": {"retention": {"value": "7y", "set": "policy"}},
+      "grain": ["order_id"],
+      "joins": [{"columns": ["customer_id"],
+                 "target": {"catalog": "demo", "schema": "sales", "table": "customers"},
+                 "target_columns": ["id"]}],
+      "columns": {
+        "order_id": {"description": "The order", "terms": ["order"],
+                     "classifications": [{"name": "key", "set": "visibility"}],
+                     "properties": {"unit": {"value": "none", "set": "policy"}}}
+      }
+    }
+  ],
+  "terms": {
+    "order": {"name": "Order", "glossary": "sales", "definition": "A purchase",
+              "status": "approved", "categories": ["core"],
+              "relations": [{"key": "line", "name": "Line", "glossary": "sales",
+                             "relation": "part"}]}
+  }
+}
+```
+
 ### Serving
 
 | Variable | Meaning | Default |
