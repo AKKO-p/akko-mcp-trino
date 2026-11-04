@@ -1031,16 +1031,16 @@ reaches the agent, only a status. Nothing in these lines is wired into a tool ye
 | `MCP_CONTEXT_PROVIDERS` | comma-separated names of providers installed under the entry-point group `akko_mcp_trino.context`; an unknown name refuses to start | none |
 | `MCP_CONTEXT_TIMEOUT_SECONDS` | time budget of one context read, more than 0 | `5` |
 | `MCP_CONTEXT_RESERVE_SECONDS` | the seconds of a tool call's budget kept in reserve, 0 or more | `0.5` |
-| `MCP_CONTEXT_MAX_CONCURRENCY` | the most context reads in flight, 1 at least | `32` |
+| `MCP_CONTEXT_MAX_CONCURRENCY` | the most context reads in flight for one provider, 1 at least | `32` |
 | `MCP_CONTEXT_RETRY_AFTER_SECONDS` | the delay before a source that is down is called again, 0 or more | `30` |
 | `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | the delay before a source that refused the account is called again (`SIGHUP` lifts it at once), 0 or more | `3600` |
 | `MCP_CONTEXT_BATCH` | the tables one read of a source holds, 1 at least | `50` |
 | `MCP_CONTEXT_TTL_SECONDS` | how long a context read is kept, 0 or more | `900` |
-| `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | the bytes the caches of tables and of glossary terms may hold, 1 at least | `536870912`, `67108864` |
+| `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | the bound of the caches of tables and of glossary terms, 1 at least; each bound counts the length of the JSON form of the cached entries, and the process holds about three to four times that in memory, so size the pod for that | `134217728`, `16777216` |
 | `MCP_VISIBILITY_TTL_SECONDS` | how long what Trino listed for a caller is kept, 0 or more | `60` |
-| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | the bytes that cache may hold, and the most names it keeps for one caller, 1 at least | `134217728`, `10000` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | the bound of that cache (counted as above, so size the pod for about three to four times that), and the most names it keeps for one caller, 1 at least | `33554432`, `10000` |
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true`: context is served only for tables the caller may read | `false` |
-| `MCP_CONTEXT_CANARY` | one table, `catalog.schema.table`, that a canary account must not see: it checks that Trino filters its listings; unset is warned of when a provider is loaded | none |
+| `MCP_CONTEXT_CANARY` | one table, `catalog.schema.table`, that no caller of this server may see: context is served to a caller only while Trino hides it from them; unset is warned of when a provider is loaded | none |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | the longest text of one context field, the longest context in one response, and the most columns described in one table, 1 at least | `500`, `60000`, `500` |
 | `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bounds of the profile of a table, 1 at least | `50`, `100000` |
 | `MCP_VISIBILITY_ENABLED` | removed in 0.8: the filter by Trino's rights cannot be turned off, and `false` refuses to start | none |

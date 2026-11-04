@@ -122,8 +122,20 @@ def merge_column(entries: Sequence[tuple[str, ColumnContext]], *, text_chars: in
     return merged
 
 
-def _grain(entries) -> list[str]:
-    return list(dict.fromkeys(c for _, context in entries for c in _plains(context.grain)))
+def _grain(entries, merged: dict) -> None:
+    """The grain is one value: the first provider with a whole grain wins, others are listed."""
+    others: list[dict] = []
+    for source, context in entries:
+        columns = [_plain(c) for c in context.grain]
+        if not columns or not all(columns):
+            continue
+        if "grain" not in merged:
+            merged["grain"] = columns
+            merged.setdefault("sources", {})["grain"] = source
+        elif columns != merged["grain"] and all(o["columns"] != columns for o in others):
+            others.append({"columns": columns, "source": source})
+    if others:
+        merged["other_grains"] = others
 
 
 def _joins(entries) -> list[dict]:
@@ -160,6 +172,6 @@ def merge_table(entries: Sequence[tuple[str, TableContext]], *, text_chars: int)
     _put(merged, "tags", _labels(entries, "tags"))
     _put(merged, "terms", _terms(entries))
     _put(merged, "properties", _properties(entries))
-    _put(merged, "grain", _grain(entries))
+    _grain(entries, merged)
     _put(merged, "joins", _joins(entries))
     return merged

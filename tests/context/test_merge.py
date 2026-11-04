@@ -72,7 +72,9 @@ def test_multi_valued_fields_are_a_union_without_duplicates():
         "set.k": {"value": "v", "source": "a", "other_values": [{"value": "other", "source": "b"}]},
         "set.j": {"value": "w", "source": "b"},
     }
-    assert merged["grain"] == ["id", "day"]
+    assert merged["grain"] == ["id"]
+    assert merged["sources"]["grain"] == "a"
+    assert merged["other_grains"] == [{"columns": ["id", "day"], "source": "b"}]
     assert merged["joins"] == [
         {"columns": ["a"], "table": "c.s.t", "target_columns": ["b"], "source": "a"},
         {"columns": ["x"], "table": "c.s.t", "target_columns": ["y"], "source": "b"},
@@ -149,6 +151,7 @@ def test_invisible_characters_are_removed_from_every_catalogue_name():
     assert merged["terms"] == [{"key": f"k{zw}1", "source": "a"}]
     assert merged["properties"] == {"set.k": {"value": "val", "source": "a"}}
     assert merged["grain"] == ["id"]
+    assert "other_grains" not in merged
     assert merged["joins"][0]["columns"] == ["a"]
     assert merged["joins"][0]["target_columns"] == ["b"]
 
@@ -217,10 +220,28 @@ def test_an_element_empty_once_cleaned_is_dropped():
     )
     assert merged["tags"] == [{"name": "ok", "set": "cat", "source": "a"}]
     assert merged["properties"] == {"set.good": {"value": "v", "source": "a"}}
-    assert merged["grain"] == ["id"]
+    assert "grain" not in merged and "other_grains" not in merged
     assert merged["joins"] == [
         {"columns": ["a"], "table": "c.s.t", "target_columns": ["b"], "source": "a"}
     ]
+
+
+def test_grain_is_one_value_the_first_non_empty_grain_wins():
+    zw = "​"
+    merged = merge_table(
+        [
+            ("a", TableContext(grain=(zw, "id"))),
+            ("b", TableContext(grain=())),
+            ("c", TableContext(grain=("day", "id"))),
+            ("d", TableContext(grain=("day", "id"))),
+            ("e", TableContext(grain=("id",))),
+            ("f", TableContext(grain=("id",))),
+        ],
+        text_chars=BIG,
+    )
+    assert merged["grain"] == ["day", "id"]
+    assert merged["sources"]["grain"] == "c"
+    assert merged["other_grains"] == [{"columns": ["id"], "source": "e"}]
 
 
 def test_a_join_with_an_empty_column_or_unequal_sides_is_dropped_whole():

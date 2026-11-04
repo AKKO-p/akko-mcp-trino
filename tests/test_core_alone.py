@@ -218,3 +218,28 @@ def test_the_core_reads_only_its_own_entry_point_groups():
         if name.removeprefix("akko_mcp_trino.") not in CORE_MODULES | CORE_PACKAGES
     }
     assert groups <= CORE_GROUPS
+
+
+def test_the_context_package_loads_neither_the_trino_client_nor_the_identity():
+    """A provider's contract test imports the package; it must not pull the core's Trino side."""
+    import subprocess
+    import sys
+
+    modules = sorted(
+        ["akko_mcp_trino.context"]
+        + [
+            f"akko_mcp_trino.context.{p.stem}"
+            for p in (CORE / "context").glob("*.py")
+            if p.stem != "__init__"
+        ]
+    )
+    code = (
+        "import importlib, sys\n"
+        f"for name in {modules!r}:\n"
+        "    importlib.import_module(name)\n"
+        "loaded = [m for m in ('akko_mcp_trino.trino_client', 'akko_mcp_trino.identity')"
+        " if m in sys.modules]\n"
+        "assert not loaded, loaded\n"
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT)
+    assert done.returncode == 0, done.stderr

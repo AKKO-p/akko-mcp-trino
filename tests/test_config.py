@@ -435,8 +435,8 @@ def test_the_context_settings_have_their_defaults_and_names():
         50,
         900.0,
     )
-    assert (c.context_cache_bytes, c.context_terms_cache_bytes) == (536870912, 67108864)
-    assert (c.visibility_ttl_seconds, c.visibility_cache_bytes) == (60.0, 134217728)
+    assert (c.context_cache_bytes, c.context_terms_cache_bytes) == (134217728, 16777216)
+    assert (c.visibility_ttl_seconds, c.visibility_cache_bytes) == (60.0, 33554432)
     assert (c.visibility_max_names, c.context_require_select, c.context_canary) == (
         10000,
         False,

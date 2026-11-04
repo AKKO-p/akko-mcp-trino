@@ -59,7 +59,8 @@ class Metrics:
         )
         self.context_cache_bytes = Gauge(
             "mcp_trino_context_cache_bytes",
-            "Bytes a context source holds in the caches",
+            "Length of the JSON form of the entries a context source caches "
+            "(memory is about 3 to 4 times that)",
             ["provider"],
             registry=self.registry,
         )

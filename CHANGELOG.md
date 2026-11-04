@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format follows
 - Secrets can be read from a file (a rotation to an empty or undecodable file keeps the last good value and logs a warning; a file replaced by another is read again): `FileSecret` and `secret_setting(env, name)` (`<NAME>_FILE` before `<NAME>`, read again when the file changes) in `akko_mcp_trino.context.secrets`.
 - `--check` prints a `context:` line, a `visibility:` line and the lines of each provider; `--check --strict` exits 2 when a provider says it is unreachable (`UNREACHABLE:`). The server sets the `httpx` log to `WARNING` and resets the providers that refused the account on `SIGHUP`.
 - Metrics, by provider: `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total` (by status), `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total` (hit or miss), `mcp_trino_context_cache_bytes` and `mcp_trino_context_breaker_open`.
-- For plugins: `build_server` takes `context_providers` and `register_query_tools` takes `context`.
+- For plugins: `build_server` takes `context_providers` and `register_query_tools` takes `context`, and `context_started` receives the context setup, for whoever must reset or close the chain.
 
 ## [0.7.2] - 2026-11-04
 

@@ -208,16 +208,16 @@ class Config:
     context_batch: int = 50
     context_ttl_seconds: float = 900.0
     # Bytes the caches of tables and of glossary terms may hold, in all.
-    context_cache_bytes: int = 536870912
-    context_terms_cache_bytes: int = 67108864
+    context_cache_bytes: int = 134217728
+    context_terms_cache_bytes: int = 16777216
     # What Trino listed for a caller: how long it is kept, the bytes it may hold and the
     # most names kept for one caller.
     visibility_ttl_seconds: float = 60.0
-    visibility_cache_bytes: int = 134217728
+    visibility_cache_bytes: int = 33554432
     visibility_max_names: int = 10000
     context_require_select: bool = False
-    # One table, `catalog.schema.table`, that a canary account must not see: it checks
-    # that Trino filters its listings.
+    # One table, `catalog.schema.table`, that no caller of this server may see: context
+    # is served to a caller only while Trino hides it from them.
     context_canary: str = ""
     # Bounds on what context adds to a response.
     context_text_chars: int = 500
@@ -482,12 +482,12 @@ class Config:
             ),
             context_batch=int(os.environ.get("MCP_CONTEXT_BATCH", "50")),
             context_ttl_seconds=float(os.environ.get("MCP_CONTEXT_TTL_SECONDS", "900")),
-            context_cache_bytes=int(os.environ.get("MCP_CONTEXT_CACHE_BYTES", "536870912")),
+            context_cache_bytes=int(os.environ.get("MCP_CONTEXT_CACHE_BYTES", "134217728")),
             context_terms_cache_bytes=int(
-                os.environ.get("MCP_CONTEXT_TERMS_CACHE_BYTES", "67108864")
+                os.environ.get("MCP_CONTEXT_TERMS_CACHE_BYTES", "16777216")
             ),
             visibility_ttl_seconds=float(os.environ.get("MCP_VISIBILITY_TTL_SECONDS", "60")),
-            visibility_cache_bytes=int(os.environ.get("MCP_VISIBILITY_CACHE_BYTES", "134217728")),
+            visibility_cache_bytes=int(os.environ.get("MCP_VISIBILITY_CACHE_BYTES", "33554432")),
             visibility_max_names=int(os.environ.get("MCP_VISIBILITY_MAX_NAMES", "10000")),
             context_require_select=os.environ.get("MCP_CONTEXT_REQUIRE_SELECT", "false").lower()
             == "true",

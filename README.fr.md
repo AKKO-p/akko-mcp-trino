@@ -555,18 +555,19 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_CONTEXT_PROVIDERS` | noms des fournisseurs, séparés par des virgules | aucun |
 | `MCP_CONTEXT_TIMEOUT_SECONDS` | budget de temps d'une lecture de contexte, plus de 0 | `5` |
 | `MCP_CONTEXT_RESERVE_SECONDS` | secondes du budget d'un appel gardées en réserve, 0 ou plus | `0.5` |
-| `MCP_CONTEXT_MAX_CONCURRENCY` | lectures de contexte simultanées au plus, 1 au moins | `32` |
-| `MCP_CONTEXT_RETRY_AFTER_SECONDS` | délai avant de rappeler une source en panne | `30` |
-| `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | délai avant de rappeler une source qui a refusé le compte (`SIGHUP` le lève aussitôt) | `3600` |
-| `MCP_CONTEXT_BATCH` | tables par lecture d'une source | `50` |
-| `MCP_CONTEXT_TTL_SECONDS` | durée de conservation d'une lecture | `900` |
-| `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | octets des caches des tables et des termes de glossaire | `536870912`, `67108864` |
-| `MCP_VISIBILITY_TTL_SECONDS` | durée de conservation de ce que Trino a listé pour un appelant | `60` |
-| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | octets de ce cache, et noms gardés au plus pour un appelant | `134217728`, `10000` |
+| `MCP_CONTEXT_MAX_CONCURRENCY` | lectures de contexte simultanées au plus par fournisseur, 1 au moins | `32` |
+| `MCP_CONTEXT_RETRY_AFTER_SECONDS` | délai avant de rappeler une source en panne, 0 ou plus | `30` |
+| `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | délai avant de rappeler une source qui a refusé le compte (`SIGHUP` le lève aussitôt), 0 ou plus | `3600` |
+| `MCP_CONTEXT_BATCH` | tables par lecture d'une source, 1 au moins | `50` |
+| `MCP_CONTEXT_TTL_SECONDS` | durée de conservation d'une lecture, 0 ou plus | `900` |
+| `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | borne des caches des tables et des termes de glossaire, 1 au moins ; chaque borne compte la longueur de la forme JSON des entrées gardées, et le processus en tient environ trois à quatre fois plus en mémoire, dimensionner le pod en conséquence | `134217728`, `16777216` |
+| `MCP_VISIBILITY_TTL_SECONDS` | durée de conservation de ce que Trino a listé pour un appelant, 0 ou plus | `60` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | borne de ce cache (comptée comme ci-dessus, soit environ trois à quatre fois plus en mémoire), et noms gardés au plus pour un appelant, 1 au moins | `33554432`, `10000` |
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true` : contexte servi seulement pour les tables que l'appelant peut lire | `false` |
-| `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'un compte sentinelle ne doit pas voir | aucune |
-| `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, au plus | `500`, `60000`, `500` |
-| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bornes du profil d'une table | `50`, `100000` |
+| `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'aucun appelant de ce serveur ne doit voir : le contexte n'est servi à un appelant que tant que Trino la lui cache | aucune |
+| `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, 1 au moins | `500`, `60000`, `500` |
+| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bornes du profil d'une table, 1 au moins | `50`, `100000` |
+| `MCP_VISIBILITY_ENABLED` | supprimé en 0.8 : le filtre par les droits de Trino ne se désactive pas, et `false` refuse de démarrer | aucune |
 
 `MCP_VISIBILITY_ENABLED=false` refuse de démarrer : le filtre par les droits de Trino ne se
 désactive pas. Avec un fournisseur chargé, le serveur expose aussi les métriques

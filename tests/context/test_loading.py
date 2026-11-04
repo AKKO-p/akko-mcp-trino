@@ -269,7 +269,7 @@ def test_check_prints_the_context_lines_and_never_a_secret(monkeypatch, capsys, 
     assert check_config(Config.from_env()) == 0
     out = capsys.readouterr().out
     assert (
-        "context: catalog (timeout 5 s, reserve 0.5 s, batch 50, caches 536870912 + 67108864 bytes)"
+        "context: catalog (timeout 5 s, reserve 0.5 s, batch 50, caches 134217728 + 16777216 bytes)"
     ) in out
     assert "visibility: ttl 60 s, canary set, require select true" in out
     assert "catalog: token set" in out
