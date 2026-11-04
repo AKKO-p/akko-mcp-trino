@@ -110,17 +110,17 @@ def test_query_never_returns_trinos_query_statistics(monkeypatch):
     import akko_mcp_trino.trino_client as tc
 
     class _StatsCur(_Cur):
-        stats = {"processedRows": 15000, "processedBytes": 688, "queryId": "q"}
+        stats = {"processedRows": 4242, "processedBytes": 688, "queryId": "q"}
         query_id = "q"
 
     monkeypatch.setattr(
         tc.trino.dbapi,
         "connect",
-        lambda **k: type("C", (), {"cursor": lambda self: _StatsCur([(751,)])})(),
+        lambda **k: type("C", (), {"cursor": lambda self: _StatsCur([("a",)])})(),
     )
-    out = _client(_CFG).query("SELECT count(*) FROM t")
+    out = _client(_CFG).query("SELECT name FROM t")
     assert set(out) == {"columns", "rows", "row_count", "truncated"}
-    assert "15000" not in repr(out) and "processed" not in repr(out)
+    assert "4242" not in repr(out) and "processed" not in repr(out)
 
 
 def test_query_uses_config_identity_by_default(monkeypatch):
