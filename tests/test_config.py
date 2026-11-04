@@ -389,9 +389,8 @@ def test_extra_read_commands_are_none_by_default_and_said_when_opened(monkeypatc
     c = Config.from_env()
     assert c.problems() == []
     assert (
-        "MCP_EXTRA_READ_COMMANDS=EXPLAIN, SHOW STATS: Trino answers these from the whole "
-        "table or with the access rules themselves; a row filter or a column mask does not "
-        "hide what they show"
+        "MCP_EXTRA_READ_COMMANDS=EXPLAIN, SHOW STATS: these reads can show facts beyond a "
+        "row filter or a column mask"
     ) in c.warnings()
 
 

@@ -105,9 +105,8 @@ def test_query_returns_columns_rows_count_bounded(monkeypatch):
 
 
 def test_query_never_returns_trinos_query_statistics(monkeypatch):
-    """Trino's statistics of a query (processedRows, processedBytes) count the rows it read
-    before a row filter: 15000 for a user who sees 751. The answer carries only columns,
-    rows, row_count and truncated, whatever the cursor holds."""
+    """The answer carries only columns, rows, row_count and truncated, never Trino's
+    statistics of the query, whatever the cursor holds."""
     import akko_mcp_trino.trino_client as tc
 
     class _StatsCur(_Cur):

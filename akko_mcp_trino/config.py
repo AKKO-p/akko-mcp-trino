@@ -170,8 +170,8 @@ class Config:
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
     # Read commands the allow-list refuses by default, named one by one by the
     # administrator (comma-separated: EXPLAIN, SHOW STATS, SHOW CREATE, SHOW GRANTS,
-    # SHOW ROLES, SHOW SESSION). Trino answers them from the whole table or with the
-    # access rules themselves, past a row filter or a column mask. Empty, the default,
+    # SHOW ROLES, SHOW SESSION). They can show facts beyond a row filter or a column
+    # mask. Empty, the default,
     # opens none, and explain_query checks a statement without printing its plan.
     extra_read_commands: str = ""
 
@@ -287,9 +287,8 @@ class Config:
             extra = []  # a problem, said by problems()
         if extra:
             found.append(
-                f"MCP_EXTRA_READ_COMMANDS={', '.join(extra)}: Trino answers these from the "
-                "whole table or with the access rules themselves; a row filter or a column "
-                "mask does not hide what they show"
+                f"MCP_EXTRA_READ_COMMANDS={', '.join(extra)}: these reads can show facts "
+                "beyond a row filter or a column mask"
             )
         return found
 

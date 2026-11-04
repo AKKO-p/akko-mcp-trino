@@ -39,12 +39,9 @@ _WRITE_TYPES = (
     exp.Set,
 )
 # The commands a read may use, as an allow-list: what an agent needs to find and read
-# data. Anything else is refused, including a command a later Trino adds. Some reads
-# Trino answers from the whole table or with the access rules themselves, past a row
-# filter or a column mask: SHOW STATS gives the lowest and highest value and the row
-# count of the whole table, EXPLAIN prints the row filter's predicate, the mask's
-# expression and the table's row count, SHOW CREATE prints a view's query. They are
-# refused unless the administrator names them in MCP_EXTRA_READ_COMMANDS.
+# data. Anything else is refused, including a command a later Trino adds. Some reads,
+# such as SHOW STATS or EXPLAIN, can show facts beyond a row filter or a column mask.
+# They are refused unless the administrator names them in MCP_EXTRA_READ_COMMANDS.
 _SHOW_ALLOWED = frozenset({"CATALOGS", "SCHEMAS", "TABLES", "COLUMNS", "FUNCTIONS"})
 # What MCP_EXTRA_READ_COMMANDS may name, and the SHOW kinds each one opens.
 EXTRA_READ_COMMANDS: dict[str, frozenset[str]] = {

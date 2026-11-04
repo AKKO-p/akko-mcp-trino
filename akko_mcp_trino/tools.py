@@ -923,8 +923,7 @@ def register_query_tools(
                 return refusal_reply(
                     "read_only", "Only a read-only statement can be explained", kind=READ_ONLY
                 )
-            # Without EXPLAIN opened, Trino only analyzes the statement: a plan would print
-            # the row filter's predicate, the mask's expression and the table's row count.
+            # Without EXPLAIN opened, Trino only analyzes the statement and prints no plan.
             statement = f"EXPLAIN {sql}" if show_plan else f"EXPLAIN (TYPE VALIDATE) {sql}"
             note(sql=statement, tables=referenced_tables(sql))
             res = run(statement)

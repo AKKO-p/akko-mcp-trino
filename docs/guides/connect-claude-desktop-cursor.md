@@ -1,6 +1,6 @@
 # Connect Claude Desktop or Cursor to akko-mcp-trino
 
-This guide connects two MCP hosts, Claude Desktop and Cursor, to akko-mcp-trino 0.7.1.
+This guide connects two MCP hosts, Claude Desktop and Cursor, to akko-mcp-trino 0.7.2.
 It covers three paths:
 
 | Path | Transport | Who the query runs as | For |
@@ -150,7 +150,7 @@ Trino with Trino's own browser login. Nothing to deploy, no token to paste. You 
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.7.1"
+        "akko-mcp-trino==0.7.2"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -206,7 +206,7 @@ turn the door off there, and keep `oauth2` for stdio, which the server enforces.
         "-e", "TRINO_CATALOG=iceberg",
         "-e", "MCP_AUTH_ENABLED=false",
         "-e", "MCP_AUTH_REQUIRED=false",
-        "akkoai/akko-mcp-trino:0.7.1"
+        "akkoai/akko-mcp-trino:0.7.2"
       ]
     }
   }
@@ -326,13 +326,13 @@ repository, with Python 3.12 or later.
 git clone https://github.com/AKKO-p/akko-mcp-trino.git
 cd akko-mcp-trino
 python3 -m venv .venv && . .venv/bin/activate
-pip install akko-mcp-trino==0.7.1
+pip install akko-mcp-trino==0.7.2
 python3 examples/check_host_config.py ~/.cursor/mcp.json --search email
 ```
 
 ```
 entry: trino (streamable HTTP)
-server: trino-mcp 0.7.1
+server: trino-mcp 0.7.2
 8 tools: search_columns, list_catalogs, list_schemas, list_tables, describe_schema, describe_table, explain_query, execute_query
 search_columns('email'):
 {"tables": [...], "matches": [...], "complete": true, "next_cursor": null}
