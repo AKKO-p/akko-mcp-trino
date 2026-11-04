@@ -13,6 +13,7 @@
         "MCP_JWKS_URL": "https://idp.example.com/realms/data/protocol/openid-connect/certs",
         "MCP_OIDC_ISSUER": "https://idp.example.com/realms/data",
         "MCP_OIDC_AUDIENCE": "akko-mcp",
+        "MCP_JWT_USER_CLAIM": "preferred_username",
         "TRINO_TOKEN_EXCHANGE_URL": "https://idp.example.com/realms/data/protocol/openid-connect/token",
         "TRINO_TOKEN_EXCHANGE_CLIENT_ID": "akko-mcp",
         "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET": "<this server's client secret>",

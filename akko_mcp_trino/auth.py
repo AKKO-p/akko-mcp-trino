@@ -14,6 +14,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional, Protocol, Sequence, Union
 
+from .config import parse_jwt_algorithms
+
 log = logging.getLogger(__name__)
 
 
@@ -64,7 +66,8 @@ def validate_token(token: Optional[str]) -> Optional[list]:
     claims = decode_jwt_unsafe(token)
     if not claims:
         return None
-    roles = claims.get("realm_access", {}).get("roles")
+    access = claims.get("realm_access")
+    roles = access.get("roles") if isinstance(access, dict) else None
     if not isinstance(roles, list):
         return None
     return roles
@@ -124,6 +127,8 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
         accepted,
         leeway_seconds=config.jwt_leeway_seconds,
         refused_audiences=refused,
+        algorithms=parse_jwt_algorithms(config.jwt_algorithms),
+        user_claim=config.jwt_user_claim,
     )
 
 
@@ -146,10 +151,23 @@ def _scopes(claim) -> tuple[str, ...]:
     return ()
 
 
-def _principal_from_claims(claims: dict) -> Principal:
-    roles = claims.get("realm_access", {}).get("roles")
+def _principal_from_claims(claims: dict, user_claim: str = "sub") -> Optional[Principal]:
+    """The caller a verified token names: the text in the ``user_claim`` claim
+    (``MCP_JWT_USER_CLAIM``, ``sub`` by default), a top-level claim read as written. A token
+    without it, or whose value is not text, is empty, or has surrounding spaces or control
+    characters, names nobody (None): never another claim, never a cleaned-up value."""
+    value = claims.get(user_claim)
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+    ):
+        return None
+    access = claims.get("realm_access")
+    roles = access.get("roles") if isinstance(access, dict) else None
     return Principal(
-        subject=str(claims.get("preferred_username") or claims.get("sub") or ""),
+        subject=value,
         roles=roles if isinstance(roles, list) else [],
         email=str(claims.get("email") or ""),
         token_id=str(claims.get("jti") or ""),
@@ -187,16 +205,20 @@ class JwksJwtAuth:
         algorithms=None,
         leeway_seconds: int = 30,
         refused_audiences: Sequence[str] = (),
+        user_claim: str = "sub",
     ):
         """Verify tokens against ``jwks_url`` for ``issuer`` and ``audience`` (one value or
         several, any of which may match), refusing a token that also names one of
-        ``refused_audiences``; ``jwks_client`` is injectable for tests.
+        ``refused_audiences``; ``jwks_client`` is injectable for tests. ``algorithms`` are
+        public-key ones only (``JWT_ALGORITHMS``), RS256 when none is given: a shared-secret
+        algorithm or ``none`` raises ValueError, here as at start.
         """
         self._refused = frozenset(refused_audiences)
+        self._user_claim = user_claim
         self._issuer = issuer
         self._audience = audience if isinstance(audience, str) else list(audience)
         self._leeway = leeway_seconds
-        self._algorithms = algorithms or ["RS256"]
+        self._algorithms = parse_jwt_algorithms(",".join(algorithms or ["RS256"]))
         if jwks_client is not None:
             self._client = jwks_client
         else:  # pragma: no cover - network construction (PyJWKClient), proven by running it
@@ -212,14 +234,19 @@ class JwksJwtAuth:
         try:
             import jwt as _jwt
 
-            key = self._client.get_signing_key_from_jwt(token).key
+            signing_key = self._client.get_signing_key_from_jwt(token)
+            # A key the issuer marks with an algorithm verifies only tokens of that algorithm.
+            declared = (getattr(signing_key, "_jwk_data", None) or {}).get("alg")
+            if declared and declared != _jwt.get_unverified_header(token).get("alg"):
+                raise _jwt.InvalidAlgorithmError("the token's algorithm is not its key's")
             claims = _jwt.decode(
                 token,
-                key,
+                signing_key.key,
                 algorithms=self._algorithms,
                 issuer=self._issuer,
                 audience=self._audience,
                 leeway=self._leeway,  # clocks drift; an iat one second ahead is not a forgery
+                options={"require": ["exp", "iss", "aud"]},  # a token without exp never ends
             )
         except Exception as exc:  # noqa: BLE001 — signature/iss/aud/exp invalid → fail-closed
             log.info("token refused: %s", type(exc).__name__)  # the reason, never the token
@@ -228,4 +255,7 @@ class JwksJwtAuth:
         if self._refused & set([aud] if isinstance(aud, str) else aud or []):
             log.info("token refused: issued for another resource")
             return None
-        return _principal_from_claims(claims)
+        principal = _principal_from_claims(claims, self._user_claim)
+        if principal is None:
+            log.info("token refused: no %s claim", self._user_claim)
+        return principal

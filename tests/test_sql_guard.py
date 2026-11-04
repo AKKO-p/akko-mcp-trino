@@ -53,7 +53,6 @@ def test_governed_catalog_refuses_system_whatever_its_case():
         "  SHOW CATALOGS",
         "DESCRIBE t",
         "DESC t",
-        "EXPLAIN SELECT 1",
         "WITH x AS (SELECT 1) SELECT * FROM x",
         "SELECT 1 UNION SELECT 2",
         "SHOW SCHEMAS FROM iceberg",
@@ -141,10 +140,13 @@ def test_explain_of_a_write_or_explain_analyze_is_refused(sql):
         "explain\n  select 1",
     ],
 )
-def test_explain_of_a_read_is_allowed(sql):
+def test_explain_of_a_read_is_allowed_once_opened(sql):
+    """EXPLAIN prints the row filter's predicate, the mask's expression and the table's row
+    count: refused by default, allowed for a read once the administrator opens it."""
     from akko_mcp_trino.sql_guard import is_read_only_sql
 
-    assert is_read_only_sql(sql) is True
+    assert is_read_only_sql(sql) is False
+    assert is_read_only_sql(sql, extra_reads=frozenset({"EXPLAIN"})) is True
 
 
 @pytest.mark.parametrize(
@@ -300,8 +302,158 @@ def test_parse_error_says_why_a_statement_does_not_parse():
 
 
 def test_other_commands_keep_their_verdict():
-    """CALL runs a procedure: refused. DESCRIBE OUTPUT reads a statement shape: allowed."""
+    """CALL runs a procedure: refused."""
     from akko_mcp_trino.sql_guard import is_read_only_sql
 
     assert is_read_only_sql("CALL iceberg.system.rollback_to_snapshot('s', 't', 1)") is False
-    assert is_read_only_sql("DESCRIBE OUTPUT q", session_catalog="iceberg") is True
+
+
+@pytest.mark.parametrize(
+    ("sql", "opened_by"),
+    [
+        ("SHOW STATS FOR demo.crm.orders", "SHOW STATS"),
+        ("SHOW STATS FOR (SELECT * FROM demo.crm.orders)", "SHOW STATS"),
+        ("show stats for demo.crm.orders", "SHOW STATS"),
+        ("SHOW CREATE VIEW demo.crm.v", "SHOW CREATE"),
+        ("SHOW CREATE TABLE demo.crm.orders", "SHOW CREATE"),
+        ("SHOW CREATE SCHEMA demo.crm", "SHOW CREATE"),
+        ("SHOW GRANTS ON TABLE demo.crm.orders", "SHOW GRANTS"),
+        ("SHOW ROLES FROM demo", "SHOW ROLES"),
+        ("SHOW CURRENT ROLES FROM demo", "SHOW ROLES"),
+        ("SHOW ROLE GRANTS FROM demo", "SHOW ROLES"),
+        ("SHOW SESSION", "SHOW SESSION"),
+        ("EXPLAIN SELECT * FROM demo.crm.orders", "EXPLAIN"),
+        ("EXPLAIN (TYPE IO) SELECT * FROM demo.crm.orders", "EXPLAIN"),
+        ("EXPLAIN (TYPE VALIDATE) SELECT 1", "EXPLAIN"),
+    ],
+)
+def test_reads_past_the_access_rules_are_refused_until_opened(sql, opened_by):
+    """The allow-list (0.7.1): Trino answers SHOW STATS from the whole table, past a row
+    filter; EXPLAIN and SHOW CREATE print the rules or a view's query. Refused by default,
+    each opened only by its own name."""
+    from akko_mcp_trino.sql_guard import EXTRA_READ_COMMANDS, is_read_only_sql
+
+    assert is_read_only_sql(sql, session_catalog="demo") is False
+    others = frozenset(EXTRA_READ_COMMANDS) - {opened_by}
+    assert is_read_only_sql(sql, session_catalog="demo", extra_reads=others) is False
+    assert is_read_only_sql(sql, session_catalog="demo", extra_reads=frozenset({opened_by}))
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SHOW BRANCHES FROM TABLE demo.crm.orders",  # a kind no allow-list names
+        "SHOW SOMETHING",
+        "DESCRIBE INPUT q",
+        "DESCRIBE OUTPUT q",
+        "DESC OUTPUT q",
+        "PREPARE q FROM SELECT 1",
+        "EXECUTE q",
+        "DESCRIBE",
+    ],
+)
+def test_commands_outside_the_allow_list_are_refused_even_with_every_extra(sql):
+    from akko_mcp_trino.sql_guard import EXTRA_READ_COMMANDS, is_read_only_sql
+
+    every = frozenset(EXTRA_READ_COMMANDS)
+    assert is_read_only_sql(sql, session_catalog="demo") is False
+    assert is_read_only_sql(sql, session_catalog="demo", extra_reads=every) is False
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SHOW CATALOGS",
+        "SHOW SCHEMAS FROM demo",
+        "SHOW TABLES FROM demo.crm",
+        "SHOW COLUMNS FROM demo.crm.orders",
+        "SHOW FUNCTIONS",
+        "DESCRIBE demo.crm.orders",
+        "DESC demo.crm.orders",
+        "SELECT count(*) FROM demo.crm.orders",
+    ],
+)
+def test_the_allow_list_keeps_what_an_agent_needs(sql):
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql(sql, session_catalog="demo") is True
+
+
+def test_an_opened_show_still_refuses_the_system_catalog():
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    opened = frozenset({"SHOW STATS", "EXPLAIN"})
+    assert is_read_only_sql("SHOW STATS FOR system.runtime.queries", extra_reads=opened) is False
+    assert (
+        is_read_only_sql("EXPLAIN SELECT * FROM system.runtime.queries", extra_reads=opened)
+        is False
+    )
+    assert is_read_only_sql("EXPLAIN ANALYZE SELECT 1", extra_reads=opened) is False
+
+
+def test_parse_extra_reads_folds_case_and_spaces_and_refuses_an_unknown_name():
+    from akko_mcp_trino.sql_guard import parse_extra_reads
+
+    assert parse_extra_reads("") == frozenset()
+    assert parse_extra_reads(" , ") == frozenset()
+    assert parse_extra_reads("show  stats, explain") == {"SHOW STATS", "EXPLAIN"}
+    with pytest.raises(ValueError, match="unknown command 'SHOW STAT'"):
+        parse_extra_reads("SHOW STAT")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 1 EXCEPT SELECT 2",
+        "SELECT 1 INTERSECT SELECT 2",
+        "VALUES (1), (2)",
+        "(SELECT 1)",
+        "-- a comment first\nSELECT 1",
+        "/* a comment */ SHOW TABLES FROM demo.crm",
+        "-- a comment\nDESCRIBE demo.crm.orders",
+        'DESCRIBE "demo"."crm"."orders"',
+        "DESCRIBE crm.orders",
+    ],
+)
+def test_reads_an_agent_writes_pass(sql):
+    """The review of 0.7.1: set operations, VALUES, a parenthesized read and a comment
+    before the statement are reads too."""
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql(sql, session_catalog="demo") is True
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "PRAGMA x",
+        "DESCRIBE FORMATTED demo.crm.orders",
+        "DESCRIBE HISTORY demo.crm.orders",
+        "DESCRIBE SELECT 1",
+        "describe input q",
+        "-- c\nDESCRIBE OUTPUT q",
+        "DESCRIBE\tINPUT q",
+        "DESCRIBE a.b.c.d",
+        "DESCRIBE 'demo'",
+        "DESCRIBE OUTPUT q x",
+        "DESCRIBE system.runtime.queries",
+        'DESCRIBE "system".runtime.queries',
+        "SHOW /* c */ STATS FOR demo.crm.orders",
+        "-- c\nSHOW STATS FOR demo.crm.orders",
+        "/* c */ EXPLAIN SELECT 1",
+        "SHOW",
+        "SELECT 1 EXCEPT SELECT * FROM system.runtime.queries",
+        "VALUES (1) UNION SELECT * FROM TABLE(pg.system.query(query => 'select 1'))",
+    ],
+)
+def test_other_forms_stay_refused(sql):
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql(sql, session_catalog="demo") is False
+
+
+def test_describe_of_a_short_name_is_refused_when_the_session_catalog_is_system():
+    from akko_mcp_trino.sql_guard import is_read_only_sql
+
+    assert is_read_only_sql("DESCRIBE runtime.queries", session_catalog="system") is False
+    assert is_read_only_sql("DESCRIBE demo.crm.orders", session_catalog="system") is True

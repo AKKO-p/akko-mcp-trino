@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+A security release that also changes one default: the user is read from `sub`. With Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading, including when you follow the `0.7` image tag. See [MIGRATING.md](MIGRATING.md).
+
+### Security
+- Read commands go by an allow-list: `SELECT`, `DESCRIBE` of a table, and `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` and `SHOW FUNCTIONS`. Any other command is refused with `kind` `read_only`, including one a later Trino adds. Before, any `SHOW`, `DESCRIBE` and `EXPLAIN` of a read was accepted. Trino answers some reads past a row filter or a column mask: `SHOW STATS` gives the lowest and highest value and the row count of the whole table, rows a row filter hides included; `EXPLAIN` prints the row filter's predicate, the mask's expression and the table's row count; `SHOW CREATE` prints a view's query; `SHOW GRANTS`, `SHOW ROLES` and `SHOW SESSION` show the access setup. `DESCRIBE INPUT` and `DESCRIBE OUTPUT` are refused too.
+- A comment before the statement no longer hides its first word: the guard reads it as Trino does. `DESCRIBE` accepts a table name of one to three parts and nothing else (`DESCRIBE FORMATTED`, `DESCRIBE HISTORY`, `DESCRIBE INPUT`, `DESCRIBE OUTPUT` are refused).
+- `explain_query` checks a statement without printing its plan: it asks Trino for `EXPLAIN (TYPE VALIDATE)`, as the caller, and answers `{"valid": true}` or the error, with its `kind`, as before.
+
+### Changed
+- **The user is read from `sub` by default**, the OpenID Connect standard. Before, the server read `preferred_username`, else `sub`. An identity provider whose `sub` is an opaque id the access rules do not know, such as Keycloak, sets `MCP_JWT_USER_CLAIM=preferred_username` (see MIGRATING.md).
+
+### Fixed
+- `execute_query` accepts the reads it refused although its description promised them: `EXCEPT`, `INTERSECT`, `VALUES`, a parenthesized `SELECT`, and a read preceded by a comment. A write or a table function nested in them is still refused.
+
+### Added
+- `MCP_EXTRA_READ_COMMANDS` (none by default): the read commands the allow-list refuses, opened one by one by the administrator, comma-separated: `EXPLAIN` (which also brings back the plan in `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES` (with `SHOW CURRENT ROLES` and `SHOW ROLE GRANTS`), `SHOW SESSION`. Open one only where no row filter or column mask needs to hold. The server says which are open at start, in `--check` and to every MCP host; an unknown name refuses to start. The `system` catalog and `EXPLAIN ANALYZE` stay refused whatever is opened.
+- `MCP_JWT_USER_CLAIM` (`sub` by default): the claim of a caller's token that names the user. `sub` is the OpenID Connect standard, the stable and unique identifier the issuer gives the user. A token without it is refused, never read from another claim.
+- `MCP_JWT_ALGORITHMS` (`RS256` by default): the signature algorithms a caller's token may use, comma-separated, public-key algorithms only (`RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, `ES512`), for an identity provider that signs with RS512 or rotates between two. A shared-secret algorithm (`HS256`...), `none` or an empty list refuses to start.
+- For plugins: `akko_mcp_trino.sql_guard.is_read_only_sql` takes `extra_reads`, and `parse_extra_reads(text)` reads the setting.
+
 ## [0.7.0] - 2026-11-01
 
 Two discovery tools, paged lists, explained errors. Nothing is removed; one helper for plugins changes its signature. See [MIGRATING.md](MIGRATING.md).

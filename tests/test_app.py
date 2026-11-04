@@ -454,6 +454,33 @@ def test_cli_check_reports_effective_config_without_secrets(monkeypatch, capsys)
     assert "token exchange: https://idp/token as client mcp-server (secret set)" in out
     assert "tok-secret" not in out and "exchange-secret" not in out, "a secret leaked"
     assert "extensions: none" in out and "WARNING" not in out
+    assert "token signatures: RS256; user from: sub" in out
+
+
+def test_cli_check_says_the_token_algorithms_and_the_user_claim(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    _clean_identity_env(monkeypatch)
+    for name, value in _JWT_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("MCP_JWT_ALGORITHMS", " rs256, RS512,RS256")
+    monkeypatch.setenv("MCP_JWT_USER_CLAIM", "preferred_username")
+    assert check_config(Config.from_env()) == 0
+    out = capsys.readouterr().out
+    assert "token signatures: RS256,RS512; user from: preferred_username" in out  # as applied
+
+
+def test_cli_check_shows_a_malformed_algorithm_setting_as_written(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    _clean_identity_env(monkeypatch)
+    for name, value in _JWT_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("MCP_JWT_ALGORITHMS", "HS256")
+    assert check_config(Config.from_env()) == 2
+    assert "token signatures: HS256;" in capsys.readouterr().out
 
 
 def test_cli_check_of_the_defaults_names_what_the_safe_mode_needs(monkeypatch, capsys):

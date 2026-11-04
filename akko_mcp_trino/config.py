@@ -9,7 +9,34 @@ An extension reads its own settings from the environment it is given (see
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
+
+from .sql_guard import parse_extra_reads
+
+# The token signature algorithms the server may accept: public-key ones only, verified
+# against the issuer's JWKS.
+JWT_ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512")
+
+
+def parse_jwt_algorithms(text: str) -> list[str]:
+    """The algorithms named in ``MCP_JWT_ALGORITHMS``, comma-separated, upper-cased, in
+    order, once each; raises ValueError on none or on one outside ``JWT_ALGORITHMS``."""
+    names: list[str] = []
+    for raw in text.split(","):
+        name = raw.strip().upper()
+        if not name or name in names:
+            continue
+        if name not in JWT_ALGORITHMS:
+            raise ValueError(
+                f"MCP_JWT_ALGORITHMS: {raw.strip()!r} is not accepted; public-key "
+                f"algorithms only: {', '.join(JWT_ALGORITHMS)}"
+            )
+        names.append(name)
+    if not names:
+        raise ValueError("MCP_JWT_ALGORITHMS is empty: name one algorithm at least, RS256 for one")
+    return names
+
 
 # Defaults shared with the tools' registration, so a page and a bound never drift apart.
 DEFAULT_MAX_ROWS = 100
@@ -95,6 +122,16 @@ class Config:
     extensions: str = ""
     # Tolerance on exp/nbf/iat for clock drift between the issuer and this server.
     jwt_leeway_seconds: int = 30
+    # The signature algorithms a caller's token may use, comma-separated: public-key
+    # algorithms only (RS, PS, ES). A shared-secret algorithm (HS*) or `none` refuses to
+    # start: the server verifies against the issuer's published public keys.
+    jwt_algorithms: str = "RS256"
+    # The claim of a caller's token that names the user, as the identity provider and the
+    # access rules know them. `sub`, the default, is the OpenID Connect standard: the
+    # stable, unique identifier the issuer gives the user. An issuer whose `sub` is an
+    # opaque id the access rules do not know (Keycloak's UUID) names another claim
+    # (`preferred_username`, `upn`, `uid`...). A token without it is refused.
+    jwt_user_claim: str = "sub"
     # This server's canonical URI (RFC 8707, RFC 9728), such as https://mcp.example.com/mcp.
     # Accepted as a token audience besides `MCP_OIDC_AUDIENCE`, named in the protected
     # resource metadata the server then publishes, and in the challenge of a 401.
@@ -131,6 +168,12 @@ class Config:
     search_max_words: int = DEFAULT_SEARCH_MAX_WORDS
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
+    # Read commands the allow-list refuses by default, named one by one by the
+    # administrator (comma-separated: EXPLAIN, SHOW STATS, SHOW CREATE, SHOW GRANTS,
+    # SHOW ROLES, SHOW SESSION). Trino answers them from the whole table or with the
+    # access rules themselves, past a row filter or a column mask. Empty, the default,
+    # opens none, and explain_query checks a statement without printing its plan.
+    extra_read_commands: str = ""
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -189,6 +232,20 @@ class Config:
                 f"MCP_CALL_TIMEOUT_SECONDS={self.call_timeout_seconds:g}: "
                 "search_columns would have no time left to search"
             )
+        try:
+            parse_extra_reads(self.extra_read_commands)
+        except ValueError as exc:
+            found.append(str(exc))
+        try:
+            parse_jwt_algorithms(self.jwt_algorithms)
+        except ValueError as exc:
+            found.append(str(exc))
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_:./#-]*", self.jwt_user_claim):
+            found.append(
+                f"MCP_JWT_USER_CLAIM={self.jwt_user_claim!r}: a claim name is a top-level claim, "
+                "letters, digits and _ : . / # - (sub, upn, preferred_username, "
+                "https://example.com/uid)"
+            )
         for name, value in (
             ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
             ("MCP_CALL_TIMEOUT_SECONDS", self.call_timeout_seconds),
@@ -224,6 +281,16 @@ class Config:
                 "MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns "
                 "refuses to search every catalog and searches a named catalog only"
             )
+        try:
+            extra = sorted(parse_extra_reads(self.extra_read_commands))
+        except ValueError:
+            extra = []  # a problem, said by problems()
+        if extra:
+            found.append(
+                f"MCP_EXTRA_READ_COMMANDS={', '.join(extra)}: Trino answers these from the "
+                "whole table or with the access rules themselves; a row filter or a column "
+                "mask does not hide what they show"
+            )
         return found
 
     @staticmethod
@@ -258,6 +325,9 @@ class Config:
             tool_plugins=os.environ.get("MCP_TOOL_PLUGINS", ""),
             extensions=os.environ.get("MCP_EXTENSIONS", ""),
             jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
+            extra_read_commands=os.environ.get("MCP_EXTRA_READ_COMMANDS", ""),
+            jwt_algorithms=os.environ.get("MCP_JWT_ALGORITHMS", "RS256"),
+            jwt_user_claim=os.environ.get("MCP_JWT_USER_CLAIM", "sub").strip() or "sub",
             resource_url=os.environ.get("MCP_RESOURCE_URL", ""),
             token_exchange_url=os.environ.get("TRINO_TOKEN_EXCHANGE_URL", ""),
             token_exchange_client_id=os.environ.get("TRINO_TOKEN_EXCHANGE_CLIENT_ID", ""),

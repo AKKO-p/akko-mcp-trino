@@ -75,7 +75,7 @@ def test_unverified_provider_returns_principal():
         _bearer(
             _unsafe_jwt(
                 {
-                    "preferred_username": "dave_steward",
+                    "sub": "dave_steward",
                     "email": "d@x",
                     "realm_access": {"roles": ["data-steward"]},
                 }
@@ -92,7 +92,7 @@ def test_unverified_provider_no_token_or_bad():
 
 # ---- JwksJwtAuth (real verification) ----
 def test_jwks_valid_token_returns_principal():
-    tok = _sign({"preferred_username": "mcp-user", "realm_access": {"roles": ["data-viewer"]}})
+    tok = _sign({"sub": "mcp-user", "realm_access": {"roles": ["data-viewer"]}})
     p = _jwks_provider().verify(_bearer(tok))
     assert p == auth.Principal(subject="mcp-user", roles=["data-viewer"])
 
@@ -125,8 +125,9 @@ def test_jwks_no_token_returns_none():
 
 
 # ---- build_auth (provider selection) ----
-def _cfg(auth_enabled, jwks_url=""):
+def _cfg(auth_enabled, jwks_url="", **kw):
     return Config(
+        **kw,
         trino_host="h",
         trino_identity_mode="service",
         query_timeout_seconds=0.0,
@@ -310,3 +311,159 @@ def test_a_server_with_no_audience_of_its_own_refuses_to_start():
         auth.build_auth(
             Config(**{**_cfg(True, jwks_url="https://kc/jwks").__dict__, "oidc_audience": ""})
         )
+
+
+def _rs512(claims=None):
+    payload = {"iss": _ISS, "aud": _AUD, "exp": int(time.time()) + 3600, **(claims or {})}
+    return pyjwt.encode(payload, _PRIV, algorithm="RS512")
+
+
+def _built_for(**kw):
+    provider = auth.build_auth(_cfg(True, jwks_url="https://kc.example/jwks", **kw))
+    provider._client = _FakeJwks()  # the keys, without the network
+    return provider
+
+
+def test_rs256_only_by_default_so_an_rs512_token_is_refused():
+    provider = _built_for()
+    assert provider.verify(_bearer(_sign({"sub": "u"}))).subject == "u"
+    assert provider.verify(_bearer(_rs512({"sub": "u"}))) is None
+
+
+def test_mcp_jwt_algorithms_accepts_the_algorithms_it_names():
+    """An identity provider that signs with RS512, or rotates from RS256 to RS512."""
+    provider = _built_for(jwt_algorithms="rs256, RS512")
+    assert provider.verify(_bearer(_sign({"sub": "u"}))).subject == "u"
+    assert provider.verify(_bearer(_rs512({"sub": "v"}))).subject == "v"
+
+
+@pytest.mark.parametrize("value", ["HS256", "none", "RS256,HS512", "", " , "])
+def test_a_shared_secret_algorithm_none_or_nothing_refuses_to_start(value):
+    from akko_mcp_trino.config import parse_jwt_algorithms
+
+    with pytest.raises(ValueError, match="MCP_JWT_ALGORITHMS"):
+        parse_jwt_algorithms(value)
+    assert any("MCP_JWT_ALGORITHMS" in p for p in _cfg(True, jwt_algorithms=value).problems())
+
+
+def test_mcp_jwt_user_claim_names_the_user_from_that_claim_only():
+    """An identity provider that puts the user in sub (the OpenID Connect standard) and
+    something else in preferred_username: MCP_JWT_USER_CLAIM=sub picks sub."""
+    provider = _built_for(jwt_user_claim="sub")
+    p = provider.verify(_bearer(_sign({"sub": "A12345", "preferred_username": "Jean D."})))
+    assert p.subject == "A12345"
+
+
+def test_a_token_without_the_named_claim_is_refused_not_read_from_another():
+    provider = _built_for(jwt_user_claim="upn")
+    assert provider.verify(_bearer(_sign({"sub": "A12345", "preferred_username": "x"}))) is None
+    assert provider.verify(_bearer(_sign({"upn": ""}))) is None
+    assert provider.verify(_bearer(_sign({"upn": ["A12345"]}))) is None
+    assert provider.verify(_bearer(_sign({"upn": "A12345"}))).subject == "A12345"
+
+
+def test_sub_names_the_user_by_default_the_openid_connect_standard():
+    """sub is the stable, unique identifier OpenID Connect gives the user: the default. A
+    token without it is refused, never read from preferred_username."""
+    provider = _built_for()
+    assert provider.verify(_bearer(_sign({"sub": "s", "preferred_username": "p"}))).subject == "s"
+    assert provider.verify(_bearer(_sign({"preferred_username": "p"}))) is None
+
+
+def test_an_issuer_whose_sub_is_an_opaque_id_names_preferred_username():
+    """Keycloak gives sub a UUID the access rules do not know."""
+    provider = _built_for(jwt_user_claim="preferred_username")
+    p = provider.verify(_bearer(_sign({"sub": "5f2c-uuid", "preferred_username": "carol"})))
+    assert p.subject == "carol"
+
+
+def test_an_empty_setting_falls_back_to_sub(monkeypatch):
+    monkeypatch.setenv("MCP_JWT_USER_CLAIM", "  ")
+    assert Config.from_env().jwt_user_claim == "sub"
+
+
+@pytest.mark.parametrize("value", ["sub", "upn", "preferred_username", "urn:oid:0.9.1", "x-uid"])
+def test_a_claim_name_is_accepted(value):
+    assert not any("MCP_JWT_USER_CLAIM" in p for p in _cfg(True, jwt_user_claim=value).problems())
+
+
+@pytest.mark.parametrize("value", ["a b", "sub;drop", "1abc", "é"])
+def test_a_malformed_claim_name_refuses_to_start(value):
+    assert any("MCP_JWT_USER_CLAIM" in p for p in _cfg(True, jwt_user_claim=value).problems())
+
+
+# ---- 0.7.1 review: what a token must never get through ----
+def _hs(claims, secret, alg="HS256", headers=None):
+    payload = {"iss": _ISS, "aud": _AUD, "exp": int(time.time()) + 600, **claims}
+    return pyjwt.encode(payload, secret, algorithm=alg, headers=headers)
+
+
+def test_a_shared_secret_token_signed_with_the_public_key_is_refused():
+    """Algorithm confusion: an HS256 token whose secret is the RSA public key."""
+    from cryptography.hazmat.primitives import serialization
+
+    pem = _PUB.public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    provider = _built_for(jwt_algorithms="RS256,RS512")
+    for alg in ("HS256", "HS512"):
+        try:
+            tok = _hs({"sub": "u"}, pem, alg)
+        except Exception:  # noqa: BLE001 - PyJWT may itself refuse to sign so
+            continue
+        assert provider.verify(_bearer(tok)) is None
+
+
+def test_an_unsigned_token_is_refused():
+    tok = pyjwt.encode(
+        {"iss": _ISS, "aud": _AUD, "exp": int(time.time()) + 600, "sub": "u"},
+        None,
+        algorithm="none",
+    )
+    assert _built_for().verify(_bearer(tok)) is None
+
+
+def test_a_token_without_exp_iss_or_aud_is_refused():
+    for drop in ("exp", "iss", "aud"):
+        payload = {"iss": _ISS, "aud": _AUD, "exp": int(time.time()) + 600, "sub": "u"}
+        del payload[drop]
+        tok = pyjwt.encode(payload, _PRIV, algorithm="RS256")
+        assert _jwks_provider().verify(_bearer(tok)) is None, drop
+
+
+def test_a_key_marked_with_an_algorithm_verifies_only_that_algorithm():
+    class _MarkedJwks:
+        def get_signing_key_from_jwt(self, token):
+            return type("K", (), {"key": _PUB, "_jwk_data": {"alg": "RS256"}})()
+
+    provider = auth.JwksJwtAuth(
+        "https://kc/jwks", _ISS, _AUD, jwks_client=_MarkedJwks(), algorithms=["RS256", "RS512"]
+    )
+    assert provider.verify(_bearer(_sign({"sub": "u"}))).subject == "u"
+    assert provider.verify(_bearer(_rs512({"sub": "u"}))) is None
+
+
+def test_the_class_built_directly_refuses_a_shared_secret_algorithm_and_reads_sub():
+    with pytest.raises(ValueError, match="MCP_JWT_ALGORITHMS"):
+        auth.JwksJwtAuth(
+            "https://kc/jwks", _ISS, _AUD, jwks_client=_FakeJwks(), algorithms=["HS256"]
+        )
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "s", "preferred_username": "p"})))
+    assert p.subject == "s"
+    assert _jwks_provider().verify(_bearer(_sign({"preferred_username": "p"}))) is None
+
+
+@pytest.mark.parametrize("value", [" alice", "alice ", " ", "al\nice", "a\tb", 42, ["A1"], ""])
+def test_a_user_that_is_not_clean_text_names_nobody(value):
+    assert _jwks_provider().verify(_bearer(_sign({"sub": value}))) is None
+
+
+def test_realm_access_that_is_not_an_object_gives_no_roles_not_an_error():
+    p = _jwks_provider().verify(_bearer(_sign({"sub": "u", "realm_access": ["x"]})))
+    assert p.subject == "u" and p.roles == []
+    assert auth.validate_token(_sign({"sub": "u", "realm_access": "x"})) is None
+
+
+@pytest.mark.parametrize("value", ["https://example.com/uid", "urn:oid:0.9.2342.19200300.100.1.1"])
+def test_a_url_style_claim_name_is_accepted(value):
+    assert not any("MCP_JWT_USER_CLAIM" in p for p in _cfg(True, jwt_user_claim=value).problems())

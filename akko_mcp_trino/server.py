@@ -22,6 +22,7 @@ from typing import Any, Callable, Iterable, Sequence, Tuple
 from . import __version__
 from .config import Config
 from .extensions import Extension
+from .sql_guard import parse_extra_reads
 from .tools import audited, register_query_tools
 from .trino_client import TrinoClient, resolve_identity
 
@@ -142,6 +143,7 @@ def build_server(
         search_max_words=config.search_max_words,
         search_max_word_length=config.search_max_word_length,
         search_reserve_seconds=config.search_reserve_seconds,
+        extra_reads=parse_extra_reads(config.extra_read_commands),
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)
     registrars = [r for ext in exts for r in ext.tool_registrars()]

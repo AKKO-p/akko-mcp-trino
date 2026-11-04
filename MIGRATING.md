@@ -1,5 +1,15 @@
 # Migrating
 
+## From 0.7.0 to 0.7.1
+
+A security release: reads that Trino answers past a row filter or a column mask are refused by default. It also reads the user from `sub`: **with Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading**, including when you follow the `0.7` image tag.
+
+- `execute_query` refuses every command outside its allow-list (`SELECT`, `DESCRIBE` of a table, `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS`, `SHOW FUNCTIONS`) with `kind` `read_only`. An agent that ran `SHOW STATS`, `EXPLAIN`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`, `DESCRIBE INPUT` or `DESCRIBE OUTPUT` now gets that refusal.
+- `explain_query` answers `{"valid": true}` instead of `{"plan": "..."}`, and its errors are unchanged. A client that only checked a statement keeps working; one that read the plan must ask the administrator to open `EXPLAIN`.
+- To keep the 0.7.0 behaviour for some of these commands, name them in `MCP_EXTRA_READ_COMMANDS`, for example `MCP_EXTRA_READ_COMMANDS="EXPLAIN, SHOW STATS"`. Do it only where no row filter or column mask needs to hold: Trino answers them from the whole table. The server says so at every start.
+- **The user is read from `sub`**, the OpenID Connect standard, and no longer from `preferred_username` first. With Keycloak, whose `sub` is a UUID, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading (Entra ID, Okta and Dex also give `sub` an opaque value: name the claim your rules know). Otherwise, in `impersonation` mode Trino runs every query as the caller's UUID, which its rules do not know; in `jwt` mode Trino reads the user from its own `principal-field`, and only the audit line and the extensions see the UUID. A token without the claim is refused. `--check` prints the claim in use (`user from: ...`).
+- For plugins: `is_read_only_sql(sql, session_catalog)` now refuses these commands too; pass `extra_reads=parse_extra_reads(...)` to open them.
+
 ## From 0.6 to 0.7
 
 Nothing is removed or renamed. One helper for plugins changes its third argument, and the extension guards run differently in `oauth2` mode.

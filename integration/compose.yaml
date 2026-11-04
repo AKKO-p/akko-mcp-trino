@@ -103,6 +103,7 @@ services:
       MCP_JWKS_URL: http://keycloak:8080/realms/integration/protocol/openid-connect/certs
       MCP_OIDC_ISSUER: https://keycloak:8443/realms/integration
       MCP_OIDC_AUDIENCE: akko-mcp
+      MCP_JWT_USER_CLAIM: preferred_username  # Keycloak's sub is a UUID
       MCP_RESOURCE_URL: http://mcp-jwt:3000/mcp
       TRINO_TOKEN_EXCHANGE_URL: https://keycloak:8443/realms/integration/protocol/openid-connect/token
       TRINO_TOKEN_EXCHANGE_CLIENT_ID: akko-mcp
@@ -136,6 +137,7 @@ services:
       MCP_JWKS_URL: http://keycloak:8080/realms/integration/protocol/openid-connect/certs
       MCP_OIDC_ISSUER: https://keycloak:8443/realms/integration
       MCP_OIDC_AUDIENCE: akko-mcp
+      MCP_JWT_USER_CLAIM: preferred_username  # Keycloak's sub is a UUID
 
   # Service mode with an open door, chosen explicitly: it must say so to every host.
   mcp-service:

@@ -225,12 +225,18 @@ python -m akko_mcp_trino
 Côté IdP, ce serveur a un client confidentiel autorisé à échanger des tokens, et
 l'audience de Trino lui est accessible. Avec Keycloak 26, activez *Standard token exchange* sur ce
 client et ajoutez-lui un mappeur d'audience vers le client Trino. Les clients des MCP hosts
-placent ce serveur dans l'audience de leurs tokens. Le dossier [`integration/`](integration/)
+placent ce serveur dans l'audience de leurs tokens. Le `sub` de Keycloak est un UUID que les
+règles de Trino ne connaissent pas : posez `MCP_JWT_USER_CLAIM=preferred_username` sur le serveur,
+et la même revendication dans le `principal-field` de Trino. Entra ID, Okta et Dex donnent aussi
+au `sub` une valeur opaque : nommez la revendication que vos règles connaissent (`upn`,
+`preferred_username`, `uid`...). Le serveur lit l'utilisateur dans `sub` par défaut
+(`MCP_JWT_USER_CLAIM`), et accepte les signatures RS256 par défaut (`MCP_JWT_ALGORITHMS`, par exemple
+`RS256,RS512`). Le dossier [`integration/`](integration/)
 contient un tel realm, testé à chaque pull request.
 
 Côté Trino : `http-server.authentication.type=JWT`, `http-server.authentication.jwt.key-file`
 réglé sur l'URL JWKS de l'IdP, `http-server.authentication.jwt.principal-field` sur la même
-revendication que celle lue par le serveur (`preferred_username` ou `sub`), et `required-audience`
+revendication que celle lue par le serveur (`MCP_JWT_USER_CLAIM`, `sub` par défaut), et `required-audience`
 sur l'audience de Trino. Deux personnes qui posent la même question obtiennent alors les réponses
 que leurs droits permettent. Un token dont l'audience est celle de Trino est refusé par le
 serveur.
@@ -329,7 +335,7 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 | `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
 | `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, `truncated` ; un échantillon gouverné sur demande ; ce qu'ajoutent les descripteurs d'une extension |
-| `explain_query` | `sql` | le plan de Trino pour une requête en lecture, sans l'exécuter |
+| `explain_query` | `sql` | `{"valid": true}` : Trino a analysé la requête en lecture sous l'identité de l'appelant, sans l'exécuter ; le plan seulement si `EXPLAIN` figure dans `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | colonnes, lignes, nombre de lignes, `truncated` |
 
 Chaque tool passe par Trino sous l'identité du mode choisi, les tools de liste compris : Trino ne
@@ -341,7 +347,20 @@ sauterait pour un tool en lecture seule. Les sept autres tools ne font que lire,
 réglage.
 
 Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans le SQL.
-`execute_query` accepte tout SQL que Trino accepte, **pourvu que ce soit une lecture** : la requête
+`execute_query` accepte tout SQL que Trino accepte, **pourvu que ce soit une lecture**. Les
+commandes passent par une liste blanche : `SELECT`, `DESCRIBE` d'une table, et `SHOW CATALOGS`,
+`SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` et `SHOW FUNCTIONS`. Toute autre commande est refusée,
+y compris une commande qu'une version future de Trino ajouterait. Trino répond à certaines lectures
+sans tenir compte d'un filtre de lignes ou d'un masque de colonne. Elles sont refusées, sauf si
+l'administrateur les nomme dans `MCP_EXTRA_READ_COMMANDS` : `SHOW STATS` donne la plus petite et la
+plus grande valeur et le nombre de lignes de toute la table, lignes filtrées comprises ; `EXPLAIN`
+affiche le prédicat du filtre de lignes, l'expression du masque et le nombre de lignes de la table ;
+`SHOW CREATE` affiche la requête d'une vue ; `SHOW GRANTS`, `SHOW ROLES` et `SHOW SESSION` montrent
+la configuration des droits. Le serveur ne renvoie jamais les statistiques d'une requête que Trino
+calcule (`processedRows`, `processedBytes`) : elles comptent les lignes lues avant le filtre de
+lignes. Un filtre de lignes protège les lignes du résultat, pas les statistiques de Trino : pour une
+colonne dont les valeurs doivent rester cachées, un masque de colonne tient là où un filtre de lignes
+ne tient pas, y compris pour les utilisateurs qui interrogent Trino directement. La requête
 est analysée en arbre et refusée si elle contient plus d'une instruction, ou si un `INSERT`,
 `UPDATE`, `DELETE`, `MERGE`, `CREATE`, `DROP`, `ALTER`, `GRANT`, `CALL` ou `SET` apparaît n'importe
 où dans l'arbre, y compris dans une CTE, une sous-requête ou l'instruction qu'un `EXPLAIN` explique.

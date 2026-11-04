@@ -51,7 +51,7 @@ class FakeClient:
             raise self._raises
 
 
-_BUDGETS = ("describe_schema_tables", "describe_schema_columns")
+_BUDGETS = ("describe_schema_tables", "describe_schema_columns", "extra_reads")
 
 
 def _registered(read_only=True, max_rows=100, max_catalogs=10000, **kw):
@@ -560,15 +560,54 @@ def test_describe_table_sample_is_capped_and_never_negative():
     assert len(client.calls) == calls_before + 1, "a negative sample must not query data"
 
 
-def test_explain_query_explains_reads_only():
-    mcp, client = _registered(
-        result={"columns": ["Query Plan"], "rows": [["Fragment 0"], ["  Output"]], "row_count": 2}
-    )
+def test_explain_query_checks_without_a_plan_by_default():
+    """0.7.1: a plan prints the row filter's predicate, the mask's expression and the
+    table's row count, so explain_query only asks Trino to analyze the statement."""
+    mcp, client = _registered(result={"columns": ["Valid"], "rows": [[True]], "row_count": 1})
     out = json.loads(mcp.tools["explain_query"]("SELECT 1;"))
-    assert out["plan"] == "Fragment 0\n  Output" and client.calls[-1][0] == "EXPLAIN SELECT 1"
+    assert out == {"valid": True}
+    assert client.calls[-1][0] == "EXPLAIN (TYPE VALIDATE) SELECT 1"
+    assert "plan" not in mcp.tools["explain_query"].__doc__.split("Returns", 1)[1]
     assert (
         "error" in json.loads(mcp.tools["explain_query"]("DROP TABLE t")) and len(client.calls) == 1
     )
+
+
+def test_explain_query_prints_the_plan_once_explain_is_opened():
+    mcp, client = _registered(
+        result={"columns": ["Query Plan"], "rows": [["Fragment 0"], ["  Output"]], "row_count": 2},
+        extra_reads=frozenset({"EXPLAIN"}),
+    )
+    out = json.loads(mcp.tools["explain_query"]("SELECT 1;"))
+    assert out["plan"] == "Fragment 0\n  Output" and client.calls[-1][0] == "EXPLAIN SELECT 1"
+    assert '{"plan": "..."}' in mcp.tools["explain_query"].__doc__
+
+
+@pytest.mark.parametrize(
+    "sql",
+    ["SHOW STATS FOR c.s.t", "EXPLAIN SELECT * FROM c.s.t", "SHOW CREATE VIEW c.s.v"],
+)
+def test_execute_query_refuses_reads_past_the_access_rules_by_default(sql):
+    mcp, client = _registered()
+    out = json.loads(mcp.tools["execute_query"](sql))
+    assert out["kind"] == "read_only" and client.calls == []
+    assert "SHOW STATS" not in mcp.tools["execute_query"].__doc__
+    assert "SHOW STATS" not in out["error"]
+
+
+def test_execute_query_runs_an_opened_read_and_says_so():
+    mcp, client = _registered(extra_reads=frozenset({"SHOW STATS"}))
+    json.loads(mcp.tools["execute_query"]("SHOW STATS FOR c.s.t"))
+    assert client.calls[-1][0] == "SHOW STATS FOR c.s.t"
+    assert "and SHOW STATS" in mcp.tools["execute_query"].__doc__
+    refused = json.loads(mcp.tools["execute_query"]("SHOW CREATE VIEW c.s.v"))
+    assert "and SHOW STATS are allowed" in refused["error"]  # the refusal says what is open
+
+
+def test_explain_query_refuses_a_command_it_would_not_run():
+    mcp, client = _registered()
+    out = json.loads(mcp.tools["explain_query"]("SHOW STATS FOR c.s.t"))
+    assert out["kind"] == "read_only" and client.calls == []
 
 
 def test_listing_errors_are_returned_not_raised():
