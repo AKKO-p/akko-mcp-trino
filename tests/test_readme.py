@@ -11,6 +11,8 @@ import json
 import pathlib
 import re
 
+import pytest
+
 from akko_mcp_trino.config import Config
 
 README = (pathlib.Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
@@ -120,17 +122,35 @@ def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path):
         "MCP_CONTEXT_FILE_SERVE_OWNER",
     }
     path = tmp_path / "context.json"
-    table = {"catalog": "demo", "schema": "sales", "table": "orders", "owner": "sales-team"}
-    document = {"version": 1, "catalogs": ["demo"], "tables": [table], "terms": {}}
+    # What the file declares, so that an allow list has something to let through.
+    table = {
+        "catalog": "demo",
+        "schema": "sales",
+        "table": "orders",
+        "owner": "sales-team",
+        "terms": ["t1", "t2"],
+        "tags": [{"name": "x", "set": "a"}, {"name": "y", "set": "*"}],
+        "properties": {"p": {"value": "v", "set": "a"}, "q": {"value": "v", "set": "*"}},
+    }
+    terms = {
+        "t1": {"name": "T1", "glossary": "a"},
+        "t2": {"name": "T2", "glossary": "*"},
+    }
+    document = {"version": 1, "catalogs": ["demo"], "tables": [table], "terms": terms}
     path.write_text(json.dumps(document), encoding="utf-8")
     sets = from_env({"MCP_CONTEXT_FILE": str(path)}).served_sets()
     assert rows["MCP_CONTEXT_FILE"].strip() == "none"
+    with pytest.raises(ValueError, match="MCP_CONTEXT_FILE is not set"):
+        from_env({})
     for name, kind in (
         ("MCP_CONTEXT_FILE_GLOSSARIES", GLOSSARY),
         ("MCP_CONTEXT_FILE_CLASSIFICATIONS", CLASSIFICATION),
         ("MCP_CONTEXT_FILE_PROPERTIES", PROPERTY),
     ):
         assert rows[name].strip() == "none" and sets[kind] == frozenset(), name
+        # the README says: exact names, `*` is a name, empty entries are ignored
+        named = from_env({"MCP_CONTEXT_FILE": str(path), name: "a, ,*"}).served_sets()
+        assert named[kind] == frozenset({"a", "*"}), name
     assert rows["MCP_CONTEXT_FILE_SERVE_OWNER"].strip() == "`false`"
     assert sets[OWNER] == frozenset()
     served = from_env({"MCP_CONTEXT_FILE": str(path), "MCP_CONTEXT_FILE_SERVE_OWNER": "true"})

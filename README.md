@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-1148%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1153%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.7.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -135,7 +135,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1148 tests at 100 % line and branch coverage, including in-process suites on
+- **Small and proven.** 1153 tests at 100 % line and branch coverage, including in-process suites on
   the real SDK for all three transports, a live run against Keycloak and Trino in CI
   ([`integration/`](integration/)), and a product-neutral guard.
 
@@ -1058,7 +1058,7 @@ reaches the agent, only a status. Nothing in these lines is wired into a tool ye
 | `MCP_CONTEXT_TTL_SECONDS` | how long a context read is kept, 0 or more | `900` |
 | `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | the bound of the caches of tables and of glossary terms, 1 at least; each bound counts the length of the JSON form of the cached entries, and the process holds about three to four times that in memory, so size the pod for that | `134217728`, `16777216` |
 | `MCP_VISIBILITY_TTL_SECONDS` | how long what Trino listed for a caller is kept, 0 or more | `60` |
-| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | the bound of that cache (each entry counts its key as well as its value; measured, the process holds 4.4 times that in memory for the entries of listed tables and 3.6 times for those of 300 selected columns, so size the pod for about five times that), and the most names it keeps for one caller, 1 at least | `33554432`, `10000` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | the bound of that cache (each entry counts its key as well as its value; measured with fresh strings, the process holds 3.6 to 8 times that in memory, so size the pod for eight times that), and the most names it keeps for one caller, 1 at least | `33554432`, `10000` |
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true`: context is served only for tables the caller may read | `false` |
 | `MCP_CONTEXT_CANARY` | one table, `catalog.schema.table`, that no caller of this server may see: context is served to a caller only while Trino hides it from them; unset is warned of when a provider is loaded | none |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | the longest text of one context field, the longest context in one response, and the most columns described in one table, 1 at least | `500`, `60000`, `500` |

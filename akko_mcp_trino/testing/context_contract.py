@@ -695,8 +695,8 @@ class ContextContract:
         _require(not leaked, f"the logs and check_lines() must never hold an object name: {leaked}")
 
     def test_a_factory_refusal_never_holds_the_secret(self, harness: ContractHarness) -> None:
-        """A factory that refuses a malformed setting (``ValueError``) does not put the secret
-        in its message, the causes included: ``--check`` prints that message. Each setting
+        """A factory that refuses a malformed setting, by whatever exception, does not put the
+        secret in its message, the causes included: ``--check`` prints that message. Each setting
         that holds the secret is given back padded with white space, then in quotes."""
         secret = harness.secret
         holders = [name for name, value in harness.env.items() if secret in value]
@@ -709,11 +709,11 @@ class ContextContract:
                 try:
                     with _running(harness, {**harness.env, name: malformed}):
                         pass
-                except ValueError as error:
+                except Exception as error:
                     refusals.append("".join(traceback.format_exception(error)))
         _require(
             not any(_holds_secret(text, secret) for text in refusals),
-            "a factory's ValueError must never hold the secret, as written or encoded",
+            "a factory's exception must never hold the secret, as written or encoded",
         )
 
     def test_the_adapter_imports_neither_the_trino_client_nor_the_identity(

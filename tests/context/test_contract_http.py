@@ -346,6 +346,16 @@ class Echoing(Recorded):
         super().__init__(env, transport)
 
 
+class Typing(Recorded):
+    """Puts a token it cannot use in a TypeError."""
+
+    def __init__(self, env, transport):
+        token = env.get("REC_TOKEN", "")
+        if token != token.strip() or token.startswith('"'):
+            raise TypeError(f"REC_TOKEN {token!r} is not a usable token")
+        super().__init__(env, transport)
+
+
 class Chatty(Recorded):
     """Prints its token."""
 
@@ -533,7 +543,12 @@ REFLECT = "test_served_sets_reflect_the_configuration"
         (
             Echoing,
             "test_a_factory_refusal_never_holds_the_secret",
-            "a factory's ValueError must never hold the secret",
+            "a factory's exception must never hold the secret",
+        ),
+        (
+            Typing,
+            "test_a_factory_refusal_never_holds_the_secret",
+            "a factory's exception must never hold the secret",
         ),
         (Chatty, LOGS, r"the logs and check_lines\(\) must never hold the secret"),
         (Remembering, LOGS, r"the logs and check_lines\(\) must never hold the secret"),

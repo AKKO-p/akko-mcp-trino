@@ -151,7 +151,7 @@ donnez.
   peut seulement refuser ce que le cœur autorise, jamais l'élargir.
 - **N'importe quel MCP host, n'importe quel modèle.** Cursor, Claude Desktop, VS Code, le SDK
   Python… Mistral, ou tout modèle compatible OpenAI avec l'agent d'exemple.
-- **Petit et prouvé.** 1148 tests à 100 % de couverture des lignes et des branches, dont des suites
+- **Petit et prouvé.** 1153 tests à 100 % de couverture des lignes et des branches, dont des suites
   sur le vrai SDK pour les trois transports, une exécution réelle contre Keycloak et Trino en CI
   ([`integration/`](integration/)) et une garde de neutralité produit.
 
@@ -579,7 +579,7 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_CONTEXT_TTL_SECONDS` | durée de conservation d'une lecture, 0 ou plus | `900` |
 | `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | borne des caches des tables et des termes de glossaire, 1 au moins ; chaque borne compte la longueur de la forme JSON des entrées gardées, et le processus en tient environ trois à quatre fois plus en mémoire, dimensionner le pod en conséquence | `134217728`, `16777216` |
 | `MCP_VISIBILITY_TTL_SECONDS` | durée de conservation de ce que Trino a listé pour un appelant, 0 ou plus | `60` |
-| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | borne de ce cache (chaque entrée compte sa clé comme sa valeur ; mesuré, le processus en tient 4,4 fois plus en mémoire pour les entrées de tables listées et 3,6 fois plus pour celles de 300 colonnes sélectionnées, dimensionner le pod pour environ cinq fois plus), et noms gardés au plus pour un appelant, 1 au moins | `33554432`, `10000` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | borne de ce cache (chaque entrée compte sa clé comme sa valeur ; mesuré avec des chaînes neuves, le processus en tient de 3,6 à 8 fois plus en mémoire, dimensionner le pod pour huit fois plus), et noms gardés au plus pour un appelant, 1 au moins | `33554432`, `10000` |
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true` : contexte servi seulement pour les tables que l'appelant peut lire | `false` |
 | `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'aucun appelant de ce serveur ne doit voir : le contexte n'est servi à un appelant que tant que Trino la lui cache | aucune |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, 1 au moins | `500`, `60000`, `500` |
