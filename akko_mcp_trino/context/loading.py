@@ -81,7 +81,10 @@ def _build(
 
 
 def close_providers(providers: Sequence[ContextProvider]) -> None:
-    """Release what providers hold open; a failure to close is not raised."""
+    """Release what providers hold open; a failure to close is not raised.
+
+    It runs its own event loop: never call it from a running event loop.
+    """
     for provider in providers:
         try:
             asyncio.run(provider.aclose())

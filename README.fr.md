@@ -594,10 +594,13 @@ vides sont ignorées. Le fichier peut déclarer plus qu'il ne sert ; seul ce qui
 autorisé est servi. `--check` affiche le fichier, le nombre de tables et de termes, et les
 ensembles servis.
 
-Le fichier est relu, hors de la boucle d'événements, quand il change. Un fichier modifié qui
+Le fichier est relu, hors de la boucle d'événements, quand il change : un changement est vu dans
+un délai d'un `MCP_CONTEXT_TTL_SECONDS`, car le contexte déjà lu est mis en cache, et les
+ensembles servis reflètent la dernière lecture du fichier. Un fichier modifié qui
 devient invalide garde le dernier contenu valide, et un avertissement nomme le réglage et le
-chemin. Une clé `values` ou `samples`, où que ce soit, refuse le fichier : un contexte ne porte
-jamais de données.
+chemin. Un champ `values` ou `samples`, où que ce soit, refuse le fichier : un contexte ne porte
+jamais de données. Une table, une colonne, un terme ou une propriété *nommé* `values` ou `samples`
+est permis.
 
 Les noms s'écrivent en minuscules, comme Trino les liste : le catalogue, le schéma, la table et les
 clés de colonnes. Le cœur les compare exactement. Un fichier qui contient deux fois la même table,

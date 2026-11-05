@@ -467,3 +467,128 @@ def test_the_file_is_read_off_the_loop(tmp_path, monkeypatch):
 
 def test_file_provider_is_a_class():
     assert FileProvider.name == "file"
+
+
+# ---- fix round 1
+
+
+def test_a_catalog_added_to_the_file_is_seen_through_maps(tmp_path):
+    path = tmp_path / "ctx.json"
+    provider = from_env(_env(_write(path, DOC, 1_000_000_000)))
+    assert not provider.maps("fresh")
+    doc = json.loads(json.dumps(DOC))
+    doc["catalogs"].append("fresh")
+    doc["tables"].append({"catalog": "fresh", "schema": "s", "table": "t", "description": "New"})
+    _write(path, doc, 2_000_000_000)
+    assert provider.maps("fresh")  # changed since the last read: any catalog may be new
+    assert provider.maps("unrelated")
+    fresh = TableRef("fresh", "s", "t")
+    assert _describe(provider, [fresh])[fresh].description == "New"
+    assert provider.maps("fresh") and not provider.maps("unrelated")
+
+
+def test_maps_does_not_read_the_file(tmp_path, monkeypatch):
+    path = tmp_path / "ctx.json"
+    provider = from_env(_env(_write(path, DOC, 1_000_000_000)))
+    _write(path, DOC, 2_000_000_000)
+    monkeypatch.setattr(file_module, "_parse", lambda *a: pytest.fail("parsed on the loop"))
+    assert provider.maps("anything")
+
+
+def test_a_missing_file_makes_maps_ask_for_a_read(tmp_path):
+    path = tmp_path / "ctx.json"
+    provider = from_env(_env(_write(path, DOC, 1_000_000_000)))
+    path.unlink()
+    assert provider.maps("unrelated")
+    _describe(provider)
+    assert not provider.maps("unrelated") and provider.maps("demo")
+
+
+def test_names_may_be_values_or_samples(tmp_path):
+    doc = {
+        "version": 1,
+        "catalogs": ["demo"],
+        "tables": [
+            {
+                "catalog": "demo",
+                "schema": "values",
+                "table": "samples",
+                "columns": {"values": {"properties": {"samples": {"value": "v", "set": "policy"}}}},
+                "properties": {"values": {"value": "v", "set": "policy"}},
+            }
+        ],
+        "terms": {"samples": {"name": "S", "glossary": "sales"}},
+    }
+    provider = _provider(tmp_path, doc)
+    ref = TableRef("demo", "values", "samples")
+    ctx = _describe(provider, [ref])[ref]
+    assert set(ctx.columns) == {"values"} and set(ctx.properties) == {"values"}
+    assert set(ctx.columns["values"].properties) == {"samples"}
+    assert set(_terms(provider, ["samples"])) == {"samples"}
+
+
+def test_a_field_named_values_is_still_refused_next_to_names(tmp_path):
+    doc = {
+        "version": 1,
+        "tables": [{"catalog": "a", "schema": "b", "table": "c", "values": [1]}],
+    }
+    with pytest.raises(ValueError, match="carries data"):
+        _provider(tmp_path, doc)
+    doc["tables"][0] = {
+        "catalog": "a",
+        "schema": "b",
+        "table": "c",
+        "columns": {"x": {"samples": 1}},
+    }
+    with pytest.raises(ValueError, match="carries data"):
+        _provider(tmp_path, doc)
+    doc["tables"][0] = {
+        "catalog": "a",
+        "schema": "b",
+        "table": "c",
+        "columns": {"x": {"properties": {"p": {"values": 1}}}},
+    }
+    with pytest.raises(ValueError, match="carries data"):
+        _provider(tmp_path, doc)
+    doc["tables"][0] = {
+        "catalog": "a",
+        "schema": "b",
+        "table": "c",
+        "properties": {"p": {"samples": 1}},
+    }
+    with pytest.raises(ValueError, match="carries data"):
+        _provider(tmp_path, doc)
+    doc["tables"] = {"values": 1}
+    with pytest.raises(ValueError, match="carries data"):
+        _provider(tmp_path, doc)
+    doc["tables"] = [{"columns": {"values": 1}, "properties": {"samples": 1}}]
+    with pytest.raises(ValueError, match="not a valid context file"):
+        _provider(tmp_path, doc)
+    doc["tables"] = [{"columns": [{"values": 1}], "properties": [{"samples": 1}]}]
+    with pytest.raises(ValueError, match="carries data"):
+        _provider(tmp_path, doc)
+    assert _provider(
+        tmp_path,
+        {"version": 1, "terms": []}.copy() | {"terms": {"values": {"name": "n", "glossary": "g"}}},
+    )
+
+
+def test_a_symlink_swapped_atomically_is_read_again(tmp_path):
+    first, second = tmp_path / "..v1", tmp_path / "..v2"
+    _write(first, DOC, 1_000_000_000)
+    changed = json.loads(json.dumps(DOC))
+    changed["tables"][0]["description"] = "Swapped in"
+    _write(second, changed, 1_000_000_000)
+    link = tmp_path / "ctx.json"
+    link.symlink_to(first)
+    provider = from_env(_env(link))
+    assert _describe(provider)[ORDERS].description == "One row per order"
+    staging = tmp_path / "staging"
+    staging.symlink_to(second)
+    os.replace(staging, link)
+    assert _describe(provider)[ORDERS].description == "Swapped in"
+
+
+def test_a_file_nested_too_deep_is_refused_like_bad_json(tmp_path):
+    with pytest.raises(ValueError, match=r"not a valid context file \(it is not JSON\)"):
+        _provider(tmp_path, "[" * 200_000 + "]" * 200_000)

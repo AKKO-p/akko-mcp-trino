@@ -1068,9 +1068,12 @@ The allow lists are exact names: `*` is the name `*`, never a wildcard, and empt
 ignored. The file may declare more than it serves; only what is declared and allowed is served.
 `--check` prints the file, how many tables and terms it holds, and the sets served.
 
-The file is read again, off the event loop, when it changes. A changed file that is no longer valid
+The file is read again, off the event loop, when it changes: a change is seen within one
+`MCP_CONTEXT_TTL_SECONDS`, because context already read is cached, and the sets the provider serves
+reflect the last time the file was read. A changed file that is no longer valid
 keeps the last good content, and one warning names the setting and the path. A `values` or
-`samples` key anywhere in the file refuses it: a context never holds data.
+`samples` field anywhere in the file refuses it: a context never holds data. A table, column, term
+or property that is *named* `values` or `samples` is fine.
 
 Names are written in lower case, as Trino lists them: the catalog, the schema, the table and the
 column keys. The core compares them exactly. A file that holds the same table, or the same column,

@@ -18,7 +18,7 @@ import logging
 import os
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
@@ -82,14 +82,53 @@ class _Allowed:
 
 
 def _has_data_key(node: Any) -> bool:
+    """Tell whether any key of the document, at any depth, is a data field."""
+    return _fields(node, {})
+
+
+def _fields(node: Any, special: Mapping[str, Callable[[Any], bool]]) -> bool:
+    """Check the keys of an object as field names, and its values as ``special`` says."""
     if isinstance(node, dict):
         return any(
-            (isinstance(key, str) and key.lower() in _DATA_KEYS) or _has_data_key(value)
+            key.lower() in _DATA_KEYS or special.get(key, _has_data_key)(value)
             for key, value in node.items()
         )
     if isinstance(node, list):
         return any(_has_data_key(item) for item in node)
     return False
+
+
+def _keys_are_names(each: Callable[[Any], bool]) -> Callable[[Any], bool]:
+    """Check an object whose keys are names (a column, a term, a property), not fields."""
+
+    def check(node: Any) -> bool:
+        if isinstance(node, dict):
+            return any(each(value) for value in node.values())
+        return _has_data_key(node)
+
+    return check
+
+
+def _column_has_data(node: Any) -> bool:
+    return _fields(node, {"properties": _keys_are_names(_has_data_key)})
+
+
+def _table_has_data(node: Any) -> bool:
+    special = {
+        "columns": _keys_are_names(_column_has_data),
+        "properties": _keys_are_names(_has_data_key),
+    }
+    return _fields(node, special)
+
+
+def _document_has_data(node: Any) -> bool:
+    """Tell whether the file carries data: a ``values`` or ``samples`` field, never a name."""
+    tables = (
+        (lambda value: any(map(_table_has_data, value)))
+        if isinstance(node, dict) and isinstance(node.get("tables"), list)
+        else _has_data_key
+    )
+    return _fields(node, {"tables": tables, "terms": _keys_are_names(_has_data_key)})
 
 
 def _object(node: Any) -> dict[str, Any]:
@@ -249,7 +288,7 @@ def _parse(path: str, text: str) -> _Content:
     """Read the file's text; the error names the setting and the path, and a fixed reason."""
     try:
         document = json.loads(text)
-        if _has_data_key(document):
+        if _document_has_data(document):
             raise _Invalid("a values or samples key carries data, which a context never holds")
         return _build(document)
     except (json.JSONDecodeError, RecursionError):
@@ -332,8 +371,13 @@ class FileProvider:
     # -- the contract
 
     def maps(self, catalog: str) -> bool:
-        """Say whether the file lists this Trino catalog."""
-        return catalog.lower() in self._content.catalogs
+        """Say whether the file lists this Trino catalog.
+
+        It looks at the file's stamp, never at its text: once the file has changed since
+        the last read, any catalog may be new, so the answer is yes and the next read
+        (``describe``, off the event loop) settles it.
+        """
+        return catalog.lower() in self._content.catalogs or _identity(self._path) != self._seen
 
     def served_sets(self) -> Mapping[str, frozenset[str]]:
         """Return what the file declares and the operator allows, as last read."""
