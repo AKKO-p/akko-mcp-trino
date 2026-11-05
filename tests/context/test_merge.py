@@ -122,14 +122,14 @@ def test_descriptions_are_cleaned_and_cut_fields_are_listed():
 
 def test_a_description_empty_after_cleaning_is_ignored():
     merged = merge_column(
-        [("a", ColumnContext(description="​")), ("b", ColumnContext(description="ok"))],
+        [("a", ColumnContext(description="\u200b")), ("b", ColumnContext(description="ok"))],
         text_chars=BIG,
     )
     assert merged["sources"] == {"description": "b"}
 
 
 def test_invisible_characters_are_removed_from_every_catalogue_name():
-    zw, bidi = "​", "‮"
+    zw, bidi = "\u200b", "‮"
     target = TableRef("c", "s", "t")
     merged = merge_table(
         [
@@ -227,7 +227,7 @@ def test_an_element_empty_once_cleaned_is_dropped():
 
 
 def test_grain_is_one_value_the_first_non_empty_grain_wins():
-    zw = "​"
+    zw = "\u200b"
     merged = merge_table(
         [
             ("a", TableContext(grain=(zw, "id"))),

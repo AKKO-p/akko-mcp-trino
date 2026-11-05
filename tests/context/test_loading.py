@@ -1,5 +1,6 @@
 """Provider loading, the check lines and the start of the context machinery."""
 
+import dataclasses
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
@@ -340,6 +341,84 @@ def test_the_visibility_switch_is_a_problem_in_check(monkeypatch, capsys):
     assert "MCP_VISIBILITY_ENABLED was removed in 0.8" in capsys.readouterr().out
 
 
-def test_the_setup_is_a_plain_pair():
+def test_the_setup_is_a_frozen_pair():
     setup = ContextSetup(chain=SimpleNamespace(), config=_config())
-    assert setup.chain is not None
+    assert [f.name for f in dataclasses.fields(setup)] == ["chain", "config"]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setup.chain = None  # type: ignore[misc]
+
+
+# ---- a factory that fails otherwise than with a ValueError
+
+
+def test_a_provider_that_cannot_be_imported_refuses_to_start_naming_only_the_type(monkeypatch):
+    first = _Provider("first")
+
+    class _Broken:
+        name = "broken"
+
+        def load(self):
+            raise ImportError("secret path /etc/token")
+
+    monkeypatch.setattr(
+        loading_module,
+        "_entry_points",
+        lambda: [_EP("first", lambda env: first), _Broken()],
+    )
+    with pytest.raises(ValueError) as caught:
+        load_providers(_config(context_providers="first,broken"), {})
+    message = str(caught.value)
+    assert "'broken'" in message and "ImportError" in message and "secret" not in message
+    assert first.closed
+
+
+def test_a_factory_that_raises_a_type_error_refuses_to_start_naming_only_the_type(monkeypatch):
+    def broken(env):
+        raise TypeError("password=hunter2")
+
+    _install(monkeypatch, catalog=broken)
+    with pytest.raises(ValueError) as caught:
+        load_providers(_config(context_providers="catalog"), {})
+    assert "TypeError" in str(caught.value) and "hunter2" not in str(caught.value)
+
+
+def test_a_failing_load_closes_the_providers_built_before_it(monkeypatch):
+    first = _Provider("first")
+
+    def broken(env):
+        raise ValueError("no")
+
+    _install(monkeypatch, first=lambda env: first, broken=broken)
+    with pytest.raises(ValueError, match="no"):
+        load_providers(_config(context_providers="first,broken"), {})
+    assert first.closed
+
+
+def test_a_failing_load_survives_a_provider_that_cannot_close(monkeypatch):
+    first = _Provider("first")
+
+    async def boom():
+        raise RuntimeError("no")
+
+    first.aclose = boom
+
+    def broken(env):
+        raise ValueError("stop")
+
+    _install(monkeypatch, first=lambda env: first, broken=broken)
+    with pytest.raises(ValueError, match="stop"):
+        load_providers(_config(context_providers="first,broken"), {})
+
+
+def test_check_names_a_provider_that_fails_to_load_and_closes_the_others(monkeypatch, capsys):
+    first = _Provider("first")
+
+    def broken(env):
+        raise TypeError("password=hunter2")
+
+    _install(monkeypatch, first=lambda env: first, broken=broken)
+    _check_env(monkeypatch, MCP_CONTEXT_PROVIDERS="first,broken")
+    assert check_config(Config.from_env()) == 2
+    out = capsys.readouterr().out
+    assert "PROBLEM: context provider 'broken' failed to load (TypeError)" in out
+    assert "hunter2" not in out and first.closed

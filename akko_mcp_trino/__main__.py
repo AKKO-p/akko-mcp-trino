@@ -16,7 +16,6 @@ decision that matters — the guard on the served transport — lives in
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import os
 import signal
@@ -31,7 +30,7 @@ from .audit import LoggingAudit
 from .auth import accepted_audiences, build_auth
 from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config, parse_jwt_algorithms, provider_names
 from .context import ContextProvider, ContextSetup
-from .context.loading import load_providers
+from .context.loading import close_providers, load_providers
 from .extensions import Extension, extension_names, load_extensions
 from .health import build_health_app
 from .metrics import Metrics
@@ -70,15 +69,6 @@ def _algorithms(config: Config) -> list[str]:
         return parse_jwt_algorithms(config.jwt_algorithms)
     except ValueError:
         return [config.jwt_algorithms]
-
-
-def _close_providers(providers: list[ContextProvider]) -> None:
-    """Release what the providers built by ``--check`` hold open; a failure is not raised."""
-    for provider in providers:
-        try:
-            asyncio.run(provider.aclose())
-        except Exception:  # noqa: BLE001 - a check never fails on closing
-            pass
 
 
 def check_config(config: Config, *, strict: bool = False) -> int:
@@ -165,7 +155,7 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         tool_registrars({"MCP_TOOL_PLUGINS": config.tool_plugins})
     except ValueError as exc:
         problems.append(str(exc))
-    _close_providers(providers)
+    close_providers(providers)
     print("\n".join(lines))
     for warning in config.warnings():
         print(f"WARNING: {warning}")

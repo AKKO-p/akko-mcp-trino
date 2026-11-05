@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-826%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1153%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.7.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -135,7 +135,9 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 826 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
+- **Small and proven.** 1153 tests at 100 % line and branch coverage, including in-process suites on
+  the real SDK for all three transports, a live run against Keycloak and Trino in CI
+  ([`integration/`](integration/)), and a product-neutral guard.
 
 ## Documentation
 
@@ -1056,7 +1058,7 @@ reaches the agent, only a status. Nothing in these lines is wired into a tool ye
 | `MCP_CONTEXT_TTL_SECONDS` | how long a context read is kept, 0 or more | `900` |
 | `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | the bound of the caches of tables and of glossary terms, 1 at least; each bound counts the length of the JSON form of the cached entries, and the process holds about three to four times that in memory, so size the pod for that | `134217728`, `16777216` |
 | `MCP_VISIBILITY_TTL_SECONDS` | how long what Trino listed for a caller is kept, 0 or more | `60` |
-| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | the bound of that cache (counted as above, so size the pod for about three to four times that), and the most names it keeps for one caller, 1 at least | `33554432`, `10000` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | the bound of that cache (each entry counts its key as well as its value; measured with fresh strings, the process holds 3.6 to 8 times that in memory, so size the pod for eight times that), and the most names it keeps for one caller, 1 at least | `33554432`, `10000` |
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true`: context is served only for tables the caller may read | `false` |
 | `MCP_CONTEXT_CANARY` | one table, `catalog.schema.table`, that no caller of this server may see: context is served to a caller only while Trino hides it from them; unset is warned of when a provider is loaded | none |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | the longest text of one context field, the longest context in one response, and the most columns described in one table, 1 at least | `500`, `60000`, `500` |
@@ -1067,6 +1069,172 @@ reaches the agent, only a status. Nothing in these lines is wired into a tool ye
 caches), a `visibility:` line (the lifetime, whether a canary is set, whether `select` is required)
 and the lines of each provider. `MCP_CONTEXT_PROVIDERS` without a canary, or in `service` mode, is
 warned of.
+
+### The file provider
+
+`file` is the provider that comes with the server, and the reference for the contract. It needs no
+service: a JSON file describes tables, columns and glossary terms by name. Turn it on with
+`MCP_CONTEXT_PROVIDERS=file`.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `MCP_CONTEXT_FILE` | the path of the JSON file; required, and a file that cannot be read or is not valid refuses to start | none |
+| `MCP_CONTEXT_FILE_GLOSSARIES` | comma-separated names of the glossaries served | none |
+| `MCP_CONTEXT_FILE_CLASSIFICATIONS` | comma-separated names of the classification and tag sets served | none |
+| `MCP_CONTEXT_FILE_PROPERTIES` | comma-separated names of the property sets served | none |
+| `MCP_CONTEXT_FILE_SERVE_OWNER` | `true`: the owner of a table is served | `false` |
+
+The allow lists are exact names: `*` is the name `*`, never a wildcard, and empty entries are
+ignored. The file may declare more than it serves; only what is declared and allowed is served.
+`--check` prints the file, how many tables and terms it holds, and the sets served.
+
+The file is read again, off the event loop, when it changes: a change is seen within one
+`MCP_CONTEXT_TTL_SECONDS`, because context already read is cached, and the sets the provider serves
+reflect the last time the file was read. A changed file that is no longer valid
+keeps the last good content, and one warning names the setting and the path. A `values` or
+`samples` field anywhere in the file refuses it: a context never holds data. A table, column, term
+or property that is *named* `values` or `samples` is fine.
+
+The provider folds the catalog, schema, table and column names to lower case, as Trino lists them,
+because the core compares them exactly; term keys are kept as written. A file that holds the same
+table, or the same column, twice once folded is refused instead of merged.
+
+```json
+{
+  "version": 1,
+  "catalogs": ["demo"],
+  "tables": [
+    {
+      "catalog": "demo", "schema": "sales", "table": "orders",
+      "description": "One row per order", "owner": "sales-team", "tier": "gold",
+      "tags": [{"name": "internal", "set": "visibility"}],
+      "terms": ["order"],
+      "properties": {"retention": {"value": "7y", "set": "policy"}},
+      "grain": ["order_id"],
+      "joins": [{"columns": ["customer_id"],
+                 "target": {"catalog": "demo", "schema": "sales", "table": "customers"},
+                 "target_columns": ["id"]}],
+      "columns": {
+        "order_id": {"description": "The order", "terms": ["order"],
+                     "classifications": [{"name": "key", "set": "visibility"}],
+                     "properties": {"unit": {"value": "none", "set": "policy"}}}
+      }
+    }
+  ],
+  "terms": {
+    "order": {"name": "Order", "glossary": "sales", "definition": "A purchase",
+              "status": "approved", "categories": ["core"],
+              "relations": [{"key": "line", "name": "Line", "glossary": "sales",
+                             "relation": "part"}]}
+  }
+}
+```
+
+### Writing a context provider
+
+A provider is a class that implements the protocol `akko_mcp_trino.context.ContextProvider`:
+`name`, `context_api` (set it to `akko_mcp_trino.context.CONTEXT_API`; the server refuses another
+version), `maps(catalog)`, `served_sets()`, `describe(refs, deadline=…)`, `terms(keys, deadline=…)`,
+`check_lines()`, `aclose()` and `credentials_stamp()`. Its package registers a factory
+`(env) -> provider` under the entry-point group `akko_mcp_trino.context`:
+
+```toml
+[project.entry-points."akko_mcp_trino.context"]
+mycatalog = "my_package.provider:from_env"
+```
+
+The factory reads the provider's own variables from `env`, raises `ValueError` when it cannot serve
+them, and does not reach its catalogue. A secret is read with
+`akko_mcp_trino.context.secret_setting(env, name)`, so that `<NAME>_FILE` works too. The rules a
+provider follows:
+
+- It serves only the sets the operator allows by exact name, one allow list per kind (glossary,
+  classification, property, owner), nothing by default, and `served_sets()` says what it serves.
+- It returns names folded as Trino lists them, in lower case: the tables, the column keys, the
+  grain and the joins. The core compares names exactly, so a name in another case is lost.
+- It returns only the core types (`TableContext`, `ColumnContext`, `Term`...), never data: no value,
+  no sample.
+- It respects the deadline it is given, raises `ProviderRefused` when its account is refused and
+  `ProviderUnavailable` when the catalogue is down, late or answers what it cannot read. The text
+  of its errors stays in the server; its logs and `check_lines()` never hold its secret nor a
+  schema, table or column name.
+- It imports neither `akko_mcp_trino.trino_client` nor `akko_mcp_trino.identity`, never receives
+  the Trino client nor the caller's identity, and never writes to its catalogue.
+
+`akko_mcp_trino.testing` publishes the contract that checks these rules. Install it in the
+provider's test environment with `pip install "akko-mcp-trino[contract]"`, which brings `pytest` by
+a range, not a pin. It needs no network, no catalogue and no Trino: the provider sends its requests
+to a transport that answers from the catalogue's recorded answers, or, on purpose, late, with a 401,
+a 503, a body that is not JSON or a 500 that holds the secret. Subclass `ContextContract` in the
+provider's tests and give it a `harness` fixture:
+
+```python
+import pytest
+from akko_mcp_trino.context import TableRef
+from akko_mcp_trino.testing import ContextContract, ContractHarness, ContractNames
+
+from my_package.provider import MyProvider
+from tests.recordings import replay  # answers an httpx.Request from the recorded answers
+
+# A quote, a backslash and an accent, so that a secret escaped or encoded is still found.
+SECRET = 'a-"secret\\é-to-find'
+
+NAMES = ContractNames(
+    catalog="warehouse",                  # a Trino catalog the provider maps
+    unmapped_catalog="lakeside",          # one it does not map
+    described=TableRef("warehouse", "ledger", "invoices"),
+    partitioned=TableRef("warehouse", "ledger", "payments"),
+    partition_column="booking_month",
+    dropped=TableRef("warehouse", "ledger", "refunds"),     # marked deleted in the catalogue
+    unknown=TableRef("warehouse", "ledger", "ghosts"),      # not in the catalogue
+    trap=TableRef("warehouse", "o'brien.été", "l'année fiscale.v2"),
+    term_column="invoice_total",          # a column of `described` with a served term
+    foreign_glossary="personnel",         # a glossary outside the allow list
+)
+
+
+class TestMyProviderContract(ContextContract):
+    @pytest.fixture
+    def harness(self):
+        return ContractHarness(
+            build=lambda env, transport: MyProvider(env, transport=transport),
+            replay=replay,
+            env={
+                "MY_CATALOGUE_TOKEN": SECRET,
+                "MY_CATALOGUE_GLOSSARIES": "finance",
+                "MY_CATALOGUE_SERVE_OWNER": "true",
+            },
+            secret=SECRET,
+            names=NAMES,
+        )
+```
+
+Every HTTP request the provider sends must go through `transport`. Names are given as Trino lists
+them, and should appear nowhere else in the provider's logs or `check_lines()`. The settings serve
+the term's glossary, and the owner when the catalogue has one. The secret is looked for as written,
+JSON-escaped, URL-encoded, as Python writes it and in base64, so give one with a quote, a backslash
+and a non-ASCII character. Logs are read from the root logger: a logger that does not propagate
+escapes the check. Keep the entry point's factory in the module of the provider's class, which the
+import check loads alone. The checks: the context comes back with its partition columns, an unknown
+table and a deleted entity are left out, an unmapped catalog costs no request, nothing outside
+`served_sets()` is returned and those sets follow the settings (without its allow lists, a provider
+still describes the table and serves no set; the owner, when the provider declares one, is served
+only when its setting asks for it, and a provider whose catalogue has no owner declares none and
+skips that check), no type carries a data value, a slow catalogue hands back control within the
+deadline plus `ContextContract.REPLY_MARGIN_SECONDS` (0.5 s) and leaves no request open, a 401
+raises `ProviderRefused` and is not sent again, a timeout, a 503 or a body that is not JSON raise
+`ProviderUnavailable`, neither the logs (`httpx` at `WARNING`, as the server sets it) nor
+`check_lines()`, read again after the catalogue's errors, nor an exception hold the secret, logs and
+`check_lines()` hold no object name, the provider's module loads nothing of the core's Trino side, a
+factory that refuses a malformed setting does not put the secret in its message (each setting that
+holds it is given back padded, then in quotes), a trap name is found under its exact name, and every
+name is folded. A provider that sends no request, such as `file`, skips the checks that need one
+with `no HTTP`. The check of `snapshot` comes with pre-warming in 0.8.x and is skipped in 0.8.
+
+`ContextContract.DEADLINE_SECONDS` (5 s) is the deadline the checks give a call that should
+succeed, and `SLOW_DEADLINE_SECONDS` (1 s) the one they give a catalogue that does not answer. They
+are class attributes: raise them in your subclass when your CI is slow, and keep the second well
+under 30 s, the time the slow catalogue takes to answer.
 
 ### Serving
 
@@ -1151,7 +1319,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 826 tests; line or branch coverage below 100 % fails the run
+pytest                        # line or branch coverage below 100 % fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start
@@ -1178,6 +1346,8 @@ Every module in `akko_mcp_trino/` has one responsibility and its tests, in
 | `token_exchange.py` | OAuth 2.0 Token Exchange (RFC 8693): a token for Trino in exchange for the caller's |
 | `health.py`, `metrics.py` | `/health`, `/ready` and `/metrics`; the Prometheus counters |
 | `server.py`, `app.py`, `__main__.py` | assembly, transport, entrypoint and `--check` |
+| `context/` | the context providers: protocol, types, chain, filter by Trino's rights, the `file` provider |
+| `testing/` | the contract every context provider passes, for the providers' own tests |
 
 The README is tested too: every variable listed here is read by `config.py`,
 and the defaults stated here are the defaults in the code.

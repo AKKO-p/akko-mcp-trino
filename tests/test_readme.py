@@ -7,8 +7,11 @@ the entrypoint it names, the variables it lists, the defaults it states.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
+
+import pytest
 
 from akko_mcp_trino.config import Config
 
@@ -26,6 +29,11 @@ def test_every_variable_the_readme_lists_is_read_by_config():
         pathlib.Path(__file__).resolve().parents[1] / "akko_mcp_trino" / "config.py"
     ).read_text(encoding="utf-8")
     read_by_code = set(re.findall(r'os\.environ\.get\("([A-Z_]+)"', source))
+    # a provider reads its own settings from the environment it is given
+    provider = (
+        pathlib.Path(__file__).resolve().parents[1] / "akko_mcp_trino" / "context" / "file.py"
+    ).read_text(encoding="utf-8")
+    read_by_code |= set(re.findall(r'"(MCP_[A-Z_]+)"', provider))
     unknown = sorted(v for v in listed if v not in read_by_code)
     assert unknown == [], f"README lists variables the code never reads: {unknown}"
 
@@ -94,3 +102,56 @@ def test_migration_guide_and_changelog_name_every_breaking_default():
         "TRINO_TOKEN_EXCHANGE_AUDIENCE",
     ):
         assert name in guide and name in changelog, name
+
+
+def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path):
+    from akko_mcp_trino.context import CLASSIFICATION, GLOSSARY, OWNER, PROPERTY
+    from akko_mcp_trino.context.file import from_env
+
+    section = README[README.index("### The file provider") :]
+    section = section[: section.index("\n### ", 4)]
+    rows = {
+        m.group(1): m.group(2)
+        for m in re.finditer(r"^\| `(MCP_CONTEXT_FILE[A-Z_]*)` \|.*\| ([^|]+) \|$", section, re.M)
+    }
+    assert set(rows) == {
+        "MCP_CONTEXT_FILE",
+        "MCP_CONTEXT_FILE_GLOSSARIES",
+        "MCP_CONTEXT_FILE_CLASSIFICATIONS",
+        "MCP_CONTEXT_FILE_PROPERTIES",
+        "MCP_CONTEXT_FILE_SERVE_OWNER",
+    }
+    path = tmp_path / "context.json"
+    # What the file declares, so that an allow list has something to let through.
+    table = {
+        "catalog": "demo",
+        "schema": "sales",
+        "table": "orders",
+        "owner": "sales-team",
+        "terms": ["t1", "t2"],
+        "tags": [{"name": "x", "set": "a"}, {"name": "y", "set": "*"}],
+        "properties": {"p": {"value": "v", "set": "a"}, "q": {"value": "v", "set": "*"}},
+    }
+    terms = {
+        "t1": {"name": "T1", "glossary": "a"},
+        "t2": {"name": "T2", "glossary": "*"},
+    }
+    document = {"version": 1, "catalogs": ["demo"], "tables": [table], "terms": terms}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    sets = from_env({"MCP_CONTEXT_FILE": str(path)}).served_sets()
+    assert rows["MCP_CONTEXT_FILE"].strip() == "none"
+    with pytest.raises(ValueError, match="MCP_CONTEXT_FILE is not set"):
+        from_env({})
+    for name, kind in (
+        ("MCP_CONTEXT_FILE_GLOSSARIES", GLOSSARY),
+        ("MCP_CONTEXT_FILE_CLASSIFICATIONS", CLASSIFICATION),
+        ("MCP_CONTEXT_FILE_PROPERTIES", PROPERTY),
+    ):
+        assert rows[name].strip() == "none" and sets[kind] == frozenset(), name
+        # the README says: exact names, `*` is a name, empty entries are ignored
+        named = from_env({"MCP_CONTEXT_FILE": str(path), name: "a, ,*"}).served_sets()
+        assert named[kind] == frozenset({"a", "*"}), name
+    assert rows["MCP_CONTEXT_FILE_SERVE_OWNER"].strip() == "`false`"
+    assert sets[OWNER] == frozenset()
+    served = from_env({"MCP_CONTEXT_FILE": str(path), "MCP_CONTEXT_FILE_SERVE_OWNER": "true"})
+    assert served.served_sets()[OWNER] != frozenset()

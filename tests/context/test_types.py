@@ -4,6 +4,8 @@ import asyncio
 import dataclasses
 from types import MappingProxyType
 
+import pytest
+
 from akko_mcp_trino import context
 from akko_mcp_trino.context import errors, provider, status, types
 
@@ -70,12 +72,8 @@ def test_the_types_are_frozen_and_their_mappings_default_to_empty_read_only_view
     assert isinstance(table.columns, MappingProxyType) and not table.columns
     assert isinstance(column.properties, MappingProxyType) and not column.properties
     assert table.joins == () and table.grain == () and table.description == ""
-    try:
+    with pytest.raises(dataclasses.FrozenInstanceError):
         table.owner = "x"  # type: ignore[misc]
-    except dataclasses.FrozenInstanceError:
-        pass
-    else:  # pragma: no cover
-        raise AssertionError("TableContext must be frozen")
     join = types.Join(("a",), types.TableRef.of("c", "s", "t"), ("b",))
     assert join.target.table == "t"
 

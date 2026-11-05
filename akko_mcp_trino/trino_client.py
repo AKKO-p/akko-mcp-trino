@@ -38,16 +38,21 @@ that outlives ``TRINO_QUERY_TIMEOUT_SECONDS`` is cancelled in Trino. Within a
 tool call that has a time budget (``MCP_CALL_TIMEOUT_SECONDS``), a query also
 gets no more than what is left of it: past the call's deadline none starts,
 and the one running is cancelled.
+
+The statements of the filter by Trino's rights carry the client tag ``mcp-gate``
+(`GATE_TAG`, by `gate_runner`), on top of an extension's tags, so that Trino's
+history and its access decisions tell them from the agent's own queries.
 """
 
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import logging
 import threading
 import time
 import webbrowser
-from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, Sequence, Union
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional, Protocol, Sequence, Union
 
 import httpx
 import trino
@@ -64,6 +69,33 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # Until Trino answers the POST of a statement, the query has no name and a cancel stops
 # nothing; past its budget, the cancel is tried again this often until the query has one.
 _RECANCEL_SECONDS = 0.05
+
+# The client tag of the statements the filter by Trino's rights runs for a caller.
+GATE_TAG = "mcp-gate"
+
+_query_tags: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "mcp_query_tags", default=()
+)
+
+
+@contextlib.contextmanager
+def query_tags(*tags: str) -> Iterator[None]:
+    """Add ``tags`` to the client tags of every query run in the block."""
+    token = _query_tags.set(_query_tags.get() + tags)
+    try:
+        yield
+    finally:
+        _query_tags.reset(token)
+
+
+def gate_runner(run: Callable[..., dict]) -> Callable[..., dict]:
+    """``run``, each statement of which carries the client tag `GATE_TAG`."""
+
+    def gated(*args: Any, **kwargs: Any) -> dict:
+        with query_tags(GATE_TAG):
+            return run(*args, **kwargs)
+
+    return gated
 
 
 def verify_setting(config: Config) -> Union[bool, str]:
@@ -375,7 +407,7 @@ class TrinoClient:
     def _connect(self, user: Optional[str] = None, connection: Optional[tuple] = None):
         cfg = self._config
         trino_user, auth = connection if connection is not None else self._identity.connection(user)
-        tags = self._tags() if self._tags is not None else []
+        tags = (self._tags() if self._tags is not None else []) + list(_query_tags.get())
         return trino.dbapi.connect(
             host=cfg.trino_host,
             port=cfg.trino_port,

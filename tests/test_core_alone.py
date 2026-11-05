@@ -50,6 +50,8 @@ CORE_MODULES = {
     "context/caches",
     "context/chain",
     "context/errors",
+    "context/file",
+    "context/gate",
     "context/loading",
     "context/loop",
     "context/merge",
@@ -58,6 +60,7 @@ CORE_MODULES = {
     "context/status",
     "context/text",
     "context/types",
+    "context/visibility",
     "errors",
     "extensions",
     "health",
@@ -68,6 +71,8 @@ CORE_MODULES = {
     "search",
     "server",
     "sql_guard",
+    "testing/__init__",
+    "testing/context_contract",
     "token_exchange",
     "tools",
     "transport_security",
@@ -75,7 +80,7 @@ CORE_MODULES = {
 }
 
 # The sub-packages of the core, named as ``akko_mcp_trino.<package>``.
-CORE_PACKAGES = {"context"}
+CORE_PACKAGES = {m.split("/")[0] for m in CORE_MODULES if "/" in m}
 
 # The entry-point groups the core reads: its tool plugins and its extensions.
 CORE_GROUPS = {"akko_mcp_trino.tools", "akko_mcp_trino.extensions", "akko_mcp_trino.context"}
@@ -181,10 +186,13 @@ def test_the_core_never_sends_trino_the_callers_own_token():
     assert "return bearer" not in source
 
 
-def test_the_core_audit_line_has_its_six_fields_and_trino_gets_no_client_tag():
+def test_the_core_audit_line_has_its_six_fields_and_trino_gets_only_the_gate_tag():
     line = AuditEvent(request_id="r", tool="t", subject="s", ok=True).as_dict()
     assert set(line) == {"request_id", "tool", "subject", "ok", "error", "duration_ms"}
     assert 'f"request_id=' not in _source() and 'f"tool=' not in _source()
+    # The one client tag of the core marks the statements of the filter by Trino's rights.
+    assert set(re.findall(r'^[A-Z_]*TAG = "([^"]*)"', _source(), re.M)) == {"mcp-gate"}
+    assert "query_tags(GATE_TAG)" in (CORE / "trino_client.py").read_text(encoding="utf-8")
 
 
 def test_without_an_extension_no_public_document_is_served_and_no_challenge_is_sent():
@@ -220,16 +228,18 @@ def test_the_core_reads_only_its_own_entry_point_groups():
     assert groups <= CORE_GROUPS
 
 
-def test_the_context_package_loads_neither_the_trino_client_nor_the_identity():
-    """A provider's contract test imports the package; it must not pull the core's Trino side."""
+@pytest.mark.parametrize("package", ["context", "testing"])
+def test_the_package_an_adapter_imports_loads_neither_the_trino_client_nor_the_identity(package):
+    """A provider and its contract test import these packages; they must not pull the core's
+    Trino side."""
     import subprocess
     import sys
 
     modules = sorted(
-        ["akko_mcp_trino.context"]
+        [f"akko_mcp_trino.{package}"]
         + [
-            f"akko_mcp_trino.context.{p.stem}"
-            for p in (CORE / "context").glob("*.py")
+            f"akko_mcp_trino.{package}.{p.stem}"
+            for p in (CORE / package).glob("*.py")
             if p.stem != "__init__"
         ]
     )
@@ -243,3 +253,54 @@ def test_the_context_package_loads_neither_the_trino_client_nor_the_identity():
     )
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT)
     assert done.returncode == 0, done.stderr
+
+
+def test_the_wheel_finds_every_sub_package_of_the_core():
+    """Packages are found, never listed: a sub-package added later cannot miss the wheel."""
+    import tomllib
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
+    assert project["setuptools"]["packages"] == {
+        "find": {"include": ["akko_mcp_trino", "akko_mcp_trino.*"]}
+    }
+    assert CORE_PACKAGES == {"context", "testing"}
+
+
+def test_an_adapter_finds_what_it_needs_in_the_context_package():
+    import akko_mcp_trino.context as context
+    from akko_mcp_trino.context import secrets, status
+
+    for name in (
+        "OK",
+        "NOT_FOUND",
+        "NOT_MAPPED",
+        "PARTIAL",
+        "UNAVAILABLE",
+        "REFUSED",
+        "ERROR",
+        "NOT_CHECKED",
+    ):
+        assert getattr(context, name) == getattr(status, name) and name in context.__all__
+    assert context.secret_setting is secrets.secret_setting
+    assert context.FileSecret is secrets.FileSecret
+
+
+def test_adapters_install_the_contract_by_an_extra_with_ranges():
+    """An adapter's own pins must not clash with ours: the extra it installs gives ranges."""
+    import tomllib
+
+    import akko_mcp_trino.testing as testing
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["optional-dependencies"]["contract"] == ["pytest>=8,<10"]
+    for text in (
+        testing.__doc__ or "",
+        (ROOT / "README.md").read_text(encoding="utf-8"),
+        (ROOT / "README.fr.md").read_text(encoding="utf-8"),
+    ):
+        assert 'pip install "akko-mcp-trino[contract]"' in text
+
+
+def test_the_sdist_carries_every_test_package():
+    manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+    assert "recursive-include tests *.py" in manifest

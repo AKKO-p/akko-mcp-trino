@@ -207,11 +207,11 @@ class Config:
     context_refused_retry_seconds: float = 3600.0
     context_batch: int = 50
     context_ttl_seconds: float = 900.0
-    # Bytes the caches of tables and of glossary terms may hold, in all.
+    # The JSON length the caches of tables and of glossary terms may hold, in all.
     context_cache_bytes: int = 134217728
     context_terms_cache_bytes: int = 16777216
-    # What Trino listed for a caller: how long it is kept, the bytes it may hold and the
-    # most names kept for one caller.
+    # What Trino listed for a caller: how long it is kept, the JSON length of the entries it
+    # may hold and the most names kept for one caller.
     visibility_ttl_seconds: float = 60.0
     visibility_cache_bytes: int = 33554432
     visibility_max_names: int = 10000
