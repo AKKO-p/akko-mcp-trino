@@ -12,9 +12,17 @@ holds the secret. The transport counts what is sent and what is still in flight.
 A provider that sends no HTTP request, such as ``file``, skips the checks that need one,
 each with ``pytest.skip("no HTTP")``. Each check fails with ``pytest.fail`` and a message
 that never holds the secret.
+
+The secret is looked for as written, JSON-escaped, URL-encoded, as Python writes it and in
+base64: give a secret with a quote, a backslash and a non-ASCII character, so that escaping
+matters. Logs are read from the root logger: a logger of the provider that does not
+propagate escapes the check. The import check imports the module of the provider's class:
+keep the entry point's factory in that module, or in one that imports no more.
 """
 
 import asyncio
+import base64
+import json
 import logging
 import subprocess
 import sys
@@ -24,6 +32,7 @@ from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Se
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from typing import Any
+from urllib.parse import quote, quote_plus
 
 import httpx
 import pytest
@@ -77,7 +86,7 @@ class ContractNames:
     described: TableRef  # a known table with a described column
     partitioned: TableRef  # a known table with a partition column
     partition_column: str
-    dropped: TableRef  # an entity deleted in the catalogue
+    dropped: TableRef  # an entity the catalogue marks deleted (record a real one)
     unknown: TableRef  # a table the catalogue does not hold
     trap: TableRef  # a known table whose name holds a quote, dot, space, accent or non-Latin
     term_column: str  # a column of ``described`` with a term of a served glossary attached
@@ -158,8 +167,15 @@ class _Run:
         return self.call(self.provider.terms(sorted(keys), deadline=deadline))
 
     def error(self, refs: Sequence[TableRef], seconds: float) -> BaseException | None:
+        return self.failure(lambda: self.describe(refs, seconds))
+
+    def terms_error(self, keys: Iterable[str], seconds: float) -> BaseException | None:
+        return self.failure(lambda: self.terms(keys, seconds))
+
+    @staticmethod
+    def failure(call: Callable[[], Any]) -> BaseException | None:
         try:
-            self.describe(refs, seconds)
+            call()
         except Exception as exc:  # noqa: BLE001 - the check says which error it expected
             return exc
         return None
@@ -266,8 +282,50 @@ def _properties(contexts: Iterable[TableContext]) -> list[Labelled]:
     ]
 
 
-def _items(env: Mapping[str, str]) -> set[str]:
-    return {part.strip() for value in env.values() for part in value.split(",") if part.strip()}
+def _items(env: Mapping[str, str], secret: str) -> set[str]:
+    """The names the settings give, the secret's setting aside."""
+    return {
+        part.strip()
+        for value in env.values()
+        if secret not in value
+        for part in value.split(",")
+        if part.strip()
+    }
+
+
+def _secret_forms(secret: str) -> set[str]:
+    """The secret as written, JSON-escaped, URL-encoded, as Python writes it, and in base64."""
+    return {
+        secret,
+        json.dumps(secret)[1:-1],
+        json.dumps(secret, ensure_ascii=False)[1:-1],
+        repr(secret)[1:-1],
+        quote(secret, safe=""),
+        quote_plus(secret, safe=""),
+        base64.b64encode(secret.encode("utf-8")).decode("ascii"),
+    }
+
+
+def _holds_secret(text: str, secret: str) -> bool:
+    return any(form in text for form in _secret_forms(secret))
+
+
+def _builds(harness: ContractHarness, env: Mapping[str, str]) -> bool:
+    try:
+        with _running(harness, env):
+            return True
+    except Exception:  # noqa: BLE001 - a setting the provider cannot do without
+        return False
+
+
+def _required(harness: ContractHarness) -> dict[str, str]:
+    """The settings left once every one the provider can do without is removed, one by one."""
+    env = dict(harness.env)
+    for key in sorted(env):
+        fewer = {k: v for k, v in env.items() if k != key}
+        if _builds(harness, fewer):
+            env = fewer
+    return env
 
 
 # ---- a value is exactly a core type, holding only its declared fields
@@ -481,7 +539,8 @@ class ContextContract:
         )
 
     def test_served_sets_reflect_the_configuration(self, harness: ContractHarness) -> None:
-        """A set is served only when the settings name it; without them, none is."""
+        """A set, the owner included, is served only when the settings name it; with only
+        the settings it cannot do without, a provider serves nothing."""
         names = harness.names
         with _running(harness) as run:
             sets = run.provider.served_sets()
@@ -490,32 +549,27 @@ class ContextContract:
             "served_sets() must give a frozenset for each of glossary, classification, "
             "property and owner",
         )
-        served = sets[GLOSSARY] | sets[CLASSIFICATION] | sets[PROPERTY]
         _require(
-            served <= _items(harness.env),
+            sets[GLOSSARY] | sets[CLASSIFICATION] | sets[PROPERTY]
+            <= _items(harness.env, harness.secret),
             "a set may be served only when the configuration names it",
         )
         _require(
-            bool(sets[GLOSSARY]) and names.foreign_glossary not in sets[GLOSSARY],
-            "the configuration of the contract must serve the term's glossary, "
-            "and never the foreign one",
+            bool(sets[GLOSSARY]) and bool(sets[OWNER]),
+            "the configuration of the contract must serve the term's glossary and the owner",
         )
-        reduced = {
-            key: value
-            for key, value in harness.env.items()
-            if not {part.strip() for part in value.split(",")} & served
-        }
-        with _running(harness, reduced) as run:
+        with _running(harness, _required(harness)) as run:
             left = run.provider.served_sets()
             found = run.describe(_refs(names), self.DEADLINE_SECONDS)
         contexts = list(found.values())
         _require(
-            not (left[GLOSSARY] | left[CLASSIFICATION] | left[PROPERTY])
+            not any(left.values())
             and not _term_keys(contexts)
             and not _classifications(contexts)
-            and not _properties(contexts),
-            "without the settings that name them, no glossary, classification or property "
-            "set may be served, as the configuration says",
+            and not _properties(contexts)
+            and not any(context.owner for context in contexts),
+            "with only its required settings, a provider must serve no set, and return no "
+            "owner, term, classification or property",
         )
 
     def test_no_type_carries_a_data_value(self, harness: ContractHarness) -> None:
@@ -575,27 +629,44 @@ class ContextContract:
     def test_logs_and_check_lines_never_hold_the_secret_or_an_object_name(
         self, harness: ContractHarness
     ) -> None:
-        """Neither the logs nor ``check_lines`` hold the secret or a schema, table or column
-        name, and an error answer that holds the secret leaves it in no exception."""
+        """Neither the logs nor ``check_lines``, read before and after each catalogue error,
+        hold the secret or a schema, table or column name, and an error answer that holds
+        the secret leaves it in no exception."""
         names, secret = harness.names, harness.secret
         with _captured_logs() as lines, _running(harness) as run:
-            self._everything(run, names)
+            found, _ = self._everything(run, names)
+            keys = _term_keys(found.values())
             checks = run.provider.check_lines()
             http = bool(run.transport.sent)
-            run.transport.mode = _LEAK
-            error = run.error([names.described], self.DEADLINE_SECONDS)
+            errors, after = [], []
+            for mode in (_LEAK, _REFUSED, _DOWN, _BAD_JSON):
+                run.transport.mode = mode
+                errors += [
+                    run.error([names.described], self.DEADLINE_SECONDS),
+                    run.terms_error(keys, self.DEADLINE_SECONDS),
+                ]
+                after.append(run.provider.check_lines())
         if http:
-            _require(isinstance(error, ProviderError), "an error answer must raise a ProviderError")
             _require(
-                secret not in "".join(traceback.format_exception(error)),
+                all(isinstance(error, ProviderError) for error in errors[:2]),
+                "an error answer must raise a ProviderError",
+            )
+            _require(
+                not any(
+                    _holds_secret("".join(traceback.format_exception(error)), secret)
+                    for error in errors
+                    if error is not None
+                ),
                 "an exception, its causes included, must never hold the secret",
             )
         _require(
-            type(checks) is list and all(type(line) is str for line in checks),
+            all(type(c) is list and all(type(line) is str for line in c) for c in [checks, *after]),
             "check_lines() must return a list of texts",
         )
-        text = "\n".join(lines + checks)
-        _require(secret not in text, "the logs and check_lines() must never hold the secret")
+        text = "\n".join(lines + checks + [line for c in after for line in c])
+        _require(
+            not _holds_secret(text, secret), "the logs and check_lines() must never hold the secret"
+        )
         leaked = sorted(name for name in _object_names(names) if name in text)
         _require(not leaked, f"the logs and check_lines() must never hold an object name: {leaked}")
 
@@ -615,6 +686,7 @@ class ContextContract:
             capture_output=True,
             text=True,
             check=False,
+            timeout=60,
         )
         _require(done.returncode == 0, f"importing {module} alone failed: {done.stderr[-500:]}")
         _require(

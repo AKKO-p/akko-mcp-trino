@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-826%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1144%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.7.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -135,7 +135,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 826 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
+- **Small and proven.** 1144 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
 
 ## Documentation
 
@@ -1141,8 +1141,9 @@ provider follows:
 - It imports neither `akko_mcp_trino.trino_client` nor `akko_mcp_trino.identity`, never receives
   the Trino client nor the caller's identity, and never writes to its catalogue.
 
-`akko_mcp_trino.testing` publishes the contract that checks these rules (it needs `pytest`). It
-needs no network, no catalogue and no Trino: the provider sends its requests to a transport that
+`akko_mcp_trino.testing` publishes the contract that checks these rules. Install it in the
+provider's test environment with `pip install "akko-mcp-trino[contract]"`, which brings `pytest`
+by a range, not a pin. It needs no network, no catalogue and no Trino: the provider sends its requests to a transport that
 answers from the catalogue's recorded answers, or, on purpose, late, with a 401, a 503, a body that
 is not JSON or a 500 that holds the secret. Subclass `ContextContract` in the provider's tests and
 give it a `harness` fixture:
@@ -1155,13 +1156,16 @@ from akko_mcp_trino.testing import ContextContract, ContractHarness, ContractNam
 from my_package.provider import MyProvider
 from tests.recordings import replay  # answers an httpx.Request from the recorded answers
 
+# A quote, a backslash and an accent, so that a secret escaped or encoded is still found.
+SECRET = 'a-"secret\\é-to-find'
+
 NAMES = ContractNames(
     catalog="warehouse",                  # a Trino catalog the provider maps
     unmapped_catalog="lakeside",          # one it does not map
     described=TableRef("warehouse", "ledger", "invoices"),
     partitioned=TableRef("warehouse", "ledger", "payments"),
     partition_column="booking_month",
-    dropped=TableRef("warehouse", "ledger", "refunds"),     # deleted in the catalogue
+    dropped=TableRef("warehouse", "ledger", "refunds"),     # marked deleted in the catalogue
     unknown=TableRef("warehouse", "ledger", "ghosts"),      # not in the catalogue
     trap=TableRef("warehouse", "o'brien.été", "l'année fiscale.v2"),
     term_column="invoice_total",          # a column of `described` with a served term
@@ -1175,21 +1179,31 @@ class TestMyProviderContract(ContextContract):
         return ContractHarness(
             build=lambda env, transport: MyProvider(env, transport=transport),
             replay=replay,
-            env={"MY_CATALOGUE_TOKEN": "a-secret-to-find", "MY_CATALOGUE_GLOSSARIES": "finance"},
-            secret="a-secret-to-find",
+            env={
+                "MY_CATALOGUE_TOKEN": SECRET,
+                "MY_CATALOGUE_GLOSSARIES": "finance",
+                "MY_CATALOGUE_SERVE_OWNER": "true",
+            },
+            secret=SECRET,
             names=NAMES,
         )
 ```
 
 Every HTTP request the provider sends must go through `transport`. Names are given as Trino lists
-them, and should appear nowhere else in the provider's logs or `check_lines()`. The checks: the
+them, and should appear nowhere else in the provider's logs or `check_lines()`. The settings serve
+the term's glossary and the owner. The secret is looked for as written, JSON-escaped, URL-encoded,
+as Python writes it and in base64, so give one with a quote, a backslash and a non-ASCII
+character. Logs are read from the root logger: a logger that does not propagate escapes the check.
+Keep the entry point's factory in the module of the provider's class, which the import check
+loads alone. The checks: the
 context comes back with its partition columns, an unknown table and a deleted entity are left out,
-an unmapped catalog costs no request, nothing outside `served_sets()` is returned and those sets
-follow the settings, no type carries a data value, a slow catalogue hands back control within the
+an unmapped catalog costs no request, nothing outside `served_sets()` is returned and those sets,
+the owner included, follow the settings (with only the settings it cannot do without, a provider
+serves nothing), no type carries a data value, a slow catalogue hands back control within the
 deadline plus `ContextContract.REPLY_MARGIN_SECONDS` (0.5 s) and leaves no request open, a 401
 raises `ProviderRefused` and is not sent again, a timeout, a 503 or a body that is not JSON raise
 `ProviderUnavailable`, neither the logs (`httpx` at `WARNING`, as the server sets it) nor
-`check_lines()` nor an exception hold the secret, logs and `check_lines()` hold no object name,
+`check_lines()`, read again after the catalogue's errors, nor an exception hold the secret, logs and `check_lines()` hold no object name,
 the provider's module loads nothing of the core's Trino side, a trap name is found under its exact
 name, and every name is folded. A provider that sends no request, such as `file`, skips the checks
 that need one with `no HTTP`. The check of `snapshot` comes with pre-warming in 0.8.x and is skipped
@@ -1278,7 +1292,7 @@ ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every publi
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
 pip-audit                     # no known vulnerability in the dependency tree
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
-pytest                        # 826 tests; line or branch coverage below 100 % fails the run
+pytest                        # line or branch coverage below 100 % fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
 python -m build && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start

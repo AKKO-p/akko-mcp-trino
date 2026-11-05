@@ -126,6 +126,6 @@ class TestFileProviderContract(ContextContract):
                 "MCP_CONTEXT_FILE_SERVE_OWNER": "true",
             },
             # The file provider holds no secret: the contract still checks none appears.
-            secret="contract-secret-5f0c8a1e",
+            secret='contract-"secret\\é-5f0c8a1e',
             names=NAMES,
         )

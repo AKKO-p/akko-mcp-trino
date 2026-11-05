@@ -46,6 +46,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# What an adapter installs to run the published contract: ranges, so its own pins do not clash.
+contract = ["pytest>=8,<10"]
 test = ["pytest==9.1.1", "pytest-cov==7.1.0"]
 dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "mypy==2.3.1", "pip-audit==2.10.1", "build==1.2.2", "twine==6.1.0"]
 

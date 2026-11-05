@@ -3,7 +3,7 @@ prune dist
 prune .venv
 include image-requirements.txt
 include CHANGELOG.md MIGRATING.md pytest.ini
-include tests/*.py
+recursive-include tests *.py
 graft examples
 graft docs/images
 global-exclude __pycache__ *.py[cod]

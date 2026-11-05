@@ -283,3 +283,24 @@ def test_an_adapter_finds_what_it_needs_in_the_context_package():
         assert getattr(context, name) == getattr(status, name) and name in context.__all__
     assert context.secret_setting is secrets.secret_setting
     assert context.FileSecret is secrets.FileSecret
+
+
+def test_adapters_install_the_contract_by_an_extra_with_ranges():
+    """An adapter's own pins must not clash with ours: the extra it installs gives ranges."""
+    import tomllib
+
+    import akko_mcp_trino.testing as testing
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["optional-dependencies"]["contract"] == ["pytest>=8,<10"]
+    for text in (
+        testing.__doc__ or "",
+        (ROOT / "README.md").read_text(encoding="utf-8"),
+        (ROOT / "README.fr.md").read_text(encoding="utf-8"),
+    ):
+        assert 'pip install "akko-mcp-trino[contract]"' in text
+
+
+def test_the_sdist_carries_every_test_package():
+    manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+    assert "recursive-include tests *.py" in manifest

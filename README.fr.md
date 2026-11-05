@@ -151,7 +151,7 @@ donnez.
   peut seulement refuser ce que le cœur autorise, jamais l'élargir.
 - **N'importe quel MCP host, n'importe quel modèle.** Cursor, Claude Desktop, VS Code, le SDK
   Python… Mistral, ou tout modèle compatible OpenAI avec l'agent d'exemple.
-- **Petit et prouvé.** 826 tests à 100 % de couverture des lignes et des branches, dont des suites
+- **Petit et prouvé.** 1144 tests à 100 % de couverture des lignes et des branches, dont des suites
   sur le vrai SDK pour les trois transports, une exécution réelle contre Keycloak et Trino en CI
   ([`integration/`](integration/)) et une garde de neutralité produit.
 
@@ -636,25 +636,32 @@ d'un fournisseur :
 - il n'importe ni `akko_mcp_trino.trino_client` ni `akko_mcp_trino.identity`, ne reçoit jamais le
   client Trino ni l'identité de l'appelant, et n'écrit jamais dans son catalogue.
 
-`akko_mcp_trino.testing` publie le contrat qui vérifie ces règles (il demande `pytest`). Il ne
-demande ni réseau, ni catalogue, ni Trino : le fournisseur envoie ses requêtes à un transport qui
+`akko_mcp_trino.testing` publie le contrat qui vérifie ces règles. On l'installe dans
+l'environnement de test du fournisseur avec `pip install "akko-mcp-trino[contract]"`, qui apporte
+`pytest` par une plage de versions, sans l'épingler. Il ne demande ni réseau, ni catalogue, ni Trino : le fournisseur envoie ses requêtes à un transport qui
 répond avec les réponses enregistrées du catalogue, ou, exprès, en retard, par un 401, un 503, un
 corps qui n'est pas du JSON ou un 500 qui contient le secret. On sous-classe `ContextContract` dans
 les tests du fournisseur et on lui donne une fixture `harness` qui rend un `ContractHarness` : la
 fabrique `build(env, transport)`, la fonction `replay` qui rejoue les réponses enregistrées, les
 réglages `env`, le `secret` qu'ils contiennent, et les `ContractNames` (catalogue mappé et non
 mappé, table décrite, table partitionnée et sa colonne de partition, entité supprimée, table
-inconnue, nom piégé, colonne à terme, glossaire hors liste). L'exemple complet est dans le
+inconnue, nom piégé, colonne à terme, glossaire hors liste). Les réglages servent le glossaire du
+terme et le propriétaire. Le secret est cherché tel quel, échappé en JSON, encodé dans une URL,
+écrit par Python et en base64 : en choisir un qui contient un guillemet droit, une barre
+oblique inverse et un caractère non ASCII. Les journaux sont lus sur le logger racine : un logger
+qui ne propage pas échappe au contrôle. La fabrique du point d'entrée reste dans le module de la
+classe du fournisseur, que le contrôle des imports charge seul. L'exemple complet est dans le
 [README](README.md#writing-a-context-provider).
 
 Le contrat vérifie que le contexte revient avec ses colonnes de partition, qu'une table inconnue et
 une entité supprimée sont omises, qu'un catalogue non mappé ne coûte aucune requête, que rien hors
-de `served_sets()` n'est rendu et que ces ensembles suivent les réglages, qu'aucun type ne porte de
+de `served_sets()` n'est rendu et que ces ensembles, propriétaire compris, suivent les réglages
+(avec seulement les réglages indispensables, un fournisseur ne sert rien), qu'aucun type ne porte de
 valeur, qu'un catalogue lent rend la main avant l'échéance plus
 `ContextContract.REPLY_MARGIN_SECONDS` (0,5 s) sans laisser de requête ouverte, qu'un 401 lève
 `ProviderRefused` sans être renvoyé, qu'un délai, un 503 ou un corps illisible lèvent
 `ProviderUnavailable`, que ni les journaux (`httpx` à `WARNING`, comme le serveur le règle), ni
-`check_lines()`, ni une exception ne contiennent le secret, que journaux et `check_lines()` ne
+`check_lines()`, relu après les erreurs du catalogue, ni une exception ne contiennent le secret, que journaux et `check_lines()` ne
 contiennent aucun nom d'objet, que le module du fournisseur ne charge rien du côté Trino du cœur,
 qu'un nom piégé est trouvé sous son nom exact, et que tous les noms sont en minuscules. Un
 fournisseur qui n'envoie aucune requête, comme `file`, saute les vérifications qui en demandent

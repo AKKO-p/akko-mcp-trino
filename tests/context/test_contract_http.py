@@ -7,11 +7,13 @@ text. The variants below each break one rule, and the contract must catch them.
 """
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -37,7 +39,8 @@ from akko_mcp_trino.testing import ContextContract, ContractHarness, ContractNam
 
 log = logging.getLogger(__name__)
 
-SECRET = "contract-token-9d41b7c2"
+# A quote, a backslash and an accent: escaped in JSON, encoded in a URL, it must still be found.
+SECRET = 'contract-"token\\é-9d41b7c2'
 
 TRAP = TableRef("warehouse", "o'brien.été", "l'année fiscale.v2")
 
@@ -118,18 +121,26 @@ NAMES = ContractNames(
     foreign_glossary="hr",
 )
 
+# How the secret looks once escaped or encoded: none may appear in a failure message.
+SECRET_FORMS = (
+    SECRET,
+    json.dumps(SECRET)[1:-1],
+    quote(SECRET, safe=""),
+)
+
 ENV = {
     "REC_TOKEN": SECRET,
     "REC_CATALOGS": "warehouse",
     "REC_GLOSSARIES": "finance",
     "REC_CLASSIFICATIONS": "sensitivity",
     "REC_PROPERTIES": "retention",
+    "REC_SERVE_OWNER": "true",
 }
 
 
 def replay(request: httpx.Request) -> httpx.Response:
     """The catalogue as recorded: a wrong token is refused, an unknown name is a 404."""
-    if request.headers.get("authorization") != f"Bearer {SECRET}":
+    if request.headers.get("authorization") != f"Bearer {quote(SECRET, safe='')}":
         return httpx.Response(401)
     params = request.url.params
     if request.url.path == "/v1/table":
@@ -149,19 +160,27 @@ class Recorded:
     name = "recorded"
     context_api = CONTEXT_API
     fold = True
+    deleted = "DELETED"
+    partitions = "partitionColumns"
 
     def __init__(self, env: Mapping[str, str], transport: httpx.AsyncBaseTransport) -> None:
+        token = env.get("REC_TOKEN", "")
+        if not token:
+            raise ValueError("REC_TOKEN is not set")
+        owner = env.get("REC_SERVE_OWNER", "false")
+        if owner not in ("true", "false"):
+            raise ValueError("REC_SERVE_OWNER must be true or false")
         self._catalogs = _items(env, "REC_CATALOGS")
         self._sets = {
             GLOSSARY: _items(env, "REC_GLOSSARIES"),
             CLASSIFICATION: _items(env, "REC_CLASSIFICATIONS"),
             PROPERTY: _items(env, "REC_PROPERTIES"),
-            OWNER: frozenset({"owner"}),
+            OWNER: frozenset({"owner"}) if owner == "true" else frozenset(),
         }
         self._client = httpx.AsyncClient(
             transport=transport,
             base_url="http://catalogue.test",
-            headers={"authorization": f"Bearer {env['REC_TOKEN']}"},
+            headers={"authorization": f"Bearer {quote(token, safe='')}"},
         )
 
     def maps(self, catalog: str) -> bool:
@@ -174,18 +193,15 @@ class Recorded:
         self, refs: Sequence[TableRef], *, deadline: float, on_behalf_of: None = None
     ) -> Mapping[TableRef, TableContext]:
         mine = [ref for ref in refs if self.maps(ref.catalog)]
-        found = await self._all(
-            [
-                self._get("/v1/table", {"catalog": r.catalog, "schema": r.schema, "table": r.table})
-                for r in mine
-            ],
-            deadline,
-        )
+        found = await self._all([self._get("/v1/table", self._params(r)) for r in mine], deadline)
         return {
             ref: self._table(spec)
             for ref, spec in zip(mine, found)
-            if spec and spec.get("status") != "DELETED"
+            if spec and spec.get("status") != self.deleted
         }
+
+    def _params(self, ref: TableRef) -> dict[str, str]:
+        return {"catalog": ref.catalog, "schema": ref.schema, "table": ref.table}
 
     async def terms(self, keys: Sequence[str], *, deadline: float) -> Mapping[str, Term]:
         unique = list(dict.fromkeys(keys))
@@ -234,6 +250,9 @@ class Recorded:
         if response.status_code != 200:
             log.warning("recorded: the catalogue answered %s", response.status_code)
             raise self.failure(response)
+        return self._json(response)
+
+    def _json(self, response: httpx.Response) -> Any:
         try:
             return response.json()
         except ValueError:
@@ -270,11 +289,11 @@ class Recorded:
 
     def _table(self, spec: dict) -> TableContext:
         columns = {self._name(n): self._column(c) for n, c in spec.get("columns", {}).items()}
-        for name in spec.get("partitionColumns", []):
+        for name in spec.get(self.partitions, []):
             columns.setdefault(self._name(name), ColumnContext())
         return TableContext(
             description=spec.get("description", ""),
-            owner=spec.get("owner", ""),
+            owner=spec.get("owner", "") if self._sets[OWNER] else "",
             tags=self._labels(spec.get("tags", []), CLASSIFICATION),
             terms=self._keys(spec.get("terms", [])),
             properties=self._properties(spec.get("properties", {})),
@@ -318,7 +337,7 @@ class Leaky(Recorded):
 
 
 class Chatty(Recorded):
-    """Prints its token and the tables it was asked about."""
+    """Prints its token."""
 
     def check_lines(self) -> list[str]:
         return [f"recorded: token {SECRET}"]
@@ -384,32 +403,172 @@ class _WithValues(TableContext):
     pass
 
 
+class Remembering(Recorded):
+    """Keeps the text of its last error and prints it in ``check_lines``."""
+
+    last = ""
+
+    def failure(self, response: httpx.Response) -> ProviderError:
+        self.last = response.text
+        return super().failure(response)
+
+    def check_lines(self) -> list[str]:
+        return super().check_lines() + [f"recorded: last error {self.last}"]
+
+
+class Lingering(Recorded):
+    """Starts a request it never waits for, nor cancels."""
+
+    async def describe(self, refs, *, deadline, on_behalf_of=None):
+        self.pending = asyncio.create_task(self._get("/v1/table", self._params(refs[0])))
+        return await super().describe(refs, deadline=deadline)
+
+
+class Late(Recorded):
+    """Takes its time before saying the catalogue is late."""
+
+    async def describe(self, refs, *, deadline, on_behalf_of=None):
+        try:
+            return await super().describe(refs, deadline=deadline)
+        except ProviderUnavailable:
+            await asyncio.sleep(1.0)
+            raise
+
+
+class Retrying(Recorded):
+    """Sends a refused request again."""
+
+    async def _get(self, path, params):
+        try:
+            return await super()._get(path, params)
+        except ProviderRefused:
+            return await super()._get(path, params)
+
+
+class Resurrecting(Recorded):
+    """Ignores that the catalogue deleted an entity."""
+
+    deleted = "never"
+
+
+class Quoting(Recorded):
+    """Quotes names the SQL way before asking the catalogue, which never finds the trap."""
+
+    def _params(self, ref: TableRef) -> dict[str, str]:
+        return {key: value.replace("'", "''") for key, value in super()._params(ref).items()}
+
+
+class Raw(Recorded):
+    """Lets a body that is not JSON through as a ``ValueError``."""
+
+    def _json(self, response: httpx.Response) -> Any:
+        return response.json()
+
+
+class Unpartitioned(Recorded):
+    """Forgets the partition columns."""
+
+    partitions = "none"
+
+
+class Unfiltered(Recorded):
+    """Says honestly what it serves, then forgets to filter tags and properties."""
+
+    def _labels(self, specs: list, kind: str) -> tuple[Labelled, ...]:
+        return tuple(Labelled(s["name"], s["set"]) for s in specs)
+
+    def _properties(self, specs: dict) -> Mapping[str, Labelled]:
+        return MappingProxyType({key: Labelled(s["value"], s["set"]) for key, s in specs.items()})
+
+
+class OwnerAlways(Recorded):
+    """Serves the owner whatever its settings say."""
+
+    def __init__(self, env, transport):
+        super().__init__(env, transport)
+        self._sets[OWNER] = frozenset({"owner"})
+
+
+LOGS = "test_logs_and_check_lines_never_hold_the_secret_or_an_object_name"
+REFLECT = "test_served_sets_reflect_the_configuration"
+
+
 @pytest.mark.parametrize(
     ("kind", "check", "says"),
     [
-        (Leaky, "test_logs_and_check_lines_never_hold_the_secret_or_an_object_name", "secret"),
-        (Chatty, "test_logs_and_check_lines_never_hold_the_secret_or_an_object_name", "secret"),
-        (Logging, "test_logs_and_check_lines_never_hold_the_secret_or_an_object_name", "name"),
-        (Unfolded, "test_returned_names_are_folded_as_trino_lists_them", "folded"),
-        (Swallowing, "test_a_401_raises_refused_and_is_not_retried", "ProviderRefused"),
-        (Eager, "test_an_unmapped_catalog_sends_no_request", "unmapped"),
-        (Ungated, "test_served_sets_reflect_the_configuration", "configuration"),
-        (Ungated, "test_nothing_outside_served_sets_is_returned", "served"),
-        (Valued, "test_no_type_carries_a_data_value", "core types"),
+        (Leaky, LOGS, "an exception, its causes included, must never hold the secret"),
+        (Chatty, LOGS, r"the logs and check_lines\(\) must never hold the secret"),
+        (Remembering, LOGS, r"the logs and check_lines\(\) must never hold the secret"),
+        (Logging, LOGS, "must never hold an object name"),
+        (
+            Unfolded,
+            "test_returned_names_are_folded_as_trino_lists_them",
+            r"lower case\): \d+ are not",
+        ),
+        (
+            Swallowing,
+            "test_a_401_raises_refused_and_is_not_retried",
+            "a 401 must raise ProviderRefused",
+        ),
+        (Retrying, "test_a_401_raises_refused_and_is_not_retried", "must not be sent again"),
+        (Eager, "test_an_unmapped_catalog_sends_no_request", "neither returned nor asked for"),
+        (Ungated, REFLECT, "only when the configuration names it"),
+        (OwnerAlways, REFLECT, "with only its required settings"),
+        (
+            Unfiltered,
+            "test_nothing_outside_served_sets_is_returned",
+            "a tag or a classification must belong",
+        ),
+        (Valued, "test_no_type_carries_a_data_value", "exactly the core types"),
+        (
+            Resurrecting,
+            "test_a_deleted_entity_is_never_returned",
+            "a deleted entity must never be returned",
+        ),
+        (Quoting, "test_trap_names_are_looked_up_as_trino_lists_them", "trap table must be found"),
+        (
+            Unpartitioned,
+            "test_describe_returns_the_context_partition_columns_included",
+            "a partition column must come",
+        ),
+        (
+            Raw,
+            "test_a_timeout_or_bad_json_raises_unavailable",
+            "'bad-json' must raise ProviderUnavailable",
+        ),
+        (
+            Lingering,
+            "test_a_slow_catalogue_returns_before_the_deadline_plus_margin_and_closes_its_connection",
+            "must be cancelled, not left open",
+        ),
+        (
+            Late,
+            "test_a_slow_catalogue_returns_before_the_deadline_plus_margin_and_closes_its_connection",
+            "past its deadline",
+        ),
     ],
 )
 def test_the_contract_catches_a_provider_that_breaks_a_rule(kind, check, says):
     with pytest.raises(pytest.fail.Exception, match=says) as failed:
         getattr(ContextContract(), check)(harness_of(kind))
-    assert SECRET not in str(failed.value)
+    assert not any(form in str(failed.value) for form in SECRET_FORMS)
+
+
+def test_the_contract_catches_a_provider_whose_module_loads_the_trino_client():
+    from tests.context.heavy_provider import Heavy
+
+    with pytest.raises(pytest.fail.Exception, match="loads what an adapter must not"):
+        ContextContract().test_the_adapter_imports_neither_the_trino_client_nor_the_identity(
+            harness_of(Heavy)
+        )
 
 
 @pytest.mark.parametrize(
     ("names", "says"),
     [
-        (dict(described=TableRef("warehouse", "Ledger", "invoices")), "folded"),
-        (dict(unmapped_catalog="warehouse"), "unmapped"),
-        (dict(trap=TableRef("warehouse", "ledger", "plain")), "trap"),
+        (dict(described=TableRef("warehouse", "Ledger", "invoices")), "as TableRef.of does"),
+        (dict(unmapped_catalog="warehouse"), "the unmapped catalog differs"),
+        (dict(trap=TableRef("warehouse", "ledger", "plain")), "the trap name must hold"),
     ],
 )
 def test_the_contract_refuses_names_that_cannot_test_anything(names, says):
@@ -422,5 +581,5 @@ def test_the_contract_refuses_names_that_cannot_test_anything(names, says):
 def test_the_contract_refuses_a_secret_too_short_to_be_found():
     harness = harness_of(Recorded)
     harness.secret = "s"
-    with pytest.raises(pytest.fail.Exception, match="secret"):
+    with pytest.raises(pytest.fail.Exception, match="8 characters"):
         ContextContract().test_trap_names_are_looked_up_as_trino_lists_them(harness)
