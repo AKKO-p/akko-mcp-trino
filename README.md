@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-1144%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1148%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.7.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -135,7 +135,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1144 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
+- **Small and proven.** 1148 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
 
 ## Documentation
 
@@ -1191,15 +1191,16 @@ class TestMyProviderContract(ContextContract):
 
 Every HTTP request the provider sends must go through `transport`. Names are given as Trino lists
 them, and should appear nowhere else in the provider's logs or `check_lines()`. The settings serve
-the term's glossary and the owner. The secret is looked for as written, JSON-escaped, URL-encoded,
+the term's glossary, and the owner when the catalogue has one. The secret is looked for as written, JSON-escaped, URL-encoded,
 as Python writes it and in base64, so give one with a quote, a backslash and a non-ASCII
 character. Logs are read from the root logger: a logger that does not propagate escapes the check.
 Keep the entry point's factory in the module of the provider's class, which the import check
 loads alone. The checks: the
 context comes back with its partition columns, an unknown table and a deleted entity are left out,
-an unmapped catalog costs no request, nothing outside `served_sets()` is returned and those sets,
-the owner included, follow the settings (with only the settings it cannot do without, a provider
-serves nothing), no type carries a data value, a slow catalogue hands back control within the
+an unmapped catalog costs no request, nothing outside `served_sets()` is returned and those sets
+follow the settings (without its allow lists, a provider still describes the table and serves no
+set; the owner, when the provider declares one, is served only when its setting asks for it, and a
+provider whose catalogue has no owner declares none and skips that check), no type carries a data value, a slow catalogue hands back control within the
 deadline plus `ContextContract.REPLY_MARGIN_SECONDS` (0.5 s) and leaves no request open, a 401
 raises `ProviderRefused` and is not sent again, a timeout, a 503 or a body that is not JSON raise
 `ProviderUnavailable`, neither the logs (`httpx` at `WARNING`, as the server sets it) nor

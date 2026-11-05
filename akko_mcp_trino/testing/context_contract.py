@@ -310,20 +310,24 @@ def _holds_secret(text: str, secret: str) -> bool:
     return any(form in text for form in _secret_forms(secret))
 
 
-def _builds(harness: ContractHarness, env: Mapping[str, str]) -> bool:
+def _describes(harness: ContractHarness, env: Mapping[str, str], seconds: float) -> bool:
+    """Whether the provider, built from ``env``, still describes the described table."""
+    described = harness.names.described
     try:
-        with _running(harness, env):
-            return True
+        with _running(harness, env) as run:
+            return described in run.describe([described], seconds)
     except Exception:  # noqa: BLE001 - a setting the provider cannot do without
         return False
 
 
-def _required(harness: ContractHarness) -> dict[str, str]:
-    """The settings left once every one the provider can do without is removed, one by one."""
+def _without_allow_lists(harness: ContractHarness, seconds: float) -> dict[str, str]:
+    """The settings left once every one is removed, one by one, that the provider can do
+    without and still describe the described table: what is left builds the provider and
+    maps the catalog, and names no set to serve."""
     env = dict(harness.env)
     for key in sorted(env):
         fewer = {k: v for k, v in env.items() if k != key}
-        if _builds(harness, fewer):
+        if _describes(harness, fewer, seconds):
             env = fewer
     return env
 
@@ -539,8 +543,8 @@ class ContextContract:
         )
 
     def test_served_sets_reflect_the_configuration(self, harness: ContractHarness) -> None:
-        """A set, the owner included, is served only when the settings name it; with only
-        the settings it cannot do without, a provider serves nothing."""
+        """A glossary, classification or property set is served only when the settings name
+        it; without its allow lists, a provider still describes the table and serves none."""
         names = harness.names
         with _running(harness) as run:
             sets = run.provider.served_sets()
@@ -555,21 +559,38 @@ class ContextContract:
             "a set may be served only when the configuration names it",
         )
         _require(
-            bool(sets[GLOSSARY]) and bool(sets[OWNER]),
-            "the configuration of the contract must serve the term's glossary and the owner",
+            bool(sets[GLOSSARY]), "the configuration of the contract must serve the term's glossary"
         )
-        with _running(harness, _required(harness)) as run:
+        with _running(harness, _without_allow_lists(harness, self.DEADLINE_SECONDS)) as run:
             left = run.provider.served_sets()
-            found = run.describe(_refs(names), self.DEADLINE_SECONDS)
-        contexts = list(found.values())
+            found = run.describe([names.described], self.DEADLINE_SECONDS)
+        context = found.get(names.described)
         _require(
-            not any(left.values())
-            and not _term_keys(contexts)
-            and not _classifications(contexts)
-            and not _properties(contexts)
-            and not any(context.owner for context in contexts),
-            "with only its required settings, a provider must serve no set, and return no "
-            "owner, term, classification or property",
+            context is not None
+            and bool(context.description or context.columns)
+            and not (left[GLOSSARY] | left[CLASSIFICATION] | left[PROPERTY])
+            and not _term_keys([context])
+            and not _classifications([context])
+            and not _properties([context]),
+            "without its allow lists, a provider must still describe the table, and serve "
+            "no glossary, classification or property set, nor return a term, a "
+            "classification or a property",
+        )
+
+    def test_the_owner_follows_the_configuration(self, harness: ContractHarness) -> None:
+        """A provider that declares the owner serves it only when its settings ask for it; one
+        whose catalogue has no notion of an owner declares none, and is not checked."""
+        names = harness.names
+        with _running(harness) as run:
+            declared = bool(run.provider.served_sets()[OWNER])
+        if not declared:
+            pytest.skip("the provider declares no owner: its catalogue has no notion of one")
+        with _running(harness, _without_allow_lists(harness, self.DEADLINE_SECONDS)) as run:
+            left = run.provider.served_sets()
+            found = run.describe([names.described], self.DEADLINE_SECONDS)
+        _require(
+            not left[OWNER] and not any(context.owner for context in found.values()),
+            "the owner must not be served once the settings that serve it are removed",
         )
 
     def test_no_type_carries_a_data_value(self, harness: ContractHarness) -> None:

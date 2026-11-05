@@ -151,7 +151,7 @@ donnez.
   peut seulement refuser ce que le cœur autorise, jamais l'élargir.
 - **N'importe quel MCP host, n'importe quel modèle.** Cursor, Claude Desktop, VS Code, le SDK
   Python… Mistral, ou tout modèle compatible OpenAI avec l'agent d'exemple.
-- **Petit et prouvé.** 1144 tests à 100 % de couverture des lignes et des branches, dont des suites
+- **Petit et prouvé.** 1148 tests à 100 % de couverture des lignes et des branches, dont des suites
   sur le vrai SDK pour les trois transports, une exécution réelle contre Keycloak et Trino en CI
   ([`integration/`](integration/)) et une garde de neutralité produit.
 
@@ -646,7 +646,7 @@ fabrique `build(env, transport)`, la fonction `replay` qui rejoue les réponses 
 réglages `env`, le `secret` qu'ils contiennent, et les `ContractNames` (catalogue mappé et non
 mappé, table décrite, table partitionnée et sa colonne de partition, entité supprimée, table
 inconnue, nom piégé, colonne à terme, glossaire hors liste). Les réglages servent le glossaire du
-terme et le propriétaire. Le secret est cherché tel quel, échappé en JSON, encodé dans une URL,
+terme, et le propriétaire quand le catalogue en connaît un. Le secret est cherché tel quel, échappé en JSON, encodé dans une URL,
 écrit par Python et en base64 : en choisir un qui contient un guillemet droit, une barre
 oblique inverse et un caractère non ASCII. Les journaux sont lus sur le logger racine : un logger
 qui ne propage pas échappe au contrôle. La fabrique du point d'entrée reste dans le module de la
@@ -655,8 +655,10 @@ classe du fournisseur, que le contrôle des imports charge seul. L'exemple compl
 
 Le contrat vérifie que le contexte revient avec ses colonnes de partition, qu'une table inconnue et
 une entité supprimée sont omises, qu'un catalogue non mappé ne coûte aucune requête, que rien hors
-de `served_sets()` n'est rendu et que ces ensembles, propriétaire compris, suivent les réglages
-(avec seulement les réglages indispensables, un fournisseur ne sert rien), qu'aucun type ne porte de
+de `served_sets()` n'est rendu et que ces ensembles suivent les réglages (sans ses listes
+autorisées, un fournisseur décrit toujours la table et ne sert aucun ensemble ; le propriétaire,
+quand le fournisseur en déclare un, n'est servi que si son réglage le demande, et un fournisseur
+dont le catalogue ne connaît pas de propriétaire n'en déclare pas et saute ce contrôle), qu'aucun type ne porte de
 valeur, qu'un catalogue lent rend la main avant l'échéance plus
 `ContextContract.REPLY_MARGIN_SECONDS` (0,5 s) sans laisser de requête ouverte, qu'un 401 lève
 `ProviderRefused` sans être renvoyé, qu'un délai, un 503 ou un corps illisible lèvent

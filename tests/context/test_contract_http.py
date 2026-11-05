@@ -489,7 +489,30 @@ class OwnerAlways(Recorded):
         self._sets[OWNER] = frozenset({"owner"})
 
 
+class Sticky(Recorded):
+    """Takes an allow list left empty for "everything" and serves every set it holds."""
+
+    def _labels(self, specs: list, kind: str) -> tuple[Labelled, ...]:
+        if self._sets[kind]:
+            return super()._labels(specs, kind)
+        return tuple(Labelled(s["name"], s["set"]) for s in specs)
+
+    def _keys(self, specs: list) -> tuple[str, ...]:
+        if self._sets[GLOSSARY]:
+            return super()._keys(specs)
+        return tuple(s["key"] for s in specs)
+
+
+class Ownerless(Recorded):
+    """A catalogue with no notion of an owner: the provider never declares one."""
+
+    def __init__(self, env, transport):
+        super().__init__(env, transport)
+        self._sets[OWNER] = frozenset()
+
+
 LOGS = "test_logs_and_check_lines_never_hold_the_secret_or_an_object_name"
+OWNER_CHECK = "test_the_owner_follows_the_configuration"
 REFLECT = "test_served_sets_reflect_the_configuration"
 
 
@@ -513,7 +536,8 @@ REFLECT = "test_served_sets_reflect_the_configuration"
         (Retrying, "test_a_401_raises_refused_and_is_not_retried", "must not be sent again"),
         (Eager, "test_an_unmapped_catalog_sends_no_request", "neither returned nor asked for"),
         (Ungated, REFLECT, "only when the configuration names it"),
-        (OwnerAlways, REFLECT, "with only its required settings"),
+        (Sticky, REFLECT, "without its allow lists, a provider must still describe"),
+        (OwnerAlways, OWNER_CHECK, "the owner must not be served once"),
         (
             Unfiltered,
             "test_nothing_outside_served_sets_is_returned",
@@ -583,3 +607,10 @@ def test_the_contract_refuses_a_secret_too_short_to_be_found():
     harness.secret = "s"
     with pytest.raises(pytest.fail.Exception, match="8 characters"):
         ContextContract().test_trap_names_are_looked_up_as_trino_lists_them(harness)
+
+
+def test_a_provider_without_an_owner_passes_and_says_why_the_owner_is_not_checked():
+    contract, harness = ContextContract(), harness_of(Ownerless)
+    contract.test_served_sets_reflect_the_configuration(harness)
+    with pytest.raises(pytest.skip.Exception, match="declares no owner"):
+        getattr(contract, OWNER_CHECK)(harness)
