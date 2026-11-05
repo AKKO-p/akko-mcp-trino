@@ -535,7 +535,7 @@ The [examples](examples/README.md) folder has the details.
 | `list_catalogs` | `offset` (optional, 0 by default) | `{"catalogs": [...], "next_offset": n or null, "truncated": bool}`: one page of the catalogs Trino shows |
 | `list_schemas` | `catalog`, `offset` (optional) | `{"schemas": [...], "next_offset": n or null, "truncated": bool}`: one page of the schemas in that catalog |
 | `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
-| `describe_schema` | `catalog`, `schema`, `offset` (optional) | `{"catalog", "schema", "tables": [{"table", "type", "comment", "columns": [{"column", "type", "comment"}]}], "next_offset": n or null, "shortened": bool}`: one page of whole tables, with their comments and columns |
+| `describe_schema` | `catalog`, `schema`, `offset` (optional) | `{"catalog", "schema", "tables": [{"table", "type", "comment", "columns": [{"column", "type", "comment"}]}], "next_offset": n or null, "shortened": bool}`: one page of tables, each complete, with their comments and columns; with a context provider, a `description` per table and `context_sources` (see [Context from a catalogue](#context-from-a-catalogue)) |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add, and `describer_errors` when one failed; with a context provider, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns` (see [Context from a catalogue](#context-from-a-catalogue)) |
 | `explain_query` | `sql` | `{"valid": true}`: Trino analyzed a read-only statement as the caller, without running it; `{"plan": "..."}` only once `EXPLAIN` is in `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (optional, lower than the server cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
@@ -794,8 +794,9 @@ A registrar with a third argument receives the `ToolContext`:
 `tools.tool(title, governed=..., open_world=...)` registers a tool with its MCP
 annotations, `tools.run(sql)` queries Trino through the identity mode,
 `tools.note(...)` records what the call did (the SQL it ran, the tables, the
-rows, whether they were cut), `tools.context` reads the context of a table under
-the caller's rights (None without a provider), and `tools.add_describer(fn)` adds to what
+rows, whether they were cut), `tools.context.tables(refs)` reads the short catalogue
+description of the tables Trino proves to the caller (`tools.context` is None without a
+provider), and `tools.add_describer(fn)` adds to what
 `describe_table` answers:
 
 ```python
@@ -1079,7 +1080,27 @@ down, slow or refused is read within `MCP_CONTEXT_TIMEOUT_SECONDS` and leaves
 and the sources say `unavailable`. The statements of the filter stop while that reserve is still
 left: one that is too slow proves nothing (`not_checked` for the canary or the select check, no
 join for a target), and the call still answers. Anything else that fails on the way serves no
-context and says `error` for every source. Plugins read the same context through `tools.context`.
+context and says `error` for every source.
+
+`describe_schema` serves less. Each table of the page that a provider describes adds
+`description`, `{"text", "source"}`: the first description a provider has for it, cut at
+`MCP_CONTEXT_TEXT_CHARS` (then `"cut": ["text"]`). A table without context has no `description`
+key, and the answer adds `context_sources`. Trino has just listed the tables of the page to the
+caller, so the filter asks it nothing more than the canary check; the providers are asked for the
+tables of the page only, in one read by batches of `MCP_CONTEXT_BATCH`. A listing serves no column
+context, no term and no owner, and `MCP_CONTEXT_REQUIRE_SELECT` does not apply to it, as it would
+cost one statement per table: `describe_table` serves the rest. The same safety holds: with less
+than `MCP_CONTEXT_RESERVE_SECONDS` left no provider is called and the sources say `unavailable`,
+a slow statement of the filter proves nothing, any other failure serves the page without context
+and says `error` for every source, and the call never answers `time_budget` because of the
+context. Without a provider, `describe_schema` answers and describes itself exactly as in 0.7.2.
+
+Plugins read the catalogues through `tools.context.tables(refs)`, a list of `TableRef` built with
+`TableRef.of`. It answers as `describe_schema` does, `descriptions` by `TableRef` and
+`context_sources`, for the tables the caller's visibility proves only (listed by Trino in this
+call or within `MCP_VISIBILITY_TTL_SECONDS`). A table Trino does not list is neither named to
+Trino nor asked of a provider, and is absent from the answer, as a table without context is. A
+plugin never receives the chain, the visibility cache nor a provider.
 
 The statements of the filter run as the caller, with the client tag `mcp-gate`: the canary check,
 `EXPLAIN (TYPE VALIDATE)` of the visible columns with `MCP_CONTEXT_REQUIRE_SELECT=true` (a refusal

@@ -23,9 +23,12 @@ from akko_mcp_trino.audit import (
 )
 from akko_mcp_trino.auth import Principal
 from akko_mcp_trino.config import Config
+from akko_mcp_trino.context import GLOSSARY, TableContext, TableRef
 from akko_mcp_trino.identity import reset_current_principal, set_current_principal
 from akko_mcp_trino.server import build_server
 from akko_mcp_trino.tools import ToolContext
+from tests.context.memory_provider import Memory
+from tests.test_tools import SchemaTrino, _in_request, _with_context
 
 
 class FakeTrino:
@@ -203,6 +206,7 @@ def test_a_three_argument_plugin_receives_the_tool_context(monkeypatch, tmp_path
     assert isinstance(tools, ToolContext) and seen["client"] is client
     assert tools.audit is audit and tools.describers == []
     assert tools.read_only is True and tools.note is note
+    assert tools.context is None, "no context provider, no reader"
 
 
 def test_run_queries_under_the_callers_identity_and_may_lower_the_row_cap(monkeypatch):
@@ -433,3 +437,50 @@ def test_a_plugin_error_reply_gets_the_kind_too(monkeypatch):
     out = json.loads(_as("alice_analyst", lambda: mcp.tools["fails"]()))
     assert out == {"error": "Invalid schema", "kind": "invalid_argument"}
     assert audit.events[0].error == "ValueError"
+
+
+# ---- the catalogues' context, read under Trino's rights
+
+
+@pytest.fixture
+def context_setups():
+    made = []
+    yield made
+    for setup in made:
+        setup.close()
+
+
+def test_a_plugin_gets_context_only_for_tables_trino_proves_visible(context_setups):
+    """Trino lists orders and refunds; the catalogue also knows payroll, hidden. A table not
+    proven is never asked of the catalogue nor named to Trino, and answers as one Trino
+    shows without context: hidden, unknown or undescribed cannot be told apart."""
+    orders, payroll = TableRef("demo", "sales", "orders"), TableRef("demo", "sales", "payroll")
+    provider = Memory(
+        tables={
+            orders: TableContext(description="Orders of the shop"),
+            payroll: TableContext(description="Salaries of everyone"),
+        },
+        sets={GLOSSARY: frozenset({"finance"})},
+    )
+    client = SchemaTrino(tables=("orders", "refunds"))
+    mcp, _, tools = _with_context(context_setups, client, provider)
+
+    @tools.tool("Peek")
+    def peek(names: list) -> str:
+        read = tools.context.tables([TableRef("demo", "sales", n) for n in names])
+        found = {ref.table: entry for ref, entry in read["descriptions"].items()}
+        return json.dumps({"descriptions": found, "context_sources": read["context_sources"]})
+
+    def ask(*names):
+        return json.loads(_in_request(lambda: mcp.tools["peek"](list(names))))
+
+    assert ask("orders", "payroll", "ghost") == {
+        "descriptions": {"orders": {"text": "Orders of the shop", "source": "catalog"}},
+        "context_sources": {"catalog": "ok"},
+    }
+    nothing = {"descriptions": {}, "context_sources": {"catalog": "not_found"}}
+    assert ask("payroll") == ask("ghost") == ask("refunds") == nothing
+    asked = {ref.table for refs in provider.calls for ref in refs}
+    assert asked == {"orders", "refunds"}
+    statements = " ".join(sql for sql, _, _ in client.calls)
+    assert "payroll" not in statements and "ghost" not in statements

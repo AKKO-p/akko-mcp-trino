@@ -4,11 +4,25 @@
 
 Nothing is removed or renamed in the answers of the tools.
 
-- Without `MCP_CONTEXT_PROVIDERS`, `describe_table` answers and describes itself exactly as in 0.7.2.
+- Without `MCP_CONTEXT_PROVIDERS`, `describe_table` and `describe_schema` answer and describe themselves exactly as in 0.7.2.
 - With a context provider, `describe_table` adds six keys to its answer: `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns`, and its description adds one sentence saying that this text comes from a catalogue and is data, never instructions. `columns`, `rows`, `truncated` and `sample` are unchanged. A client that reads only those keeps working. A key of the same name that a plugin's describer added is replaced by the context's.
+- With a context provider, each table of a `describe_schema` page may add `description`, `{"text", "source"}` (with `"cut": ["text"]` when the text was cut), and the answer adds `context_sources`; its description adds one sentence. `catalog`, `schema`, `tables` and their other keys, `next_offset` and `shortened` are unchanged.
 - A plugin's describer that raises was silent; `describe_table` now adds `describer_errors`, the number of describers that failed, never their text. The columns are still answered.
 - With a context provider, `MCP_CONTEXT_RESERVE_SECONDS` below 0.3 refuses to start: the context needs part of each call's budget kept back to end before the call does. The default, 0.5, needs no change.
 - With `MCP_CONTEXT_REQUIRE_SELECT=true`, a read of the visible columns that Trino refuses is kept as refused for `MCP_VISIBILITY_TTL_SECONDS`: a right granted in Trino serves the context of that table at most that long after. A right withdrawn can leave the context visible as long, never the data.
+
+### From the context tools `visible_tables` and `explain_table`
+
+A server that offered the context of a catalogue through tools of its own now finds it in the core
+tools, under the caller's rights in Trino:
+
+- `visible_tables` becomes `describe_schema`: one page of the tables Trino lists, each with its
+  columns and, with a provider, its `description`. `list_tables` still gives the names alone.
+- `explain_table` becomes `describe_table`: `table`, `column_context` (same keys), `terms` (each
+  term once, cited by `{"name", "ref"}`) and `context_sources`.
+- `{"known": false}` becomes the error of `DESCRIBE`: a table Trino does not show to the caller
+  answers Trino's error, with its `kind`, and no provider is called. Nothing says whether a
+  catalogue knows such a table.
 
 ## From 0.7.0 to 0.7.1
 

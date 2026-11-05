@@ -356,7 +356,7 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 | `list_catalogs` | `offset` (facultatif, 0 par défaut) | une page des catalogs que Trino montre, `next_offset`, `truncated` |
 | `list_schemas` | `catalog`, `offset` (facultatif) | une page des schémas de ce catalog, `next_offset`, `truncated` |
 | `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
-| `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` |
+| `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` ; avec un fournisseur de contexte, une `description` par table et `context_sources` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, `truncated` ; un échantillon gouverné sur demande ; ce qu'ajoutent les descripteurs d'une extension, et `describer_errors` quand l'un a échoué ; avec un fournisseur de contexte, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` et `undescribed_columns` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
 | `explain_query` | `sql` | `{"valid": true}` : Trino a analysé la requête en lecture sous l'identité de l'appelant, sans l'exécuter ; le plan seulement si `EXPLAIN` figure dans `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | colonnes, lignes, nombre de lignes, `truncated` |
@@ -641,8 +641,29 @@ et laisse `MCP_CONTEXT_RESERVE_SECONDS` du budget de l'appel ; s'il en reste moi
 n'est appelé et les sources disent `unavailable`. Les requêtes du filtre s'arrêtent tant que cette
 réserve reste : une requête trop lente ne prouve rien (`not_checked` pour le canari ou le contrôle
 de lecture, pas de jointure vers une cible), et l'appel répond quand même. Tout autre échec en
-chemin ne sert aucun contexte et dit `error` pour chaque source. Les greffons lisent le même
-contexte par `tools.context`.
+chemin ne sert aucun contexte et dit `error` pour chaque source.
+
+`describe_schema` en sert moins. Chaque table de la page qu'un fournisseur décrit ajoute
+`description`, `{"text", "source"}` : la première description qu'un fournisseur en donne, coupée à
+`MCP_CONTEXT_TEXT_CHARS` (alors `"cut": ["text"]`). Une table sans contexte n'a pas de clé
+`description`, et la réponse ajoute `context_sources`. Trino vient de lister à l'appelant les
+tables de la page : le filtre ne lui demande rien de plus que le contrôle du canari, et les
+fournisseurs ne sont interrogés que sur les tables de la page, en une lecture par lots de
+`MCP_CONTEXT_BATCH`. Une liste ne sert ni contexte de colonne, ni terme, ni propriétaire, et
+`MCP_CONTEXT_REQUIRE_SELECT` ne s'y applique pas, parce qu'il coûterait une requête par table :
+`describe_table` sert le reste. Les mêmes garanties tiennent : s'il reste moins de
+`MCP_CONTEXT_RESERVE_SECONDS`, aucun fournisseur n'est appelé et les sources disent `unavailable`,
+une requête lente du filtre ne prouve rien, tout autre échec sert la page sans contexte et dit
+`error` pour chaque source, et l'appel ne répond jamais `time_budget` à cause du contexte. Sans
+fournisseur, `describe_schema` répond et se décrit exactement comme en 0.7.2.
+
+Les greffons lisent les catalogues par `tools.context.tables(refs)`, une liste de `TableRef`
+construits par `TableRef.of`. La réponse a la forme de celle de `describe_schema`, `descriptions`
+par `TableRef` et `context_sources`, pour les seules tables que la visibilité de l'appelant prouve
+(listées par Trino dans cet appel ou depuis moins de `MCP_VISIBILITY_TTL_SECONDS`). Une table que
+Trino ne liste pas n'est ni nommée à Trino ni demandée à un fournisseur, et elle est absente de la
+réponse, comme une table sans contexte. Un greffon ne reçoit jamais la chaîne, le cache de
+visibilité ni un fournisseur.
 
 Les requêtes du filtre partent sous l'identité de l'appelant, avec l'étiquette client `mcp-gate` :
 le contrôle du canari, `EXPLAIN (TYPE VALIDATE)` des colonnes visibles avec

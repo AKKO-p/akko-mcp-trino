@@ -507,3 +507,130 @@ def test_the_key_of_the_proofs_is_the_effective_subject(made):
             reset_current_principal(token)
     canary_checks = [sql for sql in fake.statements if "canary" in sql]
     assert len(canary_checks) == 2, "one per subject, kept for the TTL"
+
+
+# ---- for_tables: the short description of each table a listing just gave
+
+REFUNDS = TableRef("demo", "sales", "refunds")
+
+
+def test_for_tables_serves_one_cleaned_and_cut_description_per_table_and_its_source(made):
+    first = Memory(
+        "first",
+        tables={ORDERS: TableContext(description="Orders‮ of the shop", owner="bob")},
+        sets=SERVED,
+    )
+    second = Memory(
+        "second",
+        tables={
+            ORDERS: TableContext(description="Other words"),
+            CUSTOMERS: TableContext(description="x" * 30),
+        },
+        sets=SERVED,
+    )
+    service, fake = _service(made, first, second, context_text_chars=20)
+    out = service.for_tables([ORDERS, CUSTOMERS, REFUNDS], listed=True)
+    assert out == {
+        "descriptions": {
+            ORDERS: {"text": "Orders of the shop", "source": "first"},
+            CUSTOMERS: {"text": "x" * 20, "source": "second", "cut": ["text"]},
+        },
+        "context_sources": {"first": "ok", "second": "ok"},
+    }
+    assert first.calls == [(ORDERS, CUSTOMERS, REFUNDS)], "one read of the tables, by key"
+    assert fake.statements == [], "Trino just listed them: nothing is asked of it"
+
+
+def test_for_tables_without_time_left_calls_no_provider(made):
+    provider = Memory(tables={ORDERS: TableContext(description="d")}, sets=SERVED)
+    service, _ = _service(made, provider, context_reserve_seconds=5.0)
+    call, token = bind_call("describe_schema", 1.0)
+    try:
+        out = service.for_tables([ORDERS], listed=True)
+    finally:
+        reset_call(token)
+    assert out == {"descriptions": {}, "context_sources": {"catalog": "unavailable"}}
+    assert provider.calls == []
+
+
+def test_for_tables_says_the_chains_failure_by_status(made, monkeypatch, caplog):
+    service, _ = _service(made, Memory(tables={ORDERS: TableContext(description="d")}))
+    chain = made[-1].chain
+
+    def late(*args, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(chain, "gather", late)
+    out = service.for_tables([ORDERS], listed=True)
+    assert out == {"descriptions": {}, "context_sources": {"catalog": "unavailable"}}
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("secret detail")
+
+    monkeypatch.setattr(chain, "gather", broken)
+    with caplog.at_level(logging.DEBUG, logger="akko_mcp_trino.context.reply"):
+        out = service.for_tables([ORDERS], listed=True)
+    assert out["context_sources"] == {"catalog": "error"}
+    assert "RuntimeError" in caplog.text and "secret detail" not in caplog.text
+
+
+def test_for_tables_a_source_whose_sets_fail_serves_nothing(made):
+    broken = Memory(
+        "broken",
+        tables={ORDERS: TableContext(description="from broken")},
+        sets=RuntimeError("no sets"),
+    )
+    good = Memory("good", tables={CUSTOMERS: TableContext(description="from good")}, sets=SERVED)
+    service, _ = _service(made, broken, good)
+    out = service.for_tables([ORDERS, CUSTOMERS], listed=True)
+    assert out == {
+        "descriptions": {CUSTOMERS: {"text": "from good", "source": "good"}},
+        "context_sources": {"broken": "error", "good": "ok"},
+    }
+
+
+def test_for_tables_a_source_that_served_cached_context_is_partial(made, monkeypatch):
+    service, _ = _service(made, Memory(sets=SERVED))
+    cached = Gathered(
+        tables=MappingProxyType({ORDERS: (("catalog", TableContext(description="cached")),)}),
+        statuses=MappingProxyType({"catalog": "unavailable"}),
+    )
+    monkeypatch.setattr(made[-1].chain, "gather", lambda *a, **k: cached)
+    out = service.for_tables([ORDERS], listed=True)
+    assert out["context_sources"] == {"catalog": "partial"}
+    assert out["descriptions"] == {ORDERS: {"text": "cached", "source": "catalog"}}
+
+
+def test_for_tables_with_a_visible_canary_serves_nothing(made):
+    provider = Memory(tables={ORDERS: TableContext(description="d")}, sets=SERVED)
+    service, _ = _service(
+        made,
+        provider,
+        trino=_trino(canary=True, schemas={"demo": ["sales", "trap"]}),
+        canary="demo.trap.canary",
+    )
+    out = service.for_tables([ORDERS], listed=True)
+    assert out == {"descriptions": {}, "context_sources": {"catalog": "not_checked"}}
+    assert provider.calls == []
+
+
+def test_for_tables_not_listed_reads_only_the_tables_trino_proves(made):
+    """Without ``listed``, a table is read only once Trino proves it to the caller, by its
+    schema's listing; the others are not named to Trino nor asked of the catalogue."""
+    payroll = TableRef("demo", "sales", "payroll")
+    provider = Memory(
+        tables={ORDERS: TableContext(description="d"), payroll: TableContext(description="p")},
+        sets=SERVED,
+    )
+    service, fake = _service(made, provider, ttl=0.0)
+    out = service.for_tables([ORDERS, payroll], listed=False)
+    assert out == {
+        "descriptions": {ORDERS: {"text": "d", "source": "catalog"}},
+        "context_sources": {"catalog": "ok"},
+    }
+    assert provider.calls == [(ORDERS,)] and "payroll" not in " ".join(fake.statements)
+    assert service.for_tables([payroll], listed=False) == {
+        "descriptions": {},
+        "context_sources": {"catalog": "not_found"},
+    }
+    assert provider.calls == [(ORDERS,)]

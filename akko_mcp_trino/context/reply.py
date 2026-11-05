@@ -13,17 +13,22 @@ merged, its terms are given references (``t1``, ``t2``… in order of first
 appearance; a catalogue's key is never served) and the whole is bounded by
 ``MCP_CONTEXT_MAX_COLUMNS`` and ``MCP_CONTEXT_RESPONSE_CHARS``.
 
+A listing serves less: ``for_tables`` gives each table the first description a
+provider has for it, cut at ``MCP_CONTEXT_TEXT_CHARS``, and nothing else. Its
+tables are read in one pass, never validated one by one.
+
 A provider never makes the tool fail: a deadline left too short, a chain that
 does not answer in time or fails says so in ``context_sources``, one status per
 provider. Anything else that fails on the way serves no context, every source
 ``error``, and is logged by type and place, never by its text.
 """
 
+import functools
 import json
 import logging
 import time
 import traceback
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any
 
 from ..audit import current_call, note
@@ -31,7 +36,7 @@ from ..config import Config
 from .chain import ContextChain
 from .gate import filter_table, filter_term
 from .merge import merge_column, merge_table
-from .status import ERROR, NOT_CHECKED, OK, PARTIAL, REFUSED, UNAVAILABLE
+from .status import ERROR, NOT_CHECKED, NOT_FOUND, OK, PARTIAL, REFUSED, UNAVAILABLE
 from .text import clean_text
 from .types import GLOSSARY, TableContext, TableRef, Term
 from .visibility import Visibility, VisibilityKey, key_for
@@ -175,15 +180,54 @@ class ContextService:
         ``context_truncated`` and ``undescribed_columns``. It never raises: an unexpected
         failure serves no context and says ``error`` for every source.
         """
+        return self._guarded(lambda: self._for_table(ref, visible_columns, complete), self._nothing)
+
+    def for_tables(self, refs: Sequence[TableRef], *, listed: bool) -> dict:
+        """Return the short catalogue description of each table of ``refs``.
+
+        ``listed`` says Trino has just listed ``refs`` to the caller in this call: they are
+        recorded as listed. Otherwise a table is read only once the visibility proves it to
+        the caller; one not proven is neither named to Trino nor asked of a provider, and is
+        absent from the answer, as a table without context is. No read is validated
+        (``MCP_CONTEXT_REQUIRE_SELECT``): that would cost one statement per table.
+        The answer has ``descriptions``, ``{"text", "source"}`` by table, with
+        ``"cut": ["text"]`` for a text cut at ``MCP_CONTEXT_TEXT_CHARS``, and
+        ``context_sources``. It never raises, as ``for_table``.
+        """
+        return self._guarded(lambda: self._for_tables(refs, listed), self._no_descriptions)
+
+    def _guarded(self, read: Callable[[], dict], nothing: Callable[[str], dict]) -> dict:
+        """``read()``, or ``nothing(ERROR)`` once it raises, logged by type and place only."""
         try:
-            return self._for_table(ref, visible_columns, complete)
+            return read()
         except Exception as exc:
             places = "; ".join(
                 f"{frame.filename}:{frame.lineno} in {frame.name}"
                 for frame in traceback.extract_tb(exc.__traceback__)
             )
-            _log.error("the context of a table failed with %s at %s", type(exc).__name__, places)
-            return self._nothing(ERROR)
+            _log.error("the context failed with %s at %s", type(exc).__name__, places)
+            return nothing(ERROR)
+
+    def _sources(
+        self,
+        statuses: Mapping[str, str],
+        answered: Collection[str],
+        *,
+        term_statuses: Mapping[str, str] | None = None,
+        cut: bool = False,
+    ) -> dict[str, str]:
+        """One status per source: ``partial`` for a source that served context while part of
+        its read failed (its tables or its terms), and for an ``ok`` one when ``cut``."""
+        term_statuses = term_statuses or {}
+        sources: dict[str, str] = {}
+        for name in self._chain.names:
+            status = statuses.get(name, UNAVAILABLE)
+            if name in answered and (status in _FAILED or term_statuses.get(name) in _NOT_WELL):
+                status = PARTIAL
+            if status == OK and cut:
+                status = PARTIAL
+            sources[name] = status
+        return sources
 
     def _for_table(self, ref: TableRef, visible_columns: Sequence[str], complete: bool) -> dict:
         visible = tuple(dict.fromkeys(visible_columns))
@@ -243,19 +287,66 @@ class ContextService:
             terms.update({(name, term_key): term for term_key, term in mine.items()})
 
         out = self._render(final, visible, terms, complete)
-        cut = out["context_truncated"] or not complete
-        sources: dict[str, str] = {}
-        for name in self._chain.names:
-            status = statuses.get(name, UNAVAILABLE)
-            if name in contexts and (status in _FAILED or term_statuses.get(name) in _NOT_WELL):
-                status = PARTIAL
-            if status == OK and cut:
-                status = PARTIAL
-            sources[name] = status
-        out["context_sources"] = sources
+        out["context_sources"] = self._sources(
+            statuses,
+            contexts,
+            term_statuses=term_statuses,
+            cut=out["context_truncated"] or not complete,
+        )
         if out["table"] or out["column_context"] or out["terms"]:
             note(metadata_served=[f"{ref.catalog}.{ref.schema}.{ref.table}"])
         return out
+
+    def _for_tables(self, refs: Sequence[TableRef], listed: bool) -> dict:
+        wanted = tuple(dict.fromkeys(refs))
+        key = key_for(self._config, "", self._subject() or "")
+        if listed:
+            self._visibility.listed(key, wanted)
+        if not wanted:
+            return self._no_descriptions(NOT_FOUND)
+        if not self._visibility.canary_clear(key):
+            return self._no_descriptions(NOT_CHECKED)
+        deadline = self.deadline()
+        if deadline is None:
+            return self._no_descriptions(UNAVAILABLE)
+        if not listed:
+            wanted = tuple(ref for ref in wanted if self._visibility.proven(key, ref))
+            if not wanted:
+                return self._no_descriptions(NOT_FOUND)
+        try:
+            gathered = self._chain.gather(wanted, deadline=deadline)
+        except Exception as exc:
+            return self._no_descriptions(_failure(exc))
+        statuses = dict(gathered.statuses)
+        found = {name for contexts in gathered.tables.values() for name, _ in contexts}
+        broken = {name for name in found if self._chain.served_sets(name) is None}
+        statuses.update(dict.fromkeys(broken, ERROR))
+
+        descriptions: dict[TableRef, dict] = {}
+        for ref in wanted:
+            # Only the description is merged: nothing else of a context reaches a listing.
+            merged = merge_table(
+                [
+                    (name, TableContext(description=ctx.description))
+                    for name, ctx in gathered.tables.get(ref, ())
+                    if name not in broken
+                ],
+                text_chars=self._config.context_text_chars,
+            )
+            if "description" in merged:
+                entry = {"text": merged["description"], "source": merged["sources"]["description"]}
+                if "description" in merged.get("cut", ()):
+                    entry["cut"] = ["text"]
+                descriptions[ref] = entry
+        if descriptions:
+            note(metadata_served=[f"{r.catalog}.{r.schema}.{r.table}" for r in descriptions])
+        return {
+            "descriptions": descriptions,
+            "context_sources": self._sources(statuses, found - broken),
+        }
+
+    def _no_descriptions(self, status: str) -> dict:
+        return {"descriptions": {}, "context_sources": dict.fromkeys(self._chain.names, status)}
 
     def _nothing(self, status: str) -> dict:
         return {
@@ -381,3 +472,24 @@ class ContextService:
             "context_truncated": bool(undescribed or left_out),
             "undescribed_columns": undescribed + left_out,
         }
+
+
+class ContextReader:
+    """What a tool plugin reads of the catalogues; never the chain, the visibility, a provider."""
+
+    __slots__ = ("_read",)
+
+    def __init__(self, service: ContextService) -> None:
+        """Read through ``service``, for the tables the visibility proves to the caller only."""
+        self._read = functools.partial(service.for_tables, listed=False)
+
+    def tables(self, refs: Sequence[TableRef]) -> dict:
+        """Return the short catalogue description of each table of ``refs`` Trino proves.
+
+        The answer is that of ``ContextService.for_tables``: ``descriptions``, keyed by
+        ``TableRef``, holds only tables Trino lists to the caller, in this call or within
+        ``MCP_VISIBILITY_TTL_SECONDS``; a table not proven is absent, as one without context
+        is, and is neither named to Trino nor asked of a catalogue. Build ``refs`` with
+        ``TableRef.of``, which folds the names as Trino does.
+        """
+        return self._read(refs)
