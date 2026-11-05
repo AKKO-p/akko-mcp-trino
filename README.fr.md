@@ -862,16 +862,21 @@ Le filtre appartient au cœur, et il est prouvé sur chaque fournisseur : `GateC
 serveur tel qu'il tourne, avec le fournisseur et son catalogue enregistré, dans les modes d'identité
 `jwt` et `impersonation` (le second avec `MCP_CONTEXT_REQUIRE_SELECT=true`), et met `FakeTrino` à la
 place de Trino. `FakeTrino` répond aux requêtes du cœur selon ce que voit chaque utilisateur
-(`Visible` : les tables, et les colonnes que Trino liste de chacune) et enregistre chaque requête avec
-son utilisateur, son texte et ses étiquettes client (`Statement`). Un appelant voit toutes les tables
+(`Visible` : les tables, les colonnes que Trino liste de chacune, et les tables qu'il liste mais dont
+il refuse la lecture) et enregistre chaque requête avec son utilisateur, son jeton pour Trino, son
+texte et ses étiquettes client (`Statement`). Chaque vérification tourne deux fois : avec un Trino qui
+répond un objet caché comme absent (un contrôle d'accès qui filtre les métadonnées), puis avec un
+Trino qui le refuse (`PERMISSION_DENIED`, comme des règles ; `FakeTrino(..., existing=...)`). Un appelant voit toutes les tables
 du harnais sauf un objet : une table, puis une colonne de la table décrite, puis la cible d'une de ses
 jointures. Le contrat vérifie que rien de cet objet, ni son nom ni aucun texte que le catalogue lui
 donne à lui seul, n'atteint une réponse, un statut de `context_sources`, une ligne d'audit, une ligne
-de journal ou une métrique ; que chaque requête part sous l'identité de l'appelant et ne nomme que ce
-que Trino lui a listé, celles de l'agent aussi ce que l'agent a écrit, et que la seule requête qui
-nomme une table cachée est le `DESCRIBE` que l'agent en a demandé ; qu'une table cachée et une table
-absente (`names.unknown`) répondent les mêmes clés, types et statuts, écrivent la même ligne d'audit
-et envoient les mêmes requêtes. Un appelant qui voit tout reçoit les trois objets, pour que les
+de journal ou une métrique, chaque canal contrôlé à part ; que chaque requête part sous l'identité de
+l'appelant, avec son jeton en `jwt`, et ne nomme que ce que Trino lui a listé, celles de l'agent aussi
+ce que l'agent a écrit, et que la seule requête qui nomme une table cachée est le `DESCRIBE` que
+l'agent en a demandé ; qu'une table cachée et une table absente (`names.unknown`) reçoivent la même
+chose du cœur (clés, types et statuts hors l'erreur de Trino, ligne d'audit hors son code d'erreur,
+requêtes) ; qu'avec `MCP_CONTEXT_REQUIRE_SELECT=true`, une table que Trino liste mais dont il refuse
+la lecture reçoit ses colonnes, aucun contexte et `not_checked`. Un appelant qui voit tout reçoit les trois objets, pour que les
 vérifications testent quelque chose. On l'ajoute à la classe ci-dessus, avec une fixture `gate` :
 
 ```python

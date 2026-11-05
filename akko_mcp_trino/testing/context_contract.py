@@ -787,6 +787,11 @@ _HIDDEN_TABLE, _HIDDEN_COLUMN, _HIDDEN_JOIN = (
     "the hidden join target",
 )
 _SCENARIOS = (_HIDDEN_TABLE, _HIDDEN_COLUMN, _HIDDEN_JOIN)
+# How Trino answers an object it hides: as missing (metadata filtered) or refused (rules).
+_FILTERS, _REFUSES = "a Trino that filters", "a Trino that refuses"
+_BEHAVIOURS = (_FILTERS, _REFUSES)
+# Keys of a reply that come from Trino's error, not from the core.
+_TRINO_ERROR = frozenset({"error", "kind", "identifier"})
 _SEES_ALL, _CALLER = "gate-sees-all", "gate-caller"
 _CANARY_SCHEMA, _CANARY_TABLE = "mcp_gate_canary", "sentinel"
 # A text shorter than this is too common to be looked for in what the caller receives.
@@ -838,11 +843,13 @@ class _Answer:
             return None
         return TableRef.of(self.args["catalog"], self.args["schema"], self.args["table"])
 
-    def scrubbed(self) -> str:
-        """The reply and the audit line, the table the agent asked for left out by name."""
-        text = self.text + "\n" + json.dumps(self.line, ensure_ascii=False)
+    def scrubbed(self, text: str) -> str:
+        """``text`` without the table the agent asked for, by name."""
         asked = self.asked()
         return text.replace(_dotted(asked), "<asked>") if asked is not None else text
+
+    def line_text(self) -> str:
+        return json.dumps(self.line, ensure_ascii=False)
 
 
 @dataclass
@@ -867,7 +874,7 @@ class _Server:
 
         first, events = len(self.fake.statements), len(self.audit.events)
         principal = set_current_principal(Principal(subject=user, token_id=f"{user}-jti"))
-        bearer = set_current_bearer(f"bearer-of-{user}")
+        bearer = set_current_bearer(_bearer(user))
         request = set_current_request_id(f"gate-{events}")
         try:
             text = self.tools[tool](**args)
@@ -889,6 +896,16 @@ class _Server:
 
 def _dotted(ref: TableRef) -> str:
     return f"{ref.catalog}.{ref.schema}.{ref.table}"
+
+
+def _bearer(user: str) -> str:
+    """The verified bearer of ``user`` in a gate run: one per caller."""
+    return f"bearer-of-{user}"
+
+
+def _trino_token(bearer: str) -> str:
+    """The token for Trino the gate run's token exchange gives for ``bearer``."""
+    return f"token-for-trino:{bearer}"
 
 
 def _table_args(ref: TableRef) -> dict[str, str]:
@@ -1084,11 +1101,14 @@ class GateContract:
 
     Each check builds the server as it runs, with the provider, for each identity mode
     the gate serves (``jwt``, ``impersonation`` with ``MCP_CONTEXT_REQUIRE_SELECT=true``),
-    and a :class:`~akko_mcp_trino.testing.FakeTrino` in place of Trino. A caller sees every
-    table the harness names but one object: the hidden table, then the hidden column, then
-    the hidden join target. Another caller, who sees everything, proves that each of them
-    is served when it is visible, so the checks test something. ``DEADLINE_SECONDS`` is the
-    deadline of a catalogue read, raised in a subclass for a slow CI.
+    and a :class:`~akko_mcp_trino.testing.FakeTrino` in place of Trino, once answering a
+    hidden object as missing (an access control that filters the metadata), once refusing
+    it (``PERMISSION_DENIED``, rule-based). A caller sees every table the harness names but
+    one object: the hidden table, then the hidden column, then the hidden join target.
+    Another caller, who sees everything, proves that each of them is served when it is
+    visible, so the checks test something. One more check gives a table Trino lists but
+    refuses a read of. ``DEADLINE_SECONDS`` is the deadline of a catalogue read, raised in
+    a subclass for a slow CI.
     """
 
     DEADLINE_SECONDS = 5.0
@@ -1108,9 +1128,17 @@ class GateContract:
         gate: GateHarness,
         mode: str,
         monkeypatch: Any,
-        rights: Mapping[str, Mapping[TableRef, tuple[str, ...]]],
+        rights: Mapping[str, Any],
+        *,
+        existing: Mapping[TableRef, tuple[str, ...]] | None = None,
+        require_select: bool | None = None,
     ) -> Iterator[_Server]:
-        """The server built as it runs in ``mode``, over the provider and a fake Trino."""
+        """The server built as it runs in ``mode``, over the provider and a fake Trino.
+
+        ``rights`` gives each user's ``Visible``; ``existing``, Trino's own tables, makes it
+        a Trino that refuses a hidden object rather than one that answers it as missing.
+        ``MCP_CONTEXT_REQUIRE_SELECT`` is ``require_select``, by default true in
+        ``impersonation`` only."""
         from ..audit import InMemoryAudit
         from ..config import Config
         from ..context.loading import close_providers
@@ -1121,12 +1149,16 @@ class GateContract:
 
         contract, names = gate.contract, gate.contract.names
         fake = FakeTrino(
-            {user: Visible(tables) for user, tables in rights.items()},
+            {
+                user: seen if isinstance(seen, Visible) else Visible(seen)
+                for user, seen in rights.items()
+            },
             configured=(_CANARY_SCHEMA, _CANARY_TABLE),
+            existing=existing,
         )
         fake.install(monkeypatch)
-        # The identity provider is not there: the exchanged token is a fixed text.
-        monkeypatch.setattr(JwtIdentity, "trino_token", lambda self, bearer: "token-for-trino")
+        # The identity provider is not there: the exchanged token names the caller's bearer.
+        monkeypatch.setattr(JwtIdentity, "trino_token", lambda self, bearer: _trino_token(bearer))
         provider = contract.build(contract.env, _Transport(contract.replay, contract.secret))
         config = Config(
             trino_host="trino.invalid",
@@ -1153,7 +1185,9 @@ class GateContract:
             token_exchange_audience="trino",
             context_providers=provider.name,
             context_canary=f"{names.catalog}.{_CANARY_SCHEMA}.{_CANARY_TABLE}",
-            context_require_select=mode == "impersonation",
+            context_require_select=(
+                mode == "impersonation" if require_select is None else require_select
+            ),
         )
         captured: dict[str, Callable[..., str]] = {}
 
@@ -1210,32 +1244,49 @@ class GateContract:
         )
 
     def _each_run(self, gate: GateHarness, monkeypatch: Any) -> Iterator[tuple]:
-        """For each mode and each hidden object: the scenario, the caller's answers, the
-        logs, the metrics, what the caller sees and the texts of the hidden object."""
+        """For each mode, each way Trino hides and each hidden object: the scenario, where it
+        runs, the caller's answers, the logs, the metrics, what the caller sees and the texts
+        of the hidden object."""
         found, terms = self._catalogue(gate)
         everything = _trino_columns(found)
         for mode in _MODES:
             self._sees_all_is_served(gate, mode, monkeypatch, everything)
-            for scenario in _SCENARIOS:
-                seen = _rights(scenario, gate, everything)
-                name, hidden = _hidden_texts(scenario, gate, found, terms, seen)
-                with _captured_logs() as lines:
-                    with self._serving(gate, mode, monkeypatch, {_CALLER: seen}) as server:
+            for behaviour in _BEHAVIOURS:
+                existing = everything if behaviour == _REFUSES else None
+                for scenario in _SCENARIOS:
+                    seen = _rights(scenario, gate, everything)
+                    name, hidden = _hidden_texts(scenario, gate, found, terms, seen)
+                    with (
+                        _captured_logs() as lines,
+                        self._serving(
+                            gate, mode, monkeypatch, {_CALLER: seen}, existing=existing
+                        ) as server,
+                    ):
                         answers = [server.call(_CALLER, tool, args) for tool, args in _calls(gate)]
                         metrics = server.metrics_text()
                         provider = server.provider
-                yield mode, scenario, answers, list(lines), metrics, seen, (name, hidden), provider
+                    where = f"{scenario}, {mode}, {behaviour}"
+                    yield (
+                        mode,
+                        scenario,
+                        where,
+                        answers,
+                        list(lines),
+                        metrics,
+                        seen,
+                        (name, hidden),
+                        provider,
+                    )
 
     def test_nothing_of_a_hidden_object_reaches_any_answer_status_or_audit_line(
         self, gate: GateHarness, monkeypatch: Any
     ) -> None:
         """No reply, ``context_sources`` status, audit line, log line or metric holds the
         name of a hidden table, column or join target, nor a text the catalogue gives it."""
-        for mode, scenario, answers, lines, metrics, seen, hidden, provider in self._each_run(
+        for _, scenario, where, answers, lines, metrics, seen, hidden, provider in self._each_run(
             gate, monkeypatch
         ):
             _, texts = hidden
-            where = f"{scenario}, {mode}"
             visible = {_dotted(ref) for ref in seen}
             for answer in answers:
                 reply = answer.reply
@@ -1249,9 +1300,18 @@ class GateContract:
                     f"the audit line says context was served of a table the caller does not "
                     f"see ({where})",
                 )
-            received = [answer.scrubbed() for answer in answers] + lines + [metrics]
-            leaked = sorted(t for t in texts if any(t in text for text in received))
-            _require(not leaked, f"{scenario} reaches the caller ({mode}): {leaked}")
+            channels = {
+                "a reply": [answer.scrubbed(answer.text) for answer in answers],
+                "the audit line": [answer.scrubbed(answer.line_text()) for answer in answers],
+                "the logs": lines,
+                "the metrics": [metrics],
+            }
+            for channel, received in channels.items():
+                leaked = sorted(t for t in texts if any(t in text for text in received))
+                _require(
+                    not leaked,
+                    f"{scenario} reaches the caller ({where}) through {channel}: {leaked}",
+                )
 
     def test_no_statement_holds_a_name_trino_had_not_listed_to_that_caller(
         self, gate: GateHarness, monkeypatch: Any
@@ -1263,9 +1323,9 @@ class GateContract:
         from .fake_trino import names_in
 
         gated = 0
-        for mode, scenario, answers, _, _, _, hidden, _ in self._each_run(gate, monkeypatch):
+        for mode, scenario, where, answers, _, _, _, hidden, _ in self._each_run(gate, monkeypatch):
             name, _ = hidden
-            where = f"{scenario}, {mode}"
+            token = _trino_token(_bearer(_CALLER)) if mode == "jwt" else ""
             for answer in answers:
                 asked = answer.asked()
                 written = {value.lower() for value in answer.args.values()}
@@ -1273,8 +1333,9 @@ class GateContract:
                     gate_statement = GATE_TAG in statement.client_tags
                     gated += gate_statement
                     _require(
-                        statement.user == _CALLER,
-                        f"a statement runs as another user than the caller ({where})",
+                        statement.user == _CALLER and statement.token == token,
+                        f"a statement runs as another user than the caller, or with another "
+                        f"token for Trino than the caller's ({where})",
                     )
                     allowed = set() if gate_statement else written
                     unlisted = [n for n in statement.unlisted if n not in allowed]
@@ -1299,32 +1360,78 @@ class GateContract:
         self, gate: GateHarness, monkeypatch: Any
     ) -> None:
         """``describe_table`` of a table Trino hides from the caller and of one that does
-        not exist answer the same keys, kinds and statuses, write the same audit line and
-        send Trino the same statements, though the catalogue describes only the first."""
+        not exist get the same from the core, though the catalogue describes only the first:
+        the same keys, kinds and statuses besides Trino's own error, the same audit line
+        besides its error code, and the same statements. Trino may answer the hidden one as
+        missing or refuse it; both are run."""
         found, _ = self._catalogue(gate)
         everything = _trino_columns(found)
         seen = _rights(_HIDDEN_TABLE, gate, everything)
+
+        def statements(answer: _Answer) -> list[tuple]:
+            table = answer.args["table"]
+            return [(s.client_tags, s.sql.replace(table, "<asked>")) for s in answer.statements]
+
+        def added(answer: _Answer) -> Any:
+            reply = {k: v for k, v in answer.reply.items() if k not in _TRINO_ERROR}
+            line = {
+                k: v
+                for k, v in answer.line.items()
+                if k not in ("request_id", "duration_ms", "error")
+            }
+            return _shape(reply), line["ok"], line["metadata_served"], _shape(line)
+
         for mode in _MODES:
-            answers = []
-            for ref in (gate.hidden_table, gate.contract.names.unknown):
-                with self._serving(gate, mode, monkeypatch, {_CALLER: seen}) as server:
-                    answers.append(server.call(_CALLER, "describe_table", _table_args(ref)))
-            hidden, missing = answers
+            for behaviour in _BEHAVIOURS:
+                existing = everything if behaviour == _REFUSES else None
+                answers = []
+                for ref in (gate.hidden_table, gate.contract.names.unknown):
+                    with self._serving(
+                        gate, mode, monkeypatch, {_CALLER: seen}, existing=existing
+                    ) as server:
+                        answers.append(server.call(_CALLER, "describe_table", _table_args(ref)))
+                hidden, missing = answers
+                _require(
+                    added(hidden) == added(missing) and statements(hidden) == statements(missing),
+                    "a hidden and a missing table must answer the same keys, kinds and "
+                    "statuses, the same audit line and the same statements "
+                    f"({mode}, {behaviour})",
+                )
 
-            def statements(answer: _Answer) -> list[tuple]:
-                table = answer.args["table"]
-                return [(s.client_tags, s.sql.replace(table, "<asked>")) for s in answer.statements]
+    def test_a_table_listed_but_not_readable_has_no_context_when_a_read_is_required(
+        self, gate: GateHarness, monkeypatch: Any
+    ) -> None:
+        """With ``MCP_CONTEXT_REQUIRE_SELECT=true``, a table Trino lists to the caller but
+        refuses them a read of gets its columns and no context: every source says
+        ``not_checked`` and the audit line says nothing was served. Without the setting,
+        the context follows what Trino lists, and is served."""
+        from .fake_trino import Visible
 
-            def line(answer: _Answer) -> Any:
-                fixed = ("ok", "error", "metadata_served")
-                varying = ("request_id", "duration_ms")
-                kept = {k: v for k, v in answer.line.items() if k not in varying}
-                return [kept[k] for k in fixed], _shape(kept)
-
+        found, _ = self._catalogue(gate)
+        everything = _trino_columns(found)
+        listed = Visible(everything, unreadable=frozenset({gate.hidden_table}))
+        description = found[gate.hidden_table].description
+        for mode in _MODES:
+            replies = {}
+            for required in (True, False):
+                with self._serving(
+                    gate, mode, monkeypatch, {_CALLER: listed}, require_select=required
+                ) as server:
+                    answer = server.call(_CALLER, "describe_table", _table_args(gate.hidden_table))
+                replies[required] = (answer.reply, answer.line)
+            (refused, line), (followed, _) = replies[True], replies[False]
             _require(
-                _shape(hidden.reply) == _shape(missing.reply)
-                and line(hidden) == line(missing)
-                and statements(hidden) == statements(missing),
-                f"a hidden and a missing table must answer the same keys, kinds and statuses, "
-                f"the same audit line and the same statements ({mode})",
+                bool(followed.get("table") or followed.get("column_context")),
+                f"without MCP_CONTEXT_REQUIRE_SELECT, the hidden table's context must follow "
+                f"what Trino lists ({mode}): the check cannot test anything",
+            )
+            _require(
+                bool(refused.get("rows"))
+                and not (refused.get("table") or refused.get("column_context"))
+                and not refused.get("terms")
+                and set(refused.get("context_sources", {}).values()) == {NOT_CHECKED}
+                and not line["metadata_served"]
+                and (not description or description not in json.dumps(refused)),
+                f"a table the caller may not read must get its columns and no context when a "
+                f"read is required ({mode})",
             )

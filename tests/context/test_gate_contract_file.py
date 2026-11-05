@@ -6,7 +6,7 @@ The tests below break the core, one rule at a time, and the contract must catch 
 """
 
 import json
-import re
+import logging
 
 import pytest
 
@@ -147,6 +147,7 @@ class TestFileProviderGate(GateContract):
 LEAK = "test_nothing_of_a_hidden_object_reaches_any_answer_status_or_audit_line"
 STATEMENTS = "test_no_statement_holds_a_name_trino_had_not_listed_to_that_caller"
 SHAPE = "test_a_hidden_and_a_missing_table_answer_the_same_shape"
+UNREADABLE = "test_a_table_listed_but_not_readable_has_no_context_when_a_read_is_required"
 
 
 def _ungated(monkeypatch):
@@ -162,8 +163,10 @@ def _trusting(monkeypatch):
 
 
 def _explaining(monkeypatch):
-    """A core that, when Trino does not describe a table, asks the catalogue about it."""
+    """A core that, when Trino refuses to describe a table, asks the catalogue about it and
+    says it served it."""
     from akko_mcp_trino import tools
+    from akko_mcp_trino.audit import current_call, note
     from akko_mcp_trino.context.reply import ContextService
 
     services = []
@@ -177,24 +180,91 @@ def _explaining(monkeypatch):
 
     def explained(exc, sql="", visible=None):
         out = json.loads(original(exc, sql, visible))
-        named = re.search(r"Table '([^']+)'", str(exc))
-        if named and services:
-            ref = TableRef.of(*named.group(1).split("."))
+        if getattr(exc, "error_name", None) == "PERMISSION_DENIED":
+            asked = current_call().tables[-1]
+            ref = TableRef.of(*asked.split("."))
             out["context_sources"] = services[-1].for_table(ref, [], complete=True)[
                 "context_sources"
             ]
+            note(metadata_served=[asked])
         return json.dumps(out)
 
     monkeypatch.setattr(ContextService, "__init__", keep)
     monkeypatch.setattr(tools, "error_reply", explained)
 
 
+def _borrowing(monkeypatch):
+    """A core whose statements carry another caller's token to Trino."""
+    monkeypatch.setattr(
+        "akko_mcp_trino.trino_client.current_bearer", lambda: "bearer-of-gate-sees-all"
+    )
+
+
+def _reading_anyway(monkeypatch):
+    """A core that takes every read as validated."""
+    monkeypatch.setattr(
+        "akko_mcp_trino.context.visibility.Visibility.selectable", lambda self, *a, **k: True
+    )
+
+
+def _side_channel(write):
+    """A core that filters what it serves, and writes the catalogue's columns elsewhere."""
+
+    def breaks(monkeypatch):
+        from akko_mcp_trino.context import reply
+
+        original = reply.filter_table
+
+        def leaky(ctx, **keywords):
+            write(sorted(ctx.columns))
+            return original(ctx, **keywords)
+
+        monkeypatch.setattr(reply, "filter_table", leaky)
+
+    return breaks
+
+
+def _noted(columns):
+    from akko_mcp_trino.audit import note
+
+    note(tables=columns)
+
+
+def _logged(columns):
+    logging.getLogger("akko_mcp_trino.context.reply").info("read the columns %s", columns)
+
+
+_METRICS = []
+
+
+def _counted(columns):
+    _METRICS[-1].context_calls.labels(provider=",".join(columns)).inc()
+
+
+def _metered(monkeypatch):
+    from akko_mcp_trino.metrics import Metrics
+
+    built = Metrics.__init__
+
+    def keep(self, *args, **kwargs):
+        built(self, *args, **kwargs)
+        _METRICS.append(self)
+
+    monkeypatch.setattr(Metrics, "__init__", keep)
+    _side_channel(_counted)(monkeypatch)
+
+
 @pytest.mark.parametrize(
     ("breaks", "check", "says"),
     [
-        (_ungated, LEAK, "reaches the caller"),
+        (_ungated, LEAK, "reaches the caller .* through a reply"),
+        (_side_channel(_noted), LEAK, "reaches the caller .* through the audit line"),
+        (_side_channel(_logged), LEAK, "reaches the caller .* through the logs"),
+        (_metered, LEAK, "reaches the caller .* through the metrics"),
         (_trusting, STATEMENTS, "names what Trino had not listed"),
-        (_explaining, SHAPE, "a hidden and a missing table must answer the same"),
+        (_borrowing, STATEMENTS, "another token for Trino than the caller's \\(.*jwt"),
+        (_explaining, SHAPE, "must answer the same .*a Trino that refuses"),
+        (_reading_anyway, UNREADABLE, "must get its columns and no context"),
     ],
 )
 def test_the_gate_contract_catches_a_core_that_breaks_a_rule(
@@ -318,3 +388,54 @@ def test_the_fake_trino_reads_the_columns_of_a_page_from_an_offset_or_whole():
     assert [row[1] for row in ana.fetchmany(10)] == ["invoice_id", "payment_ref", "total"]
     ana.execute(select + " OFFSET 1")
     assert [row[1] for row in ana.fetchmany(10)] == ["payment_ref", "total"]
+
+
+def test_the_fake_trino_refuses_what_exists_and_is_hidden_when_told_trino_has_it():
+    invoices = TableRef("warehouse", "ledger", "invoices")
+    payroll = TableRef("warehouse", "ledger", "payroll")
+    fake = FakeTrino(
+        {"ana": Visible({invoices: ("invoice_id",)}, unreadable=frozenset())},
+        existing={invoices: ("invoice_id", "total"), payroll: ("gross_pay",)},
+    )
+    ana = fake.connect(user="ana").cursor()
+    with pytest.raises(Exception, match="PERMISSION_DENIED.*Cannot show columns of table"):
+        ana.execute("DESCRIBE warehouse.ledger.payroll")
+    with pytest.raises(Exception, match="TABLE_NOT_FOUND"):
+        ana.execute("DESCRIBE warehouse.ledger.ghosts")
+    with pytest.raises(Exception, match="PERMISSION_DENIED.*Cannot select from columns"):
+        ana.execute('EXPLAIN (TYPE VALIDATE) SELECT "total" FROM "warehouse"."ledger"."invoices"')
+    with pytest.raises(Exception, match="PERMISSION_DENIED.*Cannot select from columns"):
+        ana.execute(
+            'EXPLAIN (TYPE VALIDATE) SELECT "gross_pay" FROM "warehouse"."ledger"."payroll"'
+        )
+    with pytest.raises(Exception, match="COLUMN_NOT_FOUND"):
+        ana.execute('EXPLAIN (TYPE VALIDATE) SELECT "nosuch" FROM "warehouse"."ledger"."invoices"')
+
+
+def test_the_fake_trino_lists_an_unreadable_table_and_refuses_its_read():
+    invoices = TableRef("warehouse", "ledger", "invoices")
+    fake = FakeTrino(
+        {"ana": Visible({invoices: ("invoice_id",)}, unreadable=frozenset({invoices}))}
+    )
+    ana = fake.connect(user="ana").cursor()
+    ana.execute("DESCRIBE warehouse.ledger.invoices")
+    assert ana.fetchmany(5) == [["invoice_id", "varchar", "", ""]]
+    with pytest.raises(Exception, match="PERMISSION_DENIED.*Cannot select from columns"):
+        ana.execute(
+            'EXPLAIN (TYPE VALIDATE) SELECT "invoice_id" FROM "warehouse"."ledger"."invoices"'
+        )
+
+
+def test_the_fake_trino_records_the_token_each_connection_carries():
+    import trino.auth
+
+    fake = FakeTrino({})
+    with pytest.raises(Exception, match="does not answer"):
+        fake.connect(
+            user="ana", auth=trino.auth.JWTAuthentication("token-of-ana")
+        ).cursor().execute("SELECT 1")
+    with pytest.raises(Exception, match="does not answer"):
+        fake.connect(user="ben", auth=trino.auth.BasicAuthentication("ben", "pw")).cursor().execute(
+            "SELECT 1"
+        )
+    assert [(s.user, s.token) for s in fake.statements] == [("ana", "token-of-ana"), ("ben", "")]

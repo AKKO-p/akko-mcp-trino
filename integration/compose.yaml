@@ -88,8 +88,10 @@ services:
       timeout: 5s
       retries: 60
       start_period: 20s
-    # Heap 768 MB (jvm.config); the rest is native memory, more under the context servers.
-    mem_limit: 1536m
+    # Heap 768 MB (jvm.config), plus native memory: run.sh (step 4) measured its anonymous
+    # memory at 1689 to 1777 MiB at most during the checks (three runs); 2304m leaves about
+    # 30 % more. Its page cache is reclaimed, never the cause of an OOM kill.
+    mem_limit: 2304m
 
   # The default identity mode (jwt), not named: each query runs as the caller, with
   # a token for Trino obtained by token exchange.
@@ -172,6 +174,21 @@ services:
       MCP_CONTEXT_FILE_SERVE_OWNER: "true"
       MCP_CONTEXT_CANARY: tpch.sf1.region
       MCP_CONTEXT_REQUIRE_SELECT: "true"
+
+  # The jwt context server with a canary alice sees (tpch.sf1.nation): Trino lists it to
+  # her, so the server serves her no context (not_checked) and logs a WARNING.
+  mcp-context-canary:
+    <<: *mcp
+    volumes:
+      - certs:/certs:ro
+      - ./context.json:/integration/context.json:ro
+    environment:
+      <<: *jwt-environment
+      MCP_RESOURCE_URL: http://mcp-context-canary:3000/mcp
+      MCP_CONTEXT_PROVIDERS: file
+      MCP_CONTEXT_FILE: /integration/context.json
+      MCP_CONTEXT_FILE_GLOSSARIES: geography
+      MCP_CONTEXT_CANARY: tpch.sf1.nation
 
   # Service mode with an open door, chosen explicitly: it must say so to every host.
   mcp-service:

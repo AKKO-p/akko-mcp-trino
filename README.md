@@ -1326,16 +1326,21 @@ under 30 s, the time the slow catalogue takes to answer.
 The gate is the core's, and it is proven over each provider: `GateContract` builds the server as it
 runs, with the provider and its recorded catalogue, in the `jwt` and `impersonation` identity modes
 (the second with `MCP_CONTEXT_REQUIRE_SELECT=true`), and puts `FakeTrino` in place of Trino.
-`FakeTrino` answers the core's own statements from what each user sees (`Visible`: the tables, and
-the columns Trino lists of each) and records every statement with its user, its text and its client
-tags (`Statement`). A caller sees every table of the harness but one object: a table, then a column
+`FakeTrino` answers the core's own statements from what each user sees (`Visible`: the tables, the
+columns Trino lists of each, and the tables it lists but refuses a read of) and records every
+statement with its user, its token for Trino, its text and its client tags (`Statement`). Each check
+runs twice: once with a Trino that answers a hidden object as missing (an access control that
+filters the metadata), once with one that refuses it (`PERMISSION_DENIED`, as rules do;
+`FakeTrino(..., existing=...)`). A caller sees every table of the harness but one object: a table, then a column
 of the described table, then the target of one of its joins. The checks: nothing of that object,
 neither its name nor any text the catalogue gives it alone, reaches a reply, a `context_sources`
-status, an audit line, a log line or a metric; every statement runs as the caller and names only
-what Trino has listed to them, the agent's own statements also what the agent wrote, and the one
-statement that names a hidden table is the `DESCRIBE` the agent asked of it; a hidden table and a
-missing one (`names.unknown`) answer the same keys, kinds and statuses, write the same audit line and
-send the same statements. A caller who sees everything is served the three objects, so the checks
+status, an audit line, a log line or a metric, each checked on its own; every statement runs as the
+caller, with the caller's token in `jwt`, and names only what Trino has listed to them, the agent's
+own statements also what the agent wrote, and the one statement that names a hidden table is the
+`DESCRIBE` the agent asked of it; a hidden table and a missing one (`names.unknown`) get the same
+from the core (the keys, kinds and statuses besides Trino's own error, the audit line besides its
+error code, the statements); with `MCP_CONTEXT_REQUIRE_SELECT=true`, a table Trino lists but refuses
+a read of gets its columns, no context and `not_checked`. A caller who sees everything is served the three objects, so the checks
 test something. Add it to the class above, with a `gate` fixture:
 
 ```python

@@ -25,9 +25,10 @@ JWT, IMPERSONATION, SERVICE = (
 )
 PAGED = "http://mcp-paged:3000/mcp"  # the jwt server with pages of three rows
 # The servers with the catalogue context of integration/context.json.
-CONTEXT_JWT, CONTEXT_IMPERSONATION = (
+CONTEXT_JWT, CONTEXT_IMPERSONATION, CONTEXT_CANARY = (
     "http://mcp-context-jwt:3000/mcp",
     "http://mcp-context-impersonation:3000/mcp",
+    "http://mcp-context-canary:3000/mcp",  # its canary is a table alice sees
 )
 # Texts the file gives only to what bob may not see: the table orders, the column
 # comment of nation, and the table region a join of nation names.
@@ -162,10 +163,15 @@ async def context(call) -> dict:
     async def describe(table: str) -> dict:
         return await call("describe_table", catalog="tpch", schema="tiny", table=table)
 
+    async def search(text: str) -> dict:
+        return await call("search_columns", text=text, catalog="tpch", schema="tiny")
+
     return {
         "nation": await describe("nation"),
         "orders": await describe("orders"),
         "schema": await call("describe_schema", catalog="tpch", schema="tiny"),
+        "tables": await call("list_tables", catalog="tpch", schema="tiny"),
+        "search": [await search("purchase order"), await search("totalprice")],
     }
 
 
@@ -208,12 +214,16 @@ def context_checks(label: str, url: str, alice: str, bob: str) -> None:
         "joins" not in b["nation"].get("table", {}) and REGION not in json.dumps(b["nation"]),
         b["nation"].get("table"),
     )
+    # Trino answers bob's DESCRIBE of orders as its access control does: a refusal under
+    # rules (permission), or a table that does not exist under filtered metadata (table).
+    kind = b["orders"].get("kind")
     check(
-        f"{label}: bob gets nothing of orders, from any tool",
-        "error" in b["orders"]
-        and "context_sources" not in b["orders"]
+        f"{label}: bob gets nothing of orders from describe_table, describe_schema, "
+        f"list_tables or search_columns (Trino answers him kind {kind})",
+        kind in ("permission", "table")
+        and set(b["orders"]) <= {"error", "kind", "identifier"}
         and not any(text in json.dumps(b) for text in ORDERS_TEXTS)
-        and "orders" not in json.dumps([b["nation"], b["schema"]]),
+        and "orders" not in json.dumps([b["nation"], b["schema"], b["tables"], b["search"]]),
         b,
     )
     check(
@@ -416,6 +426,14 @@ def main() -> int:
     # 1d. Catalogue context from a file, under each caller's rights in Trino.
     context_checks("context (jwt)", CONTEXT_JWT, alice, bob)
     context_checks("context (impersonation)", CONTEXT_IMPERSONATION, alice, bob)
+    seen = use(CONTEXT_CANARY, alice, context)["nation"]
+    check(
+        "context (canary): alice, who sees the canary, gets the columns and no context",
+        seen.get("context_sources") == {"file": "not_checked"}
+        and bool(seen.get("rows"))
+        and not (seen.get("table") or seen.get("column_context") or seen.get("terms")),
+        seen,
+    )
 
     # 2. The door: no token, a forged one, one issued for Trino.
     no_token = httpx.post(JWT, json={}, timeout=10)
