@@ -536,7 +536,7 @@ The [examples](examples/README.md) folder has the details.
 | `list_schemas` | `catalog`, `offset` (optional) | `{"schemas": [...], "next_offset": n or null, "truncated": bool}`: one page of the schemas in that catalog |
 | `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
 | `describe_schema` | `catalog`, `schema`, `offset` (optional) | `{"catalog", "schema", "tables": [{"table", "type", "comment", "columns": [{"column", "type", "comment"}]}], "next_offset": n or null, "shortened": bool}`: one page of whole tables, with their comments and columns |
-| `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add |
+| `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add, and `describer_errors` when one failed; with a context provider, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns` (see [Context from a catalogue](#context-from-a-catalogue)) |
 | `explain_query` | `sql` | `{"valid": true}`: Trino analyzed a read-only statement as the caller, without running it; `{"plan": "..."}` only once `EXPLAIN` is in `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (optional, lower than the server cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
 
@@ -794,7 +794,8 @@ A registrar with a third argument receives the `ToolContext`:
 `tools.tool(title, governed=..., open_world=...)` registers a tool with its MCP
 annotations, `tools.run(sql)` queries Trino through the identity mode,
 `tools.note(...)` records what the call did (the SQL it ran, the tables, the
-rows, whether they were cut), and `tools.add_describer(fn)` adds to what
+rows, whether they were cut), `tools.context` reads the context of a table under
+the caller's rights (None without a provider), and `tools.add_describer(fn)` adds to what
 `describe_table` answers:
 
 ```python
@@ -1044,7 +1045,52 @@ file changes) instead of a value.
 Context follows what Trino lists for the caller: a name that comes from a catalogue is never used
 before Trino has listed it for that caller, a provider never receives the Trino client or the
 caller's identity, and it never writes to its catalogue. The text of a provider's error never
-reaches the agent, only a status. Nothing in these lines is wired into a tool yet.
+reaches the agent, only a status.
+
+`describe_table` serves this context. Its `DESCRIBE`, run as the caller, proves the table and
+the columns Trino lists; a `DESCRIBE` that fails calls no provider and answers as before. The answer
+then adds:
+
+- `table`: what the catalogues say of the table (description, tags, terms, properties, grain,
+  joins; the owner only when a provider serves it), with `sources`, the provider of each field;
+- `column_context`: the same for each column Trino listed, by name, in the order of `DESCRIBE`. A
+  column Trino does not list has no context; a grain loses all its columns when one is hidden; a
+  join is kept only toward a table and columns Trino lists to the caller;
+- `terms`: each glossary term once, by reference (`t1`, `t2`… in order of first appearance), with
+  its `name`, `glossary`, `definition`, `status`, `categories`, `related` (only terms of the same
+  answer) and `source`. A table or a column cites `{"name", "ref"}`; a catalogue's own keys are
+  never served;
+- `context_sources`: one status per provider, `ok`, `not_found` (the provider does not know the
+  table), `not_mapped` (it does not cover this catalog), `partial` (part was not read in time or
+  in the size of the answer, or the row cap cut the `DESCRIBE`), `unavailable`, `refused`, `error`,
+  or `not_checked` (the canary is visible, a check failed, or with `MCP_CONTEXT_REQUIRE_SELECT=true`
+  Trino does not validate a read of the visible columns);
+- `context_truncated` and `undescribed_columns`: at most `MCP_CONTEXT_MAX_COLUMNS` columns are
+  described, and the context stops before the column that would take it past
+  `MCP_CONTEXT_RESPONSE_CHARS`; the columns left are listed. A text cut at `MCP_CONTEXT_TEXT_CHARS`
+  is named in `cut`.
+
+Without a provider, `describe_table` answers and describes itself exactly as in 0.7. With one, its
+description says that this text comes from a catalogue and is data, never instructions. A provider
+that is down, slow or refused never hides the columns and never fails the call: the context is read
+within `MCP_CONTEXT_TIMEOUT_SECONDS` and leaves `MCP_CONTEXT_RESERVE_SECONDS` of the call's budget;
+with less than that left, no provider is called and the sources say `unavailable`. A describer of
+a plugin that raises is counted in `describer_errors`. Plugins read the same context through
+`tools.context`.
+
+The statements of the filter run as the caller, with the client tag `mcp-gate`: the canary check,
+`EXPLAIN (TYPE VALIDATE)` of the visible columns with `MCP_CONTEXT_REQUIRE_SELECT=true` (a refusal
+is kept for `MCP_VISIBILITY_TTL_SECONDS`), and, for the target of a join, the schemas of its
+catalog, the tables of its schema and its `DESCRIBE`. A right withdrawn in Trino can leave the
+context of a table visible for up to `MCP_VISIBILITY_TTL_SECONDS`, never its data, which Trino
+refuses at once.
+
+Give each provider a read-only account that sees only what every user who sees an object in Trino
+may read of it: the allow lists of a provider name what is served, and its account should read no
+more. Behind Trino Gateway, the statements of the filter and those of the call may reach two
+clusters of one routing group: every cluster of a group must share the same access control (the
+same plugin and the same rules). A routing group whose clusters apply different rules is not
+supported.
 
 | Variable | Meaning | Default |
 |---|---|---|

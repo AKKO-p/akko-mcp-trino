@@ -490,3 +490,47 @@ def test_columns_counts_its_key_in_the_bound():
     vis = _visibility(FakeTrino(columns={("demo", "crm", "customers"): ["id"]}), max_bytes=BOUND)
     assert vis.columns(KEY, ref) == frozenset({"id"})
     assert vis.bytes <= BOUND
+
+
+class _Denied(Exception):
+    """A Trino user error that refuses access, as the Trino client raises it."""
+
+    error_name = "PERMISSION_DENIED"
+    error_type = "USER_ERROR"
+
+
+def test_a_select_trino_denies_is_kept_as_refused_for_one_ttl():
+    clock = Clock()
+    fake = FakeTrino()
+    vis = _visibility(fake, clock=clock, ttl=60.0)
+    ref = TableRef("demo", "crm", "customers")
+    vis.listed(KEY, [ref])
+    denied = fake.__call__
+
+    def refuse(sql, **kw):
+        if sql.startswith("EXPLAIN"):
+            fake.statements.append(sql)
+            raise _Denied("Access Denied: Cannot select from columns [id]")
+        return denied(sql, **kw)
+
+    vis._run = refuse
+    assert not vis.selectable(KEY, ref, ["id"], listed=["id"])
+    assert not vis.selectable(KEY, ref, ["id"], listed=["id"])
+    assert sum(sql.startswith("EXPLAIN") for sql in fake.statements) == 1, "kept as refused"
+    assert vis.selectable(replace(KEY, subject="bob"), ref, ["id"], listed=["id"]) is False
+    vis._run = fake
+    clock.now = 100.0
+    vis.listed(KEY, [ref])
+    assert vis.selectable(KEY, ref, ["id"], listed=["id"]), "asked again after the TTL"
+
+
+def test_a_select_on_the_table_just_described_needs_no_other_proof():
+    fake = FakeTrino()
+    vis = _visibility(fake, ttl=0.0)
+    ref = TableRef("demo", "hr", "salaries")
+    assert vis.selectable(KEY, ref, ["amount"], listed=["amount"], described=True)
+    assert fake.statements == [
+        'EXPLAIN (TYPE VALIDATE) SELECT "amount" FROM "demo"."hr"."salaries"'
+    ]
+    assert not vis.selectable(KEY, ref, ["other"], listed=["amount"], described=True)
+    assert len(fake.statements) == 1

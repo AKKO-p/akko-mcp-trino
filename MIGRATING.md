@@ -1,5 +1,14 @@
 # Migrating
 
+## From 0.7 to 0.8 (unreleased)
+
+Nothing is removed or renamed in the answers of the tools.
+
+- Without `MCP_CONTEXT_PROVIDERS`, `describe_table` answers and describes itself exactly as in 0.7.2.
+- With a context provider, `describe_table` adds six keys to its answer: `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns`, and its description adds one sentence saying that this text comes from a catalogue and is data, never instructions. `columns`, `rows`, `truncated` and `sample` are unchanged. A client that reads only those keeps working. A key of the same name that a plugin's describer added is replaced by the context's.
+- A plugin's describer that raises was silent; `describe_table` now adds `describer_errors`, the number of describers that failed, never their text. The columns are still answered.
+- With `MCP_CONTEXT_REQUIRE_SELECT=true`, a read of the visible columns that Trino refuses is kept as refused for `MCP_VISIBILITY_TTL_SECONDS`: a right granted in Trino serves the context of that table at most that long after. A right withdrawn can leave the context visible as long, never the data.
+
 ## From 0.7.0 to 0.7.1
 
 A security release: reads that Trino answers past a row filter or a column mask are refused by default. It also reads the user from `sub`: **with Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading**, including when you follow the `0.7` image tag.

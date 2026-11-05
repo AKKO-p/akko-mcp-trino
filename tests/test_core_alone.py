@@ -56,6 +56,7 @@ CORE_MODULES = {
     "context/loop",
     "context/merge",
     "context/provider",
+    "context/reply",
     "context/secrets",
     "context/status",
     "context/text",
