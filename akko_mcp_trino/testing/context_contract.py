@@ -434,7 +434,10 @@ class ContextContract:
     ``REPLY_MARGIN_SECONDS`` is how late past its deadline a provider may hand back
     control, chosen for a busy CI event loop. ``DEADLINE_SECONDS`` is the deadline of a
     call that should succeed; ``SLOW_DEADLINE_SECONDS`` that of a call to a catalogue
-    that does not answer in time.
+    that does not answer in time. Both are class attributes: an adapter whose tests run on
+    a slow CI raises them in its subclass (``DEADLINE_SECONDS = 15.0``), and the contract
+    reads them on every check. Keep ``SLOW_DEADLINE_SECONDS`` well under 30 seconds, the
+    time the contract's slow catalogue takes to answer.
     """
 
     REPLY_MARGIN_SECONDS = 0.5
@@ -690,6 +693,28 @@ class ContextContract:
         )
         leaked = sorted(name for name in _object_names(names) if name in text)
         _require(not leaked, f"the logs and check_lines() must never hold an object name: {leaked}")
+
+    def test_a_factory_refusal_never_holds_the_secret(self, harness: ContractHarness) -> None:
+        """A factory that refuses a malformed setting (``ValueError``) does not put the secret
+        in its message, the causes included: ``--check`` prints that message. Each setting
+        that holds the secret is given back padded with white space, then in quotes."""
+        secret = harness.secret
+        holders = [name for name, value in harness.env.items() if secret in value]
+        if not holders:
+            pytest.skip("no setting holds the secret")
+        refusals = []
+        for name in holders:
+            value = harness.env[name]
+            for malformed in (f" {value}\n", f'"{value}"'):
+                try:
+                    with _running(harness, {**harness.env, name: malformed}):
+                        pass
+                except ValueError as error:
+                    refusals.append("".join(traceback.format_exception(error)))
+        _require(
+            not any(_holds_secret(text, secret) for text in refusals),
+            "a factory's ValueError must never hold the secret, as written or encoded",
+        )
 
     def test_the_adapter_imports_neither_the_trino_client_nor_the_identity(
         self, harness: ContractHarness

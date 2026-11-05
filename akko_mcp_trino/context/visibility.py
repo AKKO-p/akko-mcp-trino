@@ -94,7 +94,7 @@ class Visibility:
 
     def _put(self, key: Hashable, value: Any) -> None:
         with self._lock:
-            self._cache.put(key, value, _size(value))
+            self._cache.put(key, value, serialized_size(key) + _size(value))
 
     def _names(self, sql: str) -> tuple[frozenset[str], bool]:
         """Return the first column of ``sql``, and whether more than the bound came."""

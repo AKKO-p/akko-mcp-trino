@@ -2,9 +2,10 @@
 
 It is the reference for the provider contract and needs no service. The file describes
 tables, columns and glossary terms by name, never data: a ``values`` or ``samples`` key
-anywhere refuses it. Names are written in lower case, as Trino lists them (catalog, schema,
-table and column), because the core compares them exactly; a file that holds the same table
-or the same column twice once folded is refused, not merged.
+anywhere refuses it. The provider folds the catalog, schema, table and column names to
+lower case, as Trino lists them, because the core compares them exactly (term keys are kept as
+written); a file that holds the same table or the same column twice once folded is refused,
+not merged.
 
 What is served is what the file declares and the operator allows by exact name
 (``MCP_CONTEXT_FILE_GLOSSARIES``, ``_CLASSIFICATIONS``, ``_PROPERTIES``; ``*`` is a name,

@@ -336,6 +336,16 @@ class Leaky(Recorded):
         return ProviderError(response.text)
 
 
+class Echoing(Recorded):
+    """Puts a token it refuses in its ValueError."""
+
+    def __init__(self, env, transport):
+        token = env.get("REC_TOKEN", "")
+        if token != token.strip() or token.startswith('"'):
+            raise ValueError(f"REC_TOKEN {token!r} has stray characters around it")
+        super().__init__(env, transport)
+
+
 class Chatty(Recorded):
     """Prints its token."""
 
@@ -520,6 +530,11 @@ REFLECT = "test_served_sets_reflect_the_configuration"
     ("kind", "check", "says"),
     [
         (Leaky, LOGS, "an exception, its causes included, must never hold the secret"),
+        (
+            Echoing,
+            "test_a_factory_refusal_never_holds_the_secret",
+            "a factory's ValueError must never hold the secret",
+        ),
         (Chatty, LOGS, r"the logs and check_lines\(\) must never hold the secret"),
         (Remembering, LOGS, r"the logs and check_lines\(\) must never hold the secret"),
         (Logging, LOGS, "must never hold an object name"),

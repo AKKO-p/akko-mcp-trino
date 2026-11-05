@@ -135,7 +135,9 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1148 tests at 100 % line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](integration/)), and a product-neutral guard.
+- **Small and proven.** 1148 tests at 100 % line and branch coverage, including in-process suites on
+  the real SDK for all three transports, a live run against Keycloak and Trino in CI
+  ([`integration/`](integration/)), and a product-neutral guard.
 
 ## Documentation
 
@@ -1056,7 +1058,7 @@ reaches the agent, only a status. Nothing in these lines is wired into a tool ye
 | `MCP_CONTEXT_TTL_SECONDS` | how long a context read is kept, 0 or more | `900` |
 | `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | the bound of the caches of tables and of glossary terms, 1 at least; each bound counts the length of the JSON form of the cached entries, and the process holds about three to four times that in memory, so size the pod for that | `134217728`, `16777216` |
 | `MCP_VISIBILITY_TTL_SECONDS` | how long what Trino listed for a caller is kept, 0 or more | `60` |
-| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | the bound of that cache (counted as above, so size the pod for about three to four times that), and the most names it keeps for one caller, 1 at least | `33554432`, `10000` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | the bound of that cache (each entry counts its key as well as its value; measured, the process holds 4.4 times that in memory for the entries of listed tables and 3.6 times for those of 300 selected columns, so size the pod for about five times that), and the most names it keeps for one caller, 1 at least | `33554432`, `10000` |
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true`: context is served only for tables the caller may read | `false` |
 | `MCP_CONTEXT_CANARY` | one table, `catalog.schema.table`, that no caller of this server may see: context is served to a caller only while Trino hides it from them; unset is warned of when a provider is loaded | none |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | the longest text of one context field, the longest context in one response, and the most columns described in one table, 1 at least | `500`, `60000`, `500` |
@@ -1093,9 +1095,9 @@ keeps the last good content, and one warning names the setting and the path. A `
 `samples` field anywhere in the file refuses it: a context never holds data. A table, column, term
 or property that is *named* `values` or `samples` is fine.
 
-Names are written in lower case, as Trino lists them: the catalog, the schema, the table and the
-column keys. The core compares them exactly. A file that holds the same table, or the same column,
-twice once folded to lower case is refused instead of merged.
+The provider folds the catalog, schema, table and column names to lower case, as Trino lists them,
+because the core compares them exactly; term keys are kept as written. A file that holds the same
+table, or the same column, twice once folded is refused instead of merged.
 
 ```json
 {
@@ -1160,11 +1162,11 @@ provider follows:
   the Trino client nor the caller's identity, and never writes to its catalogue.
 
 `akko_mcp_trino.testing` publishes the contract that checks these rules. Install it in the
-provider's test environment with `pip install "akko-mcp-trino[contract]"`, which brings `pytest`
-by a range, not a pin. It needs no network, no catalogue and no Trino: the provider sends its requests to a transport that
-answers from the catalogue's recorded answers, or, on purpose, late, with a 401, a 503, a body that
-is not JSON or a 500 that holds the secret. Subclass `ContextContract` in the provider's tests and
-give it a `harness` fixture:
+provider's test environment with `pip install "akko-mcp-trino[contract]"`, which brings `pytest` by
+a range, not a pin. It needs no network, no catalogue and no Trino: the provider sends its requests
+to a transport that answers from the catalogue's recorded answers, or, on purpose, late, with a 401,
+a 503, a body that is not JSON or a 500 that holds the secret. Subclass `ContextContract` in the
+provider's tests and give it a `harness` fixture:
 
 ```python
 import pytest
@@ -1209,24 +1211,30 @@ class TestMyProviderContract(ContextContract):
 
 Every HTTP request the provider sends must go through `transport`. Names are given as Trino lists
 them, and should appear nowhere else in the provider's logs or `check_lines()`. The settings serve
-the term's glossary, and the owner when the catalogue has one. The secret is looked for as written, JSON-escaped, URL-encoded,
-as Python writes it and in base64, so give one with a quote, a backslash and a non-ASCII
-character. Logs are read from the root logger: a logger that does not propagate escapes the check.
-Keep the entry point's factory in the module of the provider's class, which the import check
-loads alone. The checks: the
-context comes back with its partition columns, an unknown table and a deleted entity are left out,
-an unmapped catalog costs no request, nothing outside `served_sets()` is returned and those sets
-follow the settings (without its allow lists, a provider still describes the table and serves no
-set; the owner, when the provider declares one, is served only when its setting asks for it, and a
-provider whose catalogue has no owner declares none and skips that check), no type carries a data value, a slow catalogue hands back control within the
+the term's glossary, and the owner when the catalogue has one. The secret is looked for as written,
+JSON-escaped, URL-encoded, as Python writes it and in base64, so give one with a quote, a backslash
+and a non-ASCII character. Logs are read from the root logger: a logger that does not propagate
+escapes the check. Keep the entry point's factory in the module of the provider's class, which the
+import check loads alone. The checks: the context comes back with its partition columns, an unknown
+table and a deleted entity are left out, an unmapped catalog costs no request, nothing outside
+`served_sets()` is returned and those sets follow the settings (without its allow lists, a provider
+still describes the table and serves no set; the owner, when the provider declares one, is served
+only when its setting asks for it, and a provider whose catalogue has no owner declares none and
+skips that check), no type carries a data value, a slow catalogue hands back control within the
 deadline plus `ContextContract.REPLY_MARGIN_SECONDS` (0.5 s) and leaves no request open, a 401
 raises `ProviderRefused` and is not sent again, a timeout, a 503 or a body that is not JSON raise
 `ProviderUnavailable`, neither the logs (`httpx` at `WARNING`, as the server sets it) nor
-`check_lines()`, read again after the catalogue's errors, nor an exception hold the secret, logs and `check_lines()` hold no object name,
-the provider's module loads nothing of the core's Trino side, a trap name is found under its exact
-name, and every name is folded. A provider that sends no request, such as `file`, skips the checks
-that need one with `no HTTP`. The check of `snapshot` comes with pre-warming in 0.8.x and is skipped
-in 0.8.
+`check_lines()`, read again after the catalogue's errors, nor an exception hold the secret, logs and
+`check_lines()` hold no object name, the provider's module loads nothing of the core's Trino side, a
+factory that refuses a malformed setting does not put the secret in its message (each setting that
+holds it is given back padded, then in quotes), a trap name is found under its exact name, and every
+name is folded. A provider that sends no request, such as `file`, skips the checks that need one
+with `no HTTP`. The check of `snapshot` comes with pre-warming in 0.8.x and is skipped in 0.8.
+
+`ContextContract.DEADLINE_SECONDS` (5 s) is the deadline the checks give a call that should
+succeed, and `SLOW_DEADLINE_SECONDS` (1 s) the one they give a catalogue that does not answer. They
+are class attributes: raise them in your subclass when your CI is slow, and keep the second well
+under 30 s, the time the slow catalogue takes to answer.
 
 ### Serving
 

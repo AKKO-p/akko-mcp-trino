@@ -81,6 +81,7 @@ class FakeTrino:
         return {"rows": [[n] for n in kept], "truncated": cut}
 
 
+BOUND = 150
 KEY = VisibilityKey(mode="jwt", subject="alice", roles=(), catalog="demo")
 
 
@@ -219,18 +220,32 @@ def test_the_cache_expires_after_its_ttl_and_zero_disables_it():
     assert len(off.statements) == 2 * asked
 
 
+def test_an_entry_counts_its_key_as_well_as_its_value():
+    ref = TableRef("demo", "crm", "customers")
+    counted = {}
+    for width in (1, 300):
+        vis = _visibility(FakeTrino())
+        columns = [f"column_{n:03d}" for n in range(width)]
+        vis.listed(KEY, [ref])
+        before = vis.bytes
+        assert vis.selectable(KEY, ref, columns, listed=columns)
+        counted[width] = vis.bytes - before
+    assert counted[1] > len("column_000")
+    assert counted[300] > 300 * len("column_000"), "a wide entry is not counted as its value"
+
+
 def test_the_cache_is_bounded_in_bytes_and_an_evicted_proof_is_read_again():
     fake = FakeTrino()
-    vis = _visibility(fake, max_bytes=40)
+    vis = _visibility(fake, max_bytes=BOUND)
     assert vis.proven(KEY, TableRef("demo", "crm", "customers"))
-    assert vis.bytes <= 40
+    assert vis.bytes <= BOUND
     assert fake.statements.count("SHOW CATALOGS") == 1
     # The lists of catalogs and schemas were evicted to keep the tables of crm.
     assert vis.proven(KEY, TableRef("demo", "sales", "orders"))
     assert fake.statements.count("SHOW CATALOGS") == 2, "read again, never assumed"
     assert not vis.proven(KEY, TableRef("demo", "crm", "absent"))
     assert not vis.proven(KEY, TableRef("demo", "hr", "salaries"))
-    assert vis.bytes <= 40
+    assert vis.bytes <= BOUND
 
 
 def test_a_mixed_case_reference_is_not_proven_and_never_queried():

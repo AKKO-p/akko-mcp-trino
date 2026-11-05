@@ -7,6 +7,7 @@ the entrypoint it names, the variables it lists, the defaults it states.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 
@@ -99,3 +100,38 @@ def test_migration_guide_and_changelog_name_every_breaking_default():
         "TRINO_TOKEN_EXCHANGE_AUDIENCE",
     ):
         assert name in guide and name in changelog, name
+
+
+def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path):
+    from akko_mcp_trino.context import CLASSIFICATION, GLOSSARY, OWNER, PROPERTY
+    from akko_mcp_trino.context.file import from_env
+
+    section = README[README.index("### The file provider") :]
+    section = section[: section.index("\n### ", 4)]
+    rows = {
+        m.group(1): m.group(2)
+        for m in re.finditer(r"^\| `(MCP_CONTEXT_FILE[A-Z_]*)` \|.*\| ([^|]+) \|$", section, re.M)
+    }
+    assert set(rows) == {
+        "MCP_CONTEXT_FILE",
+        "MCP_CONTEXT_FILE_GLOSSARIES",
+        "MCP_CONTEXT_FILE_CLASSIFICATIONS",
+        "MCP_CONTEXT_FILE_PROPERTIES",
+        "MCP_CONTEXT_FILE_SERVE_OWNER",
+    }
+    path = tmp_path / "context.json"
+    table = {"catalog": "demo", "schema": "sales", "table": "orders", "owner": "sales-team"}
+    document = {"version": 1, "catalogs": ["demo"], "tables": [table], "terms": {}}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    sets = from_env({"MCP_CONTEXT_FILE": str(path)}).served_sets()
+    assert rows["MCP_CONTEXT_FILE"].strip() == "none"
+    for name, kind in (
+        ("MCP_CONTEXT_FILE_GLOSSARIES", GLOSSARY),
+        ("MCP_CONTEXT_FILE_CLASSIFICATIONS", CLASSIFICATION),
+        ("MCP_CONTEXT_FILE_PROPERTIES", PROPERTY),
+    ):
+        assert rows[name].strip() == "none" and sets[kind] == frozenset(), name
+    assert rows["MCP_CONTEXT_FILE_SERVE_OWNER"].strip() == "`false`"
+    assert sets[OWNER] == frozenset()
+    served = from_env({"MCP_CONTEXT_FILE": str(path), "MCP_CONTEXT_FILE_SERVE_OWNER": "true"})
+    assert served.served_sets()[OWNER] != frozenset()

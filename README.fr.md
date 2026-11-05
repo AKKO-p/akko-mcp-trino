@@ -579,7 +579,7 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_CONTEXT_TTL_SECONDS` | durée de conservation d'une lecture, 0 ou plus | `900` |
 | `MCP_CONTEXT_CACHE_BYTES`, `MCP_CONTEXT_TERMS_CACHE_BYTES` | borne des caches des tables et des termes de glossaire, 1 au moins ; chaque borne compte la longueur de la forme JSON des entrées gardées, et le processus en tient environ trois à quatre fois plus en mémoire, dimensionner le pod en conséquence | `134217728`, `16777216` |
 | `MCP_VISIBILITY_TTL_SECONDS` | durée de conservation de ce que Trino a listé pour un appelant, 0 ou plus | `60` |
-| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | borne de ce cache (comptée comme ci-dessus, soit environ trois à quatre fois plus en mémoire), et noms gardés au plus pour un appelant, 1 au moins | `33554432`, `10000` |
+| `MCP_VISIBILITY_CACHE_BYTES`, `MCP_VISIBILITY_MAX_NAMES` | borne de ce cache (chaque entrée compte sa clé comme sa valeur ; mesuré, le processus en tient 4,4 fois plus en mémoire pour les entrées de tables listées et 3,6 fois plus pour celles de 300 colonnes sélectionnées, dimensionner le pod pour environ cinq fois plus), et noms gardés au plus pour un appelant, 1 au moins | `33554432`, `10000` |
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true` : contexte servi seulement pour les tables que l'appelant peut lire | `false` |
 | `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'aucun appelant de ce serveur ne doit voir : le contexte n'est servi à un appelant que tant que Trino la lui cache | aucune |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, 1 au moins | `500`, `60000`, `500` |
@@ -619,10 +619,41 @@ chemin. Un champ `values` ou `samples`, où que ce soit, refuse le fichier : un 
 jamais de données. Une table, une colonne, un terme ou une propriété *nommé* `values` ou `samples`
 est permis.
 
-Les noms s'écrivent en minuscules, comme Trino les liste : le catalogue, le schéma, la table et les
-clés de colonnes. Le cœur les compare exactement. Un fichier qui contient deux fois la même table,
-ou la même colonne, une fois passé en minuscules est refusé au lieu d'être fusionné. Le format est
-celui de l'exemple du [README](README.md#the-file-provider).
+Le fournisseur passe en minuscules les noms de catalogue, de schéma, de table et de colonne, comme
+Trino les liste, car le cœur les compare exactement ; les clés de termes sont gardées telles
+qu'écrites. Un fichier qui contient deux fois la même table, ou la même colonne, une fois passé en
+minuscules est refusé au lieu d'être fusionné. Voici le format :
+
+```json
+{
+  "version": 1,
+  "catalogs": ["demo"],
+  "tables": [
+    {
+      "catalog": "demo", "schema": "sales", "table": "orders",
+      "description": "One row per order", "owner": "sales-team", "tier": "gold",
+      "tags": [{"name": "internal", "set": "visibility"}],
+      "terms": ["order"],
+      "properties": {"retention": {"value": "7y", "set": "policy"}},
+      "grain": ["order_id"],
+      "joins": [{"columns": ["customer_id"],
+                 "target": {"catalog": "demo", "schema": "sales", "table": "customers"},
+                 "target_columns": ["id"]}],
+      "columns": {
+        "order_id": {"description": "The order", "terms": ["order"],
+                     "classifications": [{"name": "key", "set": "visibility"}],
+                     "properties": {"unit": {"value": "none", "set": "policy"}}}
+      }
+    }
+  ],
+  "terms": {
+    "order": {"name": "Order", "glossary": "sales", "definition": "A purchase",
+              "status": "approved", "categories": ["core"],
+              "relations": [{"key": "line", "name": "Line", "glossary": "sales",
+                             "relation": "part"}]}
+  }
+}
+```
 
 ### Écrire un fournisseur de contexte
 
@@ -655,37 +686,85 @@ d'un fournisseur :
 
 `akko_mcp_trino.testing` publie le contrat qui vérifie ces règles. On l'installe dans
 l'environnement de test du fournisseur avec `pip install "akko-mcp-trino[contract]"`, qui apporte
-`pytest` par une plage de versions, sans l'épingler. Il ne demande ni réseau, ni catalogue, ni Trino : le fournisseur envoie ses requêtes à un transport qui
-répond avec les réponses enregistrées du catalogue, ou, exprès, en retard, par un 401, un 503, un
-corps qui n'est pas du JSON ou un 500 qui contient le secret. On sous-classe `ContextContract` dans
-les tests du fournisseur et on lui donne une fixture `harness` qui rend un `ContractHarness` : la
-fabrique `build(env, transport)`, la fonction `replay` qui rejoue les réponses enregistrées, les
-réglages `env`, le `secret` qu'ils contiennent, et les `ContractNames` (catalogue mappé et non
-mappé, table décrite, table partitionnée et sa colonne de partition, entité supprimée, table
-inconnue, nom piégé, colonne à terme, glossaire hors liste). Les réglages servent le glossaire du
-terme, et le propriétaire quand le catalogue en connaît un. Le secret est cherché tel quel, échappé en JSON, encodé dans une URL,
-écrit par Python et en base64 : en choisir un qui contient un guillemet droit, une barre
-oblique inverse et un caractère non ASCII. Les journaux sont lus sur le logger racine : un logger
-qui ne propage pas échappe au contrôle. La fabrique du point d'entrée reste dans le module de la
-classe du fournisseur, que le contrôle des imports charge seul. L'exemple complet est dans le
-[README](README.md#writing-a-context-provider).
+`pytest` par une plage de versions, sans l'épingler. Il ne demande ni réseau, ni catalogue, ni Trino
+: le fournisseur envoie ses requêtes à un transport qui répond avec les réponses enregistrées du
+catalogue, ou, exprès, en retard, par un 401, un 503, un corps qui n'est pas du JSON ou un 500 qui
+contient le secret. On sous-classe `ContextContract` dans les tests du fournisseur et on lui donne
+une fixture `harness` qui rend un `ContractHarness` : la fabrique `build(env, transport)`, la
+fonction `replay` qui rejoue les réponses enregistrées, les réglages `env`, le `secret` qu'ils
+contiennent, et les `ContractNames` (catalogue mappé et non mappé, table décrite, table partitionnée
+et sa colonne de partition, entité supprimée, table inconnue, nom piégé, colonne à terme, glossaire
+hors liste). Les réglages servent le glossaire du terme, et le propriétaire quand le catalogue en
+connaît un. Le secret est cherché tel quel, échappé en JSON, encodé dans une URL, écrit par Python
+et en base64 : en choisir un qui contient un guillemet droit, une barre oblique inverse et un
+caractère non ASCII. Les journaux sont lus sur le logger racine : un logger qui ne propage pas
+échappe au contrôle. La fabrique du point d'entrée reste dans le module de la classe du fournisseur,
+que le contrôle des imports charge seul. Un exemple complet :
+
+```python
+import pytest
+from akko_mcp_trino.context import TableRef
+from akko_mcp_trino.testing import ContextContract, ContractHarness, ContractNames
+
+from my_package.provider import MyProvider
+from tests.recordings import replay  # answers an httpx.Request from the recorded answers
+
+# A quote, a backslash and an accent, so that a secret escaped or encoded is still found.
+SECRET = 'a-"secret\\é-to-find'
+
+NAMES = ContractNames(
+    catalog="warehouse",                  # a Trino catalog the provider maps
+    unmapped_catalog="lakeside",          # one it does not map
+    described=TableRef("warehouse", "ledger", "invoices"),
+    partitioned=TableRef("warehouse", "ledger", "payments"),
+    partition_column="booking_month",
+    dropped=TableRef("warehouse", "ledger", "refunds"),     # marked deleted in the catalogue
+    unknown=TableRef("warehouse", "ledger", "ghosts"),      # not in the catalogue
+    trap=TableRef("warehouse", "o'brien.été", "l'année fiscale.v2"),
+    term_column="invoice_total",          # a column of `described` with a served term
+    foreign_glossary="personnel",         # a glossary outside the allow list
+)
+
+
+class TestMyProviderContract(ContextContract):
+    @pytest.fixture
+    def harness(self):
+        return ContractHarness(
+            build=lambda env, transport: MyProvider(env, transport=transport),
+            replay=replay,
+            env={
+                "MY_CATALOGUE_TOKEN": SECRET,
+                "MY_CATALOGUE_GLOSSARIES": "finance",
+                "MY_CATALOGUE_SERVE_OWNER": "true",
+            },
+            secret=SECRET,
+            names=NAMES,
+        )
+```
 
 Le contrat vérifie que le contexte revient avec ses colonnes de partition, qu'une table inconnue et
 une entité supprimée sont omises, qu'un catalogue non mappé ne coûte aucune requête, que rien hors
 de `served_sets()` n'est rendu et que ces ensembles suivent les réglages (sans ses listes
 autorisées, un fournisseur décrit toujours la table et ne sert aucun ensemble ; le propriétaire,
 quand le fournisseur en déclare un, n'est servi que si son réglage le demande, et un fournisseur
-dont le catalogue ne connaît pas de propriétaire n'en déclare pas et saute ce contrôle), qu'aucun type ne porte de
-valeur, qu'un catalogue lent rend la main avant l'échéance plus
+dont le catalogue ne connaît pas de propriétaire n'en déclare pas et saute ce contrôle), qu'aucun
+type ne porte de valeur, qu'un catalogue lent rend la main avant l'échéance plus
 `ContextContract.REPLY_MARGIN_SECONDS` (0,5 s) sans laisser de requête ouverte, qu'un 401 lève
 `ProviderRefused` sans être renvoyé, qu'un délai, un 503 ou un corps illisible lèvent
 `ProviderUnavailable`, que ni les journaux (`httpx` à `WARNING`, comme le serveur le règle), ni
-`check_lines()`, relu après les erreurs du catalogue, ni une exception ne contiennent le secret, que journaux et `check_lines()` ne
-contiennent aucun nom d'objet, que le module du fournisseur ne charge rien du côté Trino du cœur,
+`check_lines()`, relu après les erreurs du catalogue, ni une exception ne contiennent le secret, que
+journaux et `check_lines()` ne contiennent aucun nom d'objet, que le module du fournisseur ne charge
+rien du côté Trino du cœur, qu'une fabrique qui refuse un réglage mal formé n'en met pas le secret
+dans son message (chaque réglage qui le contient est rendu entouré d'espaces, puis de guillemets),
 qu'un nom piégé est trouvé sous son nom exact, et que tous les noms sont en minuscules. Un
-fournisseur qui n'envoie aucune requête, comme `file`, saute les vérifications qui en demandent
-une, avec `no HTTP`. La vérification de `snapshot` arrive avec le préchauffage en 0.8.x et est
-sautée en 0.8.
+fournisseur qui n'envoie aucune requête, comme `file`, saute les vérifications qui en demandent une,
+avec `no HTTP`. La vérification de `snapshot` arrive avec le préchauffage en 0.8.x et est sautée en
+0.8.
+
+`ContextContract.DEADLINE_SECONDS` (5 s) est l'échéance que les vérifications donnent à un appel qui
+doit réussir, et `SLOW_DEADLINE_SECONDS` (1 s) celle qu'elles donnent à un catalogue qui ne répond
+pas. Ce sont des attributs de classe : les relever dans la sous-classe quand la CI est lente, en
+gardant le second bien en dessous de 30 s, le temps que met le catalogue lent à répondre.
 
 ## Configuration, extensions, exploitation
 
