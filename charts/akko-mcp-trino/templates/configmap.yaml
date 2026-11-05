@@ -1,0 +1,101 @@
+{{- include "mcp-trino.validate" . }}
+{{- $v := .Values }}
+{{- $ca := include "mcp-trino.caEnabled" . }}
+{{- /* Numeric settings the values leave to the server's default are not written. */}}
+{{- $optional := dict
+  "TRINO_MAX_ROWS" $v.trino.maxRows
+  "TRINO_QUERY_TIMEOUT_SECONDS" $v.trino.queryTimeoutSeconds
+  "TRINO_REQUEST_TIMEOUT_SECONDS" $v.trino.requestTimeoutSeconds
+  "MCP_JWT_LEEWAY_SECONDS" $v.auth.leewaySeconds
+  "MCP_CALL_TIMEOUT_SECONDS" $v.limits.callTimeoutSeconds
+  "MCP_MAX_CATALOGS" $v.limits.maxCatalogs
+  "MCP_DESCRIBE_SCHEMA_TABLES" $v.limits.describeSchemaTables
+  "MCP_DESCRIBE_SCHEMA_COLUMNS" $v.limits.describeSchemaColumns
+  "MCP_SEARCH_MIN_LENGTH" $v.limits.searchMinLength
+  "MCP_SEARCH_MAX_WORDS" $v.limits.searchMaxWords
+  "MCP_SEARCH_MAX_WORD_LENGTH" $v.limits.searchMaxWordLength
+  "MCP_SEARCH_RESERVE_SECONDS" $v.limits.searchReserveSeconds
+}}
+# Settings only: the secrets are read by secretKeyRef, never written here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mcp-trino.fullname" . }}
+  labels:
+    {{- include "mcp-trino.labels" . | nindent 4 }}
+data:
+  MCP_TRANSPORT: {{ $v.transport | quote }}
+  MCP_PORT: {{ $v.ports.mcp | quote }}
+  MCP_HEALTH_PORT: {{ $v.ports.health | quote }}
+  {{- with $v.server.name }}
+  MCP_SERVER_NAME: {{ . | quote }}
+  {{- end }}
+  {{- with $v.server.toolPlugins }}
+  MCP_TOOL_PLUGINS: {{ join "," . | quote }}
+  {{- end }}
+  {{- with $v.server.extensions }}
+  MCP_EXTENSIONS: {{ join "," . | quote }}
+  {{- end }}
+  TRINO_HOST: {{ $v.trino.host | quote }}
+  TRINO_PORT: {{ $v.trino.port | quote }}
+  TRINO_HTTP_SCHEME: {{ $v.trino.httpScheme | quote }}
+  TRINO_CATALOG: {{ $v.trino.catalog | quote }}
+  TRINO_IDENTITY_MODE: {{ $v.trino.identityMode | quote }}
+  TRINO_READ_ONLY: {{ $v.trino.readOnly | toString | quote }}
+  TRINO_VERIFY: {{ ternary (include "mcp-trino.caPath" .) ($v.trino.verify | toString) (and $v.trino.verify (eq $ca "true")) | quote }}
+  {{- with $v.trino.source }}
+  TRINO_SOURCE: {{ . | quote }}
+  {{- end }}
+  {{- if ne $v.trino.identityMode "jwt" }}
+  TRINO_USER: {{ $v.trino.user | quote }}
+  {{- end }}
+  {{- if include "mcp-trino.clientCertEnabled" . }}
+  TRINO_CLIENT_CERT: /etc/mcp-trino/client/tls.crt
+  TRINO_CLIENT_KEY: /etc/mcp-trino/client/tls.key
+  {{- end }}
+  {{- if eq $v.trino.identityMode "jwt" }}
+  {{- $te := $v.trino.tokenExchange }}
+  TRINO_TOKEN_EXCHANGE_URL: {{ $te.url | quote }}
+  TRINO_TOKEN_EXCHANGE_CLIENT_ID: {{ $te.clientId | quote }}
+  TRINO_TOKEN_EXCHANGE_AUDIENCE: {{ $te.audience | quote }}
+  {{- with $te.scope }}
+  TRINO_TOKEN_EXCHANGE_SCOPE: {{ . | quote }}
+  {{- end }}
+  TRINO_TOKEN_EXCHANGE_VERIFY: {{ ternary (include "mcp-trino.caPath" .) ($te.verify | toString) (and $te.verify (eq $ca "true")) | quote }}
+  {{- end }}
+  MCP_AUTH_ENABLED: {{ $v.auth.enabled | toString | quote }}
+  MCP_AUTH_REQUIRED: {{ $v.auth.required | toString | quote }}
+  {{- if $v.auth.enabled }}
+  MCP_JWKS_URL: {{ $v.auth.jwksUrl | quote }}
+  {{- with $v.auth.issuer }}
+  MCP_OIDC_ISSUER: {{ . | quote }}
+  {{- end }}
+  {{- with $v.auth.audience }}
+  MCP_OIDC_AUDIENCE: {{ . | quote }}
+  {{- end }}
+  {{- with $v.auth.resourceUrl }}
+  MCP_RESOURCE_URL: {{ . | quote }}
+  {{- end }}
+  {{- with $v.auth.userClaim }}
+  MCP_JWT_USER_CLAIM: {{ . | quote }}
+  {{- end }}
+  {{- with $v.auth.algorithms }}
+  MCP_JWT_ALGORITHMS: {{ join "," . | quote }}
+  {{- end }}
+  {{- end }}
+  {{- with $v.auth.allowedHosts }}
+  MCP_ALLOWED_HOSTS: {{ join "," . | quote }}
+  {{- end }}
+  {{- with $v.extraReadCommands }}
+  MCP_EXTRA_READ_COMMANDS: {{ join "," . | quote }}
+  {{- end }}
+  {{- range $name, $value := $optional }}
+  {{- if not (kindIs "invalid" $value) }}
+  {{- /* A whole number reads as one (10000, never 1e+04). */}}
+  {{ $name }}: {{ ternary (int64 $value | toString) ($value | toString) (eq (float64 $value) (float64 (int64 $value))) | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if and (eq $ca "true") $v.ca.setSslCertFile }}
+  SSL_CERT_FILE: {{ include "mcp-trino.caPath" . | quote }}
+  {{- end }}
+  PYTHONDONTWRITEBYTECODE: "1"

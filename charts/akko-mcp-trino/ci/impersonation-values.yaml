@@ -1,0 +1,48 @@
+# Impersonation: the server's account authenticates with a client certificate (mTLS),
+# Trino runs each query as the verified caller. Ingress in front, NetworkPolicy on.
+trino:
+  host: trino.example.internal
+  catalog: lakehouse
+  identityMode: impersonation
+  user: mcp-service
+  credential: clientCertificate
+  clientCertificate:
+    secretName: mcp-service-client-tls
+  source: mcp-trino
+auth:
+  jwksUrl: https://idp.example.internal/realms/data/protocol/openid-connect/certs
+  issuer: https://idp.example.internal/realms/data
+  audience: mcp-trino
+  userClaim: preferred_username
+ca:
+  secret: internal-ca
+limits:
+  callTimeoutSeconds: 90
+  maxCatalogs: 1000000
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: mcp.example.internal
+  tls:
+    - hosts: [mcp.example.internal]
+      secretName: mcp-example-internal-tls
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+  egress:
+    trino:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: trino
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/component: coordinator
+    identityProvider:
+      to:
+        - ipBlock:
+            cidr: 192.0.2.10/32

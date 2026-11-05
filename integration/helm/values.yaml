@@ -1,0 +1,36 @@
+# The chart as the live proof installs it: service mode against the test Trino (plain
+# HTTP, no credential, the one combination a test coordinator allows), with the door on
+# (tokens verified against the test JWKS) and the NetworkPolicy on.
+trino:
+  host: trino-test
+  port: 8080
+  httpScheme: http
+  catalog: tpch
+  identityMode: service
+  user: mcp-reader
+  credential: none
+auth:
+  jwksUrl: http://jwks-test:8080/jwks.json
+  acknowledgeInsecureJwks: true   # the static test JWKS serves plain HTTP
+  issuer: https://idp.example.internal/realms/test
+  audience: mcp-trino
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - podSelector:
+          matchLabels:
+            mcp-chart-test/client: "true"
+  egress:
+    trino:
+      - podSelector:
+          matchLabels:
+            app: trino-test
+    identityProvider:
+      to:
+        - podSelector:
+            matchLabels:
+              app: jwks-test
+      ports:
+        - port: 8080
+          protocol: TCP
