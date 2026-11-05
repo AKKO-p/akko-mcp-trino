@@ -583,8 +583,23 @@ def register_query_tools(
     run = tools.run
     if context is not None:
         config = context.config
+        gated = gate_runner(run)
+        reserve = config.context_reserve_seconds
+
+        def gate_run(sql: str, **keywords: Any) -> dict:
+            """A statement of the filter by Trino's rights, stopped while the call still has
+            ``MCP_CONTEXT_RESERVE_SECONDS`` left: it then raises a plain ``TimeoutError``,
+            which proves nothing and leaves the call its answer. None starts with less left."""
+            call = current_call()
+            left = call.time_left() if call is not None else None
+            if left is not None:
+                if left - reserve <= 0:
+                    raise TimeoutError("no time is left for the filter")
+                keywords["timeout"] = left - reserve
+            return gated(sql, **keywords)
+
         visibility = Visibility(
-            gate_runner(run),
+            gate_run,
             ttl_seconds=config.visibility_ttl_seconds,
             max_bytes=config.visibility_cache_bytes,
             max_names=config.visibility_max_names,
@@ -923,6 +938,8 @@ def register_query_tools(
                 "rows": described_rows["rows"],
                 "truncated": was_cut(described_rows),
             }
+            # Read before a describer can change the answer.
+            complete = not out["truncated"]
             note(rows=len(described_rows["rows"]), truncated=out["truncated"])
             failed = 0
             for describer in tools.describers:
@@ -932,10 +949,6 @@ def register_query_tools(
                     failed += 1
             if failed:
                 out["describer_errors"] = failed
-            if service is not None:
-                visible = [str(r[0]) for r in described_rows["rows"]]
-                ref = TableRef.of(cat, sch, tbl)
-                out.update(service.for_table(ref, visible, complete=not out["truncated"]))
             n = max(0, min(int(sample_rows), MAX_SAMPLE_ROWS))
             if n:
                 # Rows of data are read: the audit line names that statement and its rows.
@@ -943,6 +956,11 @@ def register_query_tools(
                 note(sql=statement)
                 out["sample"] = run(statement)
                 note(rows=len(out["sample"]["rows"]))
+            # The context comes last: it takes only what the call has left past its reserve.
+            if service is not None:
+                visible = [str(r[0]) for r in described_rows["rows"]]
+                ref = TableRef.of(cat, sch, tbl)
+                out.update(service.for_table(ref, visible, complete=complete))
             return dumps(out)
         except Exception as e:  # noqa: BLE001
             return error_reply(e)

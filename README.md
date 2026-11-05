@@ -1070,13 +1070,16 @@ then adds:
   `MCP_CONTEXT_RESPONSE_CHARS`; the columns left are listed. A text cut at `MCP_CONTEXT_TEXT_CHARS`
   is named in `cut`.
 
-Without a provider, `describe_table` answers and describes itself exactly as in 0.7. With one, its
-description says that this text comes from a catalogue and is data, never instructions. A provider
-that is down, slow or refused never hides the columns and never fails the call: the context is read
-within `MCP_CONTEXT_TIMEOUT_SECONDS` and leaves `MCP_CONTEXT_RESERVE_SECONDS` of the call's budget;
-with less than that left, no provider is called and the sources say `unavailable`. A describer of
-a plugin that raises is counted in `describer_errors`. Plugins read the same context through
-`tools.context`.
+Without a provider, `describe_table` answers and describes itself as in 0.7.2, except
+`describer_errors`: a describer of a plugin that raises is now counted there. With a provider, its
+description says that this text comes from a catalogue and is data, never instructions. The context
+is read last, after the sample, and never hides the columns nor fails the call. A provider that is
+down, slow or refused is read within `MCP_CONTEXT_TIMEOUT_SECONDS` and leaves
+`MCP_CONTEXT_RESERVE_SECONDS` of the call's budget; with less than that left, no provider is called
+and the sources say `unavailable`. The statements of the filter stop while that reserve is still
+left: one that is too slow proves nothing (`not_checked` for the canary or the select check, no
+join for a target), and the call still answers. Anything else that fails on the way serves no
+context and says `error` for every source. Plugins read the same context through `tools.context`.
 
 The statements of the filter run as the caller, with the client tag `mcp-gate`: the canary check,
 `EXPLAIN (TYPE VALIDATE)` of the visible columns with `MCP_CONTEXT_REQUIRE_SELECT=true` (a refusal

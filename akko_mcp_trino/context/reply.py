@@ -15,12 +15,14 @@ appearance; a catalogue's key is never served) and the whole is bounded by
 
 A provider never makes the tool fail: a deadline left too short, a chain that
 does not answer in time or fails says so in ``context_sources``, one status per
-provider.
+provider. Anything else that fails on the way serves no context, every source
+``error``, and is logged by type and place, never by its text.
 """
 
 import json
 import logging
 import time
+import traceback
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -170,8 +172,20 @@ class ContextService:
         ``complete`` is false when the row cap cut the ``DESCRIBE``: the columns past it are
         not proven, the grain is not served and a source that knows the table is ``partial``.
         The answer has ``table``, ``column_context``, ``terms``, ``context_sources``,
-        ``context_truncated`` and ``undescribed_columns``.
+        ``context_truncated`` and ``undescribed_columns``. It never raises: an unexpected
+        failure serves no context and says ``error`` for every source.
         """
+        try:
+            return self._for_table(ref, visible_columns, complete)
+        except Exception as exc:
+            places = "; ".join(
+                f"{frame.filename}:{frame.lineno} in {frame.name}"
+                for frame in traceback.extract_tb(exc.__traceback__)
+            )
+            _log.error("the context of a table failed with %s at %s", type(exc).__name__, places)
+            return self._nothing(ERROR)
+
+    def _for_table(self, ref: TableRef, visible_columns: Sequence[str], complete: bool) -> dict:
         visible = tuple(dict.fromkeys(visible_columns))
         key = key_for(self._config, ref.catalog, self._subject() or "")
         self._visibility.listed(key, [ref])
@@ -189,7 +203,7 @@ class ContextService:
         except Exception as exc:
             return self._nothing(_failure(exc))
         statuses = dict(gathered.statuses)
-        join_proven = self._join_check(key, ref, visible)
+        join_proven = self._join_check(key, ref, visible, deadline)
 
         contexts: dict[str, TableContext] = {}
         served: dict[str, Mapping[str, frozenset[str]]] = {}
@@ -254,12 +268,13 @@ class ContextService:
         }
 
     def _join_check(
-        self, key: VisibilityKey, ref: TableRef, visible: Sequence[str]
+        self, key: VisibilityKey, ref: TableRef, visible: Sequence[str], deadline: float
     ) -> Callable[[TableRef, tuple[str, ...]], bool]:
         """Whether a join target and its columns are proven, each answer kept for the call.
 
         The described table is proven by its own ``DESCRIBE``; another target by the
-        visibility cache, its columns read once per call.
+        visibility cache, its columns read once per call. A target first asked past the
+        context's ``deadline`` is not proven, and nothing is asked of Trino for it.
         """
         own = frozenset(visible)
         columns: dict[TableRef, frozenset[str] | None] = {ref: own}
@@ -269,7 +284,8 @@ class ContextService:
             asked = (target, target_columns)
             if asked not in answers:
                 if target not in columns:
-                    columns[target] = self._visibility.columns(key, target)
+                    late = self._clock() >= deadline
+                    columns[target] = None if late else self._visibility.columns(key, target)
                 listed = columns[target]
                 answers[asked] = listed is not None and all(c in listed for c in target_columns)
             return answers[asked]

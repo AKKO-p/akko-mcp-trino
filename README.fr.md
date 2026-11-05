@@ -632,13 +632,17 @@ comme avant. La réponse ajoute alors :
   `MCP_CONTEXT_RESPONSE_CHARS` ; les colonnes laissées sont listées. Un texte coupé à
   `MCP_CONTEXT_TEXT_CHARS` est nommé dans `cut`.
 
-Sans fournisseur, `describe_table` répond et se décrit exactement comme en 0.7. Avec un fournisseur,
-sa description dit que ce texte vient d'un catalogue et que ce sont des données, jamais des
-instructions. Un fournisseur en panne, lent ou qui refuse le compte ne cache jamais les colonnes et
-ne fait jamais échouer l'appel : le contexte est lu en `MCP_CONTEXT_TIMEOUT_SECONDS` au plus et
-laisse `MCP_CONTEXT_RESERVE_SECONDS` du budget de l'appel ; s'il en reste moins, aucun fournisseur
-n'est appelé et les sources disent `unavailable`. Un descripteur de greffon qui lève est compté dans
-`describer_errors`. Les greffons lisent le même contexte par `tools.context`.
+Sans fournisseur, `describe_table` répond et se décrit comme en 0.7.2, sauf `describer_errors` :
+un descripteur de greffon qui lève y est désormais compté. Avec un fournisseur, sa description dit
+que ce texte vient d'un catalogue et que ce sont des données, jamais des instructions. Le contexte
+est lu en dernier, après l'échantillon, et ne cache jamais les colonnes ni ne fait échouer l'appel.
+Un fournisseur en panne, lent ou qui refuse le compte est lu en `MCP_CONTEXT_TIMEOUT_SECONDS` au plus
+et laisse `MCP_CONTEXT_RESERVE_SECONDS` du budget de l'appel ; s'il en reste moins, aucun fournisseur
+n'est appelé et les sources disent `unavailable`. Les requêtes du filtre s'arrêtent tant que cette
+réserve reste : une requête trop lente ne prouve rien (`not_checked` pour le canari ou le contrôle
+de lecture, pas de jointure vers une cible), et l'appel répond quand même. Tout autre échec en
+chemin ne sert aucun contexte et dit `error` pour chaque source. Les greffons lisent le même
+contexte par `tools.context`.
 
 Les requêtes du filtre partent sous l'identité de l'appelant, avec l'étiquette client `mcp-gate` :
 le contrôle du canari, `EXPLAIN (TYPE VALIDATE)` des colonnes visibles avec

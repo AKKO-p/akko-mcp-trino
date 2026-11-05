@@ -3,6 +3,8 @@
 It is not a test module: the tests of the context service and of ``describe_table`` share it.
 """
 
+import asyncio
+
 from akko_mcp_trino.context import (
     CONTEXT_API,
     ContextChain,
@@ -26,6 +28,7 @@ class Memory:
         self.calls = []
         self.term_calls = []
         self.term_failure = None
+        self.delay = 0.0
 
     def maps(self, catalog):
         return catalog in self.catalogs
@@ -37,6 +40,8 @@ class Memory:
 
     async def describe(self, refs, *, deadline, on_behalf_of=None):
         self.calls.append(tuple(refs))
+        if self.delay:
+            await asyncio.sleep(self.delay)
         return {ref: self.tables[ref] for ref in refs if ref in self.tables}
 
     async def terms(self, keys, *, deadline):
