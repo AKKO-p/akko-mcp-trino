@@ -16,6 +16,7 @@ import pytest
 from akko_mcp_trino import trino_client
 from akko_mcp_trino.audit import (
     InMemoryAudit,
+    current_call,
     reset_current_request_id,
     set_current_request_id,
 )
@@ -1211,28 +1212,49 @@ class GateTrino:
     """Trino for describe_table with context: the table, the canary, the select check, the
     proofs of join targets and a sample.
 
-    Each query is recorded with its user and the client tags it would carry. A statement
-    that starts with a prefix of ``slow`` takes that many seconds; given a lower
-    ``timeout``, it stops then with a plain ``TimeoutError``, as the Trino client does."""
+    Each query is recorded with its user and the client tags it would carry. Time is
+    simulated: a statement that starts with a prefix of ``slow`` takes that many seconds,
+    added to ``elapsed`` without sleeping. Given a lower ``timeout``, it stops then with a
+    plain ``TimeoutError``, as the Trino client does; one that would outlive the call marks
+    it expired, as the client does. Only ``pause`` really sleeps."""
 
     def __init__(
-        self, columns=("id", "amount"), truncated=False, describe_error=None, schemas=(), slow=None
+        self,
+        columns=("id", "amount"),
+        truncated=False,
+        describe_error=None,
+        schemas=(),
+        slow=None,
+        pause=None,
     ):
         self.columns = list(columns)
         self.truncated = truncated
         self.describe_error = describe_error
         self.schemas = list(schemas)
         self.slow = dict(slow or {})
+        self.pause = dict(pause or {})
+        self.elapsed = 0.0
+        self.timeouts = []
         self.calls = []
+
+    def _take(self, seconds, timeout):
+        self.timeouts.append(timeout)
+        if 0 < timeout < seconds:
+            self.elapsed += timeout
+            raise TimeoutError("the query exceeded its time budget")
+        call = current_call()
+        left = call.time_left() if call is not None else None
+        if left is not None and seconds >= left - self.elapsed:
+            raise call.timed_out()
+        self.elapsed += seconds
 
     def query(self, sql, user=None, params=None, **keywords):
         self.calls.append((sql, user, trino_client._query_tags.get()))
         for prefix, seconds in self.slow.items():
             if sql.startswith(prefix):
-                timeout = keywords.get("timeout", 0)
-                if 0 < timeout < seconds:
-                    time.sleep(timeout)
-                    raise TimeoutError("the query exceeded its time budget")
+                self._take(seconds, keywords.get("timeout", 0))
+        for prefix, seconds in self.pause.items():
+            if sql.startswith(prefix):
                 time.sleep(seconds)
         if sql == "DESCRIBE demo.sales.orders":
             if self.describe_error is not None:
@@ -1474,16 +1496,16 @@ def test_an_unexpected_failure_of_the_context_serves_the_columns_and_says_error(
 def test_a_filter_statement_slower_than_the_budget_is_not_checked_never_time_budget(
     setups, statement
 ):
-    """The canary check, then the select check, outlive the call: the filter stops while the
-    reserve is left, and the call answers its columns."""
+    """The canary check, then the select check, would outlive the call: the filter stops
+    while the reserve is left, and the call answers its columns."""
     provider = _orders(description="Orders of the shop")
-    client = GateTrino(slow={statement: 1.0})
+    client = GateTrino(slow={statement: 1000.0})
     mcp, _, _ = _with_context(
         setups,
         client,
         provider,
-        call_timeout_seconds=0.6,
-        context_reserve_seconds=0.3,
+        call_timeout_seconds=60.0,
+        context_reserve_seconds=0.5,
         context_canary="demo.trap.canary",
         context_require_select=True,
     )
@@ -1491,6 +1513,8 @@ def test_a_filter_statement_slower_than_the_budget_is_not_checked_never_time_bud
     assert "error" not in out and [r[0] for r in out["rows"]] == ["id", "amount"]
     assert out["context_sources"] == {"catalog": "not_checked"}
     assert provider.calls == []
+    (timeout,) = client.timeouts
+    assert 59.0 < timeout <= 59.5, "what is left of the call, less the reserve"
 
 
 def test_no_filter_statement_starts_with_less_than_the_reserve_left(setups):
@@ -1509,27 +1533,39 @@ def test_no_filter_statement_starts_with_less_than_the_reserve_left(setups):
     assert [sql for sql, _, _ in client.calls] == ["DESCRIBE demo.sales.orders"]
 
 
-def test_many_join_targets_never_turn_the_answer_into_time_budget(setups):
-    schemas = [f"s{n}" for n in range(12)]
+def test_join_targets_past_the_deadline_are_not_proven_and_never_asked(setups, monkeypatch):
+    """Each proof takes a simulated second, and the context has five: five targets are asked,
+    the seven others are not proven without a statement, and the call answers."""
+    schemas = [f"s{n:02d}" for n in range(12)]
     joins = tuple(Join(("id",), TableRef("demo", s, "target"), ("id",)) for s in schemas)
     provider = Memory(tables={ORDERS_REF: TableContext(description="d", joins=joins)}, sets=_SERVED)
-    client = GateTrino(schemas=schemas, slow={"SELECT table_name FROM": 0.2})
-    mcp, _, _ = _with_context(
-        setups, client, provider, call_timeout_seconds=1.0, context_reserve_seconds=0.3
+    client = GateTrino(schemas=schemas, slow={"SELECT table_name FROM": 1.0})
+    mcp, _, tools = _with_context(
+        setups,
+        client,
+        provider,
+        call_timeout_seconds=60.0,
+        context_timeout_seconds=5.0,
+        context_reserve_seconds=1.0,
     )
+    monkeypatch.setattr(tools.context, "_clock", lambda: time.monotonic() + client.elapsed)
     out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert "error" not in out and [r[0] for r in out["rows"]] == ["id", "amount"]
     assert "joins" not in out["table"] and out["table"]["description"] == "d"
     proofs = [sql for sql, _, _ in client.calls if sql.startswith("SELECT table_name FROM")]
-    assert len(proofs) < len(schemas), "the proofs stop at the deadline"
+    assert [p.split("'")[1] for p in proofs] == schemas[:5]
 
 
 def test_the_sample_keeps_its_budget_when_a_provider_takes_its_whole_timeout(setups):
+    """The one test on real time: the provider's read runs on the context loop, bounded by
+    the chain's own clock, which nothing in the tool's thread can drive. Margins: the call
+    ends about 0.9 s before its budget once fixed, and about 0.3 s past it if the context
+    ran first."""
     provider = _orders(description="Orders of the shop")
-    provider.delay = 3.0
-    client = GateTrino(slow={"SELECT * FROM": 0.6})
+    provider.delay = 10.0
+    client = GateTrino(pause={"SELECT * FROM": 1.2})
     mcp, _, _ = _with_context(
-        setups, client, provider, call_timeout_seconds=1.5, context_reserve_seconds=0.5
+        setups, client, provider, call_timeout_seconds=3.0, context_reserve_seconds=1.0
     )
     out = json.loads(
         _in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders", sample_rows=1))

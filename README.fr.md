@@ -571,7 +571,7 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 |---|---|---|
 | `MCP_CONTEXT_PROVIDERS` | noms des fournisseurs, séparés par des virgules | aucun |
 | `MCP_CONTEXT_TIMEOUT_SECONDS` | budget de temps d'une lecture de contexte, plus de 0 | `5` |
-| `MCP_CONTEXT_RESERVE_SECONDS` | secondes du budget d'un appel gardées en réserve, 0 ou plus | `0.5` |
+| `MCP_CONTEXT_RESERVE_SECONDS` | secondes du budget d'un appel gardées en réserve pour que le contexte finisse avant l'appel ; 0,3 ou plus quand un fournisseur est chargé (le serveur refuse moins), 0 ou plus sinon | `0.5` |
 | `MCP_CONTEXT_MAX_CONCURRENCY` | lectures de contexte simultanées au plus par fournisseur, 1 au moins | `32` |
 | `MCP_CONTEXT_RETRY_AFTER_SECONDS` | délai avant de rappeler une source en panne, 0 ou plus | `30` |
 | `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | délai avant de rappeler une source qui a refusé le compte (`SIGHUP` le lève aussitôt), 0 ou plus | `3600` |

@@ -1099,7 +1099,7 @@ supported.
 |---|---|---|
 | `MCP_CONTEXT_PROVIDERS` | comma-separated names of providers installed under the entry-point group `akko_mcp_trino.context`; an unknown name refuses to start | none |
 | `MCP_CONTEXT_TIMEOUT_SECONDS` | time budget of one context read, more than 0 | `5` |
-| `MCP_CONTEXT_RESERVE_SECONDS` | the seconds of a tool call's budget kept in reserve, 0 or more | `0.5` |
+| `MCP_CONTEXT_RESERVE_SECONDS` | the seconds of a tool call's budget kept back so that the context ends before the call does; 0.3 or more when a provider is loaded (the server refuses less), 0 or more otherwise | `0.5` |
 | `MCP_CONTEXT_MAX_CONCURRENCY` | the most context reads in flight for one provider, 1 at least | `32` |
 | `MCP_CONTEXT_RETRY_AFTER_SECONDS` | the delay before a source that is down is called again, 0 or more | `30` |
 | `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | the delay before a source that refused the account is called again (`SIGHUP` lifts it at once), 0 or more | `3600` |
