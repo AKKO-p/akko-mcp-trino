@@ -5,9 +5,12 @@ result, at most until their deadline; a read past it is cancelled.
 """
 
 import asyncio
+import logging
 import threading
 from collections.abc import Coroutine
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 # An internal margin, not an operating setting: on close, the tasks left on the loop
 # are given this long to end once cancelled; one that ignores its cancellation is
@@ -36,6 +39,11 @@ class ContextLoop:
             self._loop, self._thread = loop, thread
             thread.start()
 
+    @property
+    def running(self) -> bool:
+        """Say whether the loop is started and not closed."""
+        return self._loop is not None
+
     def submit(self, coro: Coroutine[Any, Any, Any], timeout: float) -> Any:
         """Run ``coro`` on the loop and return its result; cancel it past ``timeout`` seconds.
 
@@ -57,7 +65,9 @@ class ContextLoop:
         """Cancel what is left on the loop, stop it and join its thread, in bounded time.
 
         A task that ignores its cancellation does not hold the close past an internal
-        margin.
+        margin; it is dropped with the closed loop, and asyncio may log, once, that a
+        pending task was destroyed. A thread that does not end in time is left behind
+        with a warning.
         """
         with self._lock:
             loop, thread = self._loop, self._thread
@@ -66,6 +76,11 @@ class ContextLoop:
             return
         loop.call_soon_threadsafe(loop.stop)
         thread.join(2 * _CLOSE_WAIT_SECONDS)
+        if thread.is_alive():
+            _log.warning(
+                "the context loop did not stop within %g s; its thread is left behind",
+                2 * _CLOSE_WAIT_SECONDS,
+            )
 
     @staticmethod
     def _run(loop: asyncio.AbstractEventLoop) -> None:

@@ -1074,9 +1074,11 @@ or in `service` mode, is warned of.
 A provider that is down or that refuses the account logs one warning each time its breaker opens
 (`<name> is unavailable`, `<name> refused the account`), never the text of its error. `SIGHUP` lets
 the providers that refused the account be called again at once and sets their
-`mcp_trino_context_breaker_open` to 0. When the server stops, it closes every provider, then the
-context loop; a read that ignores its cancellation does not hold the stop for more than a few
-seconds. Catalogue text loses its control and format characters, and its line and paragraph
+`mcp_trino_context_breaker_open` to 0. When the server stops, on SIGTERM, Ctrl+C or the end of
+its input, it closes every provider, then the context loop. Over HTTP this happens in the
+application's shutdown, and SIGTERM then ends the process with exit code 143; over stdio, SIGTERM
+closes and exits 0. A read that ignores its cancellation does not hold the stop for more than a few
+seconds; asyncio may then log once that a pending task was destroyed. Catalogue text loses its control and format characters, and its line and paragraph
 separators (U+2028, U+2029), before it reaches an agent.
 
 ### The file provider

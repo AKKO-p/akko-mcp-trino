@@ -594,9 +594,11 @@ lignes de chaque fournisseur, jamais un secret.
 Un fournisseur en panne ou qui refuse le compte écrit un avertissement à chaque ouverture de son
 coupe-circuit (`<nom> is unavailable`, `<nom> refused the account`), jamais le texte de son erreur.
 `SIGHUP` laisse rappeler aussitôt les fournisseurs qui ont refusé le compte et remet leur
-`mcp_trino_context_breaker_open` à 0. À l'arrêt, le serveur ferme chaque fournisseur, puis la boucle
-du contexte ; une lecture qui ignore son annulation ne retient pas l'arrêt plus de quelques
-secondes. Le texte d'un catalogue perd ses caractères de contrôle et de format, et ses séparateurs de
+`mcp_trino_context_breaker_open` à 0. À l'arrêt, par SIGTERM, Ctrl+C ou la fin de son entrée, le
+serveur ferme chaque fournisseur, puis la boucle du contexte. En HTTP, cela se fait à l'arrêt de
+l'application, puis SIGTERM termine le processus avec le code 143 ; en stdio, SIGTERM ferme et sort
+avec 0. Une lecture qui ignore son annulation ne retient pas l'arrêt plus de quelques secondes ;
+asyncio peut alors écrire une fois qu'une tâche en attente a été détruite. Le texte d'un catalogue perd ses caractères de contrôle et de format, et ses séparateurs de
 ligne et de paragraphe (U+2028, U+2029), avant d'atteindre un agent.
 
 Avec un fournisseur chargé, le serveur expose aussi les métriques

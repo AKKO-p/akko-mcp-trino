@@ -21,6 +21,7 @@ import os
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from typing import Any
 
 import uvicorn
@@ -192,6 +193,11 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         if hasattr(signal, "SIGHUP"):
             signal.signal(signal.SIGHUP, lambda *_: setup.chain.reset_refused())
 
+    def close_context() -> None:
+        # Closing twice is harmless: a stop may come by several of these paths.
+        for setup in started:
+            setup.close()
+
     mcp, client = build_server(
         config,
         extra_tool_registrars=tool_registrars({"MCP_TOOL_PLUGINS": config.tool_plugins}),
@@ -201,15 +207,23 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         context_providers=providers,
         context_started=on_context,
     )
+    # The providers are closed, then the context loop, once the server stops. Over
+    # HTTP, uvicorn shuts the app down on SIGTERM, then lets the signal end the
+    # process: the close is in the app's shutdown. Over stdio, SIGTERM closes and exits.
+    if config.transport == "stdio":
+
+        def on_term(*_: object) -> None:
+            close_context()
+            sys.exit(0)
+
+        signal.signal(signal.SIGTERM, on_term)
     try:
         auth_provider = build_auth(config, _audiences(extensions))
         for warning in config.warnings():
             log.warning(warning)
-        _serve(config, mcp, client, auth_provider, extensions, metrics)
+        _serve(config, mcp, client, auth_provider, extensions, metrics, close_context)
     finally:
-        # The providers are closed, then the context loop, once the server stops.
-        for setup in started:
-            setup.close()
+        close_context()
 
 
 def _serve(  # pragma: no cover - process glue, proven by running it
@@ -219,6 +233,7 @@ def _serve(  # pragma: no cover - process glue, proven by running it
     auth_provider: Any,
     extensions: list[Extension],
     metrics: Metrics,
+    on_shutdown: Callable[[], None],
 ) -> None:
     """Serve on the configured transport until the server stops."""
     log = logging.getLogger(__name__)
@@ -242,7 +257,9 @@ def _serve(  # pragma: no cover - process glue, proven by running it
         daemon=True,
     ).start()
 
-    app = build_asgi_app(config, mcp, auth_provider=auth_provider, extensions=extensions)
+    app = build_asgi_app(
+        config, mcp, auth_provider=auth_provider, extensions=extensions, on_shutdown=on_shutdown
+    )
     log.info(
         "serving transport=%s port=%d auth=%s strict=%s identity=%s extensions=%s",
         config.transport,

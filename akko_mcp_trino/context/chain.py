@@ -174,12 +174,12 @@ class ContextChain:
         """
         return self._loop.submit(self._read_terms(wanted, deadline), self._timeout(deadline))
 
-    def served_sets(self, name: str) -> Mapping[str, frozenset[str]]:
+    def served_sets(self, name: str) -> Mapping[str, frozenset[str]] | None:
         """Return the sets the source ``name`` serves, by kind.
 
-        A source that fails to say serves nothing for the call: the mapping is empty,
-        the failure is traced by type, never by text, and counted as an ``error``. A
-        name not in the chain serves nothing either.
+        ``None`` when the source fails to say: it is in ``error`` for the call, the
+        failure is traced by type, never by text, and counted. An empty mapping when it
+        declares nothing, and for a name not in the chain.
         """
         provider = next((p for p in self._providers if p.name == name), None)
         if provider is None:
@@ -189,7 +189,7 @@ class ContextChain:
         except Exception as exc:
             _trace(name, exc)
             self._count({name: ERROR})
-            return _empty()
+            return None
         return MappingProxyType(dict(sets))
 
     def reset_refused(self) -> None:
@@ -212,9 +212,12 @@ class ContextChain:
     def close(self) -> None:
         """Release what the sources hold open, within the context timeout.
 
-        Nothing is raised: a source that fails to close, a close past the timeout and a
-        loop already closed are logged by type only.
+        Nothing is raised: a source that fails to close is not reported, a close past the
+        timeout is logged by type only, and once the loop is closed there is nothing left
+        to do.
         """
+        if not self._loop.running:
+            return
         try:
             self._loop.submit(self._aclose(), self._settings.timeout_seconds)
         except Exception as exc:

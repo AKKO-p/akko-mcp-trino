@@ -1,6 +1,7 @@
 """Provider loading, the check lines and the start of the context machinery."""
 
 import dataclasses
+import logging
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
@@ -429,7 +430,7 @@ def test_check_names_a_provider_that_fails_to_load_and_closes_the_others(monkeyp
     assert "hunter2" not in out and first.closed
 
 
-def test_closing_the_setup_closes_every_provider_then_the_loop(loops):
+def test_closing_the_setup_closes_every_provider_then_the_loop(loops, caplog):
     order: list[str] = []
 
     class Closing(_Provider):
@@ -448,8 +449,10 @@ def test_closing_the_setup_closes_every_provider_then_the_loop(loops):
     setup.close()
     assert sorted(order) == ["first on mcp-context", "second on mcp-context"]
     assert "mcp-context" not in {t.name for t in threading.enumerate()}
-    setup.close()
+    with caplog.at_level(logging.DEBUG):
+        setup.close()
     assert len(order) == 2, "a second close reaches nothing"
+    assert caplog.records == [], "and says nothing"
 
 
 def test_check_prints_every_context_setting_and_never_a_secret(monkeypatch, capsys, tmp_path):

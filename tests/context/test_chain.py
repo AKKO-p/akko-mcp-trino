@@ -610,11 +610,14 @@ def test_served_sets_of_a_failing_provider_is_an_error_not_a_crash(loop, caplog)
     chain = _chain(loop, good, broken, metrics=metrics)
     with caplog.at_level(logging.DEBUG, logger="akko_mcp_trino.context.chain"):
         assert dict(chain.served_sets("good")) == {"glossary": frozenset({"Finance"})}
-        assert dict(chain.served_sets("broken")) == {}
+        assert chain.served_sets("broken") is None, "an error is not an empty declaration"
         assert dict(chain.served_sets("elsewhere")) == {}
+        good.sets = {}
+        assert dict(chain.served_sets("good")) == {}
     assert "RuntimeError" in caplog.text and "s3cr3t" not in caplog.text
     errors = {"provider": "broken", "status": "error"}
     assert metrics.registry.get_sample_value("mcp_trino_context_errors_total", errors) == 1
+    good.sets = {"glossary": frozenset({"Finance"})}
     with pytest.raises(TypeError):
         chain.served_sets("good")["glossary"] = frozenset()  # type: ignore[index]
 
@@ -647,3 +650,16 @@ def test_sighup_resets_the_breaker_gauge(loop):
     chain.reset_refused()
     assert value("mcp_trino_context_breaker_open", {"provider": "refused"}) == 0
     assert value("mcp_trino_context_breaker_open", {"provider": "down"}) == 1, "an outage stays"
+
+
+def test_a_close_past_the_timeout_is_logged_by_type_and_not_raised(loop, caplog):
+    class Slow(Fake):
+        async def aclose(self):
+            await asyncio.sleep(10)
+
+    chain = _chain(loop, Slow("slow"), timeout_seconds=0.05)
+    with caplog.at_level(logging.WARNING, logger="akko_mcp_trino.context.chain"):
+        chain.close()
+    assert [r.getMessage() for r in caplog.records] == [
+        "the context sources were not all closed (TimeoutError)"
+    ]

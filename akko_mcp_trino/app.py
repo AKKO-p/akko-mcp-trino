@@ -14,6 +14,7 @@ choosing a transport never decides whether the guard is present.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from functools import partial
 from typing import Any, Awaitable, Callable, Sequence
 
@@ -97,9 +98,18 @@ def run_stdio(
 
 
 def build_asgi_app(
-    config: Config, mcp: Any, *, auth_provider: Any, extensions: Sequence[Extension] = ()
+    config: Config,
+    mcp: Any,
+    *,
+    auth_provider: Any,
+    extensions: Sequence[Extension] = (),
+    on_shutdown: Callable[[], None] | None = None,
 ) -> Any:
     """Return the transport app for ``config.transport`` with the guard mounted.
+
+    ``on_shutdown``, when given, runs once the transport has shut down, in a worker
+    thread, whether or not the transport stopped cleanly: uvicorn shuts the app down
+    on SIGTERM and SIGINT before the process ends.
 
     ``mcp`` is anything exposing ``sse_app(transport_security=)`` and
     ``streamable_http_app(transport_security=)`` —
@@ -121,6 +131,8 @@ def build_asgi_app(
             f"no ASGI app for MCP_TRANSPORT {config.transport!r}; "
             f"expected one of {_HTTP_TRANSPORTS} (stdio uses run_stdio)"
         )
+    if on_shutdown is not None:
+        _close_after(app, on_shutdown)
     for ext in extensions:
         routes = ext.routes()
         if routes:
@@ -135,6 +147,21 @@ def build_asgi_app(
         metadata_url=metadata_url,
     )
     return app
+
+
+def _close_after(app: Any, close: Callable[[], None]) -> None:
+    """Run ``close`` once the app's own lifespan has ended."""
+    inner = app.router.lifespan_context
+
+    @contextlib.asynccontextmanager
+    async def lifespan(target: Any) -> Any:
+        try:
+            async with inner(target) as state:
+                yield state
+        finally:
+            await asyncio.to_thread(close)
+
+    app.router.lifespan_context = lifespan
 
 
 def _admit(config: Config, extensions: Sequence[Extension], user: Principal | None) -> None:
