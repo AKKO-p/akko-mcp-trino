@@ -1065,10 +1065,19 @@ reaches the agent, only a status. Nothing in these lines is wired into a tool ye
 | `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bounds of the profile of a table, 1 at least | `50`, `100000` |
 | `MCP_VISIBILITY_ENABLED` | removed in 0.8: the filter by Trino's rights cannot be turned off, and `false` refuses to start | none |
 
-`--check` prints a `context:` line (the providers, the time budget, the reserve, the batch and the
-caches), a `visibility:` line (the lifetime, whether a canary is set, whether `select` is required)
-and the lines of each provider. `MCP_CONTEXT_PROVIDERS` without a canary, or in `service` mode, is
-warned of.
+`--check` prints a `context:` line (the providers and every setting above from
+`MCP_CONTEXT_TIMEOUT_SECONDS` to `MCP_CONTEXT_MAX_COLUMNS`), a `visibility:` line (the lifetime, the
+bound in bytes and in names, whether a canary is set, never its name, and whether `select` is
+required) and the lines of each provider, never a secret. `MCP_CONTEXT_PROVIDERS` without a canary,
+or in `service` mode, is warned of.
+
+A provider that is down or that refuses the account logs one warning each time its breaker opens
+(`<name> is unavailable`, `<name> refused the account`), never the text of its error. `SIGHUP` lets
+the providers that refused the account be called again at once and sets their
+`mcp_trino_context_breaker_open` to 0. When the server stops, it closes every provider, then the
+context loop; a read that ignores its cancellation does not hold the stop for more than a few
+seconds. Catalogue text loses its control and format characters, and its line and paragraph
+separators (U+2028, U+2029), before it reaches an agent.
 
 ### The file provider
 

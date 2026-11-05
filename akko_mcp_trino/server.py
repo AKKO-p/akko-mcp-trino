@@ -108,8 +108,8 @@ def build_server(
     every host in the instructions of the initialization: ``mcp_factory`` then
     receives them as ``instructions``. `context_providers`, when given, start the context
     loop (one thread) and build the chain the tools read them through; `context_started`
-    receives that setup, for whoever must reset or close the chain. Without providers
-    nothing is started."""
+    receives that setup, for whoever must reset the chain or close it
+    (``ContextSetup.close``). Without providers nothing is started."""
     problems = config.problems()
     if problems:
         raise ValueError("; ".join(problems))
@@ -140,7 +140,7 @@ def build_server(
         chain = ContextChain(
             context_providers, ContextSettings.from_config(config), loop=loop, metrics=metrics
         )
-        context = ContextSetup(chain, config)
+        context = ContextSetup(chain, config, loop)
     tools = register_query_tools(
         mcp,
         client,

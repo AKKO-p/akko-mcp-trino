@@ -586,6 +586,19 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bornes du profil d'une table, 1 au moins | `50`, `100000` |
 | `MCP_VISIBILITY_ENABLED` | supprimé en 0.8 : le filtre par les droits de Trino ne se désactive pas, et `false` refuse de démarrer | aucune |
 
+`--check` imprime une ligne `context:` (les fournisseurs et chaque réglage du tableau, de
+`MCP_CONTEXT_TIMEOUT_SECONDS` à `MCP_CONTEXT_MAX_COLUMNS`), une ligne `visibility:` (la durée, la
+borne en octets et en noms, si un canari est posé, jamais son nom, et si `select` est exigé) et les
+lignes de chaque fournisseur, jamais un secret.
+
+Un fournisseur en panne ou qui refuse le compte écrit un avertissement à chaque ouverture de son
+coupe-circuit (`<nom> is unavailable`, `<nom> refused the account`), jamais le texte de son erreur.
+`SIGHUP` laisse rappeler aussitôt les fournisseurs qui ont refusé le compte et remet leur
+`mcp_trino_context_breaker_open` à 0. À l'arrêt, le serveur ferme chaque fournisseur, puis la boucle
+du contexte ; une lecture qui ignore son annulation ne retient pas l'arrêt plus de quelques
+secondes. Le texte d'un catalogue perd ses caractères de contrôle et de format, et ses séparateurs de
+ligne et de paragraphe (U+2028, U+2029), avant d'atteindre un agent.
+
 Avec un fournisseur chargé, le serveur expose aussi les métriques
 `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total`,
 `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total`,

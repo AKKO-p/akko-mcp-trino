@@ -21,3 +21,7 @@ def test_a_text_of_exactly_the_limit_is_not_cut():
 
 def test_the_limit_applies_after_cleaning():
     assert clean_text("a​​bc", 3) == ("abc", False)
+
+
+def test_line_and_paragraph_separators_are_removed():
+    assert clean_text("a\u2028b\u2029c\nd", 10) == ("abc\nd", False)

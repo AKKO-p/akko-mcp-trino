@@ -96,6 +96,14 @@ class Gathered:
     statuses: Mapping[str, str] = field(default_factory=_empty)
 
 
+@dataclass(frozen=True)
+class TermsResult:
+    """The glossary terms read for one call, by (source, key), and one status per source asked."""
+
+    terms: Mapping[tuple[str, str], Term]
+    statuses: Mapping[str, str]
+
+
 @dataclass
 class _Breaker:
     status: str
@@ -158,26 +166,59 @@ class ContextChain:
         wanted = tuple(dict.fromkeys(refs))
         return self._loop.submit(self._gather(wanted, deadline), self._timeout(deadline))
 
-    def terms(
-        self, wanted: Mapping[str, Sequence[str]], *, deadline: float
-    ) -> Mapping[tuple[str, str], Term]:
+    def terms(self, wanted: Mapping[str, Sequence[str]], *, deadline: float) -> TermsResult:
         """Read glossary terms by source name and key, at most until ``deadline``.
 
         A source not in the chain is ignored; a term a source does not know is left out.
+        Each source asked for at least one key has a status.
         """
         return self._loop.submit(self._read_terms(wanted, deadline), self._timeout(deadline))
 
+    def served_sets(self, name: str) -> Mapping[str, frozenset[str]]:
+        """Return the sets the source ``name`` serves, by kind.
+
+        A source that fails to say serves nothing for the call: the mapping is empty,
+        the failure is traced by type, never by text, and counted as an ``error``. A
+        name not in the chain serves nothing either.
+        """
+        provider = next((p for p in self._providers if p.name == name), None)
+        if provider is None:
+            return _empty()
+        try:
+            sets = provider.served_sets()
+        except Exception as exc:
+            _trace(name, exc)
+            self._count({name: ERROR})
+            return _empty()
+        return MappingProxyType(dict(sets))
+
     def reset_refused(self) -> None:
-        """Let every source that refused the account be called again at once."""
+        """Let every source that refused the account be called again at once.
+
+        It may run in a signal handler: the breakers it lifts are closed on their next
+        call, and their gauges read 0 now.
+        """
         self._refused_generation += 1
+        if self._metrics is None:
+            return
+        for name, breaker in list(self._breakers.items()):
+            if breaker.status == REFUSED:
+                self._metrics.context_breaker_open.labels(provider=name).set(0)
 
     def check_lines(self) -> list[str]:
         """Return the lines the configuration check prints for the sources."""
         return [line for p in self._providers for line in p.check_lines()]
 
     def close(self) -> None:
-        """Release what the sources hold open; a failure to close is not raised."""
-        self._loop.submit(self._aclose(), self._settings.timeout_seconds)
+        """Release what the sources hold open, within the context timeout.
+
+        Nothing is raised: a source that fails to close, a close past the timeout and a
+        loop already closed are logged by type only.
+        """
+        try:
+            self._loop.submit(self._aclose(), self._settings.timeout_seconds)
+        except Exception as exc:
+            log.warning("the context sources were not all closed (%s)", type(exc).__name__)
 
     def _timeout(self, deadline: float) -> float:
         return max(deadline - self._clock(), 0.0) + _GRACE_SECONDS
@@ -217,7 +258,7 @@ class ContextChain:
 
     async def _read_terms(
         self, wanted: Mapping[str, Sequence[str]], deadline: float
-    ) -> Mapping[tuple[str, str], Term]:
+    ) -> TermsResult:
         jobs = {
             p.name: (p, list(dict.fromkeys(wanted[p.name])))
             for p in self._providers
@@ -225,13 +266,15 @@ class ContextChain:
         }
         found, statuses = await self._collect(jobs, self._terms, _terms, deadline)
         self._count(statuses)
-        return MappingProxyType(
-            {
-                (name, key): term
-                for name in self.names
-                for key, term in found.get(name, {}).items()
-                if term is not None
-            }
+        terms = {
+            (name, key): term
+            for name in self.names
+            for key, term in found.get(name, {}).items()
+            if term is not None
+        }
+        return TermsResult(
+            terms=MappingProxyType(terms),
+            statuses=MappingProxyType({n: statuses[n] for n in self.names if n in statuses}),
         )
 
     async def _collect(
@@ -374,6 +417,8 @@ class ContextChain:
         )
         if status == REFUSED:
             log.warning("%s refused the account", provider.name)
+        else:
+            log.warning("%s is unavailable", provider.name)
         if self._metrics is not None:
             self._metrics.context_breaker_open.labels(provider=provider.name).set(1)
 

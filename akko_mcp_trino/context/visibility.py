@@ -4,7 +4,7 @@ A name a catalogue cites (the target of a join) is kept only once Trino has list
 it to the caller. The proof never puts that name in a statement: the schemas of a
 listed catalog are read without a name filter, then the tables of a listed schema
 by ``WHERE table_schema = '<schema>'``, and the name is looked up in memory. A
-catalog or a schema enters a statement only after Trino has listed it.
+catalog, a schema or a table enters a statement only after Trino has listed it.
 
 Every statement goes through the ``run`` this cache is given, which the caller's
 wiring tags (``mcp-gate``) and binds to the verified caller. An entry is kept per
@@ -166,6 +166,28 @@ class Visibility:
             _log.warning("a visibility read failed (%s): nothing is proven", type(exc).__name__)
             return False
         return names is not None and ref.table in names
+
+    def columns(self, key: VisibilityKey, ref: TableRef) -> frozenset[str] | None:
+        """Return the columns Trino lists to the caller for a proven ``ref``.
+
+        A table not proven is never named and has ``None``; so has a table of more than
+        ``max_names`` columns, and a failed ``DESCRIBE``, which is not kept.
+        """
+        if not self.proven(key, ref):
+            return None
+        entry = ("columns", replace(key, catalog=""), ref)
+        hit, value = self._get(entry)
+        if hit:
+            return value
+        table = ".".join(_ident(n) for n in (ref.catalog, ref.schema, ref.table))
+        try:
+            names, cut = self._names(f"DESCRIBE {table}")
+        except Exception as exc:
+            _log.warning("a column read failed (%s): nothing is proven", type(exc).__name__)
+            return None
+        found = None if cut else names
+        self._put(entry, found)
+        return found
 
     def canary_clear(self, key: VisibilityKey) -> bool:
         """Return whether the configured canary is hidden from the caller.
