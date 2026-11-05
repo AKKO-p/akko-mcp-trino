@@ -1,7 +1,9 @@
 """The context interface: types, protocol, errors, statuses, and the chain that reads it.
 
 ``CONTEXT_API`` is the version of the protocol. The core refuses a provider
-whose ``context_api`` differs from it.
+whose ``context_api`` differs from it. An adapter finds here all it needs: the
+protocol, the types, the errors, the statuses and ``secret_setting``; the contract
+it must pass is ``akko_mcp_trino.testing``.
 """
 
 from dataclasses import dataclass
@@ -11,7 +13,18 @@ from .chain import ContextChain, ContextSettings, Gathered
 from .errors import ProviderError, ProviderRefused, ProviderUnavailable
 from .loop import ContextLoop
 from .provider import ContextProvider
-from .status import status_of
+from .secrets import FileSecret, secret_setting
+from .status import (
+    ERROR,
+    NOT_CHECKED,
+    NOT_FOUND,
+    NOT_MAPPED,
+    OK,
+    PARTIAL,
+    REFUSED,
+    UNAVAILABLE,
+    status_of,
+)
 from .types import (
     CLASSIFICATION,
     GLOSSARY,
@@ -41,15 +54,24 @@ class ContextSetup:
 __all__ = [
     "CLASSIFICATION",
     "CONTEXT_API",
+    "ERROR",
     "GLOSSARY",
+    "NOT_CHECKED",
+    "NOT_FOUND",
+    "NOT_MAPPED",
+    "OK",
     "OWNER",
+    "PARTIAL",
     "PROPERTY",
+    "REFUSED",
+    "UNAVAILABLE",
     "ColumnContext",
     "ContextChain",
     "ContextLoop",
     "ContextProvider",
     "ContextSetup",
     "ContextSettings",
+    "FileSecret",
     "Gathered",
     "Join",
     "Labelled",
@@ -60,5 +82,6 @@ __all__ = [
     "TableRef",
     "Term",
     "TermRef",
+    "secret_setting",
     "status_of",
 ]

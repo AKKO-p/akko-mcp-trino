@@ -607,6 +607,60 @@ clés de colonnes. Le cœur les compare exactement. Un fichier qui contient deux
 ou la même colonne, une fois passé en minuscules est refusé au lieu d'être fusionné. Le format est
 celui de l'exemple du [README](README.md#the-file-provider).
 
+### Écrire un fournisseur de contexte
+
+Un fournisseur est une classe qui implémente le protocole `akko_mcp_trino.context.ContextProvider` :
+`name`, `context_api` (à fixer à `akko_mcp_trino.context.CONTEXT_API` ; le serveur refuse une autre
+version), `maps(catalog)`, `served_sets()`, `describe(refs, deadline=…)`, `terms(keys, deadline=…)`,
+`check_lines()`, `aclose()` et `credentials_stamp()`. Son paquet enregistre une fabrique
+`(env) -> fournisseur` dans le groupe d'entrée `akko_mcp_trino.context`, par exemple
+`mycatalog = "my_package.provider:from_env"` sous `[project.entry-points."akko_mcp_trino.context"]`.
+
+La fabrique lit les variables du fournisseur dans `env`, lève `ValueError` quand elle ne peut pas
+les servir, et ne joint pas son catalogue. Un secret se lit avec
+`akko_mcp_trino.context.secret_setting(env, name)`, pour que `<NOM>_FILE` marche aussi. Les règles
+d'un fournisseur :
+
+- il ne sert que les ensembles que l'administrateur autorise par leur nom exact, une liste par
+  genre (glossaire, classification, propriété, propriétaire), rien par défaut, et `served_sets()`
+  dit ce qu'il sert ;
+- il rend les noms comme Trino les liste, en minuscules : les tables, les clés de colonnes, le
+  grain et les jointures. Le cœur compare les noms exactement : un nom dans une autre casse est
+  perdu ;
+- il ne rend que les types du cœur (`TableContext`, `ColumnContext`, `Term`...), jamais de données :
+  ni valeur, ni échantillon ;
+- il respecte l'échéance reçue, lève `ProviderRefused` quand son compte est refusé et
+  `ProviderUnavailable` quand le catalogue est en panne, en retard ou rend ce qu'il ne sait pas
+  lire. Le texte de ses erreurs reste dans le serveur ; ses journaux et `check_lines()` ne
+  contiennent jamais son secret, ni un nom de schéma, de table ou de colonne ;
+- il n'importe ni `akko_mcp_trino.trino_client` ni `akko_mcp_trino.identity`, ne reçoit jamais le
+  client Trino ni l'identité de l'appelant, et n'écrit jamais dans son catalogue.
+
+`akko_mcp_trino.testing` publie le contrat qui vérifie ces règles (il demande `pytest`). Il ne
+demande ni réseau, ni catalogue, ni Trino : le fournisseur envoie ses requêtes à un transport qui
+répond avec les réponses enregistrées du catalogue, ou, exprès, en retard, par un 401, un 503, un
+corps qui n'est pas du JSON ou un 500 qui contient le secret. On sous-classe `ContextContract` dans
+les tests du fournisseur et on lui donne une fixture `harness` qui rend un `ContractHarness` : la
+fabrique `build(env, transport)`, la fonction `replay` qui rejoue les réponses enregistrées, les
+réglages `env`, le `secret` qu'ils contiennent, et les `ContractNames` (catalogue mappé et non
+mappé, table décrite, table partitionnée et sa colonne de partition, entité supprimée, table
+inconnue, nom piégé, colonne à terme, glossaire hors liste). L'exemple complet est dans le
+[README](README.md#writing-a-context-provider).
+
+Le contrat vérifie que le contexte revient avec ses colonnes de partition, qu'une table inconnue et
+une entité supprimée sont omises, qu'un catalogue non mappé ne coûte aucune requête, que rien hors
+de `served_sets()` n'est rendu et que ces ensembles suivent les réglages, qu'aucun type ne porte de
+valeur, qu'un catalogue lent rend la main avant l'échéance plus
+`ContextContract.REPLY_MARGIN_SECONDS` (0,5 s) sans laisser de requête ouverte, qu'un 401 lève
+`ProviderRefused` sans être renvoyé, qu'un délai, un 503 ou un corps illisible lèvent
+`ProviderUnavailable`, que ni les journaux (`httpx` à `WARNING`, comme le serveur le règle), ni
+`check_lines()`, ni une exception ne contiennent le secret, que journaux et `check_lines()` ne
+contiennent aucun nom d'objet, que le module du fournisseur ne charge rien du côté Trino du cœur,
+qu'un nom piégé est trouvé sous son nom exact, et que tous les noms sont en minuscules. Un
+fournisseur qui n'envoie aucune requête, comme `file`, saute les vérifications qui en demandent
+une, avec `no HTTP`. La vérification de `snapshot` arrive avec le préchauffage en 0.8.x et est
+sautée en 0.8.
+
 ## Configuration, extensions, exploitation
 
 Toutes les variables, leurs valeurs par défaut, les points d'extension (identités, gardes, audit,

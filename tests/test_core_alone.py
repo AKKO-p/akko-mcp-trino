@@ -71,6 +71,8 @@ CORE_MODULES = {
     "search",
     "server",
     "sql_guard",
+    "testing/__init__",
+    "testing/context_contract",
     "token_exchange",
     "tools",
     "transport_security",
@@ -226,16 +228,18 @@ def test_the_core_reads_only_its_own_entry_point_groups():
     assert groups <= CORE_GROUPS
 
 
-def test_the_context_package_loads_neither_the_trino_client_nor_the_identity():
-    """A provider's contract test imports the package; it must not pull the core's Trino side."""
+@pytest.mark.parametrize("package", ["context", "testing"])
+def test_the_package_an_adapter_imports_loads_neither_the_trino_client_nor_the_identity(package):
+    """A provider and its contract test import these packages; they must not pull the core's
+    Trino side."""
     import subprocess
     import sys
 
     modules = sorted(
-        ["akko_mcp_trino.context"]
+        [f"akko_mcp_trino.{package}"]
         + [
-            f"akko_mcp_trino.context.{p.stem}"
-            for p in (CORE / "context").glob("*.py")
+            f"akko_mcp_trino.{package}.{p.stem}"
+            for p in (CORE / package).glob("*.py")
             if p.stem != "__init__"
         ]
     )
@@ -249,3 +253,33 @@ def test_the_context_package_loads_neither_the_trino_client_nor_the_identity():
     )
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT)
     assert done.returncode == 0, done.stderr
+
+
+def test_the_wheel_finds_every_sub_package_of_the_core():
+    """Packages are found, never listed: a sub-package added later cannot miss the wheel."""
+    import tomllib
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
+    assert project["setuptools"]["packages"] == {
+        "find": {"include": ["akko_mcp_trino", "akko_mcp_trino.*"]}
+    }
+    assert CORE_PACKAGES == {"context", "testing"}
+
+
+def test_an_adapter_finds_what_it_needs_in_the_context_package():
+    import akko_mcp_trino.context as context
+    from akko_mcp_trino.context import secrets, status
+
+    for name in (
+        "OK",
+        "NOT_FOUND",
+        "NOT_MAPPED",
+        "PARTIAL",
+        "UNAVAILABLE",
+        "REFUSED",
+        "ERROR",
+        "NOT_CHECKED",
+    ):
+        assert getattr(context, name) == getattr(status, name) and name in context.__all__
+    assert context.secret_setting is secrets.secret_setting
+    assert context.FileSecret is secrets.FileSecret

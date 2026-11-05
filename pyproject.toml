@@ -63,8 +63,9 @@ Issues = "https://github.com/AKKO-p/akko-mcp-trino/issues"
 Changelog = "https://github.com/AKKO-p/akko-mcp-trino/blob/main/CHANGELOG.md"
 AKKO = "https://akko-ai.com"
 
-[tool.setuptools]
-packages = ["akko_mcp_trino", "akko_mcp_trino.context"]
+# Packages are found, never listed, so that no sub-package can miss the wheel.
+[tool.setuptools.packages.find]
+include = ["akko_mcp_trino", "akko_mcp_trino.*"]
 
 [tool.setuptools.package-data]
 akko_mcp_trino = ["py.typed"]
