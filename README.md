@@ -1323,6 +1323,43 @@ succeed, and `SLOW_DEADLINE_SECONDS` (1 s) the one they give a catalogue that do
 are class attributes: raise them in your subclass when your CI is slow, and keep the second well
 under 30 s, the time the slow catalogue takes to answer.
 
+The gate is the core's, and it is proven over each provider: `GateContract` builds the server as it
+runs, with the provider and its recorded catalogue, in the `jwt` and `impersonation` identity modes
+(the second with `MCP_CONTEXT_REQUIRE_SELECT=true`), and puts `FakeTrino` in place of Trino.
+`FakeTrino` answers the core's own statements from what each user sees (`Visible`: the tables, and
+the columns Trino lists of each) and records every statement with its user, its text and its client
+tags (`Statement`). A caller sees every table of the harness but one object: a table, then a column
+of the described table, then the target of one of its joins. The checks: nothing of that object,
+neither its name nor any text the catalogue gives it alone, reaches a reply, a `context_sources`
+status, an audit line, a log line or a metric; every statement runs as the caller and names only
+what Trino has listed to them, the agent's own statements also what the agent wrote, and the one
+statement that names a hidden table is the `DESCRIBE` the agent asked of it; a hidden table and a
+missing one (`names.unknown`) answer the same keys, kinds and statuses, write the same audit line and
+send the same statements. A caller who sees everything is served the three objects, so the checks
+test something. Add it to the class above, with a `gate` fixture:
+
+```python
+from akko_mcp_trino.testing import GateContract, GateHarness
+
+
+class TestMyProviderContract(ContextContract, GateContract):
+    # the harness fixture above, then:
+    @pytest.fixture
+    def gate(self, harness):
+        return GateHarness(
+            contract=harness,
+            hidden_table=TableRef("warehouse", "ledger", "payroll"),         # described
+            hidden_column="discount_code",                                   # of `described`
+            hidden_join_target=TableRef("warehouse", "ledger", "payments"),  # joined from it
+        )
+```
+
+The three objects are in the recorded catalogue, written as Trino lists them and as an agent names
+a table (letters, digits, `_` and `-`), four characters long at least, and their names are part of
+no name or text the caller may see: the contract looks for them, and for each text the catalogue
+gives them alone, in everything the caller receives. `tests/context/test_gate_contract_file.py`
+runs it on `file`.
+
 ### Serving
 
 | Variable | Meaning | Default |
@@ -1434,7 +1471,7 @@ Every module in `akko_mcp_trino/` has one responsibility and its tests, in
 | `health.py`, `metrics.py` | `/health`, `/ready` and `/metrics`; the Prometheus counters |
 | `server.py`, `app.py`, `__main__.py` | assembly, transport, entrypoint and `--check` |
 | `context/` | the context providers: protocol, types, chain, filter by Trino's rights, the `file` provider |
-| `testing/` | the contract every context provider passes, for the providers' own tests |
+| `testing/` | the contracts every context provider passes, alone and behind the gate (`FakeTrino`), for the providers' own tests |
 
 The README is tested too: every variable listed here is read by `config.py`,
 and the defaults stated here are the defaults in the code.

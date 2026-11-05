@@ -1,4 +1,4 @@
-"""The live checks, inside the compose network: Keycloak, Trino and three servers.
+"""The live checks, inside the compose network: Keycloak, Trino and the servers.
 
 Each check prints OK or FAIL; the exit code is 1 when one fails. Run by run.sh.
 
@@ -24,6 +24,20 @@ JWT, IMPERSONATION, SERVICE = (
     "http://mcp-service:3000/mcp",
 )
 PAGED = "http://mcp-paged:3000/mcp"  # the jwt server with pages of three rows
+# The servers with the catalogue context of integration/context.json.
+CONTEXT_JWT, CONTEXT_IMPERSONATION = (
+    "http://mcp-context-jwt:3000/mcp",
+    "http://mcp-context-impersonation:3000/mcp",
+)
+# Texts the file gives only to what bob may not see: the table orders, the column
+# comment of nation, and the table region a join of nation names.
+ORDERS_TEXTS = (
+    "Purchase orders of the sample customers",
+    "Number given to the purchase order",
+    "Amount due for the purchase order",
+)
+HIDDEN_COLUMN_TEXT = "Remark kept by the reference data stewards"
+REGION = "tpch.tiny.region"
 TPCH_TINY_TABLES = {
     "customer", "lineitem", "nation", "orders", "part", "partsupp", "region", "supplier",
 }  # fmt: skip
@@ -139,6 +153,82 @@ async def discovery(call) -> dict:
         "system": await call("execute_query", sql="SELECT * FROM system.jdbc.columns"),
         "tables": await walk(call, "list_tables", "table"),
         "described": await walk(call, "describe_schema", "table"),
+    }
+
+
+async def context(call) -> dict:
+    """The tools that serve catalogue context, as one caller."""
+
+    async def describe(table: str) -> dict:
+        return await call("describe_table", catalog="tpch", schema="tiny", table=table)
+
+    return {
+        "nation": await describe("nation"),
+        "orders": await describe("orders"),
+        "schema": await call("describe_schema", catalog="tpch", schema="tiny"),
+    }
+
+
+def context_checks(label: str, url: str, alice: str, bob: str) -> None:
+    """alice sees tpch.tiny whole and gets its context; bob sees nation only, without its
+    column comment, and gets nothing of what he may not see."""
+    a, b = use(url, alice, context), use(url, bob, context)
+    nation, columns = a["nation"], a["nation"].get("column_context", {})
+    check(
+        f"{label}: alice gets the column context of tpch.tiny.nation from the file",
+        nation.get("context_sources") == {"file": "ok"}
+        and columns.get("name", {}).get("description") == "Name of the nation, in capitals"
+        and columns.get("comment", {}).get("description") == HIDDEN_COLUMN_TEXT
+        and [t["name"] for t in nation.get("terms", {}).values()] == ["Nation"],
+        nation,
+    )
+    check(
+        f"{label}: alice gets the join of nation to region, which she sees",
+        [j["table"] for j in nation.get("table", {}).get("joins", [])] == [REGION],
+        nation.get("table"),
+    )
+    check(
+        f"{label}: alice gets the description of orders and of each table of tiny it holds",
+        a["orders"].get("table", {}).get("description") == ORDERS_TEXTS[0]
+        and {t["table"] for t in a["schema"].get("tables", []) if "description" in t}
+        == {"nation", "orders", "region"},
+        (a["orders"], a["schema"]),
+    )
+    seen = b["nation"].get("column_context", {})
+    check(
+        f"{label}: bob gets the context of nation without the column Trino hides from him",
+        b["nation"].get("context_sources") == {"file": "ok"}
+        and "name" in seen
+        and "comment" not in seen
+        and HIDDEN_COLUMN_TEXT not in json.dumps(b),
+        b["nation"],
+    )
+    check(
+        f"{label}: bob gets no join to region, which he does not see",
+        "joins" not in b["nation"].get("table", {}) and REGION not in json.dumps(b["nation"]),
+        b["nation"].get("table"),
+    )
+    check(
+        f"{label}: bob gets nothing of orders, from any tool",
+        "error" in b["orders"]
+        and "context_sources" not in b["orders"]
+        and not any(text in json.dumps(b) for text in ORDERS_TEXTS)
+        and "orders" not in json.dumps([b["nation"], b["schema"]]),
+        b,
+    )
+    check(
+        f"{label}: bob's listing describes nation only",
+        [(t["table"], t.get("description", {}).get("text")) for t in b["schema"].get("tables", [])]
+        == [("nation", "The nations of the sample data, one row each")],
+        b["schema"],
+    )
+
+
+async def without_context(call) -> dict:
+    """The tools that would serve catalogue context, on a server without a provider."""
+    return {
+        "nation": await call("describe_table", catalog="tpch", schema="tiny", table="nation"),
+        "schema": await call("describe_schema", catalog="tpch", schema="tiny"),
     }
 
 
@@ -306,6 +396,26 @@ def main() -> int:
         and paged["described"][1] == 3,
         paged["described"],
     )
+
+    # 1c. Without MCP_CONTEXT_PROVIDERS, the answers of 0.7.2, without a key more.
+    plain = use(JWT, alice, without_context)
+    check(
+        "context: without a provider, describe_table answers as in 0.7.2",
+        set(plain["nation"]) == {"columns", "rows", "truncated"},
+        plain["nation"],
+    )
+    check(
+        "context: without a provider, describe_schema answers as in 0.7.2",
+        set(plain["schema"]) == {"catalog", "schema", "tables", "next_offset", "shortened"}
+        and all(
+            set(t) == {"table", "type", "comment", "columns"} for t in plain["schema"]["tables"]
+        ),
+        plain["schema"],
+    )
+
+    # 1d. Catalogue context from a file, under each caller's rights in Trino.
+    context_checks("context (jwt)", CONTEXT_JWT, alice, bob)
+    context_checks("context (impersonation)", CONTEXT_IMPERSONATION, alice, bob)
 
     # 2. The door: no token, a forged one, one issued for Trino.
     no_token = httpx.post(JWT, json={}, timeout=10)

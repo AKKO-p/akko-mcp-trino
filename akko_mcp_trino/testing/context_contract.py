@@ -24,6 +24,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 import subprocess
 import sys
 import time
@@ -40,6 +41,16 @@ import pytest
 from ..context.errors import ProviderError, ProviderRefused, ProviderUnavailable
 from ..context.loop import ContextLoop
 from ..context.provider import ContextProvider
+from ..context.status import (
+    ERROR,
+    NOT_CHECKED,
+    NOT_FOUND,
+    NOT_MAPPED,
+    OK,
+    PARTIAL,
+    REFUSED,
+    UNAVAILABLE,
+)
 from ..context.types import (
     CLASSIFICATION,
     GLOSSARY,
@@ -765,3 +776,555 @@ class ContextContract:
     def test_snapshot_pages_without_duplicate_or_loss(self, harness: ContractHarness) -> None:
         """``snapshot`` is checked from 0.8.x, with pre-warming; no provider offers it in 0.8."""
         pytest.skip("snapshot arrives with pre-warming in 0.8.x; nothing to check in 0.8")
+
+
+# ---- the gate, end to end: the provider, the core's tools and a fake Trino
+
+_MODES = ("jwt", "impersonation")
+_HIDDEN_TABLE, _HIDDEN_COLUMN, _HIDDEN_JOIN = (
+    "the hidden table",
+    "the hidden column",
+    "the hidden join target",
+)
+_SCENARIOS = (_HIDDEN_TABLE, _HIDDEN_COLUMN, _HIDDEN_JOIN)
+_SEES_ALL, _CALLER = "gate-sees-all", "gate-caller"
+_CANARY_SCHEMA, _CANARY_TABLE = "mcp_gate_canary", "sentinel"
+# A text shorter than this is too common to be looked for in what the caller receives.
+_MIN_TEXT = 4
+# What an agent may write as a catalog, a schema or a table (the tools refuse the rest).
+_AGENT_NAME = re.compile(r"[A-Za-z0-9_-]+")
+_STATUSES = frozenset(
+    {OK, PARTIAL, NOT_FOUND, NOT_MAPPED, UNAVAILABLE, REFUSED, ERROR, NOT_CHECKED}
+)
+
+
+@dataclass
+class GateHarness:
+    """The contract's harness, and which of its recorded objects the gate hides from a caller.
+
+    ``hidden_table`` is a table the catalogue describes; ``hidden_join_target`` the target
+    of a join the catalogue gives ``names.described``; ``hidden_column`` a column of
+    ``names.described`` the catalogue describes. ``names.unknown`` plays the missing
+    table. Each is written as Trino lists it, at least 4 characters long, and as an agent
+    names a table (letters, digits, ``_`` and ``-``); none of them is ``names.described``.
+    Its name must be part of no name or text the caller is allowed to see: the contract
+    looks for it, and for every text the catalogue gives it alone, in all the caller
+    receives.
+    """
+
+    contract: ContractHarness
+    hidden_table: TableRef
+    hidden_column: str
+    hidden_join_target: TableRef
+
+
+@dataclass
+class _Answer:
+    """One tool call of a gate run: the reply, the audit line and the statements it sent."""
+
+    user: str
+    tool: str
+    args: Mapping[str, str]
+    text: str
+    line: Mapping[str, Any]
+    statements: list
+
+    @property
+    def reply(self) -> dict:
+        return json.loads(self.text)
+
+    def asked(self) -> TableRef | None:
+        if not {"catalog", "schema", "table"} <= set(self.args):
+            return None
+        return TableRef.of(self.args["catalog"], self.args["schema"], self.args["table"])
+
+    def scrubbed(self) -> str:
+        """The reply and the audit line, the table the agent asked for left out by name."""
+        text = self.text + "\n" + json.dumps(self.line, ensure_ascii=False)
+        asked = self.asked()
+        return text.replace(_dotted(asked), "<asked>") if asked is not None else text
+
+
+@dataclass
+class _Server:
+    """The core's tools over one provider and a fake Trino, called as a verified user."""
+
+    tools: Mapping[str, Callable[..., str]]
+    fake: Any
+    audit: Any
+    metrics: Any
+    provider: str
+
+    def call(self, user: str, tool: str, args: Mapping[str, str]) -> _Answer:
+        from ..audit import reset_current_request_id, set_current_request_id
+        from ..auth import Principal
+        from ..identity import (
+            reset_current_bearer,
+            reset_current_principal,
+            set_current_bearer,
+            set_current_principal,
+        )
+
+        first, events = len(self.fake.statements), len(self.audit.events)
+        principal = set_current_principal(Principal(subject=user, token_id=f"{user}-jti"))
+        bearer = set_current_bearer(f"bearer-of-{user}")
+        request = set_current_request_id(f"gate-{events}")
+        try:
+            text = self.tools[tool](**args)
+        finally:
+            reset_current_request_id(request)
+            reset_current_bearer(bearer)
+            reset_current_principal(principal)
+        event = self.audit.events[events]
+        line = {
+            **event.as_dict(),
+            "tables": list(event.call.tables),
+            "metadata_served": list(event.call.metadata_served),
+        }
+        return _Answer(user, tool, dict(args), text, line, self.fake.statements[first:])
+
+    def metrics_text(self) -> str:
+        return self.metrics.render()[0].decode("utf-8")
+
+
+def _dotted(ref: TableRef) -> str:
+    return f"{ref.catalog}.{ref.schema}.{ref.table}"
+
+
+def _table_args(ref: TableRef) -> dict[str, str]:
+    return {"catalog": ref.catalog, "schema": ref.schema, "table": ref.table}
+
+
+def _calls(gate: GateHarness) -> list[tuple[str, dict[str, str]]]:
+    """What the caller of a gate run asks: each table, then each schema, of the harness."""
+    tables = list(
+        dict.fromkeys([gate.contract.names.described, gate.hidden_table, gate.hidden_join_target])
+    )
+    schemas = dict.fromkeys((ref.catalog, ref.schema) for ref in tables)
+    return [("describe_table", _table_args(ref)) for ref in tables] + [
+        ("describe_schema", {"catalog": catalog, "schema": schema}) for catalog, schema in schemas
+    ]
+
+
+def _check_gate(gate: GateHarness, found: Mapping[TableRef, TableContext]) -> None:
+    names = gate.contract.names
+    refs = [gate.hidden_table, gate.hidden_join_target, names.described, names.unknown]
+    _require(
+        all(ref == TableRef.of(ref.catalog, ref.schema, ref.table) for ref in refs)
+        and gate.hidden_column == gate.hidden_column.lower(),
+        "GateHarness names must be folded as Trino lists them (lower case, as TableRef.of does)",
+    )
+    _require(
+        all(
+            len(name) >= _MIN_TEXT
+            for name in (gate.hidden_table.table, gate.hidden_join_target.table, gate.hidden_column)
+        ),
+        "GateHarness: each hidden name must be 4 characters at least",
+    )
+    _require(
+        all(_AGENT_NAME.fullmatch(part) for ref in refs for part in _table_args(ref).values())
+        and names.described not in (gate.hidden_table, gate.hidden_join_target)
+        and names.unknown != gate.hidden_table,
+        "GateHarness: the tables are named as an agent names them (letters, digits, _ and -), "
+        "and neither hidden table is the described one nor the unknown one",
+    )
+    _require(
+        names.described in found and gate.hidden_table in found,
+        "GateHarness: the hidden table must be a table the catalogue describes, "
+        "as is the described table",
+    )
+    described = found[names.described]
+    _require(
+        gate.hidden_column in described.columns,
+        "GateHarness: the hidden column must be a column the catalogue describes "
+        "for the described table",
+    )
+    _require(
+        gate.hidden_join_target in found
+        and any(join.target == gate.hidden_join_target for join in described.joins),
+        "GateHarness: the hidden join target must be the target of a join the catalogue "
+        "gives the described table, and a table it describes",
+    )
+
+
+def _trino_columns(found: Mapping[TableRef, TableContext]) -> dict[TableRef, tuple[str, ...]]:
+    """The columns Trino has, for a caller who sees everything: every column the catalogue
+    names for a table, in its context, its grain, its joins, or as the target of a join."""
+    columns: dict[TableRef, list[str]] = {
+        ref: [*ctx.columns, *ctx.grain, *(c for join in ctx.joins for c in join.columns)]
+        for ref, ctx in found.items()
+    }
+    for ctx in found.values():
+        for join in ctx.joins:
+            if join.target in columns:
+                columns[join.target] += join.target_columns
+    return {ref: tuple(dict.fromkeys(names)) for ref, names in columns.items()}
+
+
+def _rights(
+    scenario: str, gate: GateHarness, everything: Mapping[TableRef, tuple[str, ...]]
+) -> dict[TableRef, tuple[str, ...]]:
+    """What the caller of ``scenario`` sees: everything but the object it hides."""
+    seen = dict(everything)
+    if scenario == _HIDDEN_TABLE:
+        seen.pop(gate.hidden_table)
+    elif scenario == _HIDDEN_JOIN:
+        seen.pop(gate.hidden_join_target)
+    else:
+        described = gate.contract.names.described
+        seen[described] = tuple(c for c in seen[described] if c != gate.hidden_column)
+    return seen
+
+
+def _term_texts(keys: Iterable[str], terms: Mapping[str, Term]) -> set[str]:
+    return {
+        text
+        for key in keys
+        if key in terms
+        for text in (terms[key].name, terms[key].definition, *terms[key].categories)
+    }
+
+
+def _labelled_texts(labels: Iterable[Labelled], properties: Mapping[str, Labelled]) -> set[str]:
+    return (
+        {label.name for label in labels}
+        | set(properties)
+        | {value.name for value in properties.values()}
+    )
+
+
+def _column_texts(name: str, column: ColumnContext, terms: Mapping[str, Term]) -> set[str]:
+    return (
+        {name, column.description}
+        | _labelled_texts(column.classifications, column.properties)
+        | _term_texts(column.terms, terms)
+    )
+
+
+def _table_texts(
+    ref: TableRef,
+    ctx: TableContext,
+    terms: Mapping[str, Term],
+    seen: Mapping[TableRef, tuple[str, ...]] | None = None,
+) -> set[str]:
+    """Every text the catalogue gives ``ref``; with ``seen``, only what a caller who sees
+    ``seen`` may be served of it: its visible columns, a grain all visible, joins whose
+    columns and target are visible."""
+    columns = seen.get(ref, ()) if seen is not None else tuple(ctx.columns)
+
+    def visible_join(join: Join) -> bool:
+        if seen is None:
+            return True
+        target = seen.get(join.target)
+        return (
+            target is not None
+            and all(c in columns for c in join.columns)
+            and all(c in target for c in join.target_columns)
+        )
+
+    joins = [join for join in ctx.joins if visible_join(join)]
+    texts = {ref.table, ctx.description, ctx.owner, ctx.tier}
+    texts |= _labelled_texts(ctx.tags, ctx.properties) | _term_texts(ctx.terms, terms)
+    if all(c in columns for c in ctx.grain):
+        texts |= set(ctx.grain)
+    for join in joins:
+        texts |= {join.target.table, *join.columns, *join.target_columns}
+    for name, column in ctx.columns.items():
+        if name in columns:
+            texts |= _column_texts(name, column, terms)
+    return texts
+
+
+def _hidden_texts(
+    scenario: str,
+    gate: GateHarness,
+    found: Mapping[TableRef, TableContext],
+    terms: Mapping[str, Term],
+    seen: Mapping[TableRef, tuple[str, ...]],
+) -> tuple[str, set[str]]:
+    """The name of the object ``scenario`` hides, and every text the catalogue gives it
+    that is part of nothing the caller may see: none may reach the caller."""
+    if scenario == _HIDDEN_TABLE:
+        table = gate.hidden_table
+        name, texts = table.table, _table_texts(table, found[table], terms)
+    elif scenario == _HIDDEN_JOIN:
+        target = gate.hidden_join_target
+        name, texts = target.table, _table_texts(target, found[target], terms)
+    else:
+        described = found[gate.contract.names.described]
+        name = gate.hidden_column
+        texts = _column_texts(name, described.columns[name], terms)
+    visible = set().union(
+        *(_table_texts(ref, ctx, terms, seen) for ref, ctx in found.items() if ref in seen)
+    )
+    hidden = {t for t in texts if len(t) >= _MIN_TEXT and not any(t in v for v in visible)}
+    _require(
+        name in hidden,
+        f"GateHarness: the name of {scenario} must be part of no name or text the caller "
+        "may see, or nothing tells it apart",
+    )
+    return name, hidden
+
+
+def _shape(value: Any) -> Any:
+    """The keys and kinds of a reply, with its ``kind`` and ``context_sources`` as they are."""
+    if isinstance(value, dict):
+        return {
+            key: item if key in ("kind", "context_sources") else _shape(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_shape(item) for item in value]
+    return type(value).__name__
+
+
+class GateContract:
+    """The gate of the core proven end to end over a provider; subclass it and give a
+    ``gate`` fixture that returns a :class:`GateHarness`.
+
+    Each check builds the server as it runs, with the provider, for each identity mode
+    the gate serves (``jwt``, ``impersonation`` with ``MCP_CONTEXT_REQUIRE_SELECT=true``),
+    and a :class:`~akko_mcp_trino.testing.FakeTrino` in place of Trino. A caller sees every
+    table the harness names but one object: the hidden table, then the hidden column, then
+    the hidden join target. Another caller, who sees everything, proves that each of them
+    is served when it is visible, so the checks test something. ``DEADLINE_SECONDS`` is the
+    deadline of a catalogue read, raised in a subclass for a slow CI.
+    """
+
+    DEADLINE_SECONDS = 5.0
+
+    def _catalogue(self, gate: GateHarness) -> tuple[Mapping, Mapping]:
+        names = gate.contract.names
+        wanted = list(dict.fromkeys([names.described, gate.hidden_table, gate.hidden_join_target]))
+        with _running(gate.contract) as run:
+            found = run.describe(wanted, self.DEADLINE_SECONDS)
+            terms = run.terms(_term_keys(found.values()), self.DEADLINE_SECONDS)
+        _check_gate(gate, found)
+        return found, terms
+
+    @contextmanager
+    def _serving(
+        self,
+        gate: GateHarness,
+        mode: str,
+        monkeypatch: Any,
+        rights: Mapping[str, Mapping[TableRef, tuple[str, ...]]],
+    ) -> Iterator[_Server]:
+        """The server built as it runs in ``mode``, over the provider and a fake Trino."""
+        from ..audit import InMemoryAudit
+        from ..config import Config
+        from ..context.loading import close_providers
+        from ..metrics import Metrics
+        from ..server import build_server
+        from ..trino_client import JwtIdentity
+        from .fake_trino import FakeTrino, Visible
+
+        contract, names = gate.contract, gate.contract.names
+        fake = FakeTrino(
+            {user: Visible(tables) for user, tables in rights.items()},
+            configured=(_CANARY_SCHEMA, _CANARY_TABLE),
+        )
+        fake.install(monkeypatch)
+        # The identity provider is not there: the exchanged token is a fixed text.
+        monkeypatch.setattr(JwtIdentity, "trino_token", lambda self, bearer: "token-for-trino")
+        provider = contract.build(contract.env, _Transport(contract.replay, contract.secret))
+        config = Config(
+            trino_host="trino.invalid",
+            trino_port=8443,
+            trino_user="mcp-service",
+            trino_catalog=names.catalog,
+            max_rows=1000,
+            read_only=True,
+            auth_enabled=True,
+            server_name="gate-contract",
+            health_port=0,
+            jwks_url="https://identity.invalid/certs",
+            oidc_issuer="https://identity.invalid",
+            oidc_audience="mcp",
+            transport="streamable-http",
+            mcp_port=0,
+            auth_required=True,
+            trino_http_scheme="https",
+            trino_identity_mode=mode,
+            trino_password="gate-contract-password" if mode == "impersonation" else "",
+            token_exchange_url="https://identity.invalid/token",
+            token_exchange_client_id="mcp",
+            token_exchange_client_secret="gate-contract-exchange",
+            token_exchange_audience="trino",
+            context_providers=provider.name,
+            context_canary=f"{names.catalog}.{_CANARY_SCHEMA}.{_CANARY_TABLE}",
+            context_require_select=mode == "impersonation",
+        )
+        captured: dict[str, Callable[..., str]] = {}
+
+        class _Capture:
+            def tool(self, annotations: Any = None, **_: Any) -> Callable[[Callable], Callable]:
+                def keep(fn: Callable) -> Callable:
+                    captured[fn.__name__] = fn
+                    return fn
+
+                return keep
+
+        setups: list[Any] = []
+        audit, metrics = InMemoryAudit(), Metrics()
+        try:
+            build_server(
+                config,
+                mcp_factory=lambda name, instructions=None: _Capture(),
+                metrics=metrics,
+                audit=audit,
+                context_providers=[provider],
+                context_started=setups.append,
+            )
+        except Exception:
+            close_providers([provider])
+            raise
+        try:
+            yield _Server(captured, fake, audit, metrics, provider.name)
+        finally:
+            for setup in setups:
+                setup.close()
+        _require(
+            not fake.unanswered,
+            "the fake Trino received a statement it does not answer: "
+            f"{[s.sql for s in fake.unanswered][:3]}",
+        )
+
+    def _sees_all_is_served(
+        self, gate: GateHarness, mode: str, monkeypatch: Any, everything: Mapping
+    ) -> None:
+        """A caller who sees everything is served each hidden object: the checks test something."""
+        names = gate.contract.names
+        with self._serving(gate, mode, monkeypatch, {_SEES_ALL: everything}) as server:
+            described = server.call(_SEES_ALL, "describe_table", _table_args(names.described))
+            hidden = server.call(_SEES_ALL, "describe_table", _table_args(gate.hidden_table))
+        reply, other = described.reply, hidden.reply
+        joins = reply.get("table", {}).get("joins", [])
+        _require(
+            gate.hidden_column in reply.get("column_context", {})
+            and any(join.get("table") == _dotted(gate.hidden_join_target) for join in joins)
+            and bool(other.get("table") or other.get("column_context")),
+            f"a caller who sees everything ({mode}) is not served the hidden column, the "
+            "join to the hidden target and the hidden table's context: the gate run cannot "
+            "test anything",
+        )
+
+    def _each_run(self, gate: GateHarness, monkeypatch: Any) -> Iterator[tuple]:
+        """For each mode and each hidden object: the scenario, the caller's answers, the
+        logs, the metrics, what the caller sees and the texts of the hidden object."""
+        found, terms = self._catalogue(gate)
+        everything = _trino_columns(found)
+        for mode in _MODES:
+            self._sees_all_is_served(gate, mode, monkeypatch, everything)
+            for scenario in _SCENARIOS:
+                seen = _rights(scenario, gate, everything)
+                name, hidden = _hidden_texts(scenario, gate, found, terms, seen)
+                with _captured_logs() as lines:
+                    with self._serving(gate, mode, monkeypatch, {_CALLER: seen}) as server:
+                        answers = [server.call(_CALLER, tool, args) for tool, args in _calls(gate)]
+                        metrics = server.metrics_text()
+                        provider = server.provider
+                yield mode, scenario, answers, list(lines), metrics, seen, (name, hidden), provider
+
+    def test_nothing_of_a_hidden_object_reaches_any_answer_status_or_audit_line(
+        self, gate: GateHarness, monkeypatch: Any
+    ) -> None:
+        """No reply, ``context_sources`` status, audit line, log line or metric holds the
+        name of a hidden table, column or join target, nor a text the catalogue gives it."""
+        for mode, scenario, answers, lines, metrics, seen, hidden, provider in self._each_run(
+            gate, monkeypatch
+        ):
+            _, texts = hidden
+            where = f"{scenario}, {mode}"
+            visible = {_dotted(ref) for ref in seen}
+            for answer in answers:
+                reply = answer.reply
+                sources = reply.get("context_sources", {})
+                _require(
+                    set(sources) <= {provider} and set(sources.values()) <= _STATUSES,
+                    f"context_sources must name the provider and a status, nothing else ({where})",
+                )
+                _require(
+                    set(answer.line["metadata_served"]) <= visible,
+                    f"the audit line says context was served of a table the caller does not "
+                    f"see ({where})",
+                )
+            received = [answer.scrubbed() for answer in answers] + lines + [metrics]
+            leaked = sorted(t for t in texts if any(t in text for text in received))
+            _require(not leaked, f"{scenario} reaches the caller ({mode}): {leaked}")
+
+    def test_no_statement_holds_a_name_trino_had_not_listed_to_that_caller(
+        self, gate: GateHarness, monkeypatch: Any
+    ) -> None:
+        """Every statement runs as the caller and names only what Trino has listed to them;
+        only the agent's own statements also name what the agent wrote, and the only
+        statement that names a hidden object is the ``DESCRIBE`` the agent asked of it."""
+        from ..trino_client import GATE_TAG
+        from .fake_trino import names_in
+
+        gated = 0
+        for mode, scenario, answers, _, _, _, hidden, _ in self._each_run(gate, monkeypatch):
+            name, _ = hidden
+            where = f"{scenario}, {mode}"
+            for answer in answers:
+                asked = answer.asked()
+                written = {value.lower() for value in answer.args.values()}
+                for statement in answer.statements:
+                    gate_statement = GATE_TAG in statement.client_tags
+                    gated += gate_statement
+                    _require(
+                        statement.user == _CALLER,
+                        f"a statement runs as another user than the caller ({where})",
+                    )
+                    allowed = set() if gate_statement else written
+                    unlisted = [n for n in statement.unlisted if n not in allowed]
+                    _require(
+                        not unlisted,
+                        f"a statement names what Trino had not listed to its caller ({where}): "
+                        f"{statement.sql}",
+                    )
+                    if name in names_in(statement.sql):
+                        _require(
+                            scenario != _HIDDEN_COLUMN
+                            and not gate_statement
+                            and asked is not None
+                            and asked.table == name
+                            and statement.sql.lstrip().upper().startswith("DESCRIBE "),
+                            f"a statement names what Trino had not listed to its caller "
+                            f"({where}): {statement.sql}",
+                        )
+        _require(gated > 0, "the gate ran no statement of its own: nothing was checked")
+
+    def test_a_hidden_and_a_missing_table_answer_the_same_shape(
+        self, gate: GateHarness, monkeypatch: Any
+    ) -> None:
+        """``describe_table`` of a table Trino hides from the caller and of one that does
+        not exist answer the same keys, kinds and statuses, write the same audit line and
+        send Trino the same statements, though the catalogue describes only the first."""
+        found, _ = self._catalogue(gate)
+        everything = _trino_columns(found)
+        seen = _rights(_HIDDEN_TABLE, gate, everything)
+        for mode in _MODES:
+            answers = []
+            for ref in (gate.hidden_table, gate.contract.names.unknown):
+                with self._serving(gate, mode, monkeypatch, {_CALLER: seen}) as server:
+                    answers.append(server.call(_CALLER, "describe_table", _table_args(ref)))
+            hidden, missing = answers
+
+            def statements(answer: _Answer) -> list[tuple]:
+                table = answer.args["table"]
+                return [(s.client_tags, s.sql.replace(table, "<asked>")) for s in answer.statements]
+
+            def line(answer: _Answer) -> Any:
+                fixed = ("ok", "error", "metadata_served")
+                varying = ("request_id", "duration_ms")
+                kept = {k: v for k, v in answer.line.items() if k not in varying}
+                return [kept[k] for k in fixed], _shape(kept)
+
+            _require(
+                _shape(hidden.reply) == _shape(missing.reply)
+                and line(hidden) == line(missing)
+                and statements(hidden) == statements(missing),
+                f"a hidden and a missing table must answer the same keys, kinds and statuses, "
+                f"the same audit line and the same statements ({mode})",
+            )

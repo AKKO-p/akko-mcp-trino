@@ -858,6 +858,44 @@ doit réussir, et `SLOW_DEADLINE_SECONDS` (1 s) celle qu'elles donnent à un cat
 pas. Ce sont des attributs de classe : les relever dans la sous-classe quand la CI est lente, en
 gardant le second bien en dessous de 30 s, le temps que met le catalogue lent à répondre.
 
+Le filtre appartient au cœur, et il est prouvé sur chaque fournisseur : `GateContract` construit le
+serveur tel qu'il tourne, avec le fournisseur et son catalogue enregistré, dans les modes d'identité
+`jwt` et `impersonation` (le second avec `MCP_CONTEXT_REQUIRE_SELECT=true`), et met `FakeTrino` à la
+place de Trino. `FakeTrino` répond aux requêtes du cœur selon ce que voit chaque utilisateur
+(`Visible` : les tables, et les colonnes que Trino liste de chacune) et enregistre chaque requête avec
+son utilisateur, son texte et ses étiquettes client (`Statement`). Un appelant voit toutes les tables
+du harnais sauf un objet : une table, puis une colonne de la table décrite, puis la cible d'une de ses
+jointures. Le contrat vérifie que rien de cet objet, ni son nom ni aucun texte que le catalogue lui
+donne à lui seul, n'atteint une réponse, un statut de `context_sources`, une ligne d'audit, une ligne
+de journal ou une métrique ; que chaque requête part sous l'identité de l'appelant et ne nomme que ce
+que Trino lui a listé, celles de l'agent aussi ce que l'agent a écrit, et que la seule requête qui
+nomme une table cachée est le `DESCRIBE` que l'agent en a demandé ; qu'une table cachée et une table
+absente (`names.unknown`) répondent les mêmes clés, types et statuts, écrivent la même ligne d'audit
+et envoient les mêmes requêtes. Un appelant qui voit tout reçoit les trois objets, pour que les
+vérifications testent quelque chose. On l'ajoute à la classe ci-dessus, avec une fixture `gate` :
+
+```python
+from akko_mcp_trino.testing import GateContract, GateHarness
+
+
+class TestMyProviderContract(ContextContract, GateContract):
+    # the harness fixture above, then:
+    @pytest.fixture
+    def gate(self, harness):
+        return GateHarness(
+            contract=harness,
+            hidden_table=TableRef("warehouse", "ledger", "payroll"),         # described
+            hidden_column="discount_code",                                   # of `described`
+            hidden_join_target=TableRef("warehouse", "ledger", "payments"),  # joined from it
+        )
+```
+
+Les trois objets sont dans le catalogue enregistré, écrits comme Trino les liste et comme un agent
+nomme une table (lettres, chiffres, `_` et `-`), longs de quatre caractères au moins, et leurs noms ne
+font partie d'aucun nom ni d'aucun texte que l'appelant a le droit de voir : le contrat les cherche,
+avec chaque texte que le catalogue leur donne à eux seuls, dans tout ce que l'appelant reçoit.
+`tests/context/test_gate_contract_file.py` le lance sur `file`.
+
 ## Configuration, extensions, exploitation
 
 Toutes les variables, leurs valeurs par défaut, les points d'extension (identités, gardes, audit,

@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "catalogs": ["tpch"],
+  "tables": [
+    {
+      "catalog": "tpch",
+      "schema": "tiny",
+      "table": "nation",
+      "description": "The nations of the sample data, one row each",
+      "owner": "reference-data-team",
+      "grain": ["nationkey"],
+      "joins": [
+        {
+          "columns": ["regionkey"],
+          "target": {"catalog": "tpch", "schema": "tiny", "table": "region"},
+          "target_columns": ["regionkey"]
+        }
+      ],
+      "columns": {
+        "nationkey": {"description": "Key of the nation, used by customers and suppliers"},
+        "name": {"description": "Name of the nation, in capitals", "terms": ["t-nation"]},
+        "regionkey": {"description": "Key of the region the nation belongs to"},
+        "comment": {"description": "Remark kept by the reference data stewards"}
+      }
+    },
+    {
+      "catalog": "tpch",
+      "schema": "tiny",
+      "table": "region",
+      "description": "The five regions of the sample data",
+      "columns": {"regionkey": {}, "name": {"description": "Name of the region"}}
+    },
+    {
+      "catalog": "tpch",
+      "schema": "tiny",
+      "table": "orders",
+      "description": "Purchase orders of the sample customers",
+      "columns": {
+        "orderkey": {"description": "Number given to the purchase order"},
+        "totalprice": {"description": "Amount due for the purchase order"}
+      }
+    }
+  ],
+  "terms": {
+    "t-nation": {
+      "name": "Nation",
+      "glossary": "geography",
+      "definition": "A sovereign state of the sample data"
+    }
+  }
+}

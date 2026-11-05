@@ -74,6 +74,7 @@ CORE_MODULES = {
     "sql_guard",
     "testing/__init__",
     "testing/context_contract",
+    "testing/fake_trino",
     "token_exchange",
     "tools",
     "transport_security",

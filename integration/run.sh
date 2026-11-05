@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The live proof of the identity modes: builds the image from this repository
-# (or uses MCP_IMAGE), starts a disposable Keycloak and Trino with three servers,
+# The live proof of the identity modes and of the catalogue context: builds the image from
+# this repository (or uses MCP_IMAGE), starts a disposable Keycloak and Trino with the servers,
 # runs check.py inside the network, checks the logs hold no token, prints the
 # start time and the memory, and removes everything unless KEEP=1.
 #
@@ -31,7 +31,7 @@ if ! docker compose up -d --no-build --wait --wait-timeout 420; then
   docker compose ps -a; docker compose logs --tail 60; exit 1
 fi
 echo "  all services healthy in $(( $(date +%s) - start )) s"
-for s in mcp-jwt mcp-paged mcp-impersonation mcp-service; do
+for s in mcp-jwt mcp-paged mcp-impersonation mcp-service mcp-context-jwt mcp-context-impersonation; do
   c=$(docker compose ps -q "$s")
   started=$(docker inspect -f '{{.State.StartedAt}}' "$c")
   healthy=$(docker inspect -f '{{range .State.Health.Log}}{{if eq .ExitCode 0}}{{.End}}{{"\n"}}{{end}}{{end}}' "$c" | head -1)
@@ -57,10 +57,10 @@ echo "== 3. Checks"
 docker compose --profile check run --rm --no-deps check || failed=1
 
 echo "== 4. Memory after the checks"
-docker stats --no-stream --format '  {{.Name}} {{.MemUsage}}' $(docker compose ps -q mcp-jwt mcp-paged mcp-impersonation mcp-service) | sed "s/$COMPOSE_PROJECT_NAME-//"
+docker stats --no-stream --format '  {{.Name}} {{.MemUsage}}' $(docker compose ps -q mcp-jwt mcp-paged mcp-impersonation mcp-service mcp-context-jwt mcp-context-impersonation) | sed "s/$COMPOSE_PROJECT_NAME-//"
 
 echo "== 5. Logs"
-logs=$(docker compose logs mcp-jwt mcp-paged mcp-impersonation mcp-service)
+logs=$(docker compose logs mcp-jwt mcp-paged mcp-impersonation mcp-service mcp-context-jwt mcp-context-impersonation)
 if grep -q 'eyJ' <<<"$logs"; then echo "  FAIL  a token is in the server logs"; failed=1; else echo "  OK    no token in the server logs"; fi
 if grep -q "$MCP_CLIENT_SECRET" <<<"$logs"; then echo "  FAIL  the client secret is in the logs"; failed=1; else echo "  OK    no secret in the server logs"; fi
 grep -E "WARNING|serving" <<<"$logs" | sed 's/^/  /'

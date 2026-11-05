@@ -8,8 +8,10 @@
   "tables": [
     {"user": "(alice|bob)", "catalog": "system", "schema": "(jdbc|metadata)", "table": "(columns|table_comments)",
      "privileges": ["SELECT"]},
+    {"user": "(alice|bob)", "catalog": "tpch", "schema": "sf1", "table": "region", "privileges": []},
     {"user": "alice", "catalog": "tpch", "privileges": ["SELECT"]},
     {"user": "bob", "catalog": "tpch", "schema": "tiny", "table": "nation",
-     "privileges": ["SELECT"], "filter": "regionkey = 3"}
+     "privileges": ["SELECT"], "filter": "regionkey = 3",
+     "columns": [{"name": "comment", "allow": false}]}
   ]
 }
