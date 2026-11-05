@@ -1,13 +1,16 @@
 """The chain: cache first, batches, deadlines, concurrency, breakers, statuses, metrics."""
 
 import asyncio
+import inspect
 import logging
+import pathlib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from akko_mcp_trino import config as config_module
 from akko_mcp_trino.context import (
     ContextChain,
     ContextSettings,
@@ -16,6 +19,7 @@ from akko_mcp_trino.context import (
     ProviderUnavailable,
     TermsResult,
 )
+from akko_mcp_trino.context import chain as chain_module
 from akko_mcp_trino.context.types import TableContext, TableRef, Term
 from akko_mcp_trino.metrics import Metrics
 
@@ -240,11 +244,12 @@ def test_the_deadline_reached_on_a_large_page_opens_no_breaker(loop):
 
 
 def test_a_deadline_already_passed_still_serves_the_cache(loop):
+    """Within the grace past the deadline: past it, nothing is waited for."""
     fake = Fake("one", known={ORDERS: TableContext()})
     clock = Clock()
     chain = _chain(loop, fake, clock=clock)
     chain.gather([ORDERS], deadline=clock.now + 5)
-    got = chain.gather([ORDERS, CLIENTS], deadline=clock.now - 1)
+    got = chain.gather([ORDERS, CLIENTS], deadline=clock.now - 0.1)
     assert got.statuses["one"] == "partial" and got.tables[ORDERS]
     assert len(fake.calls) == 1
 
@@ -663,3 +668,43 @@ def test_a_close_past_the_timeout_is_logged_by_type_and_not_raised(loop, caplog)
     assert [r.getMessage() for r in caplog.records] == [
         "the context sources were not all closed (TimeoutError)"
     ]
+
+
+class _SpendingLoop:
+    """A loop that never runs its coroutine: each read takes its whole wait, on the clock."""
+
+    running = True
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.waits = []
+
+    def submit(self, coro, timeout):
+        coro.close()
+        self.waits.append(timeout)
+        self.clock.now += timeout
+        raise TimeoutError
+
+
+def test_gather_then_terms_end_by_the_deadline_and_one_grace():
+    clock = Clock()
+    spending = _SpendingLoop(clock)
+    chain = ContextChain([Fake("a")], _settings(), loop=spending, clock=clock)
+    start, deadline = clock.now, clock.now + 1.0
+    with pytest.raises(TimeoutError):
+        chain.gather([ORDERS], deadline=deadline)
+    with pytest.raises(TimeoutError):
+        chain.terms({"a": ["k"]}, deadline=deadline)
+    assert clock.now <= deadline + chain_module._GRACE_SECONDS
+    assert spending.waits == [deadline - start + chain_module._GRACE_SECONDS, 0.0]
+
+
+def test_the_grace_written_in_the_docs_is_the_chains():
+    """The 0.25 s the CHANGELOG and the code's own words give is the chain's grace."""
+    written = f"{chain_module._GRACE_SECONDS:g} s"
+    root = pathlib.Path(__file__).resolve().parents[2]
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"may wait up to {written} past its deadline" in changelog
+    assert f"waits up to {written} for a provider" in inspect.getsource(config_module)
+    assert f"a grace of {written}" in " ".join(ContextChain.gather.__doc__.split())
+    assert config_module.MIN_CONTEXT_RESERVE_SECONDS > chain_module._GRACE_SECONDS

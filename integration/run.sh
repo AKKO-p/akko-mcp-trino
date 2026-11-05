@@ -70,7 +70,9 @@ docker stats --no-stream --format '  {{.Name}} {{.MemUsage}}' $(docker compose p
 # The cgroup's own record of the most memory Trino used since it started (cgroup v2).
 peak=$(docker compose exec -T trino cat /sys/fs/cgroup/memory.peak 2>/dev/null)
 limit=$(docker compose exec -T trino cat /sys/fs/cgroup/memory.max 2>/dev/null)
-[ -n "$peak" ] && echo "  trino peak, page cache included: $(( peak / 1048576 )) MiB of $(( limit / 1048576 )) MiB"
+# memory.max reads "max" for a container without a memory limit.
+case "$limit" in ''|*[!0-9]*) of="no limit" ;; *) of="$(( limit / 1048576 )) MiB" ;; esac
+[ -n "$peak" ] && echo "  trino peak, page cache included: $(( peak / 1048576 )) MiB of $of"
 anon=$(awk '{print $2}' "$samples" | sort -n | tail -1); count=$(wc -l <"$samples" | tr -d ' ')
 rm -f "$samples"
 [ -n "$anon" ] && echo "  trino anonymous memory at most $(( anon / 1048576 )) MiB during the checks ($count samples)"

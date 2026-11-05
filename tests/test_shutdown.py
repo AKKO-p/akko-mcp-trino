@@ -59,9 +59,9 @@ def _env(tmp_path, transport, **extra):
     return env
 
 
-def _closings(tmp_path) -> int:
+def _closings(tmp_path, line="closed") -> int:
     marker = tmp_path / "closed"
-    return marker.read_text().count("closed") if marker.exists() else 0
+    return marker.read_text().splitlines().count(line) if marker.exists() else 0
 
 
 def _healthy(port: int) -> bool:
@@ -77,9 +77,9 @@ def _listening(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _http_server(tmp_path):
+def _http_server(tmp_path, transport):
     port, health = _free_port(), _free_port()
-    env = _env(tmp_path, "streamable-http", MCP_PORT=str(port), MCP_HEALTH_PORT=str(health))
+    env = _env(tmp_path, transport, MCP_PORT=str(port), MCP_HEALTH_PORT=str(health))
     proc = subprocess.Popen(
         [sys.executable, _SERVER], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
     )
@@ -91,10 +91,10 @@ def _http_server(tmp_path):
     return proc
 
 
-def _stdio_server(tmp_path):
+def _stdio_server(tmp_path, **extra):
     proc = subprocess.Popen(
         [sys.executable, _SERVER],
-        env=_env(tmp_path, "stdio"),
+        env=_env(tmp_path, "stdio", **extra),
         stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -118,14 +118,19 @@ def _stop(proc, sig):
     return proc.returncode, err.decode()
 
 
-def test_sigterm_closes_the_context_over_http(tmp_path):
-    code, err = _stop(_http_server(tmp_path), signal.SIGTERM)
+_HTTP = pytest.mark.parametrize("transport", ["streamable-http", "sse"])
+
+
+@_HTTP
+def test_sigterm_closes_the_context_over_http(tmp_path, transport):
+    code, err = _stop(_http_server(tmp_path, transport), signal.SIGTERM)
     assert _closings(tmp_path) == 1, err
     assert code == -signal.SIGTERM, "uvicorn lets the signal end the process after shutdown"
 
 
-def test_ctrl_c_closes_the_context_over_http_once(tmp_path):
-    code, err = _stop(_http_server(tmp_path), signal.SIGINT)
+@_HTTP
+def test_ctrl_c_closes_the_context_over_http_once(tmp_path, transport):
+    code, err = _stop(_http_server(tmp_path, transport), signal.SIGINT)
     assert _closings(tmp_path) == 1, err
     assert code == 0, err
 
@@ -141,3 +146,24 @@ def test_the_end_of_stdin_closes_the_context_over_stdio(tmp_path):
     _, err = proc.communicate(input=b"", timeout=30)
     assert _closings(tmp_path) == 1, err.decode()
     assert proc.returncode == 0, err.decode()
+
+
+def test_sigterm_during_the_close_over_stdio_starts_no_second_close(tmp_path):
+    proc = _stdio_server(tmp_path, SHUTDOWN_CLOSE_SECONDS="2")
+    proc.stdin.close()  # the end of stdin starts the close
+    _until(lambda: _closings(tmp_path, "closing") == 1)
+    proc.send_signal(signal.SIGTERM)
+    try:
+        code = proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise
+    err = proc.stderr.read().decode()
+    assert (_closings(tmp_path, "closing"), _closings(tmp_path)) == (1, 1), err
+    assert code == 0, err
+
+
+def test_sigterm_without_a_provider_over_stdio_ends_the_process_as_in_0_7_2(tmp_path):
+    code, err = _stop(_stdio_server(tmp_path, MCP_CONTEXT_PROVIDERS=""), signal.SIGTERM)
+    assert _closings(tmp_path, "closing") == 0, err
+    assert code == -signal.SIGTERM, err

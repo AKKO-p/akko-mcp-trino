@@ -38,7 +38,7 @@ from .chain import ContextChain
 from .gate import filter_table, filter_term
 from .merge import merge_column, merge_table
 from .status import ERROR, NOT_CHECKED, NOT_FOUND, OK, PARTIAL, REFUSED, UNAVAILABLE
-from .text import clean_text
+from .text import clean_name, clean_text
 from .types import GLOSSARY, TableContext, TableRef, Term
 from .visibility import Visibility, VisibilityKey, key_for
 
@@ -57,10 +57,6 @@ def _failure(exc: BaseException) -> str:
         return UNAVAILABLE
     _log.error("the context read failed with %s", type(exc).__name__)
     return ERROR
-
-
-def _plain(text: str) -> str:
-    return clean_text(text, len(text))[0]
 
 
 def _entry_size(name: str, value: Any) -> int:
@@ -86,23 +82,37 @@ class _Terms:
     def __init__(self, read: Mapping[_TermId, Term], text_chars: int) -> None:
         self._read = read
         self._text_chars = text_chars
+        self._names: dict[_TermId, str] = {}
 
     def name(self, term_id: _TermId) -> str:
-        return _plain(self._read[term_id].name)
+        """The term's cleaned name, ``""`` when dropped; cleaned once per answer."""
+        if term_id not in self._names:
+            self._names[term_id] = clean_name(self._read[term_id].name)
+        return self._names[term_id]
+
+    def named(self, entry: dict) -> dict:
+        """``entry`` without the terms whose name is empty once cleaned or dropped."""
+        if "terms" not in entry:
+            return entry
+        kept = [t for t in entry["terms"] if self.name((t["source"], t["key"]))]
+        out = {k: v for k, v in entry.items() if k != "terms"}
+        if kept:
+            out["terms"] = kept
+        return out
 
     def render(self, term_id: _TermId, ref_of: Callable[[_TermId], str | None]) -> dict:
         """The term for the agent; a related term is named only when ``ref_of`` gives it a
         reference, which it gives only to a term read for this answer."""
         source, _ = term_id
         term = self._read[term_id]
-        out: dict[str, Any] = {"name": self.name(term_id), "glossary": _plain(term.glossary)}
+        out: dict[str, Any] = {"name": self.name(term_id), "glossary": clean_name(term.glossary)}
         definition, cut = clean_text(term.definition, self._text_chars)
         if definition:
             out["definition"] = definition
-        status = _plain(term.status)
+        status = clean_name(term.status)
         if status:
             out["status"] = status
-        categories = [c for c in map(_plain, term.categories) if c]
+        categories = [c for c in map(clean_name, term.categories) if c]
         if categories:
             out["categories"] = categories
         related = []
@@ -112,7 +122,7 @@ class _Terms:
             if ref is None:
                 continue
             shown: dict[str, str] = {"ref": ref, "name": self.name(target)}
-            kind = _plain(relation.relation)
+            kind = clean_name(relation.relation)
             if kind:
                 shown["relation"] = kind
             related.append(shown)
@@ -403,7 +413,8 @@ class ContextService:
     ) -> dict:
         """Merge, cite the terms by reference and keep what the bounds allow, in order."""
         text_chars = self._config.context_text_chars
-        table = merge_table(final, text_chars=text_chars)
+        terms = _Terms(read, text_chars)
+        table = terms.named(merge_table(final, text_chars=text_chars))
         if not complete:
             table.pop("grain", None)
             table.pop("other_grains", None)
@@ -414,13 +425,12 @@ class ContextService:
         columns: list[tuple[str, dict]] = []
         for column in visible:
             entries = [(name, ctx.columns[column]) for name, ctx in final if column in ctx.columns]
-            merged = merge_column(entries, text_chars=text_chars) if entries else {}
+            merged = terms.named(merge_column(entries, text_chars=text_chars)) if entries else {}
             if merged:
                 columns.append((column, merged))
         left_out = [name for name, _ in columns[self._config.context_max_columns :]]
         columns = columns[: self._config.context_max_columns]
 
-        terms = _Terms(read, text_chars)
         order: dict[_TermId, None] = {}
         for entry in (table, *(c for _, c in columns)):
             order.update(dict.fromkeys(_term_ids(entry)))

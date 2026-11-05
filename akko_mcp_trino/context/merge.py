@@ -3,7 +3,7 @@
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
-from .text import clean_text
+from .text import clean_name, clean_text
 from .types import ColumnContext, TableContext
 
 _SINGLE = ("owner", "tier")
@@ -27,19 +27,14 @@ def _union(
     return merged
 
 
-def _plain(text: str) -> str:
-    """A name from the catalogue without control or invisible characters; never cut."""
-    return clean_text(text, len(text))[0]
-
-
 def _plains(texts: Iterable[str]) -> tuple[str, ...]:
-    """The cleaned texts that are not empty once cleaned."""
-    return tuple(t for t in map(_plain, texts) if t)
+    """The cleaned names that are not empty once cleaned, nor dropped for their length."""
+    return tuple(t for t in map(clean_name, texts) if t)
 
 
 def _labels(entries, field: str) -> list[dict]:
     def cleaned(context) -> list[tuple[str, str]]:
-        pairs = ((_plain(i.name), _plain(i.set)) for i in getattr(context, field))
+        pairs = ((clean_name(i.name), clean_name(i.set)) for i in getattr(context, field))
         return [(name, label_set) for name, label_set in pairs if name and label_set]
 
     return _union(
@@ -64,7 +59,8 @@ def _properties(entries) -> dict:
     merged: dict[str, dict] = {}
     for source, context in entries:
         for name, labelled in context.properties.items():
-            label_set, prop, value = _plain(labelled.set), _plain(name), _plain(labelled.name)
+            label_set, prop = clean_name(labelled.set), clean_name(name)
+            value = clean_name(labelled.name)
             if not (label_set and prop and value):
                 continue
             key = f"{label_set}.{prop}"
@@ -84,7 +80,11 @@ def _texts(entries, text_chars: int, merged: dict, singles: Sequence[str]) -> No
     winner = ""
     for source, context in entries:
         for field in ("description", *singles):
-            text, was_cut = clean_text(getattr(context, field), text_chars)
+            # The owner and the tier are names: dropped past their bound, never cut.
+            if field == "description":
+                text, was_cut = clean_text(context.description, text_chars)
+            else:
+                text, was_cut = clean_name(getattr(context, field)), False
             if not text:
                 continue
             if field not in sources:
@@ -126,7 +126,7 @@ def _grain(entries, merged: dict) -> None:
     """The grain is one value: the first provider with a whole grain wins, others are listed."""
     others: list[dict] = []
     for source, context in entries:
-        columns = [_plain(c) for c in context.grain]
+        columns = [clean_name(c) for c in context.grain]
         if not columns or not all(columns):
             continue
         if "grain" not in merged:

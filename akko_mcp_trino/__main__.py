@@ -187,6 +187,7 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
     metrics = Metrics()
 
     started: list[ContextSetup] = []
+    closing: list[bool] = []
 
     def on_context(setup: ContextSetup) -> None:
         started.append(setup)
@@ -194,7 +195,10 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
             signal.signal(signal.SIGHUP, lambda *_: setup.chain.reset_refused())
 
     def close_context() -> None:
-        # Closing twice is harmless: a stop may come by several of these paths.
+        # One close only: a stop may come by several of these paths, even during a close.
+        if closing:
+            return
+        closing.append(True)
         for setup in started:
             setup.close()
 
@@ -209,10 +213,14 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
     )
     # The providers are closed, then the context loop, once the server stops. Over
     # HTTP, uvicorn shuts the app down on SIGTERM, then lets the signal end the
-    # process: the close is in the app's shutdown. Over stdio, SIGTERM closes and exits.
-    if config.transport == "stdio":
+    # process: the close is in the app's shutdown. Over stdio with a provider, SIGTERM
+    # closes and exits 0, or lets a close under way end the process; without one, the
+    # signal ends the process as in 0.7.2.
+    if config.transport == "stdio" and started:
 
         def on_term(*_: object) -> None:
+            if closing:
+                return
             close_context()
             sys.exit(0)
 

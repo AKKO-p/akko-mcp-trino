@@ -1,13 +1,14 @@
 """The real server process, run by ``test_shutdown`` with one context provider.
 
-The provider ``marker`` appends one line to the file ``SHUTDOWN_MARKER`` names each
-time it is closed, so the test sees whether, and how often, a stop closed the
-context. ``SHUTDOWN_READY`` names a file written once the server is about to serve
-over stdio. Trino is never reached.
+The provider ``marker`` appends ``closing`` to the file ``SHUTDOWN_MARKER`` names when
+a close starts and ``closed`` when it ends, ``SHUTDOWN_CLOSE_SECONDS`` later, so the
+test sees whether, and how often, a stop closed the context. ``SHUTDOWN_READY`` names a
+file written once the server is about to serve over stdio. Trino is never reached.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -35,6 +36,9 @@ class _Marker:
         return []
 
     async def aclose(self):
+        with open(os.environ["SHUTDOWN_MARKER"], "a", encoding="utf-8") as out:
+            out.write("closing\n")
+        await asyncio.sleep(float(os.environ.get("SHUTDOWN_CLOSE_SECONDS", "0")))
         with open(os.environ["SHUTDOWN_MARKER"], "a", encoding="utf-8") as out:
             out.write("closed\n")
 

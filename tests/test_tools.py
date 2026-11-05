@@ -17,10 +17,13 @@ from akko_mcp_trino import tools as tools_module
 from akko_mcp_trino import trino_client
 from akko_mcp_trino.audit import InMemoryAudit
 from akko_mcp_trino.context import (
+    CLASSIFICATION,
     GLOSSARY,
     OWNER,
+    PROPERTY,
     ColumnContext,
     Join,
+    Labelled,
     TableContext,
     TableRef,
     Term,
@@ -1464,6 +1467,37 @@ def test_the_sample_keeps_its_budget_when_a_provider_takes_its_whole_timeout(set
     assert out["context_sources"] == {"catalog": "unavailable"}
 
 
+def test_huge_catalogue_names_read_late_keep_the_call_within_its_budget(setups):
+    """On real time: the provider answers 0.3 s before the context's deadline, with a
+    million-character name in every label of the table and its columns. Read whole, as
+    before names had a bound, they took about 0.16 s each, near 3 s for these 18, far past
+    the 0.3 s reserve."""
+    huge = "n" * 1_000_000
+    labels = tuple(Labelled(huge, "pii") for _ in range(3))
+    props = MappingProxyType({f"k{n}": Labelled(huge, "set") for n in range(3)})
+    column = ColumnContext(classifications=labels, properties=props)
+    provider = _orders(
+        owner=huge,
+        tags=labels,
+        properties=props,
+        columns=MappingProxyType({"id": column, "amount": column}),
+    )
+    provider.sets = {
+        **_SERVED,
+        CLASSIFICATION: frozenset({"pii"}),
+        PROPERTY: frozenset({"set"}),
+        OWNER: frozenset({"owner"}),
+    }
+    provider.delay = 0.9
+    mcp, _, _ = with_context(
+        setups, GateTrino(), provider, call_timeout_seconds=1.5, context_reserve_seconds=0.3
+    )
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    assert "error" not in out and [r[0] for r in out["rows"]] == ["id", "amount"]
+    assert out["context_sources"] == {"catalog": "ok"}
+    assert huge not in json.dumps(out)
+
+
 def test_a_cut_describe_stays_cut_whatever_a_describer_returns(setups):
     def says_complete(catalog, schema, table, rows):
         return {"truncated": False}
@@ -1653,5 +1687,5 @@ def test_an_empty_page_asks_no_catalogue(setups):
     provider = Memory(sets=_SERVED)
     mcp, _, _ = with_context(setups, SchemaTrino(tables=()), provider)
     out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
-    assert out["tables"] == [] and out["context_sources"] == {"catalog": "not_found"}
+    assert out["tables"] == [] and "context_sources" not in out, "nothing was asked"
     assert provider.calls == []

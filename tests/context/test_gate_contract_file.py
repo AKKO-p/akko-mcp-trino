@@ -234,24 +234,21 @@ def _logged(columns):
     logging.getLogger("akko_mcp_trino.context.reply").info("read the columns %s", columns)
 
 
-_METRICS = []
-
-
-def _counted(columns):
-    _METRICS[-1].context_calls.labels(provider=",".join(columns)).inc()
-
-
 def _metered(monkeypatch):
     from akko_mcp_trino.metrics import Metrics
 
     built = Metrics.__init__
+    made: list = []  # the metrics of this test only
 
     def keep(self, *args, **kwargs):
         built(self, *args, **kwargs)
-        _METRICS.append(self)
+        made.append(self)
+
+    def counted(columns):
+        made[-1].context_calls.labels(provider=",".join(columns)).inc()
 
     monkeypatch.setattr(Metrics, "__init__", keep)
-    _side_channel(_counted)(monkeypatch)
+    _side_channel(counted)(monkeypatch)
 
 
 @pytest.mark.parametrize(

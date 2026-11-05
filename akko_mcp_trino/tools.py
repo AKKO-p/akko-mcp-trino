@@ -920,8 +920,9 @@ def register_query_tools(
                 "next_offset": next_offset,
                 "shortened": shortened,
             }
-            # The context comes last: Trino has just listed the tables of the page.
-            if service is not None:
+            # The context comes last: Trino has just listed the tables of the page. An
+            # empty page asks no provider and says nothing of them.
+            if service is not None and described:
                 refs = [TableRef.of(folded_cat, folded, t["table"]) for t in described]
                 context_of = service.for_tables(refs, listed=True)
                 for ref, entry in zip(refs, described):

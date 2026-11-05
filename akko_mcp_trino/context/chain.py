@@ -161,7 +161,8 @@ class ContextChain:
     def gather(self, refs: Sequence[TableRef], *, deadline: float) -> Gathered:
         """Read the context of ``refs`` from every source, at most until ``deadline``.
 
-        ``deadline`` is an instant of the chain's clock.
+        ``deadline`` is an instant of the chain's clock. The caller waits at most until
+        ``deadline`` plus a grace of 0.25 s, an end shared by every read for that deadline.
         """
         wanted = tuple(dict.fromkeys(refs))
         return self._loop.submit(self._gather(wanted, deadline), self._timeout(deadline))
@@ -170,7 +171,8 @@ class ContextChain:
         """Read glossary terms by source name and key, at most until ``deadline``.
 
         A source not in the chain is ignored; a term a source does not know is left out.
-        Each source asked for at least one key has a status.
+        Each source asked for at least one key has a status. Read after ``gather`` with
+        the same ``deadline``, it gets only what is left of their shared end.
         """
         return self._loop.submit(self._read_terms(wanted, deadline), self._timeout(deadline))
 
@@ -224,7 +226,9 @@ class ContextChain:
             log.warning("the context sources were not all closed (%s)", type(exc).__name__)
 
     def _timeout(self, deadline: float) -> float:
-        return max(deadline - self._clock(), 0.0) + _GRACE_SECONDS
+        # One end per deadline, deadline + _GRACE_SECONDS: a second read for the same
+        # deadline gets only what is left of it, never a grace of its own.
+        return max(deadline + _GRACE_SECONDS - self._clock(), 0.0)
 
     async def _aclose(self) -> None:
         await asyncio.gather(*(p.aclose() for p in self._providers), return_exceptions=True)

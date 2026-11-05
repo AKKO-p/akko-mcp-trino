@@ -3,6 +3,12 @@
 Each check prints OK or FAIL; the exit code is 1 when one fails. Run by run.sh.
 
     python check.py
+    python check.py --record FILE   # writes alice's replies of the server without a provider
+
+The replies of 0.7.2 in replies-0.7.2.json were recorded that way from the v0.7.2 image:
+MCP_IMAGE=<the v0.7.2 image> KEEP=1 run.sh, then
+docker compose --profile check run --rm --no-deps -v "$PWD:/out" check \
+  --record /out/replies-0.7.2.json
 """
 
 import json
@@ -43,6 +49,9 @@ TPCH_TINY_TABLES = {
     "customer", "lineitem", "nation", "orders", "part", "partsupp", "region", "supplier",
 }  # fmt: skip
 NATIONS = "SELECT name FROM tpch.tiny.nation ORDER BY nationkey"
+# alice's describe_table of tpch.tiny.nation and describe_schema of tpch.tiny, as 0.7.2
+# answered them, byte for byte.
+REPLIES_072 = "/integration/replies-0.7.2.json"
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -101,9 +110,11 @@ async def tool_calls(url: str, bearer: str, fn) -> object:
         async with ClientSession(read, write) as s:
             await s.initialize()
 
-            async def call(tool: str, **args: object) -> dict:
+            async def call(tool: str, raw: bool = False, **args: object) -> dict | str:
                 res = await s.call_tool(tool, args)
                 text = res.content[0].text if res.content else ""
+                if raw:  # the reply's own bytes
+                    return text
                 try:
                     return json.loads(text)
                 except ValueError:  # a tool this server does not have answers in prose
@@ -200,6 +211,12 @@ def context_checks(label: str, url: str, alice: str, bob: str) -> None:
         == {"nation", "orders", "region"},
         (a["orders"], a["schema"]),
     )
+    check(
+        f"{label}: alice finds orders through list_tables and search_columns",
+        "orders" in a["tables"].get("tables", [])
+        and "orders" in {m["table"] for m in a["search"][1].get("matches", [])},
+        (a["tables"], a["search"]),
+    )
     seen = b["nation"].get("column_context", {})
     check(
         f"{label}: bob gets the context of nation without the column Trino hides from him",
@@ -235,10 +252,13 @@ def context_checks(label: str, url: str, alice: str, bob: str) -> None:
 
 
 async def without_context(call) -> dict:
-    """The tools that would serve catalogue context, on a server without a provider."""
+    """The replies, as text, of the tools that would serve catalogue context, on a server
+    without a provider."""
     return {
-        "nation": await call("describe_table", catalog="tpch", schema="tiny", table="nation"),
-        "schema": await call("describe_schema", catalog="tpch", schema="tiny"),
+        "describe_table": await call(
+            "describe_table", raw=True, catalog="tpch", schema="tiny", table="nation"
+        ),
+        "describe_schema": await call("describe_schema", raw=True, catalog="tpch", schema="tiny"),
     }
 
 
@@ -407,21 +427,16 @@ def main() -> int:
         paged["described"],
     )
 
-    # 1c. Without MCP_CONTEXT_PROVIDERS, the answers of 0.7.2, without a key more.
+    # 1c. Without MCP_CONTEXT_PROVIDERS, the replies of 0.7.2, byte for byte.
     plain = use(JWT, alice, without_context)
-    check(
-        "context: without a provider, describe_table answers as in 0.7.2",
-        set(plain["nation"]) == {"columns", "rows", "truncated"},
-        plain["nation"],
-    )
-    check(
-        "context: without a provider, describe_schema answers as in 0.7.2",
-        set(plain["schema"]) == {"catalog", "schema", "tables", "next_offset", "shortened"}
-        and all(
-            set(t) == {"table", "type", "comment", "columns"} for t in plain["schema"]["tables"]
-        ),
-        plain["schema"],
-    )
+    with open(REPLIES_072, encoding="utf-8") as recorded:
+        replies_072 = json.load(recorded)
+    for tool in ("describe_table", "describe_schema"):
+        check(
+            f"context: without a provider, {tool} answers as 0.7.2 did, byte for byte",
+            plain[tool] == replies_072[tool],
+            plain[tool],
+        )
 
     # 1d. Catalogue context from a file, under each caller's rights in Trino.
     context_checks("context (jwt)", CONTEXT_JWT, alice, bob)
@@ -526,5 +541,14 @@ def main() -> int:
     return 1 if failed else 0
 
 
+def record(path: str) -> int:
+    """Write alice's replies of the server without a provider to ``path``, as JSON."""
+    replies = use(JWT, token("alice", "mcp-host"), without_context)
+    with open(path, "w", encoding="utf-8") as out:
+        json.dump(replies, out, indent=1)
+        out.write("\n")
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(record(sys.argv[2]) if sys.argv[1:2] == ["--record"] else main())

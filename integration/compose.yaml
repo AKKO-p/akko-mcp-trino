@@ -216,6 +216,7 @@ services:
       INTEGRATION_PASSWORD: ${INTEGRATION_PASSWORD}
     volumes:
       - ./check.py:/integration/check.py:ro
+      - ./replies-0.7.2.json:/integration/replies-0.7.2.json:ro
       - certs:/certs:ro
     mem_limit: 128m
 

@@ -23,6 +23,7 @@ from akko_mcp_trino.context import (
     TermRef,
 )
 from akko_mcp_trino.context.reply import ContextService
+from akko_mcp_trino.context.text import NAME_CHARS
 from akko_mcp_trino.context.visibility import Visibility
 from akko_mcp_trino.identity import (
     current_subject,
@@ -30,6 +31,7 @@ from akko_mcp_trino.identity import (
     set_current_principal,
 )
 from tests.context.memory_provider import Memory, setup_for
+from tests.context.test_text import _Reads
 from tests.context.test_visibility import FakeTrino
 from tests.test_core_alone import _config
 
@@ -344,6 +346,77 @@ def test_at_most_the_column_bound_is_described(made):
     assert out["context_sources"] == {"catalog": "partial"}
 
 
+def _huge() -> str:
+    """A name of a million characters that may be read within its window only."""
+    return _Reads("n" * 1_000_000, allowed=4 * NAME_CHARS + 1)
+
+
+def test_a_term_name_past_its_bound_drops_the_term_and_other_huge_names_are_dropped(made):
+    related = TermRef("k-big", "", "finance", _huge())
+    terms = {
+        "k-big": Term("k-big", _huge(), "finance"),
+        "k-ok": Term(
+            "k-ok",
+            "Amount",
+            "finance",
+            status=_huge(),
+            categories=(_huge(), "Ledger"),
+            relations=(related, TermRef("k-net", "", "finance", _huge())),
+        ),
+        "k-net": Term("k-net", "Net", "finance"),
+    }
+    provider = Memory(
+        tables={
+            ORDERS: TableContext(
+                terms=("k-big", "k-ok"),
+                columns=_columns(
+                    a=ColumnContext(terms=("k-big",)), b=ColumnContext(terms=("k-net",))
+                ),
+            )
+        },
+        terms=terms,
+        sets=SERVED,
+    )
+    service, _ = _service(made, provider)
+    out = service.for_table(ORDERS, ["a", "b"], complete=True)
+    assert out["context_sources"] == {"catalog": "ok"}
+    assert out["table"] == {"terms": [{"name": "Amount", "ref": "t1"}]}
+    assert list(out["column_context"]) == ["b"], "a column whose only term is dropped"
+    assert out["terms"]["t1"] == {
+        "name": "Amount",
+        "glossary": "finance",
+        "categories": ["Ledger"],
+        "related": [{"ref": "t2", "name": "Net"}],
+        "source": "catalog",
+    }
+    assert [t["name"] for t in out["terms"].values()] == ["Amount", "Net"]
+
+
+class _Counted(str):
+    """A name that counts how many times it is read."""
+
+    reads = 0
+
+    def __iter__(self):
+        type(self).reads += 1
+        return str.__iter__(self)
+
+
+def test_a_term_name_is_cleaned_once_per_answer(made):
+    _Counted.reads = 0
+    names = [f"c{n:03d}" for n in range(300)]
+    columns = {n: ColumnContext(terms=("k",)) for n in names}
+    provider = Memory(
+        tables={ORDERS: TableContext(columns=_columns(**columns))},
+        terms={"k": Term("k", _Counted("Amount"), "finance")},
+        sets=SERVED,
+    )
+    service, _ = _service(made, provider)
+    out = service.for_table(ORDERS, names, complete=True)
+    assert len(out["column_context"]) == 300 and out["terms"]["t1"]["name"] == "Amount"
+    assert _Counted.reads == 1
+
+
 def test_a_cut_definition_says_so(made):
     term = Term("k", "Amount", "finance", definition="w" * 50, status="Approved")
     provider = Memory(tables={ORDERS: TableContext(terms=("k",))}, terms={"k": term}, sets=SERVED)
@@ -634,6 +707,9 @@ def test_for_tables_not_listed_reads_only_the_tables_trino_proves(made):
         "context_sources": {"catalog": "not_found"},
     }
     assert provider.calls == [(ORDERS,)]
+    before = len(fake.statements)
+    assert service.for_tables([], listed=False)["descriptions"] == {}
+    assert provider.calls == [(ORDERS,)] and len(fake.statements) == before, "nothing asked"
 
 
 class _NeverRead(str):

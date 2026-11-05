@@ -1,6 +1,8 @@
 """Catalogue text is cleaned and bounded."""
 
-from akko_mcp_trino.context.text import clean_text
+import pathlib
+
+from akko_mcp_trino.context.text import NAME_CHARS, clean_name, clean_text
 
 
 def test_zero_width_and_bidi_characters_are_removed():
@@ -51,3 +53,32 @@ def test_a_text_of_dropped_characters_is_read_up_to_four_times_its_limit():
     assert clean_text(hidden, 10) == ("", True)
     assert clean_text("\u200b" * 30 + "abc", 10) == ("abc", False), "within the bound, whole"
     assert clean_text("\u200b" * 40 + "abc", 10) == ("a", True), "past it, cut and said"
+
+
+def test_a_name_within_its_bound_is_cleaned_whole():
+    assert clean_name("p\u200bii") == "pii"
+    assert clean_name("n" * NAME_CHARS) == "n" * NAME_CHARS
+
+
+def test_a_name_past_its_bound_is_dropped_never_cut():
+    assert clean_name("n" * (NAME_CHARS + 1)) == ""
+    assert clean_name("\u200b" * (4 * NAME_CHARS + 1) + "n") == "", "past the read window"
+
+
+def test_a_huge_name_is_read_within_its_window_only():
+    huge = _Reads("n" * 1_000_000, allowed=4 * NAME_CHARS + 1)
+    assert clean_name(huge) == ""
+
+
+def test_the_bound_written_in_the_docs_is_the_codes():
+    root = pathlib.Path(__file__).resolve().parents[2]
+
+    def text(name):
+        return " ".join((root / name).read_text(encoding="utf-8").split())
+
+    window = 4 * NAME_CHARS + 1
+    for name in ("README.md", "CHANGELOG.md", "MIGRATING.md"):
+        assert f"longer than {NAME_CHARS} characters once cleaned" in text(name), name
+    assert f"reads at most {window} characters" in text("README.md")
+    assert f"de plus de {NAME_CHARS} caractères une fois nettoyé" in text("README.fr.md")
+    assert f"lit au plus {window} caractères" in text("README.fr.md")
