@@ -28,7 +28,7 @@ from akko_mcp_trino.identity import reset_current_principal, set_current_princip
 from akko_mcp_trino.server import build_server
 from akko_mcp_trino.tools import ToolContext
 from tests.context.memory_provider import Memory
-from tests.test_tools import SchemaTrino, _in_request, _with_context
+from tests.tool_doubles import SchemaTrino, in_request, with_context
 
 
 class FakeTrino:
@@ -463,7 +463,7 @@ def test_a_plugin_gets_context_only_for_tables_trino_proves_visible(context_setu
         sets={GLOSSARY: frozenset({"finance"})},
     )
     client = SchemaTrino(tables=("orders", "refunds"))
-    mcp, _, tools = _with_context(context_setups, client, provider)
+    mcp, _, tools = with_context(context_setups, client, provider)
 
     @tools.tool("Peek")
     def peek(names: list) -> str:
@@ -472,7 +472,7 @@ def test_a_plugin_gets_context_only_for_tables_trino_proves_visible(context_setu
         return json.dumps({"descriptions": found, "context_sources": read["context_sources"]})
 
     def ask(*names):
-        return json.loads(_in_request(lambda: mcp.tools["peek"](list(names))))
+        return json.loads(in_request(lambda: mcp.tools["peek"](list(names))))
 
     assert ask("orders", "payroll", "ghost") == {
         "descriptions": {"orders": {"text": "Orders of the shop", "source": "catalog"}},
@@ -484,3 +484,16 @@ def test_a_plugin_gets_context_only_for_tables_trino_proves_visible(context_setu
     assert asked == {"orders", "refunds"}
     statements = " ".join(sql for sql, _, _ in client.calls)
     assert "payroll" not in statements and "ghost" not in statements
+
+
+def test_a_plugin_reads_at_most_a_page_of_tables_per_call(context_setups):
+    refs = [TableRef("demo", "sales", n) for n in ("a", "b", "c")]
+    provider = Memory(
+        tables={ref: TableContext(description=ref.table) for ref in refs},
+        sets={GLOSSARY: frozenset({"finance"})},
+    )
+    client = SchemaTrino(tables=("a", "b", "c"))
+    _, _, tools = with_context(context_setups, client, provider, describe_schema_tables=2)
+    read = in_request(lambda: tools.context.tables([refs[0], refs[0], refs[1], refs[2]]))
+    assert list(read["descriptions"]) == refs[:2]
+    assert provider.calls == [tuple(refs[:2])], "the tables past the bound are never asked"

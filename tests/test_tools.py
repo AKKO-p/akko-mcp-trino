@@ -7,23 +7,15 @@ from an argument.
 import functools
 import json
 import logging
-import re
 import time
 from collections.abc import Mapping
-from dataclasses import replace as _replace
 from types import MappingProxyType
 
 import pytest
 
 from akko_mcp_trino import tools as tools_module
 from akko_mcp_trino import trino_client
-from akko_mcp_trino.audit import (
-    InMemoryAudit,
-    current_call,
-    reset_current_request_id,
-    set_current_request_id,
-)
-from akko_mcp_trino.auth import Principal
+from akko_mcp_trino.audit import InMemoryAudit
 from akko_mcp_trino.context import (
     GLOSSARY,
     OWNER,
@@ -34,25 +26,9 @@ from akko_mcp_trino.context import (
     Term,
 )
 from akko_mcp_trino.context.reply import ContextReader
-from akko_mcp_trino.identity import reset_current_principal, set_current_principal
 from akko_mcp_trino.tools import register_query_tools
-from tests.context.memory_provider import Memory, setup_for
-
-
-class FakeMCP:
-    """Captures the functions decorated with @mcp.tool() so tests can call them directly."""
-
-    def __init__(self):
-        self.tools = {}
-        self.annotations = {}
-
-    def tool(self, annotations=None, **kw):
-        def deco(fn):
-            self.tools[fn.__name__] = fn
-            self.annotations[fn.__name__] = annotations
-            return fn
-
-        return deco
+from tests.context.memory_provider import Memory
+from tests.tool_doubles import FakeMCP, GateTrino, SchemaTrino, in_request, with_context
 
 
 class FakeClient:
@@ -452,21 +428,11 @@ def _registered_with_audit(read_only=True, **client_kw):
     return mcp, client, audit
 
 
-def _in_request(fn):
-    t1 = set_current_principal(Principal(subject="alice_admin", token_id="jti-9"))
-    t3 = set_current_request_id("req-1")
-    try:
-        return fn()
-    finally:
-        reset_current_request_id(t3)
-        reset_current_principal(t1)
-
-
 def test_execute_query_records_who_called_which_tool_with_which_outcome():
     """The core's line: request id, tool, subject, outcome, duration. Nothing else is
     written: the token id, the SQL digest and the tables are an extension's."""
     mcp, _, audit = _registered_with_audit()
-    _in_request(lambda: mcp.tools["execute_query"]("SELECT 1"))
+    in_request(lambda: mcp.tools["execute_query"]("SELECT 1"))
     assert len(audit.events) == 1
     e = audit.events[0]
     assert (e.request_id, e.tool, e.subject, e.ok) == (
@@ -480,7 +446,7 @@ def test_execute_query_records_who_called_which_tool_with_which_outcome():
 
 def test_every_tool_is_audited():
     mcp, _, audit = _registered_with_audit()
-    _in_request(
+    in_request(
         lambda: (
             mcp.tools["list_catalogs"](),
             mcp.tools["list_schemas"]("c"),
@@ -498,20 +464,20 @@ def test_every_tool_is_audited():
 
 def test_refused_write_is_audited_as_failure():
     mcp, _, audit = _registered_with_audit()
-    _in_request(lambda: mcp.tools["execute_query"]("DROP TABLE t"))
+    in_request(lambda: mcp.tools["execute_query"]("DROP TABLE t"))
     assert audit.events[0].ok is False and audit.events[0].error == "read_only"
 
 
 def test_trino_error_is_audited_as_failure():
     mcp, _, audit = _registered_with_audit(raises=RuntimeError("Access Denied: Cannot select"))
-    _in_request(lambda: mcp.tools["execute_query"]("SELECT 1"))
+    in_request(lambda: mcp.tools["execute_query"]("SELECT 1"))
     assert audit.events[0].ok is False and audit.events[0].error == "RuntimeError"
 
 
 def test_invalid_identifier_is_audited_as_a_failure():
     """An agent gets {"error": …} it can act on, and the audit line says it failed."""
     mcp, _, audit = _registered_with_audit()
-    out = json.loads(_in_request(lambda: mcp.tools["list_schemas"]("bad;name")))
+    out = json.loads(in_request(lambda: mcp.tools["list_schemas"]("bad;name")))
     assert "Invalid catalog" in out["error"]
     assert audit.events[0].ok is False and audit.events[0].tool == "list_schemas"
 
@@ -557,7 +523,7 @@ def test_every_tool_hands_the_verified_caller_to_the_client():
         ("describe_table", {"catalog": "c", "schema": "s", "table": "t"}),
         ("execute_query", {"sql": "SELECT 1"}),
     ]
-    _in_request(lambda: [mcp.tools[n](**a) for n, a in calls])
+    in_request(lambda: [mcp.tools[n](**a) for n, a in calls])
     assert [u for _, u in client.calls] == ["alice_admin"] * len(calls)
 
 
@@ -566,7 +532,7 @@ def test_every_tool_hands_the_verified_caller_to_the_client():
 
 def test_describe_table_can_add_a_governed_sample():
     mcp, client = _registered()
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("c", "s", "t", sample_rows=5)))
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("c", "s", "t", sample_rows=5)))
     assert out["sample"]["rows"] == [["v"]]
     assert client.calls[-1] == ("SELECT * FROM c.s.t LIMIT 5", "alice_admin")
 
@@ -823,7 +789,7 @@ def _describing(tables, columns, comments=(), **kw):
 
 def test_describe_schema_returns_whole_tables_with_comments():
     mcp, client = _describing(_CRM_TABLES, _CRM_COLUMNS, _CRM_COMMENTS)
-    out = json.loads(_in_request(lambda: mcp.tools["describe_schema"]("demo", "crm")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "crm")))
     assert out == {
         "catalog": "demo",
         "schema": "crm",
@@ -1029,7 +995,7 @@ def test_a_refused_metadata_view_is_audited_as_a_failure():
     mcp, client, audit = _registered_with_audit(
         results=[_rows([("crm",)]), _rows(_CRM_TABLES), PermissionError("refused")]
     )
-    _in_request(lambda: mcp.tools["describe_schema"]("demo", "crm"))
+    in_request(lambda: mcp.tools["describe_schema"]("demo", "crm"))
     assert audit.events[0].ok is False and audit.events[0].error == "PermissionError"
 
 
@@ -1213,109 +1179,12 @@ ORDERS_REF = TableRef("demo", "sales", "orders")
 _SERVED = {GLOSSARY: frozenset({"finance"})}
 
 
-class GateTrino:
-    """Trino for describe_table with context: the table, the canary, the select check, the
-    proofs of join targets and a sample.
-
-    Each query is recorded with its user and the client tags it would carry. Time is
-    simulated: a statement that starts with a prefix of ``slow`` takes that many seconds,
-    added to ``elapsed`` without sleeping. Given a lower ``timeout``, it stops then with a
-    plain ``TimeoutError``, as the Trino client does; one that would outlive the call marks
-    it expired, as the client does. Only ``pause`` really sleeps."""
-
-    def __init__(
-        self,
-        columns=("id", "amount"),
-        truncated=False,
-        describe_error=None,
-        schemas=(),
-        slow=None,
-        pause=None,
-    ):
-        self.columns = list(columns)
-        self.truncated = truncated
-        self.describe_error = describe_error
-        self.schemas = list(schemas)
-        self.slow = dict(slow or {})
-        self.pause = dict(pause or {})
-        self.elapsed = 0.0
-        self.timeouts = []
-        self.calls = []
-
-    def _take(self, seconds, timeout):
-        self.timeouts.append(timeout)
-        if 0 < timeout < seconds:
-            self.elapsed += timeout
-            raise TimeoutError("the query exceeded its time budget")
-        call = current_call()
-        left = call.time_left() if call is not None else None
-        if left is not None and seconds >= left - self.elapsed:
-            raise call.timed_out()
-        self.elapsed += seconds
-
-    def query(self, sql, user=None, params=None, **keywords):
-        self.calls.append((sql, user, trino_client._query_tags.get()))
-        for prefix, seconds in self.slow.items():
-            if sql.startswith(prefix):
-                self._take(seconds, keywords.get("timeout", 0))
-        for prefix, seconds in self.pause.items():
-            if sql.startswith(prefix):
-                time.sleep(seconds)
-        answer = self.answer(sql)
-        if answer is not None:
-            return answer
-        if sql == "DESCRIBE demo.sales.orders":
-            if self.describe_error is not None:
-                raise self.describe_error
-            rows = [[c, "bigint", "", ""] for c in self.columns]
-            columns = ["Column", "Type", "Extra", "Comment"]
-            return {"columns": columns, "rows": rows, "truncated": self.truncated}
-        if sql == "SHOW CATALOGS":
-            return {"columns": ["Catalog"], "rows": [["demo"]], "truncated": False}
-        if sql.startswith("SELECT schema_name FROM"):
-            return {"columns": ["x"], "rows": [[n] for n in self.schemas], "truncated": False}
-        if sql.startswith(("SELECT table_name FROM", "EXPLAIN (TYPE VALIDATE)")):
-            return {"columns": ["x"], "rows": [], "truncated": False}
-        if sql.startswith("SELECT * FROM demo.sales.orders LIMIT"):
-            return {"columns": ["id"], "rows": [[1]], "row_count": 1}
-        raise AssertionError(f"unexpected statement: {sql}")
-
-    def answer(self, sql):
-        """The answer of a subclass to ``sql``, before the statements above; None for none."""
-        return None
-
-    def ping(self):
-        return None
-
-
 @pytest.fixture
 def setups():
     made = []
     yield made
     for setup in made:
         setup.close()
-
-
-def _with_context(setups, client, *providers, describers=(), call_timeout_seconds=0.0, **settings):
-    # test_core_alone imports this module: its configuration is read once both are loaded.
-    from tests.test_core_alone import _config
-
-    config = _replace(_config(), **settings)
-    setup = setup_for(config, *providers)
-    setups.append(setup)
-    mcp = FakeMCP()
-    audit = InMemoryAudit()
-    tools = register_query_tools(
-        mcp,
-        client,
-        audit=audit,
-        call_timeout_seconds=call_timeout_seconds,
-        describe_schema_tables=config.describe_schema_tables,
-        context=setup,
-    )
-    for describer in describers:
-        tools.add_describer(describer)
-    return mcp, audit, tools
 
 
 def _orders(**columns):
@@ -1340,7 +1209,7 @@ def test_without_a_provider_describe_table_is_unchanged_byte_for_byte():
 
 
 def test_with_a_provider_the_description_says_the_context_is_data(setups):
-    mcp, _, _ = _with_context(setups, GateTrino(), Memory())
+    mcp, _, _ = with_context(setups, GateTrino(), Memory())
     doc = mcp.tools["describe_table"].__doc__
     assert doc.startswith(V072_DESCRIBE_DOC.split("\n\nResults are governed")[0])
     assert CONTEXT_SENTENCE in " ".join(doc.split())
@@ -1357,8 +1226,8 @@ def test_describe_table_serves_context_of_visible_columns_only(setups):
             }
         ),
     )
-    mcp, _, _ = _with_context(setups, GateTrino(), provider)
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    mcp, _, _ = with_context(setups, GateTrino(), provider)
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert out["rows"] == [["id", "bigint", "", ""], ["amount", "bigint", "", ""]]
     assert out["table"]["description"] == "Orders of the shop"
     assert list(out["column_context"]) == ["id", "amount"]
@@ -1374,8 +1243,8 @@ def test_a_refused_describe_calls_no_provider_and_serves_nothing(setups):
     provider = _orders(description="Orders of the shop")
     denied = RuntimeError("Access Denied: Cannot show columns of table demo.sales.orders")
     client = GateTrino(describe_error=denied)
-    mcp, _, _ = _with_context(setups, client, provider)
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    mcp, _, _ = with_context(setups, client, provider)
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert out == {"error": str(denied), "kind": "other"}
     assert provider.calls == [] and [sql for sql, _, _ in client.calls] == [
         "DESCRIBE demo.sales.orders"
@@ -1393,8 +1262,8 @@ def test_a_describe_cut_by_the_row_cap_says_partial_and_empties_the_grain(setups
         ),
     )
     client = GateTrino(truncated=True)
-    mcp, _, _ = _with_context(setups, client, provider)
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    mcp, _, _ = with_context(setups, client, provider)
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert out["truncated"] is True
     assert "grain" not in out["table"]
     assert list(out["column_context"]) == ["id"] and "Not listed" not in json.dumps(out)
@@ -1403,10 +1272,10 @@ def test_a_describe_cut_by_the_row_cap_says_partial_and_empties_the_grain(setups
 
 def test_with_less_than_the_reserve_left_no_provider_is_called_and_no_time_budget_error(setups):
     provider = _orders(description="Orders of the shop")
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups, GateTrino(), provider, call_timeout_seconds=1.0, context_reserve_seconds=5.0
     )
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert "error" not in out
     assert [r[0] for r in out["rows"]] == ["id", "amount"]
     assert out["context_sources"] == {"catalog": "unavailable"}
@@ -1416,11 +1285,9 @@ def test_with_less_than_the_reserve_left_no_provider_is_called_and_no_time_budge
 def test_require_select_validates_the_visible_columns_once_and_caches_it(setups):
     provider = _orders(description="Orders of the shop")
     client = GateTrino()
-    mcp, _, _ = _with_context(setups, client, provider, context_require_select=True)
+    mcp, _, _ = with_context(setups, client, provider, context_require_select=True)
     for _ in range(2):
-        out = json.loads(
-            _in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
-        )
+        out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
         assert out["context_sources"] == {"catalog": "ok"}
     checks = [sql for sql, _, _ in client.calls if sql.startswith("EXPLAIN")]
     assert checks == ['EXPLAIN (TYPE VALIDATE) SELECT "id", "amount" FROM "demo"."sales"."orders"']
@@ -1429,10 +1296,10 @@ def test_require_select_validates_the_visible_columns_once_and_caches_it(setups)
 def test_the_gate_runs_tagged_and_as_the_effective_subject(setups):
     provider = _orders(description="Orders of the shop")
     client = GateTrino()
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups, client, provider, context_canary="demo.trap.canary", context_require_select=True
     )
-    _in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
+    in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
     (describe, *gate) = client.calls
     assert describe == ("DESCRIBE demo.sales.orders", "alice_admin", ())
     assert gate and all(
@@ -1455,22 +1322,22 @@ def test_a_failing_describer_is_said(setups):
     out = json.loads(mcp.tools["describe_table"]("demo", "sales", "orders"))
     assert out["describer_errors"] == 2 and out["owner_team"] == "sales"
     assert "backend" not in json.dumps(out)
-    mcp, _, _ = _with_context(setups, GateTrino(), Memory(), describers=[broken])
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    mcp, _, _ = with_context(setups, GateTrino(), Memory(), describers=[broken])
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert out["describer_errors"] == 1 and out["context_sources"] == {"catalog": "not_found"}
 
 
 def test_metadata_served_names_the_described_table(setups):
-    mcp, audit, _ = _with_context(setups, GateTrino(), _orders(description="Orders"))
-    _in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
-    mcp, quiet, _ = _with_context(setups, GateTrino(), Memory())
-    _in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
+    mcp, audit, _ = with_context(setups, GateTrino(), _orders(description="Orders"))
+    in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
+    mcp, quiet, _ = with_context(setups, GateTrino(), Memory())
+    in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
     assert audit.events[0].call.metadata_served == ["demo.sales.orders"]
     assert quiet.events[0].call.metadata_served == []
 
 
 def test_plugins_receive_a_reader_never_the_chain_nor_the_visibility(setups):
-    _, _, tools = _with_context(setups, GateTrino(), Memory())
+    _, _, tools = with_context(setups, GateTrino(), Memory())
     assert isinstance(tools.context, ContextReader)
     assert [name for name in dir(tools.context) if not name.startswith("_")] == ["tables"]
     assert register_query_tools(FakeMCP(), FakeClient()).context is None
@@ -1498,11 +1365,9 @@ class _Unreadable(Mapping):
 def test_an_unexpected_failure_of_the_context_serves_the_columns_and_says_error(setups, caplog):
     provider = Memory(tables={ORDERS_REF: TableContext(columns=_Unreadable(["id"]))}, sets=_SERVED)
     other = Memory("other", tables={ORDERS_REF: TableContext(description="d")}, sets=_SERVED)
-    mcp, _, _ = _with_context(setups, GateTrino(), provider, other)
+    mcp, _, _ = with_context(setups, GateTrino(), provider, other)
     with caplog.at_level(logging.DEBUG, logger="akko_mcp_trino.context.reply"):
-        out = json.loads(
-            _in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
-        )
+        out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert [r[0] for r in out["rows"]] == ["id", "amount"]
     assert out["context_sources"] == {"catalog": "error", "other": "error"}
     assert out["table"] == {} and "error" not in out
@@ -1518,7 +1383,7 @@ def test_a_filter_statement_slower_than_the_budget_is_not_checked_never_time_bud
     while the reserve is left, and the call answers its columns."""
     provider = _orders(description="Orders of the shop")
     client = GateTrino(slow={statement: 1000.0})
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups,
         client,
         provider,
@@ -1527,7 +1392,7 @@ def test_a_filter_statement_slower_than_the_budget_is_not_checked_never_time_bud
         context_canary="demo.trap.canary",
         context_require_select=True,
     )
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert "error" not in out and [r[0] for r in out["rows"]] == ["id", "amount"]
     assert out["context_sources"] == {"catalog": "not_checked"}
     assert provider.calls == []
@@ -1538,7 +1403,7 @@ def test_a_filter_statement_slower_than_the_budget_is_not_checked_never_time_bud
 def test_no_filter_statement_starts_with_less_than_the_reserve_left(setups):
     provider = _orders(description="Orders of the shop")
     client = GateTrino()
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups,
         client,
         provider,
@@ -1546,7 +1411,7 @@ def test_no_filter_statement_starts_with_less_than_the_reserve_left(setups):
         context_reserve_seconds=5.0,
         context_canary="demo.trap.canary",
     )
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert "error" not in out and out["context_sources"] == {"catalog": "not_checked"}
     assert [sql for sql, _, _ in client.calls] == ["DESCRIBE demo.sales.orders"]
 
@@ -1566,7 +1431,7 @@ def test_join_targets_past_the_deadline_are_not_proven_and_never_asked(setups, m
             tools_module.ContextService, clock=lambda: time.monotonic() + client.elapsed
         ),
     )
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups,
         client,
         provider,
@@ -1574,7 +1439,7 @@ def test_join_targets_past_the_deadline_are_not_proven_and_never_asked(setups, m
         context_timeout_seconds=5.0,
         context_reserve_seconds=1.0,
     )
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert "error" not in out and [r[0] for r in out["rows"]] == ["id", "amount"]
     assert "joins" not in out["table"] and out["table"]["description"] == "d"
     proofs = [sql for sql, _, _ in client.calls if sql.startswith("SELECT table_name FROM")]
@@ -1589,11 +1454,11 @@ def test_the_sample_keeps_its_budget_when_a_provider_takes_its_whole_timeout(set
     provider = _orders(description="Orders of the shop")
     provider.delay = 10.0
     client = GateTrino(pause={"SELECT * FROM": 1.2})
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups, client, provider, call_timeout_seconds=3.0, context_reserve_seconds=1.0
     )
     out = json.loads(
-        _in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders", sample_rows=1))
+        in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders", sample_rows=1))
     )
     assert "error" not in out and out["sample"]["rows"] == [[1]]
     assert out["context_sources"] == {"catalog": "unavailable"}
@@ -1604,10 +1469,10 @@ def test_a_cut_describe_stays_cut_whatever_a_describer_returns(setups):
         return {"truncated": False}
 
     provider = _orders(grain=("id",), description="d")
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups, GateTrino(truncated=True), provider, describers=[says_complete]
     )
-    out = json.loads(_in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert "grain" not in out["table"] and out["context_sources"] == {"catalog": "partial"}
 
 
@@ -1657,35 +1522,6 @@ SCHEMA_CONTEXT_SENTENCE = (
     "partial, unavailable, refused, error or not_checked."
 )
 CUSTOMERS_REF = TableRef("demo", "sales", "customers")
-# What the filter asks to prove a table of demo.sales: the tables of its schema, by no name.
-_SALES_TABLES = (
-    "SELECT table_name FROM \"demo\".information_schema.tables WHERE table_schema = 'sales'"
-)
-
-
-class SchemaTrino(GateTrino):
-    """Trino for describe_schema with context: the schema sales of demo, its ``tables``
-    (one column ``id`` each, no comment), and the proofs of the filter, which list the
-    same tables."""
-
-    def __init__(self, tables=("customers", "orders"), **kw):
-        super().__init__(schemas=["sales"], **kw)
-        self.tables = list(tables)
-
-    def answer(self, sql):
-        names = sorted(re.findall(r"table_name = '([^']*)'", sql))
-        if sql.startswith("SELECT table_name, table_type FROM demo.information_schema.tables"):
-            start, limit = map(int, re.search(r"OFFSET (\d+) LIMIT (\d+)$", sql).groups())
-            rows = [[t, "BASE TABLE"] for t in self.tables][start : start + limit]
-        elif "system.jdbc.columns" in sql:
-            rows = [[t, "id", "bigint", None, 1] for t in names]
-        elif "system.metadata.table_comments" in sql:
-            rows = [[t, None] for t in names]
-        elif sql == _SALES_TABLES:
-            rows = [[t] for t in self.tables]
-        else:
-            return None
-        return {"columns": ["x"], "rows": rows, "truncated": False}
 
 
 class _TextThatFails(str):
@@ -1723,8 +1559,8 @@ def test_describe_schema_adds_a_short_description_per_table_with_its_source(setu
         sets=_SERVED,
     )
     client = SchemaTrino(tables=("customers", "orders", "refunds"))
-    mcp, audit, _ = _with_context(setups, client, first, second)
-    out = json.loads(_in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
+    mcp, audit, _ = with_context(setups, client, first, second)
+    out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
     customers, orders, refunds = out["tables"]
     assert customers["description"] == {"text": "c" * 500, "source": "other", "cut": ["text"]}
     assert orders["description"] == {"text": "Orders of the shop", "source": "catalog"}
@@ -1756,15 +1592,15 @@ def test_describe_schema_asks_the_catalogue_only_for_the_tables_of_the_page(setu
         sets=_SERVED,
     )
     client = SchemaTrino(tables=tuple(refs))
-    mcp, _, tools = _with_context(
+    mcp, _, tools = with_context(
         setups, client, provider, context_batch=2, describe_schema_tables=3
     )
-    out = json.loads(_in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
     assert [t["table"] for t in out["tables"]] == ["t0", "t1", "t2"] and out["next_offset"] == 3
     assert provider.calls == [(refs["t0"], refs["t1"]), (refs["t2"],)]
     assert not [sql for sql, _, tags in client.calls if trino_client.GATE_TAG in tags]
     before = len(client.calls)
-    read = _in_request(lambda: tools.context.tables([refs["t2"]]))
+    read = in_request(lambda: tools.context.tables([refs["t2"]]))
     assert read["descriptions"] == {refs["t2"]: {"text": "About t2", "source": "catalog"}}
     assert len(client.calls) == before, "proven by the listing of the page, no statement"
 
@@ -1774,9 +1610,9 @@ def test_describe_schema_serves_its_page_when_the_context_fails_unexpectedly(set
         tables={ORDERS_REF: TableContext(description=_TextThatFails("fine"))}, sets=_SERVED
     )
     other = Memory("other", tables={ORDERS_REF: TableContext(description="d")}, sets=_SERVED)
-    mcp, _, _ = _with_context(setups, SchemaTrino(), provider, other)
+    mcp, _, _ = with_context(setups, SchemaTrino(), provider, other)
     with caplog.at_level(logging.DEBUG, logger="akko_mcp_trino.context.reply"):
-        out = json.loads(_in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
+        out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
     assert [t["table"] for t in out["tables"]] == ["customers", "orders"]
     assert all("description" not in t for t in out["tables"]) and "error" not in out
     assert out["context_sources"] == {"catalog": "error", "other": "error"}
@@ -1786,10 +1622,10 @@ def test_describe_schema_serves_its_page_when_the_context_fails_unexpectedly(set
 
 def test_describe_schema_with_less_than_the_reserve_left_calls_no_provider(setups):
     provider = Memory(tables={ORDERS_REF: TableContext(description="d")}, sets=_SERVED)
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups, SchemaTrino(), provider, call_timeout_seconds=1.0, context_reserve_seconds=5.0
     )
-    out = json.loads(_in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
     assert "error" not in out and [t["table"] for t in out["tables"]] == ["customers", "orders"]
     assert all("description" not in t for t in out["tables"])
     assert out["context_sources"] == {"catalog": "unavailable"} and provider.calls == []
@@ -1798,7 +1634,7 @@ def test_describe_schema_with_less_than_the_reserve_left_calls_no_provider(setup
 def test_a_slow_canary_on_describe_schema_is_not_checked_never_time_budget(setups):
     provider = Memory(tables={ORDERS_REF: TableContext(description="d")}, sets=_SERVED)
     client = SchemaTrino(slow={'SELECT table_name FROM "demo"': 1000.0})
-    mcp, _, _ = _with_context(
+    mcp, _, _ = with_context(
         setups,
         client,
         provider,
@@ -1806,7 +1642,7 @@ def test_a_slow_canary_on_describe_schema_is_not_checked_never_time_budget(setup
         context_reserve_seconds=0.5,
         context_canary="demo.trap.canary",
     )
-    out = json.loads(_in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
+    out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
     assert "error" not in out and [t["table"] for t in out["tables"]] == ["customers", "orders"]
     assert out["context_sources"] == {"catalog": "not_checked"} and provider.calls == []
     (timeout,) = client.timeouts
@@ -1815,7 +1651,7 @@ def test_a_slow_canary_on_describe_schema_is_not_checked_never_time_budget(setup
 
 def test_an_empty_page_asks_no_catalogue(setups):
     provider = Memory(sets=_SERVED)
-    mcp, _, _ = _with_context(setups, SchemaTrino(tables=()), provider)
-    out = json.loads(_in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
+    mcp, _, _ = with_context(setups, SchemaTrino(tables=()), provider)
+    out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
     assert out["tables"] == [] and out["context_sources"] == {"catalog": "not_found"}
     assert provider.calls == []

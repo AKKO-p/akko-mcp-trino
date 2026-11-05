@@ -517,7 +517,7 @@ REFUNDS = TableRef("demo", "sales", "refunds")
 def test_for_tables_serves_one_cleaned_and_cut_description_per_table_and_its_source(made):
     first = Memory(
         "first",
-        tables={ORDERS: TableContext(description="Orders‮ of the shop", owner="bob")},
+        tables={ORDERS: TableContext(description="Orders\u202e of the shop", owner="bob")},
         sets=SERVED,
     )
     second = Memory(
@@ -634,3 +634,58 @@ def test_for_tables_not_listed_reads_only_the_tables_trino_proves(made):
         "context_sources": {"catalog": "not_found"},
     }
     assert provider.calls == [(ORDERS,)]
+
+
+class _NeverRead(str):
+    """A description that must never be read: no listing serves it."""
+
+    def __iter__(self):
+        raise AssertionError("a description that is not served was read")
+
+
+def test_for_tables_reads_only_the_description_it_serves(made):
+    first = Memory(
+        "first",
+        tables={
+            ORDERS: TableContext(description="d"),
+            CUSTOMERS: TableContext(description="\u200b"),
+        },
+        sets=SERVED,
+    )
+    second = Memory(
+        "second",
+        tables={
+            ORDERS: TableContext(description=_NeverRead("other")),
+            CUSTOMERS: TableContext(description="c"),
+        },
+        sets=SERVED,
+    )
+    service, _ = _service(made, first, second)
+    out = service.for_tables([ORDERS, CUSTOMERS], listed=True)
+    assert out == {
+        "descriptions": {
+            ORDERS: {"text": "d", "source": "first"},
+            CUSTOMERS: {"text": "c", "source": "second"},
+        },
+        "context_sources": {"first": "ok", "second": "ok"},
+    }
+
+
+def test_the_readers_deadline_is_taken_after_its_proofs(made):
+    """The proofs of a plugin's tables spend the call's time: the deadline is read after
+    them, and none left calls no provider."""
+    provider = Memory(tables={ORDERS: TableContext(description="d")}, sets=SERVED)
+    fake = _trino()
+    call, token = bind_call("plugin", 10.0)
+
+    def slow(sql, **keywords):
+        call.deadline = time.monotonic() + 0.1
+        return fake(sql, **keywords)
+
+    try:
+        service, _ = _service(made, provider, trino=slow, context_reserve_seconds=0.5)
+        out = service.for_tables([ORDERS], listed=False)
+    finally:
+        reset_call(token)
+    assert out == {"descriptions": {}, "context_sources": {"catalog": "unavailable"}}
+    assert provider.calls == [] and fake.statements, "proven first, then no time left"

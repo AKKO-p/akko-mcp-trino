@@ -151,7 +151,7 @@ donnez.
   peut seulement refuser ce que le cœur autorise, jamais l'élargir.
 - **N'importe quel MCP host, n'importe quel modèle.** Cursor, Claude Desktop, VS Code, le SDK
   Python… Mistral, ou tout modèle compatible OpenAI avec l'agent d'exemple.
-- **Petit et prouvé.** 1153 tests à 100 % de couverture des lignes et des branches, dont des suites
+- **Petit et prouvé.** 1246 tests à 100 % de couverture des lignes et des branches, dont des suites
   sur le vrai SDK pour les trois transports, une exécution réelle contre Keycloak et Trino en CI
   ([`integration/`](integration/)) et une garde de neutralité produit.
 
@@ -662,8 +662,13 @@ construits par `TableRef.of`. La réponse a la forme de celle de `describe_schem
 par `TableRef` et `context_sources`, pour les seules tables que la visibilité de l'appelant prouve
 (listées par Trino dans cet appel ou depuis moins de `MCP_VISIBILITY_TTL_SECONDS`). Une table que
 Trino ne liste pas n'est ni nommée à Trino ni demandée à un fournisseur, et elle est absente de la
-réponse, comme une table sans contexte. Un greffon ne reçoit jamais la chaîne, le cache de
-visibilité ni un fournisseur.
+réponse, comme une table sans contexte. Un appel lit au plus `MCP_DESCRIBE_SCHEMA_TABLES` tables
+distinctes, les premières de `refs`, autant qu'une page de `describe_schema` ; les suivantes sont
+absentes. Un greffon ne reçoit jamais la chaîne, le cache de visibilité ni un fournisseur.
+
+Un texte de catalogue coûte ce qui est servi, pas ce que le catalogue envoie : le nettoyage lit au
+plus quatre fois `MCP_CONTEXT_TEXT_CHARS` caractères d'un texte, et une liste ne lit que la
+description qu'elle sert.
 
 Les requêtes du filtre partent sous l'identité de l'appelant, avec l'étiquette client `mcp-gate` :
 le contrôle du canari, `EXPLAIN (TYPE VALIDATE)` des colonnes visibles avec

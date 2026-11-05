@@ -23,7 +23,7 @@ from akko_mcp_trino.audit import AuditEvent
 from akko_mcp_trino.config import Config
 from akko_mcp_trino.server import build_server
 from akko_mcp_trino.trino_client import resolve_identity
-from tests.test_tools import FakeMCP
+from tests.tool_doubles import FakeMCP, core_config
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CORE = ROOT / "akko_mcp_trino"
@@ -87,30 +87,7 @@ CORE_PACKAGES = {m.split("/")[0] for m in CORE_MODULES if "/" in m}
 CORE_GROUPS = {"akko_mcp_trino.tools", "akko_mcp_trino.extensions", "akko_mcp_trino.context"}
 
 
-def _config(**over) -> Config:
-    base = dict(
-        trino_host="h",
-        trino_identity_mode="service",
-        query_timeout_seconds=0.0,
-        call_timeout_seconds=0.0,
-        trino_port=8443,
-        trino_user="svc",
-        trino_catalog="c",
-        max_rows=10,
-        read_only=True,
-        auth_enabled=False,
-        server_name="t",
-        health_port=3001,
-        jwks_url="",
-        oidc_issuer="",
-        oidc_audience="",
-        transport="streamable-http",
-        mcp_port=3000,
-        auth_required=False,
-        trino_http_scheme="https",
-    )
-    base.update(over)
-    return Config(**base)
+_config = core_config
 
 
 def _modules() -> list[pathlib.Path]:

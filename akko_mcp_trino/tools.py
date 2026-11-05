@@ -616,7 +616,7 @@ def register_query_tools(
             canary=config.context_canary,
         )
         service = ContextService(context.chain, visibility, config, subject=current_subject)
-        tools.context = ContextReader(service)
+        tools.context = ContextReader(service, max_tables=describe_schema_tables)
 
     schema_visible = tools.schema_visible
 

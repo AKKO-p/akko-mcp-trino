@@ -14,8 +14,9 @@ appearance; a catalogue's key is never served) and the whole is bounded by
 ``MCP_CONTEXT_MAX_COLUMNS`` and ``MCP_CONTEXT_RESPONSE_CHARS``.
 
 A listing serves less: ``for_tables`` gives each table the first description a
-provider has for it, cut at ``MCP_CONTEXT_TEXT_CHARS``, and nothing else. Its
-tables are read in one pass, never validated one by one.
+provider has for it, cut at ``MCP_CONTEXT_TEXT_CHARS``, and nothing else; the
+descriptions it does not serve are never read. Its tables are read in one pass,
+never validated one by one.
 
 A provider never makes the tool fail: a deadline left too short, a chain that
 does not answer in time or fails says so in ``context_sources``, one status per
@@ -306,13 +307,14 @@ class ContextService:
             return self._no_descriptions(NOT_FOUND)
         if not self._visibility.canary_clear(key):
             return self._no_descriptions(NOT_CHECKED)
-        deadline = self.deadline()
-        if deadline is None:
-            return self._no_descriptions(UNAVAILABLE)
         if not listed:
             wanted = tuple(ref for ref in wanted if self._visibility.proven(key, ref))
             if not wanted:
                 return self._no_descriptions(NOT_FOUND)
+        # Taken once the proofs are done: they spend the call's time, never the providers'.
+        deadline = self.deadline()
+        if deadline is None:
+            return self._no_descriptions(UNAVAILABLE)
         try:
             gathered = self._chain.gather(wanted, deadline=deadline)
         except Exception as exc:
@@ -324,20 +326,18 @@ class ContextService:
 
         descriptions: dict[TableRef, dict] = {}
         for ref in wanted:
-            # Only the description is merged: nothing else of a context reaches a listing.
-            merged = merge_table(
-                [
-                    (name, TableContext(description=ctx.description))
-                    for name, ctx in gathered.tables.get(ref, ())
-                    if name not in broken
-                ],
-                text_chars=self._config.context_text_chars,
-            )
-            if "description" in merged:
-                entry = {"text": merged["description"], "source": merged["sources"]["description"]}
-                if "description" in merged.get("cut", ()):
-                    entry["cut"] = ["text"]
-                descriptions[ref] = entry
+            # Only the description reaches a listing, and only the one served is read: the
+            # first source whose description is not empty once cleaned.
+            for name, ctx in gathered.tables.get(ref, ()):
+                if name in broken:
+                    continue
+                text, cut = clean_text(ctx.description, self._config.context_text_chars)
+                if text:
+                    entry: dict[str, Any] = {"text": text, "source": name}
+                    if cut:
+                        entry["cut"] = ["text"]
+                    descriptions[ref] = entry
+                    break
         if descriptions:
             note(metadata_served=[f"{r.catalog}.{r.schema}.{r.table}" for r in descriptions])
         return {
@@ -477,11 +477,13 @@ class ContextService:
 class ContextReader:
     """What a tool plugin reads of the catalogues; never the chain, the visibility, a provider."""
 
-    __slots__ = ("_read",)
+    __slots__ = ("_read", "_max_tables")
 
-    def __init__(self, service: ContextService) -> None:
-        """Read through ``service``, for the tables the visibility proves to the caller only."""
+    def __init__(self, service: ContextService, *, max_tables: int) -> None:
+        """Read through ``service``, for the tables the visibility proves to the caller only,
+        ``max_tables`` at most per call (``MCP_DESCRIBE_SCHEMA_TABLES``, a page of a listing)."""
         self._read = functools.partial(service.for_tables, listed=False)
+        self._max_tables = max_tables
 
     def tables(self, refs: Sequence[TableRef]) -> dict:
         """Return the short catalogue description of each table of ``refs`` Trino proves.
@@ -490,6 +492,8 @@ class ContextReader:
         ``TableRef``, holds only tables Trino lists to the caller, in this call or within
         ``MCP_VISIBILITY_TTL_SECONDS``; a table not proven is absent, as one without context
         is, and is neither named to Trino nor asked of a catalogue. Build ``refs`` with
-        ``TableRef.of``, which folds the names as Trino does.
+        ``TableRef.of``, which folds the names as Trino does. Only the first
+        ``MCP_DESCRIBE_SCHEMA_TABLES`` distinct tables of ``refs`` are read, as many as a
+        page of ``describe_schema``; the tables past them are absent.
         """
-        return self._read(refs)
+        return self._read(list(dict.fromkeys(refs))[: self._max_tables])
