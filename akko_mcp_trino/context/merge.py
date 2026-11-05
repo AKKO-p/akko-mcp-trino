@@ -54,21 +54,28 @@ def _terms(entries) -> list[dict]:
     )
 
 
-def _properties(entries) -> dict:
-    """Properties keyed ``<set>.<key>``: the first value stays, differing ones are listed."""
+def _properties(entries, text_chars: int) -> dict:
+    """Properties keyed ``<set>.<key>``: the first value stays, differing ones are listed.
+
+    The set and the key are names, dropped past their bound; a value is a text, cut at
+    ``text_chars`` with ``"cut": ["value"]``.
+    """
     merged: dict[str, dict] = {}
     for source, context in entries:
         for name, labelled in context.properties.items():
             label_set, prop = clean_name(labelled.set), clean_name(name)
-            value = clean_name(labelled.name)
+            value, cut = clean_text(labelled.name, text_chars)
             if not (label_set and prop and value):
                 continue
+            shown: dict = {"value": value, "source": source}
+            if cut:
+                shown["cut"] = ["value"]
             key = f"{label_set}.{prop}"
-            entry = merged.setdefault(key, {"value": value, "source": source})
+            entry = merged.setdefault(key, shown)
             if value != entry["value"]:
                 others = entry.setdefault("other_values", [])
                 if all(o["value"] != value for o in others):
-                    others.append({"value": value, "source": source})
+                    others.append(shown)
     return merged
 
 
@@ -118,7 +125,7 @@ def merge_column(entries: Sequence[tuple[str, ColumnContext]], *, text_chars: in
     _texts(entries, text_chars, merged, ())
     _put(merged, "classifications", _labels(entries, "classifications"))
     _put(merged, "terms", _terms(entries))
-    _put(merged, "properties", _properties(entries))
+    _put(merged, "properties", _properties(entries, text_chars))
     return merged
 
 
@@ -171,7 +178,7 @@ def merge_table(entries: Sequence[tuple[str, TableContext]], *, text_chars: int)
     _texts(entries, text_chars, merged, _SINGLE)
     _put(merged, "tags", _labels(entries, "tags"))
     _put(merged, "terms", _terms(entries))
-    _put(merged, "properties", _properties(entries))
+    _put(merged, "properties", _properties(entries, text_chars))
     _grain(entries, merged)
     _put(merged, "joins", _joins(entries))
     return merged

@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
-  <img src="https://img.shields.io/badge/tests-1279%20passed-success" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1280%20passed-success" alt="Tests">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.7.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
@@ -135,7 +135,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
-- **Small and proven.** 1279 tests at 100 % line and branch coverage, including in-process suites on
+- **Small and proven.** 1280 tests at 100 % line and branch coverage, including in-process suites on
   the real SDK for all three transports, a live run against Keycloak and Trino in CI
   ([`integration/`](integration/)), and a product-neutral guard.
 
@@ -1098,19 +1098,21 @@ of the context. Without a provider, `describe_schema` answers and describes itse
 
 Plugins read the catalogues through `tools.context.tables(refs)`, a list of `TableRef` built with
 `TableRef.of`. It answers as `describe_schema` does, `descriptions` by `TableRef` and
-`context_sources`, for the tables the caller's visibility proves only (listed by Trino in this
-call or within `MCP_VISIBILITY_TTL_SECONDS`). A table Trino does not list is neither named to
-Trino nor asked of a provider, and is absent from the answer, as a table without context is. One
-call reads at most `MCP_DESCRIBE_SCHEMA_TABLES` distinct tables, the first of `refs`, as many as a
-page of `describe_schema`; the tables past them are absent. A plugin never receives the chain, the
-visibility cache nor a provider.
+`context_sources`, for the tables the caller's visibility proves only (listed by Trino in this call
+or within `MCP_VISIBILITY_TTL_SECONDS`). A table Trino does not list is neither named to Trino nor
+asked of a provider, and is absent from the answer, as a table without context is. One call reads at
+most `MCP_DESCRIBE_SCHEMA_TABLES` distinct tables, the first of `refs`, as many as a page of
+`describe_schema`; the tables past them are absent. An empty `refs` asks nothing and answers no
+`context_sources`, as an empty page does. A plugin never receives the chain, the visibility cache
+nor a provider.
 
-A catalogue text costs what is served, not what the catalogue sends: cleaning a text reads at
-most four times `MCP_CONTEXT_TEXT_CHARS` of it, and a listing reads only the description it
-serves. A name the catalogue gives (a classification, a tag, a set, a property's key or value, the
-owner, the tier, a term's name, glossary, status, category or relation, a column of a grain or a
-join) longer than 256 characters once cleaned is dropped, never cut, since a cut name is another
-name; deciding so reads at most 1025 characters of it. A term whose name is dropped is not served.
+A catalogue text costs what is served, not what the catalogue sends: cleaning a text reads at most
+four times `MCP_CONTEXT_TEXT_CHARS` of it, and a listing reads only the description it serves. A
+name the catalogue gives (a classification, a tag, a set, a property's key, the owner, the tier, a
+term's name, glossary, status, category or relation, a column of a grain or a join) longer than 256
+characters once cleaned is dropped, never cut, since a cut name is another name; deciding so reads
+at most 1025 characters of it. A term whose name is dropped is not served. A property's value is a
+text: it is cut at `MCP_CONTEXT_TEXT_CHARS`, and then carries `"cut": ["value"]`.
 
 The statements of the filter run as the caller, with the client tag `mcp-gate`: the canary check,
 `EXPLAIN (TYPE VALIDATE)` of the visible columns with `MCP_CONTEXT_REQUIRE_SELECT=true` (a refusal

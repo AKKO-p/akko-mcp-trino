@@ -151,7 +151,7 @@ donnez.
   peut seulement refuser ce que le cœur autorise, jamais l'élargir.
 - **N'importe quel MCP host, n'importe quel modèle.** Cursor, Claude Desktop, VS Code, le SDK
   Python… Mistral, ou tout modèle compatible OpenAI avec l'agent d'exemple.
-- **Petit et prouvé.** 1279 tests à 100 % de couverture des lignes et des branches, dont des suites
+- **Petit et prouvé.** 1280 tests à 100 % de couverture des lignes et des branches, dont des suites
   sur le vrai SDK pour les trois transports, une exécution réelle contre Keycloak et Trino en CI
   ([`integration/`](integration/)) et une garde de neutralité produit.
 
@@ -667,15 +667,18 @@ par `TableRef` et `context_sources`, pour les seules tables que la visibilité d
 Trino ne liste pas n'est ni nommée à Trino ni demandée à un fournisseur, et elle est absente de la
 réponse, comme une table sans contexte. Un appel lit au plus `MCP_DESCRIBE_SCHEMA_TABLES` tables
 distinctes, les premières de `refs`, autant qu'une page de `describe_schema` ; les suivantes sont
-absentes. Un greffon ne reçoit jamais la chaîne, le cache de visibilité ni un fournisseur.
+absentes. Une liste `refs` vide n'interroge rien et ne répond aucun `context_sources`, comme une
+page vide. Un greffon ne reçoit jamais la chaîne, le cache de visibilité ni un fournisseur.
 
 Un texte de catalogue coûte ce qui est servi, pas ce que le catalogue envoie : le nettoyage lit au
 plus quatre fois `MCP_CONTEXT_TEXT_CHARS` caractères d'un texte, et une liste ne lit que la
 description qu'elle sert. Un nom que donne le catalogue (une classification, une étiquette, un
-ensemble, la clé ou la valeur d'une propriété, le propriétaire, le niveau, le nom, le glossaire, le
-statut, la catégorie ou la relation d'un terme, une colonne d'un grain ou d'une jointure) de plus de
-256 caractères une fois nettoyé est écarté, jamais coupé, car un nom coupé est un autre nom ; en
-décider lit au plus 1025 caractères. Un terme dont le nom est écarté n'est pas servi.
+ensemble, la clé d'une propriété, le propriétaire, le niveau, le nom, le glossaire, le statut, la
+catégorie ou la relation d'un terme, une colonne d'un grain ou d'une jointure) de plus de 256
+caractères une fois nettoyé est écarté, jamais coupé, car un nom coupé est un autre nom ; en décider
+lit au plus 1025 caractères. Un terme dont le nom est écarté n'est pas servi. La valeur d'une
+propriété est un texte : elle est coupée à `MCP_CONTEXT_TEXT_CHARS`, et porte alors
+`"cut": ["value"]`.
 
 Les requêtes du filtre partent sous l'identité de l'appelant, avec l'étiquette client `mcp-gate` :
 le contrôle du canari, `EXPLAIN (TYPE VALIDATE)` des colonnes visibles avec

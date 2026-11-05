@@ -9,7 +9,7 @@ _DROPPED = ("Cc", "Cf", "Zl", "Zp")
 # dropped characters costs what it may serve, never what the catalogue sent.
 _READ_PER_KEPT = 4
 # The longest name a catalogue may give and still be served: a classification, a tag, a
-# set, a property's key or value, the owner, the tier, a term's name, glossary, status,
+# set, a property's key, the owner, the tier, a term's name, glossary, status,
 # category or relation, a column of a grain or a join. Catalogues give names as
 # identifiers and short labels, far below this; a longer one is dropped, never cut (a cut
 # name is another name), and deciding so reads at most 4 * NAME_CHARS + 1 characters of

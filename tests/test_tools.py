@@ -1637,6 +1637,8 @@ def test_describe_schema_asks_the_catalogue_only_for_the_tables_of_the_page(setu
     read = in_request(lambda: tools.context.tables([refs["t2"]]))
     assert read["descriptions"] == {refs["t2"]: {"text": "About t2", "source": "catalog"}}
     assert len(client.calls) == before, "proven by the listing of the page, no statement"
+    assert in_request(lambda: tools.context.tables([])) == {"descriptions": {}}, "no status"
+    assert len(provider.calls) == 2 and len(client.calls) == before
 
 
 def test_describe_schema_serves_its_page_when_the_context_fails_unexpectedly(setups, caplog):

@@ -708,8 +708,8 @@ def test_for_tables_not_listed_reads_only_the_tables_trino_proves(made):
     }
     assert provider.calls == [(ORDERS,)]
     before = len(fake.statements)
-    assert service.for_tables([], listed=False)["descriptions"] == {}
-    assert provider.calls == [(ORDERS,)] and len(fake.statements) == before, "nothing asked"
+    assert service.for_tables([], listed=False) == {"descriptions": {}}, "nothing asked"
+    assert provider.calls == [(ORDERS,)] and len(fake.statements) == before
 
 
 class _NeverRead(str):

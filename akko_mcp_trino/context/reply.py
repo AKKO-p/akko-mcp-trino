@@ -203,7 +203,7 @@ class ContextService:
         (``MCP_CONTEXT_REQUIRE_SELECT``): that would cost one statement per table.
         The answer has ``descriptions``, ``{"text", "source"}`` by table, with
         ``"cut": ["text"]`` for a text cut at ``MCP_CONTEXT_TEXT_CHARS``, and
-        ``context_sources``. It never raises, as ``for_table``.
+        ``context_sources``, absent when ``refs`` is empty. It never raises, as ``for_table``.
         """
         return self._guarded(lambda: self._for_tables(refs, listed), self._no_descriptions)
 
@@ -313,8 +313,8 @@ class ContextService:
         key = key_for(self._config, "", self._subject() or "")
         if listed:
             self._visibility.listed(key, wanted)
-        if not wanted:
-            return self._no_descriptions(NOT_FOUND)
+        if not wanted:  # nothing was asked: no provider, no status
+            return {"descriptions": {}}
         if not self._visibility.canary_clear(key):
             return self._no_descriptions(NOT_CHECKED)
         if not listed:
@@ -504,6 +504,7 @@ class ContextReader:
         is, and is neither named to Trino nor asked of a catalogue. Build ``refs`` with
         ``TableRef.of``, which folds the names as Trino does. Only the first
         ``MCP_DESCRIBE_SCHEMA_TABLES`` distinct tables of ``refs`` are read, as many as a
-        page of ``describe_schema``; the tables past them are absent.
+        page of ``describe_schema``; the tables past them are absent. An empty ``refs``
+        asks nothing and answers no ``context_sources``, as an empty page does.
         """
         return self._read(list(dict.fromkeys(refs))[: self._max_tables])

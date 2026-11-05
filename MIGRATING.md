@@ -29,13 +29,14 @@ tools, under the caller's rights in Trino:
   | `joins`: `[{"columns", "target", "target_columns"}]` | `table.joins`: `[{"columns", "table", "target_columns", "source"}]` |
   | `columns`, the context of each visible column, by name | `column_context`, by name, in the order of `DESCRIBE` |
   | a column's `classification`: `["PII"]` | `classifications`: `[{"name": "PII", "set", "source"}]` |
-  | `properties`: `{"<set>.<key>": "value"}` | `properties`: `{"<set>.<key>": {"value", "source"}}`, with `other_values` when providers differ |
+  | `properties`: `{"<set>.<key>": "value"}` | `properties`: `{"<set>.<key>": {"value", "source"}}`, with `other_values` when providers differ; a value is cut at `MCP_CONTEXT_TEXT_CHARS` with `"cut": ["value"]` |
   | `terms`: `[{"name", "definition", "status"}]` | `terms`: `[{"name", "ref"}]` (`t1`, `t2`…); the term itself, with its `definition` and `status`, once in the answer's `terms` dictionary under its reference |
   | a column's `values` | removed: the context serves no data value |
   | nothing | `sources` (the provider of each field), `other_descriptions`, `other_grains`, `cut` |
   | nothing | `context_sources`, `context_truncated`, `undescribed_columns` at the top |
 
-  A name longer than 256 characters once cleaned is dropped, never cut.
+  A name (a set, a property's key, a tag, a classification, a term's name, the owner, the tier, a
+  column of a grain or a join) longer than 256 characters once cleaned is dropped, never cut.
 - `{"known": false}` becomes the error of `DESCRIBE`: a table Trino does not show to the caller
   answers Trino's own error, with its `kind`, and no provider is called. Nothing says whether a
   catalogue knows such a table. A hidden table and a missing one no longer answer the same bytes:

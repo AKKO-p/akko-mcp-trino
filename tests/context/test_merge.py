@@ -284,7 +284,6 @@ def test_every_name_past_its_bound_is_dropped_whole_and_read_within_its_window()
         properties=MappingProxyType(
             {
                 _huge(): Labelled("v", "set"),
-                "k": Labelled(_huge(), "set"),
                 "j": Labelled("v", _huge()),
                 "good": Labelled("v", "set"),
             }
@@ -300,7 +299,7 @@ def test_every_name_past_its_bound_is_dropped_whole_and_read_within_its_window()
             {
                 "id": ColumnContext(
                     classifications=(Labelled(_huge(), "cls"), Labelled("pii", _huge())),
-                    properties=MappingProxyType({"k": Labelled(_huge(), "set")}),
+                    properties=MappingProxyType({_huge(): Labelled("v", "set")}),
                 )
             }
         ),
@@ -323,3 +322,25 @@ def test_a_name_of_exactly_its_bound_is_served_whole():
     )
     assert merged["owner"] == name
     assert merged["tags"] == [{"name": name, "set": name, "source": "a"}]
+
+
+def test_a_property_value_is_a_text_cut_at_the_text_limit_and_says_so():
+    def props(value):
+        return ColumnContext(properties=MappingProxyType({"k": Labelled(value, "set")}))
+
+    huge = _Reads("v" * 1_000_000, allowed=4 * 10 + 1)
+    merged = merge_column(
+        [("a", props(huge)), ("b", props("w" * 12)), ("c", props("short"))], text_chars=10
+    )
+    assert merged["properties"] == {
+        "set.k": {
+            "value": "v" * 10,
+            "source": "a",
+            "cut": ["value"],
+            "other_values": [
+                {"value": "w" * 10, "source": "b", "cut": ["value"]},
+                {"value": "short", "source": "c"},
+            ],
+        }
+    }
+    assert "cut" not in merged, "the cut is named on the value itself"
