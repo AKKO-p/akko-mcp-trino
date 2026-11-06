@@ -8,8 +8,12 @@ account of its own, through the REST API v2 only, and never writes to it.
 
 *French version: [README.fr.md](README.fr.md).*
 
-> **Status.** Tables, columns and glossary terms are read, with the allow lists, high
-> availability and Basic authentication or a Knox token; Kerberos comes in the next commit of 0.8.
+> **Status.** Tables, columns and glossary terms are read, with the allow lists and high
+> availability, under Basic authentication, a Knox token or Kerberos (SPNEGO). The provider
+> passes the server's context contract on answers recorded from Apache Atlas 2.1, the version of
+> reference. Kerberos is tested against a stand-in for its library only, and the Knox
+> token against a fake Atlas only: neither has been proven against a real KDC or a real Knox
+> gateway yet.
 
 ## Install
 
@@ -17,6 +21,10 @@ account of its own, through the REST API v2 only, and never writes to it.
 pip install "akko-mcp-trino[atlas]"     # the core with this provider and Kerberos
 export MCP_CONTEXT_PROVIDERS=atlas
 ```
+
+Alone: `pip install akko-mcp-trino-atlas` (Basic and Knox), or
+`pip install "akko-mcp-trino-atlas[kerberos]"` for Kerberos, which brings `pyspnego` and its
+GSSAPI bindings (MIT Kerberos libraries on the system).
 
 The provider is registered under the entry point group `akko_mcp_trino.context` as `atlas`.
 Nothing is loaded unless `MCP_CONTEXT_PROVIDERS` names it; the container image of
@@ -34,7 +42,8 @@ secret.
 | `ATLAS_AUTH` | `basic` (a user and a password, or a Knox token) or `kerberos` | `basic` |
 | `ATLAS_USER`, `ATLAS_PASSWORD` or `ATLAS_PASSWORD_FILE` | Basic authentication, with a read-only account; the file comes first | empty |
 | `ATLAS_KNOX_TOKEN` or `ATLAS_KNOX_TOKEN_FILE` | a Knox token, sent as `Authorization: Bearer`, for Atlas behind a Knox topology with the `ATLAS` role; not with `ATLAS_USER` | empty |
-| `ATLAS_PRINCIPAL`, `ATLAS_KEYTAB` | Kerberos (SPNEGO), with `ATLAS_AUTH=kerberos` | empty |
+| `ATLAS_PRINCIPAL`, `ATLAS_KEYTAB` | Kerberos (SPNEGO), with `ATLAS_AUTH=kerberos`: the account's principal and the path of its keytab. The path is never printed. | empty |
+| `ATLAS_SPN` | the service name Atlas runs under, `<service>@<host>`, with `ATLAS_AUTH=kerberos`, when an address is not the host's canonical name | `HTTP@<host of each address>` |
 | `ATLAS_CLUSTERS` | JSON object, Trino catalog to Atlas cluster: `{"lake": "primary"}`. Catalogs are folded to lower case, as Trino lists them; two that fold to the same name are refused. A catalog not named here is not mapped and nothing is asked about it. | required |
 | `ATLAS_TABLE_TYPES` | entity types a table is looked up under, in order; the first that holds it wins | `hive_table,iceberg_table` |
 | `ATLAS_MAX_QUERY_CHARS` | longest query string of one bulk read; a batch of tables is split under it | `6000` |
@@ -124,12 +133,69 @@ When unavailable, it logs `atlas unreachable`, with no address, user or object n
 is logged by the server as `atlas refused the account`. Neither the logs nor an error carry an
 answer's text or the secret.
 
+## Kerberos (SPNEGO)
+
+With `ATLAS_AUTH=kerberos`, the provider answers Atlas's `WWW-Authenticate: Negotiate` with a
+token from `pyspnego`. Each negotiation gets a new ticket from the keytab, kept in a cache in
+memory (`MEMORY:`), so an expired ticket is never used and no process of its own renews one; it is
+one request to the KDC. Once Atlas opens a session (`ATLASSESSIONID`), no new negotiation happens until Atlas asks
+for one, and a redirect of Atlas's passive server negotiates again with the active one. A
+negotiation that fails makes the provider unavailable for the call, with no other address tried.
+Mutual authentication of Atlas is left to TLS (`https` and `ATLAS_CA_BUNDLE`).
+
+What the container needs:
+
+- the `kerberos` extra (`ATLAS_AUTH=kerberos` without it refuses to start);
+- a `krb5.conf` (`/etc/krb5.conf`, or `KRB5_CONFIG`) that names the realm and its KDC, with
+  `rdns = false`, since an address behind a load balancer or a Kubernetes service has no
+  reverse name that matches Atlas's service principal (`ATLAS_SPN` names it);
+- a route to the KDC (port 88) from the pod: Kubernetes and OpenShift network policies must let
+  it through;
+- a clock in step with the KDC (five minutes of skew at most, by default);
+- the keytab mounted read-only, as a secret, never in the image.
+
+`--check` prints the principal, never the keytab.
+
+## The account the provider reads with
+
+1. **Read only.** The account needs to read entities, glossaries and their terms, and nothing
+   else: no write, no administration. On Atlas with its own users, a user of the
+   `DATA_SCIENTIST` role is enough: the recorded answers of the contract were read with one. On
+   Atlas governed by Ranger, a policy of the `atlas` service that only reads.
+2. **It sees what is served to everyone.** The provider serves what this account reads, within
+   the allow lists, to every caller who sees the object in Trino. Give it only the glossaries,
+   classifications and business metadata that anyone who sees the table may read.
+3. **A refusal stops it, not a retry loop.** A refused account (401, 403, or a redirect to a
+   login page on another host) is not asked again for an hour, or until its secret file
+   changes, or `SIGHUP`, so that the provider never locks it in a directory that counts failed
+   logins.
+
+## Checking the configuration
+
+`akko-mcp-trino --check` prints the addresses (never with credentials), the authentication,
+the principal for Kerberos, the catalogs, the sets served and the bound on parallel reads. It
+then asks Atlas its version (`GET /api/atlas/admin/version`) and prints
+`atlas: answers, version <version>`, or a line that starts with `UNREACHABLE:` when Atlas
+refuses the account or does not answer; `--check --strict` then exits 2.
+
 ## Atlas versions
 
-The tests replay answers recorded from a vendor build of Atlas 2.1 and from Apache Atlas 2.4, in
-`tests/recordings/atlas-2.1` and `tests/recordings/atlas-2.4`. Every name and text in them was
-replaced by a neutral one, structure kept, by `tests/recordings/anonymize.py`; its docstring
-says how to record and anonymize a new version.
+| Atlas | Role |
+|---|---|
+| Apache Atlas 2.1 | reference |
+| Apache Atlas 2.4 | compatibility |
+
+The tests replay recorded answers, in `tests/recordings/`:
+
+- `atlas-2.1-seed`: a build of Atlas 2.1, seeded with a neutral catalogue that plays every
+  role of the server's contracts, and read through an account that may only read;
+- `atlas-2.1`: a real catalogue of the same version, made neutral;
+- `atlas-2.4`: Apache Atlas 2.4.0, built from the official sources.
+
+The server's context contract (`ContextContract`) runs on `atlas-2.1-seed` and on `atlas-2.1`;
+a check that needs a role the real catalogue lacks is skipped and says why. Every name and text
+of a real catalogue was replaced by a neutral one, structure kept, by
+`tests/recordings/anonymize.py`; its docstring says how to record and anonymize a new version.
 
 ## License
 

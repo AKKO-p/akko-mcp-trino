@@ -54,6 +54,11 @@ jobs:
           /tmp/licenses/bin/pip install -c image-requirements.txt . pip-licenses==5.5.5
           if [ "${{ matrix.packages }}" = "core+atlas" ]; then
             /tmp/licenses/bin/pip install --no-deps ./providers/atlas
+            # The kerberos extra of the provider (pyspnego, gssapi, krb5), built against the
+            # system's MIT Kerberos; its requirement is written as in providers/atlas/pyproject.toml.
+            sudo apt-get install -y --no-install-recommends libkrb5-dev
+            /tmp/licenses/bin/pip install "pyspnego[kerberos]>=0.11,<1"
+            /tmp/licenses/bin/pip-licenses --packages pyspnego gssapi krb5
           fi
           /tmp/licenses/bin/pip-licenses --partial-match --fail-on "GNU General Public License;GNU Affero General Public License;AGPL;Collate Community License"
           /tmp/licenses/bin/pip-licenses --fail-on "GPL;GPLv2;GPLv2+;GPLv3;GPLv3+;GPL-2.0;GPL-2.0+;GPL-3.0;GPL-3.0+;GPL-2.0-only;GPL-2.0-or-later;GPL-3.0-only;GPL-3.0-or-later"

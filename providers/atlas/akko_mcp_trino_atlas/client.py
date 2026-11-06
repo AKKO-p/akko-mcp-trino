@@ -39,7 +39,8 @@ from typing import Any
 import httpx
 from akko_mcp_trino.context import ProviderRefused, ProviderUnavailable
 
-from .settings import BASIC, KNOX, AtlasSettings
+from .settings import BASIC, KERBEROS, KNOX, AtlasSettings
+from .spnego import NegotiationError, SpnegoAuth
 
 log = logging.getLogger(__name__)
 
@@ -83,12 +84,12 @@ class _BearerAuth(httpx.Auth):
         yield request
 
 
-def _auth(settings: AtlasSettings) -> httpx.Auth | None:
+def _auth(settings: AtlasSettings, kerberos: SpnegoAuth | None) -> httpx.Auth | None:
     if settings.auth == BASIC:
         return httpx.BasicAuth(settings.user, settings.secret())
     if settings.auth == KNOX:
         return _BearerAuth(settings)
-    return None
+    return kerberos
 
 
 def client_options(settings: AtlasSettings) -> dict[str, Any]:
@@ -130,6 +131,11 @@ class AtlasClient:
         self._settings = settings
         self._urls = settings.urls
         self._first = 0
+        self._kerberos = (
+            SpnegoAuth(settings.principal, settings.keytab, settings.spn)
+            if settings.auth == KERBEROS
+            else None
+        )
         options = client_options(settings)
         if transport is not None:
             options.pop("proxy")
@@ -160,11 +166,13 @@ class AtlasClient:
         """One request to one address, following redirects among the addresses only."""
         for _ in range(_MAX_REDIRECTS + 1):
             try:
-                response = await self._http.get(
-                    url, params=params, auth=_auth(self._settings) or httpx.USE_CLIENT_DEFAULT
-                )
+                auth = _auth(self._settings, self._kerberos) or httpx.USE_CLIENT_DEFAULT
+                response = await self._http.get(url, params=params, auth=auth)
             except httpx.TransportError:
                 raise _Outage from None
+            except NegotiationError:
+                # The same credentials fail on every address: none is tried.
+                raise self._unavailable("the kerberos negotiation failed") from None
             if response.status_code >= 500:
                 raise _Outage
             location = response.headers.get("location")

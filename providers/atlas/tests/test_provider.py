@@ -336,6 +336,7 @@ def test_check_lines_name_the_addresses_and_sets_never_the_secret():
         f"atlas: {ATLAS} (basic); catalogs: lake; at most 4 requests at once",
         "atlas: glossaries: finance; classifications: confidential; "
         "business metadata: stewardship; owner: served",
+        "atlas: answers, version 2.4.0",
     ]
     bare = provider(FakeAtlas("atlas-2.4"))
     assert bare.check_lines()[1].endswith("business metadata: none; owner: not served")
@@ -413,3 +414,24 @@ def test_a_guid_not_found_answer_to_a_bulk_read_is_an_outage(caplog):
     with pytest.raises(ProviderUnavailable):
         describe(p, [INVOICES])
     assert [r.getMessage() for r in caplog.records] == ["atlas unreachable"]
+
+
+def test_the_check_says_when_atlas_does_not_answer_its_version():
+    def answering(status, body=None, error=None):
+        def handler(request):
+            if error is not None:
+                raise error
+            return httpx.Response(status, json=body if body is not None else {})
+
+        p = AtlasProvider(read_settings(BASE), transport=transport(handler))
+        line = p.check_lines()[-1]
+        asyncio.run(p.aclose())
+        return line
+
+    assert answering(200, {"Version": "2.1.0"}) == "atlas: answers, version 2.1.0"
+    assert answering(200, {}) == "atlas: answers, version not given"
+    assert answering(401) == "UNREACHABLE: atlas refused the account"
+    assert answering(503) == "UNREACHABLE: atlas did not answer"
+    assert answering(0, error=RuntimeError("a bug")) == (
+        "UNREACHABLE: the atlas check failed (RuntimeError)"
+    )

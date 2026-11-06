@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 
 from akko_mcp_trino.context import FileSecret, secret_setting
 
+from .spnego import load_spnego
+
 BASIC, KNOX, KERBEROS = "basic", "knox", "kerberos"
 # Settings of Basic and Knox, refused with Kerberos so that none is silently ignored.
 _BASIC_SETTINGS = (
@@ -44,7 +46,8 @@ class AtlasSettings:
     auth: str
     user: str = ""
     principal: str = ""
-    keytab: str = ""
+    keytab: str = field(default="", repr=False)
+    spn: str = ""
     clusters: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     table_types: tuple[str, ...] = DEFAULT_TABLE_TYPES
     max_query_chars: int = DEFAULT_MAX_QUERY_CHARS
@@ -177,15 +180,21 @@ def _auth(env: Mapping[str, str]) -> dict:
                 raise ValueError(f"ATLAS_AUTH=kerberos needs {name}")
         if any(env.get(name, "").strip() for name in _BASIC_SETTINGS):
             raise ValueError("ATLAS_AUTH=kerberos does not take a user, a password or a token")
+        spn = env.get("ATLAS_SPN", "").strip()
+        service, at, host = spn.partition("@")
+        if spn and (not at or not service or not host):
+            raise ValueError("ATLAS_SPN must read <service>@<host>, such as HTTP@atlas.example")
+        load_spnego()
         return {
+            "spn": spn,
             "auth": KERBEROS,
             "principal": env["ATLAS_PRINCIPAL"].strip(),
             "keytab": env["ATLAS_KEYTAB"].strip(),
         }
     if auth != BASIC:
         raise ValueError("ATLAS_AUTH must be basic or kerberos")
-    if any(env.get(name, "").strip() for name in ("ATLAS_PRINCIPAL", "ATLAS_KEYTAB")):
-        raise ValueError("ATLAS_PRINCIPAL and ATLAS_KEYTAB need ATLAS_AUTH=kerberos")
+    if any(env.get(name, "").strip() for name in ("ATLAS_PRINCIPAL", "ATLAS_KEYTAB", "ATLAS_SPN")):
+        raise ValueError("ATLAS_PRINCIPAL, ATLAS_KEYTAB and ATLAS_SPN need ATLAS_AUTH=kerberos")
     user = env.get("ATLAS_USER", "").strip()
     password = secret_setting(env, "ATLAS_PASSWORD")
     token = secret_setting(env, "ATLAS_KNOX_TOKEN")

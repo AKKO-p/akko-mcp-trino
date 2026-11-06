@@ -42,6 +42,7 @@ import asyncio
 import itertools
 import time
 from collections.abc import Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from types import MappingProxyType
 from typing import Any
 from urllib.parse import quote
@@ -64,10 +65,11 @@ from akko_mcp_trino.context import (
 )
 
 from .client import INSTANCE_BY_ATTRIBUTE, INSTANCE_BY_GUID, UNKNOWN_TYPE, AtlasClient, Missing
-from .settings import AtlasSettings
+from .settings import KERBEROS, AtlasSettings
 
 BULK = "/api/atlas/v2/entity/bulk/uniqueAttribute/type/"
 TERM = "/api/atlas/v2/glossary/term/"
+VERSION = "/api/atlas/admin/version"
 # A bulk read says nothing of a table Atlas does not hold, or of a type it does not know.
 _BULK_MISSING = MappingProxyType({**INSTANCE_BY_ATTRIBUTE, **UNKNOWN_TYPE})
 # The relations of a term that are read, and the name the core gives each.
@@ -176,6 +178,7 @@ class AtlasProvider:
     ) -> None:
         """Build the provider; ``transport`` replaces the network (tests, the contract)."""
         self.settings = settings
+        self._transport = transport
         self._client = AtlasClient(settings, transport)
         # Entity types Atlas said do not exist, each with the reset generation and the
         # secret's stamp it was learnt under; a record from an older one is stale. Only the
@@ -249,13 +252,41 @@ class AtlasProvider:
         def names(values: Iterable[str]) -> str:
             return ", ".join(sorted(values)) or "none"
 
-        return [
+        lines = [
             f"atlas: {', '.join(s.urls)} ({s.auth}); catalogs: {names(s.clusters)}; "
             f"at most {s.max_concurrent_requests} requests at once",
             f"atlas: glossaries: {names(sets[GLOSSARY])}; classifications: "
             f"{names(sets[CLASSIFICATION])}; business metadata: {names(sets[PROPERTY])}; "
             "owner: " + ("served" if sets[OWNER] else "not served"),
         ]
+        if s.auth == KERBEROS:
+            service = s.spn or "HTTP@<host of each address>"
+            lines.append(f"atlas: kerberos principal {s.principal}, service {service}")
+        return [*lines, self._probe()]
+
+    def _probe(self) -> str:
+        """Ask Atlas its version, on a client and an event loop of the probe's own, so that
+        it runs from any thread; the line says whether Atlas answered, never why in its
+        own words."""
+
+        async def ask() -> Any:
+            client = AtlasClient(self.settings, self._transport)
+            try:
+                return await client.get(VERSION)
+            finally:
+                await client.aclose()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            try:
+                answer = pool.submit(asyncio.run, ask()).result()
+            except ProviderRefused:
+                return "UNREACHABLE: atlas refused the account"
+            except ProviderUnavailable:
+                return "UNREACHABLE: atlas did not answer"
+            except Exception as exc:  # noqa: BLE001 - the check says it failed, by type
+                return f"UNREACHABLE: the atlas check failed ({type(exc).__name__})"
+        version = _text(_object(answer).get("Version")).strip()
+        return f"atlas: answers, version {version or 'not given'}"
 
     async def aclose(self) -> None:
         """Close the HTTP client."""

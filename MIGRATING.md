@@ -12,6 +12,23 @@ Nothing is removed or renamed in the answers of the tools.
 - Over stdio with a context provider, SIGTERM closes the providers and exits 0, where 0.7.2 died by the signal (143). Without a provider, nothing changes.
 - With `MCP_CONTEXT_REQUIRE_SELECT=true`, a read of the visible columns that Trino refuses is kept as refused for `MCP_VISIBILITY_TTL_SECONDS`: a right granted in Trino serves the context of that table at most that long after. A right withdrawn can leave the context visible as long, never the data.
 
+### From the earlier Atlas provider
+
+The Atlas provider is now `akko-mcp-trino-atlas`, in this repository, under the entry-point group
+`akko_mcp_trino.context` (named `atlas` in `MCP_CONTEXT_PROVIDERS`). Its settings keep their
+names, with these changes:
+
+- **Nothing is served by default.** Without `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` and
+  `ATLAS_BUSINESS_METADATA`, no glossary term, no classification and no business metadata is
+  served, only descriptions. An empty `ATLAS_BUSINESS_METADATA` used to serve every set: name each
+  set now, and each glossary and classification too. `*` is a name like any other, never a
+  wildcard.
+- `ATLAS_CLUSTERS` is required, and its catalogs are folded to lower case.
+- `ATLAS_MAX_CONCURRENT_REQUESTS` (default 4) bounds the glossary term reads sent at once;
+  `ATLAS_MAX_QUERY_CHARS` (6000), `ATLAS_PROXY` and `ATLAS_SPN` are new too.
+- `ATLAS_URL` takes several addresses, for Atlas in high availability; `ATLAS_PASSWORD_FILE`,
+  `ATLAS_KNOX_TOKEN[_FILE]` and `ATLAS_AUTH=kerberos` are new ways to authenticate.
+
 ### From the context tools `visible_tables` and `explain_table`
 
 A server that offered the context of a catalogue through tools of its own now finds it in the core

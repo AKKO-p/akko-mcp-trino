@@ -20,6 +20,7 @@ RECORDINGS = Path(__file__).parent / "recordings"
 VERSIONS = ("atlas-2.1", "atlas-2.4")
 BULK = "/api/atlas/v2/entity/bulk/uniqueAttribute/type/"
 TERM = "/api/atlas/v2/glossary/term/"
+VERSION = "/api/atlas/admin/version"
 ATLAS = "http://atlas-a:21000"
 # The trap table of the recordings, by Trino schema and table: a quote, a dot, a space, accents.
 TRAP = ("o'brien", "été.l'année fiscale.v2")
@@ -64,6 +65,7 @@ class FakeAtlas:
             self.terms[body["guid"]] = body
         # Recorded from Atlas 2.1 only; Atlas 2.4 answers with the same code.
         self.term_not_found = recording("atlas-2.1", "glossary-term-not-found")["response"]
+        self.version = recording(version, "admin-version")["response"]
         self.requests: list[httpx.Request] = []
 
     def entities(self, type_name: str) -> list[dict[str, Any]]:
@@ -87,6 +89,8 @@ class FakeAtlas:
         """Answer one request as the recorded Atlas did."""
         self.requests.append(request)
         path = request.url.path
+        if path == VERSION:
+            return httpx.Response(self.version["status"], json=copy.deepcopy(self.version["body"]))
         if path.startswith(TERM):
             guid = path.removeprefix(TERM)
             term = self.terms.get(guid)

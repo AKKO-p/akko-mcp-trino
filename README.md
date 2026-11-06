@@ -1043,6 +1043,11 @@ or a factory that cannot serve its settings refuses to start; a catalogue that i
 variables from the environment; a secret can be given as a file (`<NAME>_FILE`, read again when the
 file changes) instead of a value.
 
+Two providers come with this repository: `file`, in the core, the reference for the contract (a
+catalogue kept in one JSON file), and `atlas`, for Apache Atlas, a package of its own
+(`akko-mcp-trino-atlas`, installed by the `atlas` extra); its settings, its Kerberos set-up and
+the account it needs are in [its README](providers/atlas/README.md).
+
 Context follows what Trino lists for the caller: a name that comes from a catalogue is never used
 before Trino has listed it for that caller, a provider never receives the Trino client or the
 caller's identity, and it never writes to its catalogue. The text of a provider's error never

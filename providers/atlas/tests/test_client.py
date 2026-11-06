@@ -11,6 +11,7 @@ import httpx
 import pytest
 from akko_mcp_trino.context import ProviderRefused, ProviderUnavailable, TableRef
 from atlas_replay import ATLAS, FakeAtlas, transport
+from fake_spnego import install
 
 import akko_mcp_trino_atlas
 from akko_mcp_trino_atlas import AtlasProvider
@@ -294,7 +295,8 @@ def test_a_refusal_drops_the_session():
     assert ["cookie" in r.headers for r in seen] == [False, True, False]
 
 
-def test_a_knox_token_is_sent_as_a_bearer_and_kerberos_sends_no_password(tmp_path):
+def test_a_knox_token_is_sent_as_a_bearer_and_kerberos_sends_no_password(tmp_path, monkeypatch):
+    install(monkeypatch)  # a stand-in for the kerberos extra
     token = tmp_path / "token"
     token.write_text("knox-token-1\n", encoding="utf-8")
     atlas = FakeAtlas("atlas-2.4")

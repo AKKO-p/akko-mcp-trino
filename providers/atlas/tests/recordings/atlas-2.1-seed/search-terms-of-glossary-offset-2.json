@@ -1,0 +1,73 @@
+{
+ "request": {
+  "body": {
+   "entityFilters": {
+    "attributeName": "qualifiedName",
+    "attributeValue": "@finance",
+    "operator": "endsWith"
+   },
+   "excludeDeletedEntities": true,
+   "limit": 2,
+   "offset": 2,
+   "typeName": "AtlasGlossaryTerm"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 4,
+   "entities": [
+    {
+     "attributes": {
+      "name": "Invoice",
+      "qualifiedName": "Invoice@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Invoice",
+     "guid": "00000000-0000-4000-8000-000000000014",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Bill",
+      "qualifiedName": "Bill@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Bill",
+     "guid": "00000000-0000-4000-8000-000000000057",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    }
+   ],
+   "queryType": "BASIC",
+   "searchParameters": {
+    "entityFilters": {
+     "attributeName": "qualifiedName",
+     "attributeValue": "@finance",
+     "operator": "endsWith"
+    },
+    "excludeDeletedEntities": true,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 2,
+    "offset": 2,
+    "typeName": "AtlasGlossaryTerm"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

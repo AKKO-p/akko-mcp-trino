@@ -4,7 +4,15 @@ Each file is one exchange with Atlas, `{"request": {...}, "response": {...}}`, r
 tests in place of a catalogue. Only reads were recorded: `GET`, and
 `POST /api/atlas/v2/search/basic`. Response headers were not kept.
 
-- `atlas-2.1`: a vendor build of Atlas 2.1.
+- `atlas-2.1-seed`: a build of Atlas 2.1, the version of reference, started empty for
+  these recordings and removed after. An administrator wrote a neutral catalogue that plays
+  every role of the server's contracts (tables of both entity types with columns and partition
+  keys, a deleted table, a name with a quote, a space and an accent, two glossaries with a term
+  of one related to a term of the other, a category, classifications and business metadata);
+  every answer was then read by an account of the `DATA_SCIENTIST` role, which may only read.
+  `anonymize.py` changed nothing but its GUIDs (sequential), times (fixed) and the build
+  revision and version (zeros, `2.1.0`): its names and texts were neutral already.
+- `atlas-2.1`: a vendor build of Atlas 2.1, a real catalogue made neutral.
 - `atlas-2.4`: Apache Atlas 2.4.0, built from the official sources, holding a small catalogue
   written for these tests.
 

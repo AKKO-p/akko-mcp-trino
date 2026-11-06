@@ -565,6 +565,11 @@ servir ses réglages empêchent le démarrage ; un catalogue injoignable, non (`
 quand un fournisseur se dit injoignable). Un secret peut être donné en fichier (`<NOM>_FILE`, relu
 quand le fichier change).
 
+Deux fournisseurs viennent avec ce dépôt : `file`, dans le cœur, la référence du contrat (un
+catalogue tenu dans un fichier JSON), et `atlas`, pour Apache Atlas, un paquet à part
+(`akko-mcp-trino-atlas`, installé par l'extra `atlas`) ; ses réglages, sa mise en place de Kerberos
+et le compte qu'il lui faut sont dans [son README](providers/atlas/README.fr.md).
+
 Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs valeurs par défaut :
 
 | Variable | Rôle | Défaut |

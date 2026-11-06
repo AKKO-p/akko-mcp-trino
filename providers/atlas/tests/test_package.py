@@ -3,6 +3,7 @@
 from importlib.metadata import entry_points, version
 
 import pytest
+from fake_spnego import install
 
 import akko_mcp_trino_atlas
 from akko_mcp_trino_atlas import AtlasProvider, AtlasSettings, from_env
@@ -86,7 +87,8 @@ REFUSED = [
 ]
 
 
-def test_from_env_requires_the_url_a_way_to_authenticate_and_the_clusters(tmp_path):
+def test_from_env_requires_the_url_a_way_to_authenticate_and_the_clusters(tmp_path, monkeypatch):
+    install(monkeypatch)  # a stand-in for the kerberos extra
     for env, says in REFUSED:
         with pytest.raises(ValueError, match=says) as raised:
             from_env(env)

@@ -256,6 +256,7 @@ DIGIT_FIELDS = frozenset({"status"})
 SECONDS, MILLISECONDS = range(10**9, 10**10), range(10**12, 10**13)
 # The message of a 404 on a read by unique attribute: the qualified name in it is replaced.
 MISSING = re.compile(r"Instance (\S+) with unique attribute \{qualifiedName=(.+)\} does not exist")
+GUID_NOT_FOUND = re.compile(r"Given instance guid (\S+) is invalid/not found")
 # Values Atlas itself writes: kept as they are.
 STRUCTURAL = [
     re.compile(p)
@@ -506,6 +507,10 @@ class Anonymizer:
             return "@" + self.name("glossary", value[1:])
         if key == "attributeValue" and "@" in value and kind:
             return self.qualified(kind, value, where)
+        not_found = GUID_NOT_FOUND.fullmatch(value) if key == "errorMessage" else None
+        if not_found:
+            start, end = not_found.span(1)
+            return value[:start] + self.guid(not_found.group(1)) + value[end:]
         missing = MISSING.fullmatch(value) if key == "errorMessage" else None
         if missing:
             found = [k for p, k in KINDS if p.search(missing.group(1))]

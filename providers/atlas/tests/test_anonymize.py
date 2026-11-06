@@ -86,3 +86,30 @@ def test_a_business_attribute_named_in_drop_is_left_out(tmp_path):
     got = json.loads((out / "read.json").read_text(encoding="utf-8"))
     (kept,) = got["response"]["body"]["entities"][0]["businessAttributes"].values()
     assert len(kept) == 1 and "family" not in json.dumps(got)
+
+
+def test_a_guid_not_found_message_keeps_its_shape_with_the_guid_renumbered(tmp_path):
+    real = "7d3f0c52-9a41-4b1e-8c0d-5e2f6a7b8c9d"
+    doc = {
+        "request": {
+            "body": None,
+            "method": "GET",
+            "path": f"/api/atlas/v2/glossary/term/{real}",
+            "query": [],
+        },
+        "response": {
+            "body": {
+                "errorCode": "ATLAS-404-00-005",
+                "errorMessage": f"Given instance guid {real} is invalid/not found",
+            },
+            "content_type": "application/json",
+            "status": 404,
+        },
+    }
+    out = _run(doc, tmp_path)
+    guid = out["request"]["path"].rsplit("/", 1)[1]
+    assert guid != real and real not in json.dumps(out)
+    assert (
+        out["response"]["body"]["errorMessage"]
+        == f"Given instance guid {guid} is invalid/not found"
+    )
