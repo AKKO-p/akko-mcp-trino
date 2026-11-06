@@ -49,8 +49,13 @@ written by [pip-compile](https://pip-tools.readthedocs.io/) from its source:
 | `requirements/image.txt` | `requirements/image.in`: the dependencies the package declares | the container image, the license and vulnerability checks |
 | `requirements/build.txt` | `requirements/build.in`: the build frontend and the backend of `[build-system]` | the image's build stage, and the checks, with `dev.txt` |
 | `requirements/release.txt` | `requirements/release.in`: the build tools and twine | the release (sdist, wheel, upload) |
-| `requirements/dev.txt` | `requirements/dev.in`: the `dev` extra and the tools of the checks, at the versions of the image and the release | CI and the set-up above, on every Python version |
+| `requirements/dev.txt` | `requirements/dev.in`: the tools of the checks, by name, at the versions of the image and the release | CI and the set-up above, on every Python version |
 | `requirements/kerberos.txt` | its `.in`: the `kerberos` extra of the Atlas provider | the license check only |
+
+The versions of the tools (pytest, ruff, mypy and the others) live in
+`requirements/dev.txt` only: the `test` and `dev` extras of `pyproject.toml`
+name them without a version, so that an update, by Dependabot or by
+`lock.sh compile`, changes the lock alone.
 
 The wheels and the sdist are built by the locked backend, without isolation
 (`python -m build --no-isolation`), so that no build tool is fetched unlocked.

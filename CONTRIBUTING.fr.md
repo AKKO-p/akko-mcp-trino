@@ -48,8 +48,12 @@ s'installe depuis un verrou, en versions exactes et avec leurs empreintes, écri
 | `requirements/image.txt` | `requirements/image.in` : les dépendances que le paquet déclare | l'image de conteneur, les contrôles de licences et de vulnérabilités |
 | `requirements/build.txt` | `requirements/build.in` : l'outil de construction et le backend de `[build-system]` | l'étape de construction de l'image, et les contrôles, avec `dev.txt` |
 | `requirements/release.txt` | `requirements/release.in` : les outils de construction et twine | la publication (sdist, wheel, envoi) |
-| `requirements/dev.txt` | `requirements/dev.in` : l'extra `dev` et les outils des contrôles, aux versions de l'image et de la publication | la CI et l'installation de développement, sur chaque version de Python |
+| `requirements/dev.txt` | `requirements/dev.in` : les outils des contrôles, par leur nom, aux versions de l'image et de la publication | la CI et l'installation de développement, sur chaque version de Python |
 | `requirements/kerberos.txt` | son `.in` : l'extra `kerberos` de l'adaptateur Atlas | le contrôle des licences seulement |
+
+Les versions des outils (pytest, ruff, mypy et les autres) ne vivent que dans
+`requirements/dev.txt` : les extras `test` et `dev` de `pyproject.toml` les nomment sans version,
+pour qu'une mise à jour, par Dependabot ou par `lock.sh compile`, ne change que le verrou.
 
 Les wheels et le sdist sont construits par le backend verrouillé, sans isolation
 (`python -m build --no-isolation`), pour qu'aucun outil de construction ne soit téléchargé hors
