@@ -32,7 +32,7 @@ classifiers = [
 ]
 # Ranges, so that the server installs next to other tools and in conda-forge;
 # the lower bounds are tested in CI. The container image installs the exact
-# versions of image-requirements.txt.
+# versions of the lock requirements/image.txt, with their hashes.
 dependencies = [
   "mcp[cli]>=2.2.0,<3",
   "trino>=0.339.0,<1",

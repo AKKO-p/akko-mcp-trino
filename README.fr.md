@@ -193,7 +193,8 @@ docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
 
 La même image est publiée sous `ghcr.io/akko-p/akko-mcp-trino`. Elle tourne sans root, porte un
 contrôle de santé et prend les mêmes variables d'environnement, sur les ports `3000` (MCP) et
-`3001` (santé).
+`3001` (santé). Elle installe chaque dépendance depuis le verrou `requirements/image.txt`, en
+version exacte et avec ses empreintes (voir « Dépendances et verrous » plus bas).
 
 Il faut Python 3.12 ou plus récent pour l'installation par pip.
 
@@ -1183,6 +1184,70 @@ Les issues et les pull requests sont bienvenues : voir [CONTRIBUTING.md](CONTR
 vulnérabilité se signale à security@akko-ai.com, selon [SECURITY.md](SECURITY.md). Si vous arrivez à
 faire passer une écriture à travers la garde, ouvrez une issue : c'est exactement ce que nous
 cherchons.
+
+### Dépendances et verrous
+
+`pyproject.toml` déclare des plages, pour que le serveur s'installe à côté d'autres outils ; la CI
+lance les tests aux versions les plus basses et les plus hautes qu'elles permettent. Tout le reste
+s'installe depuis un verrou de `requirements/`, en versions exactes et avec leurs empreintes, écrit
+par [pip-compile](https://pip-tools.readthedocs.io/) depuis sa source :
+
+| Verrou | Source | Installé par |
+|---|---|---|
+| `requirements/image.txt` | `requirements/image.in` : les dépendances que le paquet déclare | l'image de conteneur, les contrôles de licences et de vulnérabilités |
+| `requirements/dev.txt` | `requirements/dev.in` : l'extra `dev` et les outils des contrôles, aux versions de l'image | la CI et l'installation de développement, sur chaque version de Python |
+
+L'image installe son verrou par `pip install --require-hashes`, puis le paquet sans ses
+dépendances ; `pip check` fait échouer la construction s'il manque une dépendance au verrou.
+L'adaptateur Atlas entre dans le verrou avec la version qui publie les deux ; d'ici là, l'image
+l'installe sans ses dépendances.
+
+Le Dockerfile nomme son image de base une seule fois, épinglée par digest
+(`FROM python:3.12.16-slim@sha256:…`) dans ses deux étapes, pour que l'image soit reproductible ;
+Dependabot en apporte les mises à jour de sécurité, une version corrective de Python ou de nouveaux
+paquets système, sous forme d'une nouvelle étiquette et d'un nouveau digest. Le Python de l'image
+est celui des verrous : `scripts/lock.sh` le lit sur cette ligne (`LOCK_PYTHON`, ici `3.12`), et
+`tests/test_locks.py` vérifie que les verrous ont été compilés avec lui. Une nouvelle version
+mineure de Python se fait à la main : la ligne `FROM`, puis `bash scripts/lock.sh compile` sur ce
+Python.
+
+`scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions :
+`LOCK_PYTHON`, les versions de Python des contrôles (`CHECK_PYTHONS`) et les plateformes de l'image
+(`IMAGE_PLATFORMS`). Dans un environnement installé depuis `requirements/dev.txt`, sur ce Python :
+
+```bash
+pip install --require-hashes -r requirements/dev.txt && pip install --no-deps -e .
+bash scripts/lock.sh compile    # après un changement d'un fichier .in ou des dépendances de pyproject.toml
+bash scripts/lock.sh check      # ce que lance la CI : compiler à nouveau, échouer si un verrou change
+bash scripts/lock.sh verify     # chaque version du verrou de l'image a une wheel pour chaque plateforme
+PIP_COMPILE_ARGS="--upgrade-package sqlglot" bash scripts/lock.sh compile   # un paquet à sa dernière version
+```
+
+Une exécution réelle de `check`, après l'ajout de `pyyaml` à `image.in` sans nouvelle compilation :
+
+```text
++    --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
++    # via -r requirements/image.in
+ referencing==0.37.0 \
+     --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231 \
+     --hash=sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8
+lock.sh: a lock is stale; run: bash scripts/lock.sh compile
+```
+
+et de `verify` :
+
+```text
+lock.sh: requirements/image.txt resolves for linux/amd64 (52 wheels)
+lock.sh: requirements/image.txt resolves for linux/arm64 (52 wheels)
+```
+
+pip-compile prévient que « The generated requirements file may be rejected by pip install » : le
+paquet lui-même reste hors des verrous à dessein (`--unsafe-package`), car il s'installe depuis sa
+source.
+
+Dependabot met les verrous à jour une fois par mois, en une seule pull request, et ne déplace une
+plage de `pyproject.toml` que lorsqu'une nouvelle version en sort
+(`versioning-strategy: increase-if-necessary`).
 
 ## À propos
 

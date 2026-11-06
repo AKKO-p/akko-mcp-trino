@@ -1,0 +1,6 @@
+# The container image: the dependencies the package declares (pyproject.toml), each locked with
+# its hashes in image.txt. The package itself is not locked (--unsafe-package): the image
+# installs its own wheel, without dependencies, after the lock.
+# The Atlas adapter enters the lock with the release that publishes both: until then the image
+# installs it without its dependencies, the only other one of which, httpx, comes with the core.
+-e file:.

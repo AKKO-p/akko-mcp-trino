@@ -3,7 +3,7 @@ prune dist
 # Each context provider of providers/ ships in its own sdist.
 prune providers
 prune .venv
-include image-requirements.txt
+include requirements/*.in requirements/*.txt scripts/lock.sh Dockerfile
 include CHANGELOG.md MIGRATING.md pytest.ini
 recursive-include tests *.py
 graft examples
