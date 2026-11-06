@@ -97,17 +97,8 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
        "approvalStatus": "IN_REVIEW",
-       "businessName": "businessName of ledger.invoices",
-       "dataSource": "dataSource of ledger.invoices",
-       "domain": "domain of ledger.invoices",
-       "family": "family of ledger.invoices",
-       "origin": "origin of ledger.invoices",
-       "ownerTeam": "ownerTeam of ledger.invoices",
-       "reference": "reference of ledger.invoices",
-       "steward": "user_03",
-       "subfamily": "subfamily of ledger.invoices"
+       "ownerTeam": "ownerTeam of ledger.invoices"
       }
      },
      "createTime": 1700000000000,
@@ -352,17 +343,8 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
        "approvalStatus": "IN_REVIEW",
-       "businessName": "businessName of ledger.accounts",
-       "dataSource": "dataSource of ledger.accounts",
-       "domain": "domain of ledger.accounts",
-       "family": "family of ledger.accounts",
-       "origin": "origin of ledger.accounts",
-       "ownerTeam": "ownerTeam of ledger.accounts",
-       "reference": "reference of ledger.accounts",
-       "steward": "user_03",
-       "subfamily": "subfamily of ledger.accounts"
+       "ownerTeam": "ownerTeam of ledger.accounts"
       }
      },
      "createTime": 1700000000000,
@@ -652,16 +634,8 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
        "approvalStatus": "APPROVED",
-       "businessName": "businessName of o'brien.été.l'année fiscale.v2",
-       "dataSource": "dataSource of o'brien.été.l'année fiscale.v2",
-       "domain": "domain of o'brien.été.l'année fiscale.v2",
-       "family": "family of o'brien.été.l'année fiscale.v2",
-       "origin": "origin of o'brien.été.l'année fiscale.v2",
-       "ownerTeam": "ownerTeam of o'brien.été.l'année fiscale.v2",
-       "reference": "reference of o'brien.été.l'année fiscale.v2",
-       "steward": "user_03"
+       "ownerTeam": "ownerTeam of o'brien.été.l'année fiscale.v2"
       }
      },
      "createTime": 1700000000000,
@@ -840,9 +814,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.column_03"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -897,9 +869,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.invoice_total"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "classifications": [
@@ -936,7 +906,7 @@
          },
          "typeName": "AtlasGlossarySemanticAssignment"
         },
-        "relationshipGuid": "00000000-0000-4000-8000-000000000075",
+        "relationshipGuid": "00000000-0000-4000-8000-000000000074",
         "relationshipStatus": "ACTIVE",
         "relationshipType": "AtlasGlossarySemanticAssignment",
         "typeName": "AtlasGlossaryTerm"
@@ -986,9 +956,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.column_04"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1043,9 +1011,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.invoice_kind"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1073,7 +1039,7 @@
          },
          "typeName": "AtlasGlossarySemanticAssignment"
         },
-        "relationshipGuid": "00000000-0000-4000-8000-000000000074",
+        "relationshipGuid": "00000000-0000-4000-8000-000000000075",
         "relationshipStatus": "ACTIVE",
         "relationshipType": "AtlasGlossarySemanticAssignment",
         "typeName": "AtlasGlossaryTerm"
@@ -1123,9 +1089,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.column_05"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1180,9 +1144,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.column_06"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1237,9 +1199,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.column_07"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "classifications": [
@@ -1303,9 +1263,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.column_08"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1360,9 +1318,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.invoices.column_09"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "classifications": [
@@ -1426,9 +1382,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_10"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "classifications": [
@@ -1492,9 +1446,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_04"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1549,9 +1501,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_11"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1629,9 +1579,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_12"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1686,9 +1634,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_13"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1743,9 +1689,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_08"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1800,9 +1744,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_14"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1857,9 +1799,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_15"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1914,9 +1854,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_03"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -1971,9 +1909,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_16"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -2028,9 +1964,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_17"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -2085,9 +2019,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_06"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -2142,9 +2074,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_18"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -2199,9 +2129,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "IN_REVIEW",
-       "reference": "reference of ledger.accounts.column_19"
+       "approvalStatus": "IN_REVIEW"
       }
      },
      "createTime": 1700000000000,
@@ -2279,9 +2207,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_20"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,
@@ -2336,9 +2262,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_21"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,
@@ -2393,9 +2317,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_22"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,
@@ -2450,9 +2372,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_23"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,
@@ -2507,9 +2427,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_24"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,
@@ -2564,9 +2482,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_25"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,
@@ -2621,9 +2537,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_26"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,
@@ -2678,9 +2592,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_04"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,
@@ -2735,9 +2647,7 @@
      },
      "businessAttributes": {
       "stewardship": {
-       "approvalDate": 1700000000000,
-       "approvalStatus": "APPROVED",
-       "reference": "reference of o'brien.été.l'année fiscale.v2.column_08"
+       "approvalStatus": "APPROVED"
       }
      },
      "createTime": 1700000000000,

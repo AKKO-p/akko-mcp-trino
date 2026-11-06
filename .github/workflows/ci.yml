@@ -47,7 +47,8 @@ jobs:
       - name: licenses of what the packages install (no GPL, AGPL or Collate Community License)
         # In an environment of their own, so that the test and release tools do not count. The
         # first list matches within a license name, the second matches SPDX identifiers
-        # exactly, so that the LGPL is not taken for the GPL.
+        # exactly, so that the LGPL is not taken for the GPL. A choice between licenses
+        # ("MIT OR GPL-2.0-only") passes: the permissive one applies.
         run: |
           python -m venv /tmp/licenses
           /tmp/licenses/bin/pip install -c image-requirements.txt . pip-licenses==5.5.5
@@ -55,7 +56,7 @@ jobs:
             /tmp/licenses/bin/pip install --no-deps ./providers/atlas
           fi
           /tmp/licenses/bin/pip-licenses --partial-match --fail-on "GNU General Public License;GNU Affero General Public License;AGPL;Collate Community License"
-          /tmp/licenses/bin/pip-licenses --fail-on "GPL;GPLv2;GPLv3;GPL-2.0;GPL-3.0;GPL-2.0-only;GPL-2.0-or-later;GPL-3.0-only;GPL-3.0-or-later"
+          /tmp/licenses/bin/pip-licenses --fail-on "GPL;GPLv2;GPLv2+;GPLv3;GPLv3+;GPL-2.0;GPL-2.0+;GPL-3.0;GPL-3.0+;GPL-2.0-only;GPL-2.0-or-later;GPL-3.0-only;GPL-3.0-or-later"
       - name: sdist and wheel build and are valid
         run: python -m build && twine check dist/*
       - name: the Atlas provider's sdist and wheel build and are valid

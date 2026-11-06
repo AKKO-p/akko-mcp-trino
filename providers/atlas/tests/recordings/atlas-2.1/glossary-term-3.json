@@ -9,14 +9,7 @@
   "body": {
    "abbreviation": "abbreviation of Term 05",
    "additionalAttributes": {
-    "approvalStatus": "APPROVED",
-    "domain": "domain of Term 05",
-    "family": "family of Term 05",
-    "importedLinks": "importedLinks of Term 05",
-    "origin": "origin of Term 05",
-    "reference": "reference of Term 05",
-    "steward": "user_03",
-    "url": "url of Term 05"
+    "approvalStatus": "APPROVED"
    },
    "anchor": {
     "glossaryGuid": "00000000-0000-4000-8000-000000000113",

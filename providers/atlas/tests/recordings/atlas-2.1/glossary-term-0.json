@@ -9,14 +9,7 @@
   "body": {
    "abbreviation": "abbreviation of Customer identifier",
    "additionalAttributes": {
-    "approvalStatus": "APPROVED",
-    "domain": "domain of Customer identifier",
-    "family": "family of Customer identifier",
-    "importedLinks": "importedLinks of Customer identifier",
-    "origin": "origin of Customer identifier",
-    "reference": "reference of Customer identifier",
-    "steward": "user_03",
-    "url": "url of Customer identifier"
+    "approvalStatus": "APPROVED"
    },
    "anchor": {
     "glossaryGuid": "00000000-0000-4000-8000-000000000113",

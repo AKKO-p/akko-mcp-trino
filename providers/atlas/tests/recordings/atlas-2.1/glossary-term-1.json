@@ -8,14 +8,7 @@
  "response": {
   "body": {
    "additionalAttributes": {
-    "approvalStatus": "APPROVED",
-    "domain": "domain of Supplier",
-    "family": "family of Supplier",
-    "importedLinks": "importedLinks of Supplier",
-    "origin": "origin of Supplier",
-    "reference": "reference of Supplier",
-    "steward": "user_03",
-    "url": "url of Supplier"
+    "approvalStatus": "APPROVED"
    },
    "anchor": {
     "glossaryGuid": "00000000-0000-4000-8000-000000000113",

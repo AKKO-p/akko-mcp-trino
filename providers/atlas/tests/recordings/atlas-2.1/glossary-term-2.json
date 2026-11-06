@@ -9,14 +9,7 @@
   "body": {
    "abbreviation": "abbreviation of Invoice",
    "additionalAttributes": {
-    "approvalStatus": "IN_REVIEW",
-    "domain": "domain of Invoice",
-    "family": "family of Invoice",
-    "importedLinks": "importedLinks of Invoice",
-    "origin": "origin of Invoice",
-    "reference": "reference of Invoice",
-    "steward": "user_03",
-    "url": "url of Invoice"
+    "approvalStatus": "IN_REVIEW"
    },
    "anchor": {
     "glossaryGuid": "00000000-0000-4000-8000-000000000113",
@@ -40,7 +33,7 @@
       },
       "typeName": "AtlasGlossarySemanticAssignment"
      },
-     "relationshipGuid": "00000000-0000-4000-8000-000000000074",
+     "relationshipGuid": "00000000-0000-4000-8000-000000000075",
      "relationshipStatus": "ACTIVE",
      "relationshipType": "AtlasGlossarySemanticAssignment",
      "typeName": "hive_column"
@@ -62,7 +55,7 @@
       },
       "typeName": "AtlasGlossarySemanticAssignment"
      },
-     "relationshipGuid": "00000000-0000-4000-8000-000000000075",
+     "relationshipGuid": "00000000-0000-4000-8000-000000000074",
      "relationshipStatus": "ACTIVE",
      "relationshipType": "AtlasGlossarySemanticAssignment",
      "typeName": "hive_column"

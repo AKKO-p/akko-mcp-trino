@@ -23,6 +23,14 @@ from akko_mcp_trino.context import FileSecret, secret_setting
 __version__ = "0.7.2"
 
 BASIC, KNOX, KERBEROS = "basic", "knox", "kerberos"
+# Settings of Basic and Knox, refused with Kerberos so that none is silently ignored.
+_BASIC_SETTINGS = (
+    "ATLAS_USER",
+    "ATLAS_PASSWORD",
+    "ATLAS_PASSWORD_FILE",
+    "ATLAS_KNOX_TOKEN",
+    "ATLAS_KNOX_TOKEN_FILE",
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,10 @@ def _urls(env: Mapping[str, str]) -> tuple[str, ...]:
             raise ValueError("ATLAS_URL: each address must be an http or https URL with a host")
         if parts.username or parts.password:
             raise ValueError("ATLAS_URL: an address must not hold credentials")
+        try:
+            parts.port
+        except ValueError:
+            raise ValueError("ATLAS_URL: an address has a port that is not a number") from None
     return urls
 
 
@@ -64,11 +76,18 @@ def from_env(env: Mapping[str, str]) -> AtlasSettings:
         for name in ("ATLAS_PRINCIPAL", "ATLAS_KEYTAB"):
             if not env.get(name, "").strip():
                 raise ValueError(f"ATLAS_AUTH=kerberos needs {name}")
+        if any(env.get(name, "").strip() for name in _BASIC_SETTINGS):
+            raise ValueError("ATLAS_AUTH=kerberos does not take a user, a password or a token")
         return AtlasSettings(
-            urls, KERBEROS, principal=env["ATLAS_PRINCIPAL"].strip(), keytab=env["ATLAS_KEYTAB"]
+            urls,
+            KERBEROS,
+            principal=env["ATLAS_PRINCIPAL"].strip(),
+            keytab=env["ATLAS_KEYTAB"].strip(),
         )
     if auth != BASIC:
         raise ValueError("ATLAS_AUTH must be basic or kerberos")
+    if any(env.get(name, "").strip() for name in ("ATLAS_PRINCIPAL", "ATLAS_KEYTAB")):
+        raise ValueError("ATLAS_PRINCIPAL and ATLAS_KEYTAB need ATLAS_AUTH=kerberos")
     user = env.get("ATLAS_USER", "").strip()
     password = secret_setting(env, "ATLAS_PASSWORD")
     token = secret_setting(env, "ATLAS_KNOX_TOKEN")

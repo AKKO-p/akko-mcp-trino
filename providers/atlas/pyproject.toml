@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "akko-mcp-trino-atlas"
 # The same number as akko-mcp-trino: the packages of the repository are released together.
-version = "0.7.2"
+# Written once, in akko_mcp_trino_atlas/__init__.py.
+dynamic = ["version"]
 description = "Apache Atlas context provider for akko-mcp-trino: descriptions, classifications, glossary terms and business metadata of the tables Trino shows the caller."
 readme = "README.md"
 license = "Apache-2.0"
@@ -49,6 +50,9 @@ Documentation = "https://github.com/AKKO-p/akko-mcp-trino/blob/main/providers/at
 Repository = "https://github.com/AKKO-p/akko-mcp-trino"
 Issues = "https://github.com/AKKO-p/akko-mcp-trino/issues"
 Changelog = "https://github.com/AKKO-p/akko-mcp-trino/blob/main/CHANGELOG.md"
+
+[tool.setuptools.dynamic]
+version = { attr = "akko_mcp_trino_atlas.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["akko_mcp_trino_atlas", "akko_mcp_trino_atlas.*"]

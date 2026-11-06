@@ -20,7 +20,7 @@ export MCP_CONTEXT_PROVIDERS=atlas
 
 The provider is registered under the entry point group `akko_mcp_trino.context` as `atlas`.
 Nothing is loaded unless `MCP_CONTEXT_PROVIDERS` names it; the container image of
-akko-mcp-trino carries it, inactive.
+akko-mcp-trino carries it, inactive, without the Kerberos libraries for now.
 
 ## Settings
 
@@ -39,7 +39,7 @@ A secret given as a file (`*_FILE`) is read again when the file changes.
 
 ## Atlas versions
 
-The tests replay answers recorded from Atlas 2.1 and Atlas 2.4, in
+The tests replay answers recorded from a vendor build of Atlas 2.1 and from Apache Atlas 2.4, in
 `tests/recordings/atlas-2.1` and `tests/recordings/atlas-2.4`. Every name and text in them was
 replaced by a neutral one, structure kept, by `tests/recordings/anonymize.py`; its docstring
 says how to record and anonymize a new version.

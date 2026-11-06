@@ -7,26 +7,32 @@ that may only read, and keep the raw answers off the repository. Then::
 
 ``RAW_DIR`` holds one JSON file per exchange, ``{"request": {"method", "path", "query",
 "body"}, "response": {"status", "content_type", "body"}}``, where ``query`` is a list of
-``[name, value]`` pairs. Each file is written to ``OUT_DIR`` under the same name, with:
+``[name, value]`` pairs; response headers are not recorded. Each file is written to
+``OUT_DIR`` under the same name, with:
 
 - every name a catalogue gives (database, table, column, glossary, term, category,
-  classification, business metadata and its attributes, cluster, user) replaced by a
+  classification, business metadata set and attribute, cluster, user) replaced by a
   neutral one, the same everywhere it appears, qualified names included;
-- every free text (descriptions, comments, examples, attribute values) replaced by a
-  short text naming the field and the object it belongs to;
-- every GUID replaced by a sequential one, every timestamp by a fixed one, the server's
-  build revision by zeros and its version cut to ``major.minor.patch``.
+- every free text (descriptions, comments, examples, business attribute values) replaced
+  by a short text naming the field and the object it belongs to;
+- the table parameters of the metastore (DDL times, row counts, sizes) dropped, and the
+  statistics a vendor's types add (file and snapshot counts, snapshot ids) set to null;
+- every GUID replaced by a sequential one, every integer that looks like a time in
+  seconds or milliseconds by a fixed one, the server's build revision by zeros and its
+  version cut to ``major.minor.patch``.
 
 Neutral names are given in order of first appearance (``schema_01``, ``table_01``,
 ``Term 01``...). ``NAMES.json`` may choose some of them, for instance so that the tables
 the tests use carry the names of the contract: ``{"<role>": {"<real name>": "<neutral
-name>"}, "values": {"<real value>": "<neutral value>"}}``, with the roles ``db``,
-``table``, ``column``, ``glossary``, ``term``, ``category``, ``classification``,
-``bm_type``, ``bm_attr``, ``user`` and ``cluster``. That file holds real names: keep it
-out of the repository.
+name>"}, "values": {"<real value>": "<neutral value>"}, "drop": ["<real attribute>"]}``,
+with the roles ``db``, ``table``, ``column``, ``glossary``, ``term``, ``category``,
+``classification``, ``bm_type``, ``bm_attr``, ``user`` and ``cluster``; a business
+attribute named in ``drop`` is left out. That file holds real names: keep it out of the
+repository.
 
-Any string the script does not know how to treat stops it, naming the field but never
-the value: nothing passes through unexamined.
+What the script keeps as written is listed here: the object keys of ``KEYS``, the values
+of ``STRUCTURAL``, digits only in ``DIGIT_FIELDS``, integers that are not times. Any other
+key or string stops it, naming where it was found but never the key or the value.
 """
 
 import argparse
@@ -93,6 +99,161 @@ FREE_TEXT = {
     "viewExpandedText",
     "displayName",
 }
+# Object keys Atlas writes, kept as they are; any other key stops the script. The keys of
+# ``referredEntities`` (GUIDs), ``businessAttributes`` and ``additionalAttributes`` (names
+# of a catalogue) are rewritten instead.
+KEYS = frozenset(
+    {
+        "Description",
+        "Name",
+        "Revision",
+        "Version",
+        "abbreviation",
+        "additionalAttributes",
+        "aliases",
+        "anchor",
+        "antonyms",
+        "approximateCount",
+        "assignedEntities",
+        "attributeName",
+        "attributeValue",
+        "attributes",
+        "body",
+        "businessAttributes",
+        "categories",
+        "categoryGuid",
+        "classificationNames",
+        "classifications",
+        "classifies",
+        "columns",
+        "comment",
+        "confidence",
+        "content_type",
+        "createTime",
+        "createdBy",
+        "currentSnapshotId",
+        "currentSnapshotTsMs",
+        "db",
+        "ddlQueries",
+        "description",
+        "displayName",
+        "displayText",
+        "entities",
+        "entity",
+        "entityFilters",
+        "entityGuid",
+        "entityStatus",
+        "errorCode",
+        "errorMessage",
+        "examples",
+        "excludeDeletedEntities",
+        "excludeHeaderAttributes",
+        "expression",
+        "glossaryGuid",
+        "glossaryTermHeader",
+        "guid",
+        "includeClassificationAttributes",
+        "includeSubClassifications",
+        "includeSubTypes",
+        "inputToProcesses",
+        "isA",
+        "isIncomplete",
+        "labels",
+        "lastAccessTime",
+        "limit",
+        "longDescription",
+        "manifestsCreated",
+        "manifestsKept",
+        "manifestsReplaced",
+        "meaningNames",
+        "meanings",
+        "message",
+        "method",
+        "migratedToIceberg",
+        "model",
+        "name",
+        "numFiles",
+        "offset",
+        "operator",
+        "outputFromProcesses",
+        "owner",
+        "parameters",
+        "partitionKeys",
+        "partitionSpec",
+        "path",
+        "pipeline",
+        "position",
+        "preferredTerms",
+        "preferredToTerms",
+        "propagate",
+        "qualifiedName",
+        "query",
+        "queryText",
+        "queryType",
+        "referredEntities",
+        "relationGuid",
+        "relationshipAttributes",
+        "relationshipGuid",
+        "relationshipStatus",
+        "relationshipType",
+        "removePropagationsOnEntityDelete",
+        "replacedBy",
+        "replacementTerms",
+        "replicatedFrom",
+        "replicatedTo",
+        "request",
+        "response",
+        "retention",
+        "rewriteEnable",
+        "schema",
+        "sd",
+        "searchParameters",
+        "seeAlso",
+        "servlet",
+        "shortDescription",
+        "snapshotCount",
+        "source",
+        "status",
+        "steward",
+        "synonyms",
+        "table",
+        "tableType",
+        "temporary",
+        "termGuid",
+        "termName",
+        "terms",
+        "translatedTerms",
+        "translationTerms",
+        "type",
+        "typeName",
+        "updateTime",
+        "updatedBy",
+        "url",
+        "usage",
+        "userDescription",
+        "validValues",
+        "validValuesFor",
+        "version",
+        "viewExpandedText",
+        "viewOriginalText",
+    }
+)
+# Statistics of a table: never kept.
+STATISTICS = frozenset(
+    {
+        "numFiles",
+        "snapshotCount",
+        "currentSnapshotId",
+        "currentSnapshotTsMs",
+        "manifestsCreated",
+        "manifestsKept",
+        "manifestsReplaced",
+    }
+)
+# The only fields whose value may be a string of digits (the status of an error body).
+DIGIT_FIELDS = frozenset({"status"})
+# Integers in these ranges look like a time in seconds or in milliseconds.
+SECONDS, MILLISECONDS = range(10**9, 10**10), range(10**12, 10**13)
 # The message of a 404 on a read by unique attribute: the qualified name in it is replaced.
 MISSING = re.compile(r"Instance (\S+) with unique attribute \{qualifiedName=(.+)\} does not exist")
 # Values Atlas itself writes: kept as they are.
@@ -120,7 +281,6 @@ STRUCTURAL = [
         r"^Full authentication is required to access this resource$",
         r"^ATLAS-\d{3}-\d{2}-[0-9A-F]{3}$",
         r"^Type ENTITY with name [a-z_]+ does not exist$",
-        r"^\d+$",
     )
 ]
 
@@ -131,6 +291,7 @@ class Anonymizer:
     def __init__(self, chosen: dict[str, dict[str, str]]) -> None:
         """Start from the neutral names ``chosen`` (by role, then real name)."""
         self.values: dict[str, str] = dict(chosen.get("values", {}))
+        self.drop = frozenset(chosen.get("drop", ()))
         self.names: dict[str, dict[str, str]] = {role: dict(chosen.get(role, {})) for role in AUTO}
         for role, names in self.names.items():
             if len(set(names.values())) != len(names):
@@ -170,8 +331,8 @@ class Anonymizer:
         return ".".join(names) + "@" + self.name("cluster", right)
 
     def split(self, dotted: str, roles: list[str], where: str) -> list[str]:
-        """Split ``dotted`` into one part per role. A name may hold a dot: then the split
-        whose parts but the last are names already known in their roles is taken."""
+        """Split ``dotted`` into one part per role. A name may hold a dot: then the one
+        split whose every part holding a dot is a name already known in its role is taken."""
         pieces = dotted.split(".")
         if len(pieces) == len(roles):
             return pieces
@@ -179,7 +340,7 @@ class Anonymizer:
         for cuts in combinations(range(1, len(pieces)), len(roles) - 1):
             bounds = (0, *cuts, len(pieces))
             parts = [".".join(pieces[a:b]) for a, b in zip(bounds, bounds[1:])]
-            if all(p in self.names[r] for r, p in zip(roles[:-1], parts[:-1])):
+            if all("." not in p or p in self.names[r] for r, p in zip(roles, parts)):
                 splits.append(parts)
         if len(splits) != 1:
             raise SystemExit(f"{where}: a qualified name that splits {len(splits)} ways")
@@ -236,8 +397,11 @@ class Anonymizer:
             return self.mapping(node, ctx, where)
         if isinstance(node, str):
             return self.leaf(ctx.get("key", ""), node, ctx, where)
-        if isinstance(node, int) and not isinstance(node, bool) and 10**12 < node < 4 * 10**12:
-            return 1_700_000_000_000
+        if isinstance(node, int) and not isinstance(node, bool):
+            if node in SECONDS:
+                return 1_700_000_000
+            if node in MILLISECONDS:
+                return 1_700_000_000_000
         return node
 
     def mapping(self, node: dict[str, Any], ctx: dict[str, Any], where: str) -> dict:
@@ -253,8 +417,14 @@ class Anonymizer:
             elif parent == "businessAttributes":
                 attrs = {"key": "bm", "label": label}
                 out[self.name("bm_type", key)] = self.attributes(value, attrs, where)
+            elif key not in KEYS:
+                raise SystemExit(f"{where}: an unknown key (key not shown)")
             elif key == "additionalAttributes" and isinstance(value, dict):
                 out[key] = self.attributes(value, {"key": "bm", "label": label}, where)
+            elif key == "parameters" and isinstance(value, dict):
+                out[key] = {}
+            elif key in STATISTICS:
+                out[key] = None
             else:
                 out[key] = self.walk(value, inner, f"{where}.{key}")
         return out
@@ -265,6 +435,8 @@ class Anonymizer:
             return self.walk(attrs, ctx, where)
         out = {}
         for key, value in attrs.items():
+            if key in self.drop:
+                continue
             neutral = self.name("bm_attr", key)
             if isinstance(value, str) and value in self.values:
                 out[neutral] = self.values[value]
@@ -348,6 +520,8 @@ class Anonymizer:
             return self.name(kind, value)
         if key in FREE_TEXT:
             return f"{key} of {ctx.get('label', 'the object')}" if value else value
+        if key in DIGIT_FIELDS and value.isdigit():
+            return value
         if any(p.fullmatch(value) for p in STRUCTURAL):
             return value
         raise SystemExit(f"{where}: no rule for the field {key!r} (value not shown)")
