@@ -76,7 +76,7 @@ jobs:
       - name: known vulnerabilities in the locked dependencies (pip-audit)
         run: |
           pip-audit --disable-pip --require-hashes -r requirements/image.txt -r requirements/build.txt \
-            -r requirements/release.txt -r requirements/dev.txt -r providers/atlas/requirements-kerberos.txt
+            -r requirements/release.txt -r requirements/dev.txt -r requirements/kerberos.txt
       - name: product-neutral guard
         run: bash lint-vendor-neutral.sh
       - name: tests (100 % line and branch coverage)
@@ -116,7 +116,7 @@ jobs:
             # system's MIT Kerberos.
             sudo apt-get update -qq
             sudo apt-get install -y --no-install-recommends libkrb5-dev
-            /tmp/licenses/bin/pip install --require-hashes -r providers/atlas/requirements-kerberos.txt
+            /tmp/licenses/bin/pip install --require-hashes -r requirements/kerberos.txt
             pip-licenses --python /tmp/licenses/bin/python --packages pyspnego gssapi krb5
           fi
           pip-licenses --python /tmp/licenses/bin/python --partial-match --fail-on "GNU General Public License;GNU Affero General Public License;AGPL;Collate Community License"

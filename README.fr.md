@@ -1198,7 +1198,7 @@ s'installe depuis un verrou, en versions exactes et avec leurs empreintes, écri
 | `requirements/build.txt` | `requirements/build.in` : l'outil de construction et le backend de `[build-system]` | l'étape de construction de l'image, et les contrôles, avec `dev.txt` |
 | `requirements/release.txt` | `requirements/release.in` : les outils de construction et twine | la publication (sdist, wheel, envoi) |
 | `requirements/dev.txt` | `requirements/dev.in` : l'extra `dev` et les outils des contrôles, aux versions de l'image et de la publication | la CI et l'installation de développement, sur chaque version de Python |
-| `providers/atlas/requirements-kerberos.txt` | son `.in` : l'extra `kerberos` de l'adaptateur Atlas | le contrôle des licences seulement |
+| `requirements/kerberos.txt` | son `.in` : l'extra `kerberos` de l'adaptateur Atlas | le contrôle des licences seulement |
 
 Les wheels et le sdist sont construits par le backend verrouillé, sans isolation
 (`python -m build --no-isolation`), pour qu'aucun outil de construction ne soit téléchargé hors
@@ -1208,7 +1208,8 @@ dépendance que le paquet ou un paquet verrouillé déclare. Il ne voit pas une 
 seulement un extra, comme la CLI de `mcp[cli]`. L'adaptateur Atlas entre dans le verrou avec la
 version qui publie les deux ; d'ici là, l'image l'installe sans ses dépendances.
 
-`dev.txt` et `image.txt` installent le paquet depuis son dossier ; ils laissent donc hors du verrou
+`dev.txt`, `image.txt` et `kerberos.txt` installent le paquet depuis son dossier (`-e`, ou
+`-r image.in`) ; ils laissent donc hors du verrou
 le paquet lui-même, pip et setuptools (`--unsafe-package`) : les contrôles installent `build.txt`,
 qui épingle setuptools, avec `dev.txt`. Un verrou qui épingle pip ou setuptools est compilé par
 Dependabot avec `--allow-unsafe`, qui échoue sur un paquet installé depuis son dossier. Les autres
@@ -1264,9 +1265,15 @@ paquet lui-même reste hors des verrous à dessein, car il s'installe depuis sa 
 
 Dependabot met les verrous à jour une fois par mois, en une seule pull request, et ne déplace une
 plage de `pyproject.toml` que lorsqu'une nouvelle version en sort
-(`versioning-strategy: increase-if-necessary`). Les lignes `-r` de `dev.in` et de `release.in` lui
-font compiler d'abord les verrous qu'ils lisent. Il ne voit pas le verrou `kerberos`, deux dossiers
-plus bas : `PIP_COMPILE_ARGS=--upgrade bash scripts/lock.sh compile` le met à jour.
+(`versioning-strategy: increase-if-necessary`). Les lignes `-r` de `dev.in`, de `release.in` et de `kerberos.in` lui
+font compiler d'abord les verrous qu'ils lisent ; son image a les en-têtes du MIT Kerberos dont le
+verrou `kerberos` a besoin.
+
+La publication télécharge un seul outil hors pip, `mcp-publisher`, à la version exacte de
+`MCP_PUBLISHER_VERSION` dans `.github/workflows/release.yml`, et échoue si son archive ne correspond
+pas à `MCP_PUBLISHER_SHA256`. Dependabot ne peut pas le suivre : pour le changer, on reprend les deux
+depuis la nouvelle version, l'empreinte étant la ligne de `mcp-publisher_linux_amd64.tar.gz` dans son
+`registry_<version>_checksums.txt`.
 
 ## À propos
 

@@ -1,0 +1,9 @@
+# The kerberos extra of the Atlas provider, for the license check only (it is not in the image):
+# its requirement, as written in providers/atlas/pyproject.toml (tests/test_locks.py checks it),
+# with the dependencies of the image, at the same versions. gssapi and krb5 publish no Linux
+# wheel: they are built from their sdists, whose hashes are checked, against the system's MIT
+# Kerberos (libkrb5-dev, which Dependabot's image has too). The -r line makes the image lock
+# compile first.
+-r image.in
+-c image.txt
+pyspnego[kerberos]>=0.11,<1

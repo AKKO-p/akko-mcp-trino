@@ -31,16 +31,26 @@ fi
 # the image installs.
 : "${IMAGE_GLIBC:=2.41}"
 # The sources, in the order they are compiled: a lock is compiled after the locks it reads.
-: "${LOCKS:=requirements/build.in requirements/image.in requirements/release.in requirements/dev.in providers/atlas/requirements-kerberos.in}"
+: "${LOCKS:=requirements/build.in requirements/image.in requirements/release.in requirements/dev.in requirements/kerberos.in}"
 : "${PIP_COMPILE_ARGS:=}"
 
 # The pip-compile options of a source, the ones Dependabot reads back from the lock's header. A
-# source that installs the package from its directory (-e) leaves the package out of its lock,
+# source that installs the package from its directory (-e, itself or through -r) leaves the package out of its lock,
 # and pip and setuptools too, which Dependabot would otherwise compile with --allow-unsafe, and
 # that fails on the package's directory; such a lock installs with build.txt, which pins
 # setuptools. Any other source pins them (--allow-unsafe).
+# Whether a source installs the package from its directory, itself or through its -r lines.
+editable() {
+  local child
+  grep -q '^-e ' "$1" && return 0
+  for child in $(sed -nE 's/^-r[[:space:]]*//p' "$1"); do
+    editable "$(dirname "$1")/$child" && return 0
+  done
+  return 1
+}
+
 options() {
-  if grep -q '^-e ' "$1"; then
+  if editable "$1"; then
     local package
     package=$(sed -nE 's/^name = "([^"]+)"/\1/p' pyproject.toml | head -1)
     echo "--unsafe-package=$package --unsafe-package=pip --unsafe-package=setuptools"

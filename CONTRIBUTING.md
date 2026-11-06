@@ -47,7 +47,7 @@ written by [pip-compile](https://pip-tools.readthedocs.io/) from its source:
 | `requirements/build.txt` | `requirements/build.in`: the build frontend and the backend of `[build-system]` | the image's build stage, and the checks, with `dev.txt` |
 | `requirements/release.txt` | `requirements/release.in`: the build tools and twine | the release (sdist, wheel, upload) |
 | `requirements/dev.txt` | `requirements/dev.in`: the `dev` extra and the tools of the checks, at the versions of the image and the release | CI and the set-up above, on every Python version |
-| `providers/atlas/requirements-kerberos.txt` | its `.in`: the `kerberos` extra of the Atlas provider | the license check only |
+| `requirements/kerberos.txt` | its `.in`: the `kerberos` extra of the Atlas provider | the license check only |
 
 The wheels and the sdist are built by the locked backend, without isolation
 (`python -m build --no-isolation`), so that no build tool is fetched unlocked.
@@ -58,8 +58,8 @@ declares. It does not see a dependency that only an extra brings, such as the
 CLI of `mcp[cli]`. The Atlas provider enters the lock with the release that
 publishes both; until then the image installs it without dependencies.
 
-`dev.txt` and `image.txt` install the package from its directory, so they
-leave out the package itself, pip and setuptools (`--unsafe-package`): the
+`dev.txt`, `image.txt` and `kerberos.txt` install the package from its
+directory (`-e`, or `-r image.in`), so they leave out the package itself, pip and setuptools (`--unsafe-package`): the
 checks install `build.txt`, which pins setuptools, with `dev.txt`. A lock that
 pins pip or setuptools is compiled by Dependabot with `--allow-unsafe`, which
 fails on a package installed from its directory. The other locks pin them
@@ -117,10 +117,15 @@ installs from its source.
 
 Dependabot updates the locks once a month, in one pull request, and moves a
 range of `pyproject.toml` only when a new version falls outside it
-(`versioning-strategy: increase-if-necessary`). The `-r` lines of `dev.in`
-and `release.in` make it compile the locks they read first. It does not see
-the `kerberos` lock, which is two directories down:
-`PIP_COMPILE_ARGS=--upgrade bash scripts/lock.sh compile` updates it.
+(`versioning-strategy: increase-if-necessary`). The `-r` lines of `dev.in`,
+`release.in` and `kerberos.in` make it compile the locks they read first; its
+image has the MIT Kerberos headers that the `kerberos` lock needs.
+
+The release downloads one tool outside pip, `mcp-publisher`, at the exact
+version of `MCP_PUBLISHER_VERSION` in `.github/workflows/release.yml`, and
+fails unless its archive matches `MCP_PUBLISHER_SHA256`. Dependabot cannot
+follow it: to move it, set both from the new release, the hash being the line
+of `mcp-publisher_linux_amd64.tar.gz` in its `registry_<version>_checksums.txt`.
 
 ## Pull requests
 

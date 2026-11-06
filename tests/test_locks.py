@@ -214,7 +214,7 @@ def test_the_atlas_provider_declares_the_pythons_of_the_checks() -> None:
 
 def test_the_kerberos_lock_reads_the_requirement_of_the_atlas_extra() -> None:
     project = tomllib.loads((ROOT / "providers/atlas/pyproject.toml").read_text())["project"]
-    source = (ROOT / "providers/atlas/requirements-kerberos.in").read_text()
+    source = (ROOT / "requirements/kerberos.in").read_text()
     lines = [line for line in source.splitlines() if line and not line.startswith(("#", "-"))]
     assert lines == project["optional-dependencies"]["kerberos"]
 
@@ -285,3 +285,24 @@ def test_the_release_builds_only_a_version_tag_reachable_from_main(tmp_path: Pat
         done = _run("bash", script, tag, "main", cwd=repo)
         assert done.returncode == 1 and done.stdout == "", tag
         assert reason in done.stderr, (tag, done.stderr)
+
+
+def test_every_download_of_the_workflows_is_pinned_and_checked() -> None:
+    """A tool fetched outside pip names an exact version and is checked against its sha256."""
+    downloads = 0
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text()
+        assert "releases/latest" not in text, path.name
+        assert not re.search(r"(curl|wget)[^\n]*\|\s*(tar|sh|bash)", text), path.name
+        for name in re.findall(r"curl [^\n]*-\w*o (\S+) ", text):
+            downloads += 1
+            check = rf"\$\{{\w+_SHA256\}}  {re.escape(name)}\" \| sha256sum -c -"
+            assert re.search(check, text), name
+    assert downloads >= 3
+
+
+def test_dependabot_finds_every_lock() -> None:
+    """Dependabot reads the .in and .txt files of the root and of each directory just below it."""
+    for source in _lock_default("LOCKS").split():
+        assert source.count("/") <= 1, source
+        assert (ROOT / source).exists() and (ROOT / source).with_suffix(".txt").exists(), source
