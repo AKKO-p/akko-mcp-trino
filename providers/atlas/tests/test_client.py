@@ -184,7 +184,7 @@ def test_only_atlas_instance_not_found_is_nothing(caplog):
     # a wrong prefix in ATLAS_URL): unavailable, never "nothing known".
     others = [
         httpx.Response(404, headers={"content-type": "text/html"}, text="<h1>Not Found</h1>"),
-        httpx.Response(404, json={"errorCode": "ATLAS-404-00-005"}),
+        httpx.Response(404, json={"errorCode": "ATLAS-404-00-001"}),
         httpx.Response(404, json=["ATLAS-404-00-009"]),
         httpx.Response(404, headers={"content-type": "application/json"}, content=b"{"),
         httpx.Response(400, json={"errorCode": "ATLAS-400-00-001"}),

@@ -3,7 +3,8 @@
 A bulk read is answered from the recording of its entity type: the recorded entities
 whose qualified name was asked, and the entities they refer to, as Atlas answers a
 smaller or larger batch. A type recorded with an error (Atlas 2.4 does not know
-``iceberg_table``) answers that error for any batch.
+``iceberg_table``) answers that error for any batch. A glossary term is answered from its
+recorded read by GUID.
 """
 
 import copy
@@ -17,9 +18,26 @@ import httpx
 RECORDINGS = Path(__file__).parent / "recordings"
 VERSIONS = ("atlas-2.1", "atlas-2.4")
 BULK = "/api/atlas/v2/entity/bulk/uniqueAttribute/type/"
+TERM = "/api/atlas/v2/glossary/term/"
 ATLAS = "http://atlas-a:21000"
 # The trap table of the recordings, by Trino schema and table: a quote, a dot, a space, accents.
 TRAP = ("o'brien", "été.l'année fiscale.v2")
+
+
+def term_not_found(guid: str) -> httpx.Response:
+    """Atlas's answer to a term read by a GUID it does not hold.
+
+    Constructed in the format of the recorded 404 answers (``errorCode``,
+    ``errorMessage``), with the code and message of Atlas's ``INSTANCE_GUID_NOT_FOUND``.
+    To be replaced by the recording of that answer from the target Atlas.
+    """
+    return httpx.Response(
+        404,
+        json={
+            "errorCode": "ATLAS-404-00-005",
+            "errorMessage": f"Given instance guid {guid} is invalid/not found",
+        },
+    )
 
 
 def recording(version: str, name: str) -> dict[str, Any]:
@@ -55,6 +73,10 @@ class FakeAtlas:
         for path in sorted((RECORDINGS / version).glob("bulk-*.json")):
             if not path.stem.endswith("-unknown-only"):
                 self.bulk[path.stem.removeprefix("bulk-")] = recording(version, path.stem)
+        self.terms: dict[str, dict[str, Any]] = {}
+        for path in sorted((RECORDINGS / version).glob("glossary-term-*.json")):
+            body = recording(version, path.stem)["response"]["body"]
+            self.terms[body["guid"]] = body
         self.requests: list[httpx.Request] = []
 
     def entities(self, type_name: str) -> list[dict[str, Any]]:
@@ -78,6 +100,12 @@ class FakeAtlas:
         """Answer one request as the recorded Atlas did."""
         self.requests.append(request)
         path = request.url.path
+        if path.startswith(TERM):
+            guid = path.removeprefix(TERM)
+            term = self.terms.get(guid)
+            if term is None:
+                return term_not_found(guid)
+            return httpx.Response(200, json=copy.deepcopy(term))
         if not path.startswith(BULK):
             return httpx.Response(404, json={"errorCode": "ATLAS-404-00-005"})
         exchange = self.bulk.get(path.removeprefix(BULK))

@@ -16,7 +16,8 @@ What an answer means:
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
 - Atlas's own "does not exist" answers, by their error code: a 404 with
-  ``ATLAS-404-00-009`` (no instance has that unique attribute) is ``Missing.INSTANCE``,
+  ``ATLAS-404-00-009`` (no instance has that unique attribute) or ``ATLAS-404-00-005``
+  (no instance has that GUID, a glossary term read by GUID) is ``Missing.INSTANCE``,
   and a 400 with ``ATLAS-400-00-014`` (the type does not exist; Atlas 2.4 without the
   Iceberg model) is ``Missing.TYPE``. Any other 400 or 404 (a page, another code, a wrong
   path behind Knox) is ``ProviderUnavailable``.
@@ -54,9 +55,10 @@ class Missing(Enum):
     TYPE = "type"
 
 
-# The error codes recorded from Atlas 2.1 and 2.4, by status.
+# Atlas's error codes for "does not exist", by status: by unique attribute and by GUID
+# (Atlas's INSTANCE_GUID_NOT_FOUND), and an entity type.
 _MISSING = {
-    404: {"ATLAS-404-00-009": Missing.INSTANCE},
+    404: {"ATLAS-404-00-009": Missing.INSTANCE, "ATLAS-404-00-005": Missing.INSTANCE},
     400: {"ATLAS-400-00-014": Missing.TYPE},
 }
 

@@ -23,6 +23,19 @@ What is served beyond descriptions is what the allow lists name, by exact name:
 ``ATLAS_GLOSSARIES`` (by the glossary suffix of a term's qualified name),
 ``ATLAS_CLASSIFICATIONS`` and ``ATLAS_BUSINESS_METADATA``; empty, none is served.
 ``ATLAS_OWNER_ATTRIBUTE`` serves the owner from one business metadata attribute.
+
+A glossary term is read by its GUID, ``GET /api/atlas/v2/glossary/term/{guid}``, once per
+distinct key: the first read alone, so that a refused account costs one request and the
+next reads reuse its session, then at most ``ATLAS_MAX_CONCURRENT_REQUESTS`` at a time,
+all within the call's deadline. Its glossary is the suffix of its qualified name
+(``<term>@<glossary>``); a term outside ``ATLAS_GLOSSARIES``, or that names no glossary,
+is never served. The definition is ``shortDescription``, else ``longDescription``; the
+status is ``additionalAttributes.<ATLAS_TERM_STATUS_ATTRIBUTE>``, never the status of an
+assignment. Related terms (``synonyms``, ``preferredTerms``, ``preferredToTerms``,
+``seeAlso``, ``isA``, ``replacedBy``) and categories come from the term's own answer, by
+the name and qualified name it gives them, with no other request; a related term of a
+glossary outside the allow list, or without a qualified name, is left out. Other
+relations (``classifies``, ``replacementTerms``, ``antonyms``...) are not read.
 """
 
 import asyncio
@@ -42,16 +55,28 @@ from akko_mcp_trino.context import (
     PROPERTY,
     ColumnContext,
     Labelled,
+    ProviderRefused,
     ProviderUnavailable,
     TableContext,
     TableRef,
     Term,
+    TermRef,
 )
 
 from .client import AtlasClient, Missing
 from .settings import AtlasSettings
 
 BULK = "/api/atlas/v2/entity/bulk/uniqueAttribute/type/"
+TERM = "/api/atlas/v2/glossary/term/"
+# The relations of a term that are read, and the name the core gives each.
+RELATIONS = (
+    ("synonyms", "synonym"),
+    ("preferredTerms", "preferred"),
+    ("preferredToTerms", "preferred_to"),
+    ("seeAlso", "see_also"),
+    ("isA", "is_a"),
+    ("replacedBy", "replaced_by"),
+)
 _ACTIVE = "ACTIVE"
 _STATUSES = ("status", "relationshipStatus", "entityStatus")
 
@@ -88,6 +113,24 @@ def _value(value: Any) -> str:
     if value is None or isinstance(value, dict):
         return ""
     return str(value)
+
+
+def _glossary(qualified_name: Any) -> str:
+    """The glossary a term's qualified name ends with, ``<term>@<glossary>``; empty
+    without one."""
+    name, at, glossary = _text(qualified_name).rpartition("@")
+    return glossary if at and name else ""
+
+
+def _first_of(group: BaseExceptionGroup) -> BaseException:
+    """The error a call raises when parallel reads failed: a refusal first, then an outage,
+    then whatever came first (the server says ``error`` for it)."""
+    errors = group.exceptions
+    for kind in (ProviderRefused, ProviderUnavailable):
+        for error in errors:
+            if isinstance(error, kind):
+                return error
+    return errors[0]
 
 
 def _wins(names: Iterable[str]) -> str:
@@ -185,8 +228,17 @@ class AtlasProvider:
         }
 
     async def terms(self, keys: Sequence[str], *, deadline: float) -> Mapping[str, Term]:
-        """Glossary terms are not read yet: no term is returned."""
-        return {}
+        """Read glossary terms by GUID, once each, and return those of allowed glossaries."""
+        unique = [key for key in dict.fromkeys(keys) if key]
+        if not unique:
+            return {}
+        try:
+            async with asyncio.timeout(deadline - time.monotonic()):
+                first = await self._term(unique[0])
+                rest = await self._parallel(unique[1:])
+        except TimeoutError:
+            raise ProviderUnavailable("the deadline passed before atlas answered") from None
+        return {term.key: term for term in (first, *rest) if term is not None}
 
     def check_lines(self) -> list[str]:
         """Return the addresses, the authentication and what is served, never a secret."""
@@ -196,7 +248,8 @@ class AtlasProvider:
             return ", ".join(sorted(values)) or "none"
 
         return [
-            f"atlas: {', '.join(s.urls)} ({s.auth}); catalogs: {names(s.clusters)}",
+            f"atlas: {', '.join(s.urls)} ({s.auth}); catalogs: {names(s.clusters)}; "
+            f"at most {s.max_concurrent_requests} requests at once",
             f"atlas: glossaries: {names(sets[GLOSSARY])}; classifications: "
             f"{names(sets[CLASSIFICATION])}; business metadata: {names(sets[PROPERTY])}; "
             "owner: " + ("served" if sets[OWNER] else "not served"),
@@ -217,6 +270,62 @@ class AtlasProvider:
         self._generation = next(self._resets)
 
     # -- reading
+
+    async def _parallel(self, keys: list[str]) -> list[Term | None]:
+        """Read terms, at most ``ATLAS_MAX_CONCURRENT_REQUESTS`` at a time; the first
+        failure cancels the others and is the call's error."""
+        slots = asyncio.Semaphore(self.settings.max_concurrent_requests)
+
+        async def one(key: str) -> Term | None:
+            async with slots:
+                return await self._term(key)
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                tasks = [group.create_task(one(key)) for key in keys]
+        except BaseExceptionGroup as raised:
+            raise _first_of(raised) from None
+        return [task.result() for task in tasks]
+
+    async def _term(self, key: str) -> Term | None:
+        """One term, or ``None`` when Atlas does not hold it or it may not be served."""
+        doc = await self._client.get(TERM + quote(key, safe=""))
+        if isinstance(doc, Missing):
+            return None
+        body = _object(doc)
+        glossary = _glossary(body.get("qualifiedName"))
+        name = _text(body.get("name")).strip()
+        if not name or glossary not in self.settings.glossaries:
+            return None
+        attribute = self.settings.term_status_attribute
+        status = (
+            _value(_object(body.get("additionalAttributes")).get(attribute)) if attribute else ""
+        )
+        definition = (
+            _text(body.get("shortDescription")).strip()
+            or _text(body.get("longDescription")).strip()
+        )
+        categories = (_text(c.get("displayText")) for c in _items(body.get("categories")))
+        return Term(
+            key=key,
+            name=name,
+            glossary=glossary,
+            definition=definition,
+            status=status,
+            categories=tuple(c for c in dict.fromkeys(categories) if c),
+            relations=self._relations(body),
+        )
+
+    def _relations(self, body: Mapping[str, Any]) -> tuple[TermRef, ...]:
+        """The six relations read, each to a term of an allowed glossary, once each."""
+        refs: dict[tuple[str, str], TermRef] = {}
+        for field, relation in RELATIONS:
+            for header in _items(body.get(field)):
+                glossary = _glossary(header.get("qualifiedName"))
+                key, name = _text(header.get("termGuid")), _text(header.get("displayText"))
+                if key and name and glossary in self.settings.glossaries:
+                    refs.setdefault((key, relation), TermRef(key, name, glossary, relation))
+        return tuple(refs.values())
 
     async def _entities(
         self, names: list[str]

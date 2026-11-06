@@ -8,9 +8,8 @@ account of its own, through the REST API v2 only, and never writes to it.
 
 *French version: [README.fr.md](README.fr.md).*
 
-> **Status.** Tables and columns are read by batch, with the allow lists, high availability and
-> Basic authentication or a Knox token; glossary terms (their definitions) and Kerberos come in
-> the next commits of 0.8.
+> **Status.** Tables, columns and glossary terms are read, with the allow lists, high
+> availability and Basic authentication or a Knox token; Kerberos comes in the next commit of 0.8.
 
 ## Install
 
@@ -47,6 +46,7 @@ secret.
 | `ATLAS_CA_BUNDLE` | CA bundle to check Atlas's certificate against | the system's |
 | `ATLAS_PROXY` | `http` or `https` proxy to reach Atlas; the environment's proxy settings are never read | none |
 | `ATLAS_TIMEOUT_SECONDS` | timeout of one request to Atlas | `5` |
+| `ATLAS_MAX_CONCURRENT_REQUESTS` | glossary term reads sent at once, from 1 to 32 | `4` |
 
 A secret given as a file (`*_FILE`) is read again when the file changes.
 
@@ -80,6 +80,29 @@ provider ask for it again; a change of the secret's file does too.
   `ATLAS_TABLE_TYPES` that holds the table wins.
 - A business metadata value is served as text, a list joined by commas.
 
+## How glossary terms are read
+
+A term is read by its GUID, `GET /api/atlas/v2/glossary/term/{guid}`, once per distinct key the
+server asks for. The first read goes alone, so that a refused account costs one request and the
+next reads reuse its session; the others go at most `ATLAS_MAX_CONCURRENT_REQUESTS` at a time.
+The call's deadline covers them all: past it, the provider is unavailable for the call and
+returns no part of it. `GET /api/atlas/v2/glossary/terms/{guid}/assignedEntities` is never
+called.
+
+- The glossary is the suffix of the term's qualified name (`<term>@<glossary>`). A term outside
+  `ATLAS_GLOSSARIES`, or whose qualified name names no glossary, is never served.
+- The definition is `shortDescription`, else `longDescription`. The status is
+  `additionalAttributes.<ATLAS_TERM_STATUS_ATTRIBUTE>` when that setting is set, never the
+  status of an assignment.
+- Related terms come from six relations of the term, `synonyms`, `preferredTerms`,
+  `preferredToTerms`, `seeAlso`, `isA` and `replacedBy` (served as `synonym`, `preferred`,
+  `preferred_to`, `see_also`, `is_a`, `replaced_by`), and categories by their names, all from the
+  term's own answer, with no other request. A related term of a glossary outside the allow list,
+  or without a qualified name, is left out unread. Other relations (`classifies`,
+  `replacementTerms`, `antonyms`, `translationTerms`, `validValues`...) are not read. The server
+  names a related term only when it is attached to an object the caller sees.
+- A term Atlas does not hold (404 with `ATLAS-404-00-005`) is left out.
+
 ## Network, high availability and errors
 
 The client reads nothing from the environment (no implicit proxy), sends `X-XSRF-HEADER` and
@@ -92,7 +115,7 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
 | 401 or 403 | is refused at once; the session cookie is dropped |
 | a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
-| 404 with `ATLAS-404-00-009` (no such instance) | knows nothing of these tables |
+| 404 with `ATLAS-404-00-009` or `ATLAS-404-00-005` (no such instance) | knows nothing of these tables or this term |
 | 400 with `ATLAS-400-00-014` (no such type) | knows nothing under that type, and remembers it until `SIGHUP` |
 | any other 400 or 404 (a page, another code, a wrong path behind Knox) | is unavailable |
 

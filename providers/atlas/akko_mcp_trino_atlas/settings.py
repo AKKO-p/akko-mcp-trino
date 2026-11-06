@@ -26,6 +26,8 @@ DEFAULT_TABLE_TYPES = ("hive_table", "iceberg_table")
 # Under the 8 KiB request header limit of the Jetty that serves Atlas, request line included.
 DEFAULT_MAX_QUERY_CHARS = 6000
 DEFAULT_TIMEOUT_SECONDS = 5.0
+DEFAULT_MAX_CONCURRENT_REQUESTS = 4
+MAX_CONCURRENT_REQUESTS = 32
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,7 @@ class AtlasSettings:
     owner_attribute: str = ""
     term_status_attribute: str = ""
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    max_concurrent_requests: int = DEFAULT_MAX_CONCURRENT_REQUESTS
     verify: ssl.SSLContext | bool = field(default=True, repr=False, compare=False)
     proxy: str = field(default="", repr=False)
     _secret: FileSecret | str = field(default="", repr=False)
@@ -122,6 +125,17 @@ def _positive(env: Mapping[str, str], name: str, default: float, kind: type) -> 
         raise ValueError(f"{name} must be a positive number") from None
     if not value > 0:
         raise ValueError(f"{name} must be a positive number")
+    return value
+
+
+def _concurrency(env: Mapping[str, str]) -> int:
+    value = int(
+        _positive(env, "ATLAS_MAX_CONCURRENT_REQUESTS", DEFAULT_MAX_CONCURRENT_REQUESTS, int)
+    )
+    if value > MAX_CONCURRENT_REQUESTS:
+        raise ValueError(
+            f"ATLAS_MAX_CONCURRENT_REQUESTS must be between 1 and {MAX_CONCURRENT_REQUESTS}"
+        )
     return value
 
 
@@ -214,6 +228,7 @@ def read_settings(env: Mapping[str, str]) -> AtlasSettings:
         owner_attribute=_owner(env),
         term_status_attribute=env.get("ATLAS_TERM_STATUS_ATTRIBUTE", "").strip(),
         timeout_seconds=_positive(env, "ATLAS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS, float),
+        max_concurrent_requests=_concurrency(env),
         verify=_verify(env),
         proxy=_proxy(env),
         **auth,

@@ -325,25 +325,12 @@ def test_a_name_longer_than_the_query_length_goes_alone():
     assert batches([], 40) == []
 
 
-def test_terms_are_not_read_by_this_provider_yet():
-    atlas = FakeAtlas("atlas-2.4")
-    p = provider(atlas, **SERVED)
-
-    async def run():
-        try:
-            return await p.terms(["00000000-0000-4000-8000-000000000010"], deadline=1e12)
-        finally:
-            await p.aclose()
-
-    assert asyncio.run(run()) == {} and atlas.requests == []
-
-
 def test_check_lines_name_the_addresses_and_sets_never_the_secret():
     p = provider(FakeAtlas("atlas-2.4"), **SERVED)
     lines = p.check_lines()
     asyncio.run(p.aclose())
     assert lines == [
-        f"atlas: {ATLAS} (basic); catalogs: lake",
+        f"atlas: {ATLAS} (basic); catalogs: lake; at most 4 requests at once",
         "atlas: glossaries: finance; classifications: confidential; "
         "business metadata: stewardship; owner: served",
     ]

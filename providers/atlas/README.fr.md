@@ -8,9 +8,9 @@ un compte à lui, par l'API REST v2 seulement, et n'y écrit jamais.
 
 *Version anglaise : [README.md](README.md).*
 
-> **État.** Les tables et leurs colonnes se lisent par lots, avec les listes blanches, la haute
-> disponibilité et l'authentification Basic ou par jeton Knox ; les termes de glossaire (leurs
-> définitions) et Kerberos arrivent dans les prochains commits de la 0.8.
+> **État.** Les tables, les colonnes et les termes de glossaire se lisent, avec les listes
+> blanches, la haute disponibilité et l'authentification Basic ou par jeton Knox ; Kerberos arrive
+> dans le prochain commit de la 0.8.
 
 ## Installation
 
@@ -47,6 +47,7 @@ cite une adresse, un proxy ni un secret.
 | `ATLAS_CA_BUNDLE` | autorités de certification contre lesquelles vérifier le certificat d'Atlas | celles du système |
 | `ATLAS_PROXY` | proxy `http` ou `https` pour joindre Atlas ; les réglages de proxy de l'environnement ne sont jamais lus | aucun |
 | `ATLAS_TIMEOUT_SECONDS` | délai d'une requête à Atlas | `5` |
+| `ATLAS_MAX_CONCURRENT_REQUESTS` | lectures de termes de glossaire envoyées à la fois, de 1 à 32 | `4` |
 
 Un secret donné par fichier (`*_FILE`) est relu quand le fichier change.
 
@@ -81,6 +82,29 @@ fournisseur le demande de nouveau ; un changement du fichier du secret aussi.
   premier type d'`ATLAS_TABLE_TYPES` qui contient la table l'emporte.
 - Une valeur de métadonnée métier est servie en texte, une liste jointe par des virgules.
 
+## Lecture des termes de glossaire
+
+Un terme se lit par son GUID, `GET /api/atlas/v2/glossary/term/{guid}`, une fois par clé
+distincte que demande le serveur. La première lecture part seule, pour qu'un compte refusé ne
+coûte qu'une requête et que les suivantes réutilisent sa session ; les autres partent au plus
+`ATLAS_MAX_CONCURRENT_REQUESTS` à la fois. L'échéance de l'appel les couvre toutes : dépassée,
+le fournisseur se dit indisponible pour l'appel et n'en rend aucune partie.
+`GET /api/atlas/v2/glossary/terms/{guid}/assignedEntities` n'est jamais appelé.
+
+- Le glossaire est le suffixe du nom qualifié du terme (`<terme>@<glossaire>`). Un terme hors
+  d'`ATLAS_GLOSSARIES`, ou dont le nom qualifié ne nomme aucun glossaire, n'est jamais servi.
+- La définition est `shortDescription`, sinon `longDescription`. Le statut est
+  `additionalAttributes.<ATLAS_TERM_STATUS_ATTRIBUTE>` quand ce réglage est posé, jamais le
+  statut d'un rattachement.
+- Les termes liés viennent de six relations du terme, `synonyms`, `preferredTerms`,
+  `preferredToTerms`, `seeAlso`, `isA` et `replacedBy` (servies en `synonym`, `preferred`,
+  `preferred_to`, `see_also`, `is_a`, `replaced_by`), et les catégories par leur nom, le tout
+  tiré de la réponse du terme lui-même, sans autre requête. Un terme lié d'un glossaire hors de
+  la liste blanche, ou sans nom qualifié, est écarté sans être lu. Les autres relations
+  (`classifies`, `replacementTerms`, `antonyms`, `translationTerms`, `validValues`...) ne sont
+  pas lues. Le serveur ne nomme un terme lié que s'il est rattaché à un objet que l'appelant voit.
+- Un terme qu'Atlas n'a pas (404 avec `ATLAS-404-00-005`) est écarté.
+
 ## Réseau, haute disponibilité et erreurs
 
 Le client ne lit rien dans l'environnement (pas de proxy implicite), envoie `X-XSRF-HEADER` et
@@ -93,7 +117,7 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
 | 401 ou 403 | se dit refusé tout de suite ; le cookie de session est oublié |
 | un 200 qui n'est pas du JSON (une page de connexion Knox), un JSON illisible, un autre statut | se dit indisponible |
-| 404 avec `ATLAS-404-00-009` (aucune instance) | ne sait rien de ces tables |
+| 404 avec `ATLAS-404-00-009` ou `ATLAS-404-00-005` (aucune instance) | ne sait rien de ces tables ou de ce terme |
 | 400 avec `ATLAS-400-00-014` (aucun type) | ne sait rien sous ce type, et s'en souvient jusqu'au `SIGHUP` |
 | tout autre 400 ou 404 (une page, un autre code, un mauvais chemin derrière Knox) | se dit indisponible |
 
