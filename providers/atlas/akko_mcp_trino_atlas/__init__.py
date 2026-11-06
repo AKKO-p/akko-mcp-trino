@@ -63,7 +63,9 @@ def _urls(env: Mapping[str, str]) -> tuple[str, ...]:
         try:
             parts.port
         except ValueError:
-            raise ValueError("ATLAS_URL: an address has a port that is not a number") from None
+            raise ValueError(
+                "ATLAS_URL: an address has a port that is not a valid number"
+            ) from None
     return urls
 
 

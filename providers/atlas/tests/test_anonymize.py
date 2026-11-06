@@ -72,3 +72,17 @@ def test_a_timestamp_in_seconds_or_milliseconds_is_rewritten(tmp_path):
     _invoices(doc)["lastAccessTime"] = 1790294400123
     out = _invoices(_run(doc, tmp_path))
     assert (out["createTime"], out["lastAccessTime"]) == (1_700_000_000, 1_700_000_000_000)
+
+
+def test_a_business_attribute_named_in_drop_is_left_out(tmp_path):
+    doc = _table_read()
+    entity = doc["response"]["body"]["entities"][0]
+    entity["businessAttributes"] = {"stewardship": {"approvalStatus": "APPROVED", "family": "x"}}
+    raw, out = tmp_path / "raw", tmp_path / "out"
+    raw.mkdir()
+    (raw / "read.json").write_text(json.dumps(doc), encoding="utf-8")
+    names = {**copy.deepcopy(NAMES), "drop": ["family"]}
+    anonymize.run(raw, out, names)
+    got = json.loads((out / "read.json").read_text(encoding="utf-8"))
+    (kept,) = got["response"]["body"]["entities"][0]["businessAttributes"].values()
+    assert len(kept) == 1 and "family" not in json.dumps(got)
