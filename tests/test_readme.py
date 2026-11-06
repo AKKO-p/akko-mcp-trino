@@ -155,3 +155,36 @@ def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path):
     assert sets[OWNER] == frozenset()
     served = from_env({"MCP_CONTEXT_FILE": str(path), "MCP_CONTEXT_FILE_SERVE_OWNER": "true"})
     assert served.served_sets()[OWNER] != frozenset()
+
+
+def _resource_groups(path: pathlib.Path) -> list[dict]:
+    """The Trino resource group examples of a README: its JSON blocks with rootGroups."""
+    blocks = re.findall(r"```json\n(.*?)```", path.read_text(encoding="utf-8"), re.S)
+    return [json.loads(b) for b in blocks if '"rootGroups"' in b]
+
+
+def _leaves(groups: list[dict], prefix: str = "") -> tuple[set[str], set[str]]:
+    """The paths of every group, and of the leaf groups, as a selector names them."""
+    every, leaves = set(), set()
+    for group in groups:
+        path = f"{prefix}{group['name']}"
+        every.add(path)
+        if group.get("subGroups"):
+            more, deeper = _leaves(group["subGroups"], f"{path}.")
+            every |= more
+            leaves |= deeper
+        else:
+            leaves.add(path)
+    return every, leaves
+
+
+@pytest.mark.parametrize("readme", ["README.md", "README.fr.md"])
+def test_the_resource_group_example_selects_only_leaf_groups(readme):
+    """Trino refuses a query its selector puts in a group that has sub-groups: a selector
+    must name a leaf, so the queries without the tag need a group of their own."""
+    (example,) = _resource_groups(pathlib.Path(__file__).resolve().parents[1] / readme)
+    every, leaves = _leaves(example["rootGroups"])
+    selected = [s["group"] for s in example["selectors"]]
+    assert selected and all(g in every for g in selected), "a selector names no group"
+    assert [g for g in selected if g not in leaves] == [], "a selector names a non-leaf group"
+    assert not example["selectors"][-1].get("clientTags"), "a last selector catches the rest"

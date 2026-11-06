@@ -544,7 +544,8 @@ The [examples](examples/README.md) folder has the details.
 The aggregate query of `profile_table` carries the client tag `MCP_PROFILE_CLIENT_TAG`
 (`mcp-profile` by default), so Trino's resource groups can bound how many run at once and
 the memory they take; for example, with the file-based resource group manager (the figures
-are an example to adapt, not a measure):
+are an example to adapt, not a measure). Every selector names a leaf group, so the queries
+without the tag need their own group (`global.other` here), or Trino refuses them:
 
 ```json
 {
@@ -555,13 +556,14 @@ are an example to adapt, not a measure):
       "hardConcurrencyLimit": 100,
       "maxQueued": 1000,
       "subGroups": [
-        {"name": "profile", "softMemoryLimit": "10%", "hardConcurrencyLimit": 2, "maxQueued": 20}
+        {"name": "profile", "softMemoryLimit": "10%", "hardConcurrencyLimit": 2, "maxQueued": 20},
+        {"name": "other", "softMemoryLimit": "70%", "hardConcurrencyLimit": 98, "maxQueued": 980}
       ]
     }
   ],
   "selectors": [
     {"clientTags": ["mcp-profile"], "group": "global.profile"},
-    {"group": "global"}
+    {"group": "global.other"}
   ]
 }
 ```

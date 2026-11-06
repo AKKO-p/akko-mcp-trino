@@ -365,7 +365,9 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 La requête d'agrégats de `profile_table` porte l'étiquette client `MCP_PROFILE_CLIENT_TAG`
 (`mcp-profile` par défaut) : les groupes de ressources de Trino peuvent ainsi borner leur nombre
 simultané et leur mémoire, par exemple avec le gestionnaire de groupes de ressources par fichier (les
-chiffres sont un exemple à adapter, pas une mesure) :
+chiffres sont un exemple à adapter, pas une mesure). Chaque sélecteur nomme un groupe feuille : les
+requêtes sans l'étiquette ont donc besoin de leur propre groupe (ici `global.other`), sinon Trino les
+refuse :
 
 ```json
 {
@@ -376,13 +378,14 @@ chiffres sont un exemple à adapter, pas une mesure) :
       "hardConcurrencyLimit": 100,
       "maxQueued": 1000,
       "subGroups": [
-        {"name": "profile", "softMemoryLimit": "10%", "hardConcurrencyLimit": 2, "maxQueued": 20}
+        {"name": "profile", "softMemoryLimit": "10%", "hardConcurrencyLimit": 2, "maxQueued": 20},
+        {"name": "other", "softMemoryLimit": "70%", "hardConcurrencyLimit": 98, "maxQueued": 980}
       ]
     }
   ],
   "selectors": [
     {"clientTags": ["mcp-profile"], "group": "global.profile"},
-    {"group": "global"}
+    {"group": "global.other"}
   ]
 }
 ```
