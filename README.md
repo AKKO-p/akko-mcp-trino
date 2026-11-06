@@ -400,8 +400,11 @@ with memory caching or optional `keyring`. `--check` does not log in.
 
 A [Dockerfile](Dockerfile) ships with the repository (non-root, health check,
 OCI labels). The image is published for `linux/amd64` and `linux/arm64` as
-`akkoai/akko-mcp-trino` and `ghcr.io/akko-p/akko-mcp-trino`. Run it with the
-same environment variables, publishing ports `3000` (MCP) and `3001` (health):
+`akkoai/akko-mcp-trino` and `ghcr.io/akko-p/akko-mcp-trino`. It installs
+every dependency from the lock `requirements/image.txt`, at exact versions and
+with their hashes (see [CONTRIBUTING.md](CONTRIBUTING.md#dependencies-and-locks)).
+Run it with the same environment variables, publishing ports `3000` (MCP) and
+`3001` (health):
 
 ```bash
 docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
@@ -1702,15 +1705,16 @@ exposes `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total` (by st
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install --require-hashes -r requirements/build.txt -r requirements/dev.txt && pip install --no-deps --no-build-isolation -e .
 ruff check akko_mcp_trino tests examples && ruff format akko_mcp_trino tests examples
 ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every public name documented
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
-pip-audit                     # no known vulnerability in the dependency tree
+pip-audit --disable-pip --require-hashes -r requirements/image.txt -r requirements/dev.txt -r requirements/release.txt   # no known vulnerability in the locks
+bash scripts/lock.sh check    # the locks match their sources (CONTRIBUTING.md, "Dependencies and locks")
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
 pytest                        # line or branch coverage below 100 % fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
-python -m build && twine check dist/*
+python -m build --no-isolation && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start
 ```
 

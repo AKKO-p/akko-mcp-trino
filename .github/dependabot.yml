@@ -3,7 +3,12 @@ version: 2
 # once is more noise than review.
 updates:
   - package-ecosystem: pip
+    # pyproject.toml declares ranges; requirements/*.txt are the locks, compiled from
+    # requirements/*.in by pip-compile (found from the root, as the .in files install the
+    # package from it). A new version goes into the locks, and a range moves only when the new
+    # version falls outside it.
     directory: /
+    versioning-strategy: increase-if-necessary
     schedule: { interval: monthly }
     groups:
       python-dependencies: { patterns: ["*"] }
@@ -15,6 +20,12 @@ updates:
       actions: { patterns: ["*"] }
     open-pull-requests-limit: 1
   - package-ecosystem: docker
+    # The base image of the Dockerfile, pinned by digest: its security updates (a Python patch
+    # release, the system packages) come as a new tag and digest. A new Python minor version
+    # changes the locks too (bash scripts/lock.sh compile), so it is made by hand.
     directory: /
     schedule: { interval: monthly }
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     open-pull-requests-limit: 1

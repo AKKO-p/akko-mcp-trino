@@ -1,92 +1,157 @@
 name: release
 # Tag v* → package on PyPI (trusted publishing), provenance, and the image.
-# Run by hand (workflow_dispatch) with an existing tag, it only builds and
+# Run by hand (workflow_dispatch) with an existing release tag, it only builds and
 # pushes the image of that tag again, with the current workflow.
+# The tag is checked first (scripts/release-tag.sh, from this workflow's commit): a version
+# tag, present and reachable from main; every later job builds the commit it names. The jobs
+# that build run no step with an OIDC token; signing and publishing are jobs of their own.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag whose image to push again (e.g. v0.5.3)"
+        description: "Existing release tag (v<major>.<minor>.<patch>) whose image to push again"
         required: true
+# Read-only by default; each job that publishes or signs adds what it needs.
+permissions:
+  contents: read
 jobs:
+  ref:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sha: ${{ steps.tag.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: bash scripts/release-tag.sh "$TAG" origin/main >> "$GITHUB_OUTPUT"
+  dist:
+    # The sdist and the wheel, built once by the locked tools and handed to the jobs that
+    # publish and sign them.
+    if: github.event_name == 'push'
+    needs: ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ needs.ref.outputs.sha }}
+      - id: lock
+        run: bash scripts/lock.sh outputs >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: ${{ steps.lock.outputs.python }}
+      - run: pip install --require-hashes -r requirements/release.txt
+      - run: python -m build --no-isolation && twine check dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: dist
+          path: dist/
   pypi:
     # Runs once trusted publishing is configured on pypi.org for this repository
     # (Publishing → pending publisher: AKKO-p/akko-mcp-trino, release.yml, environment pypi)
     # and the repository variable PYPI_TRUSTED_PUBLISHING is set to "true".
     # Until then, releases are uploaded with twine from a maintainer's machine.
     if: github.event_name == 'push' && vars.PYPI_TRUSTED_PUBLISHING == 'true'
+    needs: dist
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
-      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
-          python-version: "3.12"
-      - run: pip install build twine && python -m build && twine check dist/*
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
   registry:
     # Lists the server in the official MCP Registry once the package is on PyPI
     # (the registry checks the mcp-name marker in the PyPI description).
     needs: pypi
     runs-on: ubuntu-latest
+    env:
+      # mcp-publisher, an exact release; its archive must match this sha256, the line of
+      # mcp-publisher_linux_amd64.tar.gz in that release's registry_<version>_checksums.txt.
+      # Dependabot cannot follow it: to move it, set both from the new release (CONTRIBUTING.md).
+      MCP_PUBLISHER_VERSION: v1.8.4
+      MCP_PUBLISHER_SHA256: 5dc2fd415369c73551259f31cd33e2aacc9e0d1021e7f08fef1492d93b781628
     permissions:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Wait for PyPI to serve the version in server.json
         run: |
           v=$(python3 -c "import json;print(json.load(open('server.json'))['version'])")
           for i in $(seq 1 30); do curl -fsS "https://pypi.org/pypi/akko-mcp-trino/$v/json" >/dev/null && exit 0; sleep 20; done; exit 1
-      - name: Install mcp-publisher
-        run: curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: Install mcp-publisher (exact version, checksum verified)
+        run: |
+          curl -fsSLo mcp-publisher.tar.gz "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+          rm mcp-publisher.tar.gz
       - run: ./mcp-publisher validate
       - run: ./mcp-publisher login github-oidc
       - run: ./mcp-publisher publish
   provenance:
-    # Signed build provenance and an SBOM for the wheel and sdist, attached to the release.
+    # Signed build provenance and an SBOM for the wheel and sdist of the dist job, attached to
+    # the release.
     if: github.event_name == 'push'
+    needs: [ref, dist]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          python-version: "3.12"
-      - run: pip install build && python -m build
-      - uses: anchore/sbom-action@v0
+          ref: ${{ needs.ref.outputs.sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: dist
+          path: dist/
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
         with:
           path: .
           format: spdx-json
           output-file: sbom.spdx.json
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-path: dist/*
-      - run: gh release upload "${GITHUB_REF_NAME}" dist/* sbom.spdx.json --clobber
+      - run: gh release upload "$TAG" dist/* sbom.spdx.json --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.ref.outputs.tag }}
   image:
+    needs: ref
     runs-on: ubuntu-latest
     permissions:
       packages: write
       contents: read
-      id-token: write
-      attestations: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
-      - uses: actions/checkout@v7
+      # This workflow's commit, then the checked tag in tag/: a tag from before
+      # requirements/image.txt builds with its own image-requirements.txt (scripts/release-image.sh).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
-          ref: ${{ inputs.tag || github.ref }}
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+          ref: ${{ needs.ref.outputs.sha }}
+          path: tag
+      - id: lock
+        run: bash scripts/release-image.sh tag >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -94,32 +159,46 @@ jobs:
       # Docker Hub too, once the repository variable DOCKERHUB_USERNAME and the
       # secret DOCKERHUB_TOKEN are set; without them the image goes to GHCR only.
       - if: vars.DOCKERHUB_USERNAME != ''
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/metadata-action@v6
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         id: meta
         with:
           images: |
             ghcr.io/akko-p/akko-mcp-trino
             name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/akko-mcp-trino,enable=${{ vars.DOCKERHUB_USERNAME != '' }}
           tags: |
-            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
+            type=semver,pattern={{version}},value=${{ needs.ref.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.ref.outputs.tag }}
             type=raw,value=latest
-      - uses: docker/build-push-action@v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         id: push
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
+          context: tag
+          platforms: ${{ steps.lock.outputs.platforms }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-      - uses: actions/attest-build-provenance@v4
+  image-provenance:
+    # The image's signed build provenance, in a job that runs nothing from the tag.
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-name: ghcr.io/akko-p/akko-mcp-trino
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ needs.image.outputs.digest }}
           push-to-registry: true
   dockerhub-page:
     # The Docker Hub page (overview and short description) follows DOCKERHUB.md,
@@ -128,8 +207,8 @@ jobs:
     needs: image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: peter-evans/dockerhub-description@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: peter-evans/dockerhub-description@432a30c9e07499fd01da9f8a49f0faf9e0ca5b77  # v4.0.2
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}

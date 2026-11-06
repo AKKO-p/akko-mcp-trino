@@ -110,7 +110,7 @@ docker compose up -d --wait
 - Le fonctionnement de bout en bout est décrit sur [akko-ai.com/docs/comment-ca-marche](https://akko-ai.com/docs/comment-ca-marche/) (aussi [en anglais](https://akko-ai.com/en/docs/how-it-works/)).
 - Le guide, les prérequis, la configuration et les exemples sont sur [akko-ai.com/docs/coeur-open-source](https://akko-ai.com/docs/coeur-open-source/) (aussi [en anglais](https://akko-ai.com/en/docs/open-source-core/)) et [akko-ai.com/docs/exemples](https://akko-ai.com/docs/exemples/).
 - Le guide pas à pas pour Claude Desktop et Cursor est sur [akko-ai.com/docs/brancher-claude-cursor](https://akko-ai.com/docs/brancher-claude-cursor/) (en anglais dans ce dépôt, [docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md)).
-- La référence est dans ce dépôt, en anglais : le [README](README.md), [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md).
+- La référence est dans ce dépôt, en anglais : le [README](README.md), [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`SECURITY.md`](SECURITY.md) ; le guide de contribution, en français : [`CONTRIBUTING.fr.md`](CONTRIBUTING.fr.md).
 
 ## Pourquoi
 
@@ -193,7 +193,8 @@ docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
 
 La même image est publiée sous `ghcr.io/akko-p/akko-mcp-trino`. Elle tourne sans root, porte un
 contrôle de santé et prend les mêmes variables d'environnement, sur les ports `3000` (MCP) et
-`3001` (santé).
+`3001` (santé). Elle installe chaque dépendance depuis le verrou `requirements/image.txt`, en
+version exacte et avec ses empreintes (voir [CONTRIBUTING.fr.md](CONTRIBUTING.fr.md#dépendances-et-verrous)).
 
 Il faut Python 3.12 ou plus récent pour l'installation par pip.
 
@@ -1179,7 +1180,7 @@ tools), les refus, l'audit et les métriques sont décrits dans le [README](READ
 
 ## Contribuer
 
-Les issues et les pull requests sont bienvenues : voir [CONTRIBUTING.md](CONTRIBUTING.md). Une
+Les issues et les pull requests sont bienvenues : voir [CONTRIBUTING.fr.md](CONTRIBUTING.fr.md). Une
 vulnérabilité se signale à security@akko-ai.com, selon [SECURITY.md](SECURITY.md). Si vous arrivez à
 faire passer une écriture à travers la garde, ouvrez une issue : c'est exactement ce que nous
 cherchons.
