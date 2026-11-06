@@ -34,6 +34,11 @@ def test_every_variable_the_readme_lists_is_read_by_config():
         pathlib.Path(__file__).resolve().parents[1] / "akko_mcp_trino" / "context" / "file.py"
     ).read_text(encoding="utf-8")
     read_by_code |= set(re.findall(r'"(MCP_[A-Z_]+)"', provider))
+    # a module of the core reads its own settings from the environment it is given
+    for module in (pathlib.Path(__file__).resolve().parents[1] / "akko_mcp_trino" / "modules").glob(
+        "*.py"
+    ):
+        read_by_code |= set(re.findall(r'"(MCP_[A-Z_]+)"', module.read_text(encoding="utf-8")))
     unknown = sorted(v for v in listed if v not in read_by_code)
     assert unknown == [], f"README lists variables the code never reads: {unknown}"
 
@@ -182,12 +187,14 @@ def _leaves(groups: list[dict], prefix: str = "") -> tuple[set[str], set[str]]:
 def test_the_resource_group_example_selects_only_leaf_groups(readme):
     """Trino refuses a query its selector puts in a group that has sub-groups: a selector
     must name a leaf, so the queries without the tag need a group of their own."""
-    (example,) = _resource_groups(pathlib.Path(__file__).resolve().parents[1] / readme)
-    every, leaves = _leaves(example["rootGroups"])
-    selected = [s["group"] for s in example["selectors"]]
-    assert selected and all(g in every for g in selected), "a selector names no group"
-    assert [g for g in selected if g not in leaves] == [], "a selector names a non-leaf group"
-    assert not example["selectors"][-1].get("clientTags"), "a last selector catches the rest"
+    examples = _resource_groups(pathlib.Path(__file__).resolve().parents[1] / readme)
+    assert len(examples) == 2, "profile_table's tag and trino-tags' tool tag"
+    for example in examples:
+        every, leaves = _leaves(example["rootGroups"])
+        selected = [s["group"] for s in example["selectors"]]
+        assert selected and all(g in every for g in selected), "a selector names no group"
+        assert [g for g in selected if g not in leaves] == [], "a selector names a non-leaf group"
+        assert not example["selectors"][-1].get("clientTags"), "a last selector catches the rest"
 
 
 @pytest.mark.parametrize(
@@ -270,3 +277,24 @@ def test_the_readme_says_what_the_context_of_a_catalogue_serves_and_under_which_
     assert "lets the caller read" not in flat and "laisse lire à l'appelant" not in flat
     assert "only of those the caller may also select" not in flat
     assert "seulement de celles que l'appelant peut aussi" not in flat
+
+
+# What a real run of the integration suite showed, quoted by both READMEs, one per module.
+_MODULE_EXAMPLES = [
+    "MCP_REQUIRED_SCOPES=data:query",
+    'WWW-Authenticate: Bearer resource_metadata="http://mcp-scoped:3000/.well-known/'
+    'oauth-protected-resource/mcp", error="insufficient_scope", scope="data:query"',
+    '"scopes_supported": ["data:query"]',
+    '"token_id": "jti-docs-0001",',
+    '"sql_sha256": "595c26467ad8ea2d0a0857b4bf5c094d6f6d6bfc8c88ebc289f03a523ce7faf5",',
+    "X-Trino-Client-Tags: request_id=req-docs-0001,tool=execute_query",
+    "20261106_173554_00003_ppe7v  [global, agents]     trino-mcp",
+    "`integration/compose.yaml`",
+]
+
+
+@pytest.mark.parametrize("readme", ["README.md", "README.fr.md"])
+def test_each_readme_quotes_a_real_example_of_each_module(readme):
+    text = (pathlib.Path(__file__).resolve().parents[1] / readme).read_text(encoding="utf-8")
+    assert [e for e in _MODULE_EXAMPLES if e not in text] == []
+    assert text.count("Not tested live") + text.count("Non testé en live") == 2, "Entra ID, Okta"

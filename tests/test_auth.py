@@ -467,3 +467,62 @@ def test_realm_access_that_is_not_an_object_gives_no_roles_not_an_error():
 @pytest.mark.parametrize("value", ["https://example.com/uid", "urn:oid:0.9.2342.19200300.100.1.1"])
 def test_a_url_style_claim_name_is_accepted(value):
     assert not any("MCP_JWT_USER_CLAIM" in p for p in _cfg(True, jwt_user_claim=value).problems())
+
+
+# ---- the claims that name the client and the scopes, set by the operator
+
+
+def _claims_provider(client_claims, scope_claims):
+    return auth.JwksJwtAuth(
+        "https://kc.example/jwks",
+        _ISS,
+        _AUD,
+        jwks_client=_FakeJwks(),
+        client_claims=client_claims,
+        scope_claims=scope_claims,
+    )
+
+
+def test_the_client_and_the_scopes_come_from_the_first_claim_present():
+    """Okta names the application in `cid` and lists the scopes in `scp`."""
+    provider = _claims_provider(("cid", "azp"), ("scp", "scope"))
+    p = provider.verify(_bearer(_sign({"sub": "u", "cid": "okta-app", "azp": "x", "scp": ["a"]})))
+    assert (p.client_id, p.scopes) == ("okta-app", ("a",))
+    p = provider.verify(_bearer(_sign({"sub": "u", "azp": "x", "scope": "b c"})))
+    assert (p.client_id, p.scopes) == ("x", ("b", "c")), "the next claim when the first is absent"
+
+
+def test_an_entra_scp_string_is_split_on_spaces():
+    provider = _claims_provider(("appid", "azp"), ("scp",))
+    p = provider.verify(_bearer(_sign({"sub": "u", "appid": "entra-app", "scp": "Data.Read x"})))
+    assert (p.client_id, p.scopes) == ("entra-app", ("Data.Read", "x"))
+
+
+@pytest.mark.parametrize("value", [3, {"a": 1}, ["a", 3], [["a"]], True, None])
+def test_a_scope_claim_of_another_type_gives_no_scope_never_a_conversion(value):
+    provider = _claims_provider(("azp",), ("scp",))
+    assert provider.verify(_bearer(_sign({"sub": "u", "scp": value}))).scopes == ()
+
+
+def test_the_default_claims_are_those_of_0_7():
+    """azp then client_id for the client, scope for the scopes: the principal of 0.7."""
+    default = _jwks_provider()
+    claims = {"sub": "u", "jti": "j", "azp": "a", "client_id": "b", "scope": "x y", "scp": "z"}
+    assert default.verify(_bearer(_sign(claims))) == auth.Principal(
+        subject="u", token_id="j", client_id="a", scopes=("x", "y")
+    )
+
+
+def test_a_claim_present_wins_even_empty_and_the_next_is_never_read():
+    """The first claim the token carries, whatever it holds: an empty scope list gives no
+    scope, never the next claim's; an empty client gives no client."""
+    provider = _claims_provider(("cid", "azp"), ("scp", "scope"))
+    claims = {"sub": "u", "cid": "", "azp": "x", "scp": [], "scope": "data:query"}
+    p = provider.verify(_bearer(_sign(claims)))
+    assert (p.client_id, p.scopes) == ("", ())
+
+
+@pytest.mark.parametrize("value", [["mcp-host"], True, 3, {"a": "b"}])
+def test_a_client_claim_that_is_not_text_is_no_client_never_a_conversion(value):
+    provider = _claims_provider(("azp", "client_id"), ("scope",))
+    assert provider.verify(_bearer(_sign({"sub": "u", "azp": value}))).client_id == ""

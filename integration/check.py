@@ -30,6 +30,9 @@ JWT, IMPERSONATION, SERVICE = (
     "http://mcp-service:3000/mcp",
 )
 PAGED = "http://mcp-paged:3000/mcp"  # the jwt server with pages of three rows
+# The jwt server with the three modules of the core, and one whose token-policy requires a
+# scope no token of the realm carries.
+MODULES, SCOPED = "http://mcp-modules:3000/mcp", "http://mcp-scoped:3000/mcp"
 # The servers with the catalogue context of integration/context.json.
 CONTEXT_JWT, CONTEXT_IMPERSONATION, CONTEXT_CANARY = (
     "http://mcp-context-jwt:3000/mcp",
@@ -286,6 +289,27 @@ def trino_direct(bearer: str, user: str | None = None) -> httpx.Response:
     if user:
         headers["X-Trino-User"] = user
     return httpx.post(TRINO, content="SELECT current_user", headers=headers, verify=CA, timeout=20)
+
+
+def trino_rows(bearer: str, sql: str) -> list:
+    """The rows of ``sql`` run in Trino with ``bearer``, its pages followed to the end."""
+    headers = {"Authorization": f"Bearer {bearer}"}
+    body = httpx.post(TRINO, content=sql, headers=headers, verify=CA, timeout=20).json()
+    rows: list = []
+    while True:
+        rows += body.get("data") or []
+        if "error" in body or "nextUri" not in body:
+            return rows if "error" not in body else [["error", body["error"].get("message")]]
+        body = httpx.get(body["nextUri"], headers=headers, verify=CA, timeout=20).json()
+
+
+def group_of(bearer: str, probe: str) -> list:
+    """The resource group of the query that holds ``probe``, from Trino's own history."""
+    return trino_rows(
+        bearer,
+        "SELECT resource_group_id FROM system.runtime.queries "
+        f"WHERE query LIKE '%{probe}%' AND query NOT LIKE '%system.runtime.queries%'",
+    )
 
 
 def who(answer: dict) -> str:
@@ -583,6 +607,42 @@ def main() -> int:
         "TRINO_IDENTITY_MODE=service" in s["instructions"]
         and "MCP_AUTH_ENABLED=false" in s["instructions"],
         s["instructions"],
+    )
+
+    # 5. The modules of the core.
+    m = ask(MODULES, alice)
+    check(
+        "modules: token-policy admits the host's client, and alice reads her 25 nations",
+        who(m) == "alice" and len(m["nations"].get("rows", [])) == 25,
+        m["nations"],
+    )
+    refused = httpx.post(SCOPED, json={}, headers={"Authorization": f"Bearer {alice}"}, timeout=10)
+    check(
+        "modules: token-policy answers a token without the required scope 403 "
+        "insufficient_scope, naming the scope to ask for",
+        refused.status_code == 403
+        and refused.headers.get("x-reason") == "insufficient_scope"
+        and 'scope="data:query"' in refused.headers.get("www-authenticate", ""),
+        (refused.status_code, refused.headers.get("www-authenticate")),
+    )
+    meta = httpx.get("http://mcp-scoped:3000/.well-known/oauth-protected-resource/mcp", timeout=10)
+    check(
+        "modules: the protected resource metadata names the scopes token-policy requires",
+        meta.json().get("scopes_supported") == ["data:query"],
+        meta.text,
+    )
+    probes = {server: os.urandom(8).hex() for server in (MODULES, JWT)}
+    for server, probe in probes.items():
+        use(server, alice, lambda call, p=probe: call("execute_query", sql=f"SELECT '{p}' AS p"))
+    check(
+        "modules: trino-tags puts execute_query in the resource group its tool tag selects",
+        group_of(alice_for_trino, probes[MODULES]) == [[["global", "agents"]]],
+        group_of(alice_for_trino, probes[MODULES]),
+    )
+    check(
+        "control: without trino-tags, the same query falls in the group of the others",
+        group_of(alice_for_trino, probes[JWT]) == [[["global", "other"]]],
+        group_of(alice_for_trino, probes[JWT]),
     )
 
     for name, ok, detail in RESULTS:

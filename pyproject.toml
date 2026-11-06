@@ -56,6 +56,11 @@ atlas = ["akko-mcp-trino-atlas[kerberos]==0.7.2"]
 [project.scripts]
 akko-mcp-trino = "akko_mcp_trino.__main__:main"
 
+[project.entry-points."akko_mcp_trino.extensions"]
+token-policy = "akko_mcp_trino.modules.token_policy:create"
+fingerprint-audit = "akko_mcp_trino.modules.fingerprint_audit:create"
+trino-tags = "akko_mcp_trino.modules.trino_tags:create"
+
 [project.entry-points."akko_mcp_trino.context"]
 file = "akko_mcp_trino.context.file:from_env"
 

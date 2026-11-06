@@ -107,7 +107,9 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         f"audience={config.oidc_audience or '-'} resource={config.resource_url or '-'}",
         "audiences accepted: "
         + (", ".join(accepted_audiences(config, _audiences(extensions))) or "-"),
-        f"token signatures: {','.join(_algorithms(config))}; user from: {config.jwt_user_claim}",
+        f"token signatures: {','.join(_algorithms(config))}; user from: {config.jwt_user_claim}; "
+        f"client from: {','.join(config.client_claims())}; scopes from: "
+        f"{','.join(config.scope_claims())}",
         f"user token (stdio): {'set' if config.user_token else '-'}",
         f"trino identity mode: {config.trino_identity_mode} over {config.trino_http_scheme}",
         *identity,
@@ -144,6 +146,7 @@ def check_config(config: Config, *, strict: bool = False) -> int:
             if config.profile_budget_seconds() > 0
             else "none"
         ),
+        f"audit: up to {config.audit_max_names} names a list, the rest counted",
         f"tool plugins: {config.tool_plugins or 'none'}",
         f"extensions: {', '.join(extension_names(config.extensions)) or 'none'}",
         *[line for ext in extensions for line in ext.check_lines()],

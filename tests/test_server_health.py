@@ -1,5 +1,7 @@
 """build_server assembly and the health endpoints."""
 
+from dataclasses import replace
+
 from starlette.testclient import TestClient
 
 from akko_mcp_trino.config import Config
@@ -145,3 +147,37 @@ def test_ready_503_when_trino_down():
     r = TestClient(app).get("/ready")
     assert r.status_code == 503
     assert r.json()["status"] == "error" and "connection refused" in r.json()["detail"]
+
+
+def test_the_names_an_audit_line_keeps_reach_the_tools_and_a_plugin(monkeypatch):
+    """MCP_AUDIT_MAX_NAMES set to 1: the record of a built-in tool and of a plugin's tool keep
+    one name and count the others."""
+    from akko_mcp_trino.audit import InMemoryAudit, note
+    from tests.tool_doubles import in_request
+
+    class _Trino:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query(self, sql, user=None, params=None, **keywords):
+            return {"columns": ["c"], "rows": [[1]], "row_count": 1, "truncated": False}
+
+    def registrar(mcp, client):
+        @mcp.tool()
+        def plugin_tables() -> str:
+            note(tables=["p.q.r", "p.q.s", "p.q.t"])
+            return "ok"
+
+    monkeypatch.setattr("akko_mcp_trino.server.TrinoClient", _Trino)
+    audit = InMemoryAudit()
+    mcp, _ = build_server(
+        replace(_CFG, audit_max_names=1),
+        extra_tool_registrars=[registrar],
+        mcp_factory=lambda name, **_: FakeMCP(),
+        audit=audit,
+    )
+    in_request(lambda: mcp.tools["execute_query"]("SELECT * FROM a.b.c, a.b.d"))
+    in_request(lambda: mcp.tools["plugin_tables"]())
+    built_in, plugin = (e.call for e in audit.events)
+    assert (built_in.tables, built_in.tables_cut) == (["a.b.c"], 1)
+    assert (plugin.tables, plugin.tables_cut) == (["p.q.r"], 2)

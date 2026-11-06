@@ -14,7 +14,7 @@ export MCP_CLIENT_SECRET="$(secret)" INTEGRATION_PASSWORD="$(secret)"
 export TRINO_SHARED_SECRET="$(secret)" KEYCLOAK_ADMIN_PASSWORD="$(secret)"
 failed=0
 began=$(date +%s)
-SERVERS="mcp-jwt mcp-paged mcp-impersonation mcp-service mcp-context-jwt mcp-context-impersonation mcp-context-canary"
+SERVERS="mcp-jwt mcp-paged mcp-impersonation mcp-service mcp-context-jwt mcp-context-impersonation mcp-context-canary mcp-modules mcp-scoped"
 cleanup() {
   if [ "${KEEP:-0}" = "1" ]; then echo "KEEP=1: project $COMPOSE_PROJECT_NAME left running"; return; fi
   docker compose --profile check down -v --remove-orphans >/dev/null 2>&1
@@ -89,6 +89,15 @@ if [ -n "$canary" ] && ! grep -qE "alice|bob" <<<"$canary"; then
   echo "  OK    the canary seen by a caller is logged as a WARNING, without the caller's name"
 else
   echo "  FAIL  the canary seen by a caller is not logged, or the line names the caller"; failed=1
+fi
+# fingerprint-audit: the line of alice's read of the nations on mcp-modules carries the SHA-256
+# of that statement and her token id, never the statement itself.
+nations_sha=$(printf '%s' "SELECT name FROM tpch.tiny.nation ORDER BY nationkey" | sha256sum | cut -d' ' -f1)
+fingerprint=$(docker compose logs mcp-modules | grep '"tool":"execute_query"' | grep "\"sql_sha256\":\"$nations_sha\"" | head -1)
+if [ -n "$fingerprint" ] && grep -q '"token_id":"[^"]' <<<"$fingerprint" && ! grep -q "tpch.tiny.nation ORDER BY" <<<"$fingerprint"; then
+  echo "  OK    fingerprint-audit: the line carries the statement's SHA-256 and the token id, never the statement"
+else
+  echo "  FAIL  fingerprint-audit: no line with the statement's SHA-256 and a token id"; failed=1
 fi
 echo "  the run took $(( $(date +%s) - began )) s"
 

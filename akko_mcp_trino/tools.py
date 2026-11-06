@@ -41,6 +41,7 @@ from typing import Any, Callable, Optional, Sequence
 from mcp.types import ToolAnnotations
 
 from .audit import (
+    DEFAULT_AUDIT_MAX_NAMES,
     AuditEvent,
     bind_call,
     current_call,
@@ -152,13 +153,14 @@ class _Call:
     """One tool call: request id (the edge's, or a fresh one), record bound with its time
     budget, clock started."""
 
-    def __init__(self, audit: Any, tool: str, budget_seconds: float) -> None:
+    def __init__(self, audit: Any, tool: str, budget_seconds: float, max_names: int) -> None:
         self._audit, self._tool, self._budget = audit, tool, budget_seconds
+        self._max_names = max_names
 
     def __enter__(self) -> "_Call":
         self._start = time.perf_counter()
         self._rid = None if current_request_id() else set_current_request_id(uuid.uuid4().hex)
-        self.call, self._token = bind_call(self._tool, self._budget)
+        self.call, self._token = bind_call(self._tool, self._budget, self._max_names)
         self.ok, self.error = True, ""
         return self
 
@@ -209,9 +211,10 @@ def audited(
     *,
     name: Optional[str] = None,
     budget_seconds: float = 0.0,
+    max_names: int = DEFAULT_AUDIT_MAX_NAMES,
 ) -> Callable:
     """Wrap a tool so that each call is one audited call, due within ``budget_seconds``
-    when above 0.
+    when above 0, whose record keeps ``max_names`` names a list (``MCP_AUDIT_MAX_NAMES``).
 
     The call gets a request id (the edge's, or a fresh one outside a request),
     a record the tool fills with ``note(...)``, and, when ``audit`` is given,
@@ -226,14 +229,14 @@ def audited(
 
         @functools.wraps(fn)
         async def awrapped(*args, **kwargs):
-            with _Call(audit, tool, budget_seconds) as call:
+            with _Call(audit, tool, budget_seconds, max_names) as call:
                 return call.returned(await fn(*args, **kwargs))
 
         return awrapped
 
     @functools.wraps(fn)
     def wrapped(*args, **kwargs):
-        with _Call(audit, tool, budget_seconds) as call:
+        with _Call(audit, tool, budget_seconds, max_names) as call:
             return call.returned(fn(*args, **kwargs))
 
     return wrapped
@@ -634,12 +637,15 @@ class ToolContext:
         read_only: bool,
         call_timeout_seconds: float = 0.0,
         page_size: int = DEFAULT_MAX_ROWS,
+        audit_max_names: int = DEFAULT_AUDIT_MAX_NAMES,
     ) -> None:
         """Bind the server, the client and the shared machinery; every tool registered
-        here is due within ``call_timeout_seconds`` when above 0, and a page of a list
-        holds ``page_size`` entries (``TRINO_MAX_ROWS``)."""
+        here is due within ``call_timeout_seconds`` when above 0, its record keeps
+        ``audit_max_names`` names a list, and a page of a list holds ``page_size`` entries
+        (``TRINO_MAX_ROWS``)."""
         self._mcp, self._client = mcp, client
         self.audit = audit
+        self.audit_max_names = audit_max_names
         self.read_only = read_only
         self.call_timeout_seconds = call_timeout_seconds
         self.page_size = page_size
@@ -741,7 +747,14 @@ class ToolContext:
         def deco(fn: Callable) -> Callable:
             if governed:  # the model must know what a masked value means
                 fn.__doc__ = (fn.__doc__ or "").rstrip() + "\n\n" + _GOVERNANCE_NOTE + "\n"
-            return register(audited(self.audit, fn, budget_seconds=self.call_timeout_seconds))
+            return register(
+                audited(
+                    self.audit,
+                    fn,
+                    budget_seconds=self.call_timeout_seconds,
+                    max_names=self.audit_max_names,
+                )
+            )
 
         return deco
 
@@ -768,6 +781,7 @@ def register_query_tools(
     describe_max_columns: int = DEFAULT_DESCRIBE_MAX_COLUMNS,
     extra_reads: frozenset[str] = frozenset(),
     context: ContextSetup | None = None,
+    audit_max_names: int = DEFAULT_AUDIT_MAX_NAMES,
     profile_max_columns: int = DEFAULT_PROFILE_MAX_COLUMNS,
     profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS,
     profile_modes: Sequence[str] = PROFILE_MODES,
@@ -824,6 +838,7 @@ def register_query_tools(
         read_only=read_only,
         call_timeout_seconds=call_timeout_seconds,
         page_size=max_rows,
+        audit_max_names=audit_max_names,
     )
     # MCP tool annotations: the listing, describing and explaining tools only read,
     # whatever the settings; execute_query reads only while TRINO_READ_ONLY is true,

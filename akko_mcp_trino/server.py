@@ -55,8 +55,9 @@ class _AuditedServer:
     """The MCP server as a tool plugin sees it: every tool it adds is audited, and due
     within the same time budget as a built-in one."""
 
-    def __init__(self, mcp: Any, audit: Any, budget_seconds: float) -> None:
+    def __init__(self, mcp: Any, audit: Any, budget_seconds: float, max_names: int) -> None:
         self._mcp, self._audit, self._budget = mcp, audit, budget_seconds
+        self._max_names = max_names
 
     def tool(self, *args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
         """The server's ``tool`` decorator, with the audit wrapped around the function."""
@@ -64,14 +65,24 @@ class _AuditedServer:
         name = kwargs.get("name") or (args[0] if args else None)
 
         def deco(fn: Callable) -> Callable:
-            return register(audited(self._audit, fn, name=name, budget_seconds=self._budget))
+            return register(
+                audited(
+                    self._audit,
+                    fn,
+                    name=name,
+                    budget_seconds=self._budget,
+                    max_names=self._max_names,
+                )
+            )
 
         return deco
 
     def add_tool(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
         """The server's ``add_tool``, with the audit wrapped around the function."""
         name = kwargs.get("name") or (args[0] if args else None)
-        wrapped = audited(self._audit, fn, name=name, budget_seconds=self._budget)
+        wrapped = audited(
+            self._audit, fn, name=name, budget_seconds=self._budget, max_names=self._max_names
+        )
         return self._mcp.add_tool(wrapped, *args, **kwargs)
 
     def __getattr__(self, attr: str) -> Any:
@@ -159,6 +170,7 @@ def build_server(
         search_reserve_seconds=config.search_reserve_seconds,
         search_concurrency=config.search_concurrency,
         search_max_threads=config.search_max_threads,
+        audit_max_names=config.audit_max_names,
         describe_max_columns=config.describe_max_columns,
         extra_reads=parse_extra_reads(config.extra_read_commands),
         context=context,
@@ -172,7 +184,7 @@ def build_server(
         profile_timeout_seconds=config.profile_timeout_seconds,
         profile_max_concurrent=config.profile_max_concurrent,
     )
-    plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)
+    plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds, config.audit_max_names)
     registrars = [r for ext in exts for r in ext.tool_registrars()]
     for registrar in [*registrars, *extra_tool_registrars]:
         if _takes_tools(registrar):
