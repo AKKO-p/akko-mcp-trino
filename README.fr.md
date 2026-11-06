@@ -110,7 +110,7 @@ docker compose up -d --wait
 - Le fonctionnement de bout en bout est décrit sur [akko-ai.com/docs/comment-ca-marche](https://akko-ai.com/docs/comment-ca-marche/) (aussi [en anglais](https://akko-ai.com/en/docs/how-it-works/)).
 - Le guide, les prérequis, la configuration et les exemples sont sur [akko-ai.com/docs/coeur-open-source](https://akko-ai.com/docs/coeur-open-source/) (aussi [en anglais](https://akko-ai.com/en/docs/open-source-core/)) et [akko-ai.com/docs/exemples](https://akko-ai.com/docs/exemples/).
 - Le guide pas à pas pour Claude Desktop et Cursor est sur [akko-ai.com/docs/brancher-claude-cursor](https://akko-ai.com/docs/brancher-claude-cursor/) (en anglais dans ce dépôt, [docs/guides/connect-claude-desktop-cursor.md](docs/guides/connect-claude-desktop-cursor.md)).
-- La référence est dans ce dépôt, en anglais : le [README](README.md), [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md).
+- La référence est dans ce dépôt, en anglais : le [README](README.md), [`examples/`](examples/), [`CHANGELOG.md`](CHANGELOG.md), [`MIGRATING.md`](MIGRATING.md), [`SECURITY.md`](SECURITY.md) ; le guide de contribution, en français : [`CONTRIBUTING.fr.md`](CONTRIBUTING.fr.md).
 
 ## Pourquoi
 
@@ -194,7 +194,7 @@ docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
 La même image est publiée sous `ghcr.io/akko-p/akko-mcp-trino`. Elle tourne sans root, porte un
 contrôle de santé et prend les mêmes variables d'environnement, sur les ports `3000` (MCP) et
 `3001` (santé). Elle installe chaque dépendance depuis le verrou `requirements/image.txt`, en
-version exacte et avec ses empreintes (voir « Dépendances et verrous » plus bas).
+version exacte et avec ses empreintes (voir [CONTRIBUTING.fr.md](CONTRIBUTING.fr.md#dépendances-et-verrous)).
 
 Il faut Python 3.12 ou plus récent pour l'installation par pip.
 
@@ -1180,100 +1180,10 @@ tools), les refus, l'audit et les métriques sont décrits dans le [README](READ
 
 ## Contribuer
 
-Les issues et les pull requests sont bienvenues : voir [CONTRIBUTING.md](CONTRIBUTING.md). Une
+Les issues et les pull requests sont bienvenues : voir [CONTRIBUTING.fr.md](CONTRIBUTING.fr.md). Une
 vulnérabilité se signale à security@akko-ai.com, selon [SECURITY.md](SECURITY.md). Si vous arrivez à
 faire passer une écriture à travers la garde, ouvrez une issue : c'est exactement ce que nous
 cherchons.
-
-### Dépendances et verrous
-
-`pyproject.toml` déclare des plages, pour que le serveur s'installe à côté d'autres outils ; la CI
-lance les tests aux versions les plus basses et les plus hautes qu'elles permettent. Tout le reste
-s'installe depuis un verrou, en versions exactes et avec leurs empreintes, écrit par
-[pip-compile](https://pip-tools.readthedocs.io/) depuis sa source :
-
-| Verrou | Source | Installé par |
-|---|---|---|
-| `requirements/image.txt` | `requirements/image.in` : les dépendances que le paquet déclare | l'image de conteneur, les contrôles de licences et de vulnérabilités |
-| `requirements/build.txt` | `requirements/build.in` : l'outil de construction et le backend de `[build-system]` | l'étape de construction de l'image, et les contrôles, avec `dev.txt` |
-| `requirements/release.txt` | `requirements/release.in` : les outils de construction et twine | la publication (sdist, wheel, envoi) |
-| `requirements/dev.txt` | `requirements/dev.in` : l'extra `dev` et les outils des contrôles, aux versions de l'image et de la publication | la CI et l'installation de développement, sur chaque version de Python |
-| `requirements/kerberos.txt` | son `.in` : l'extra `kerberos` de l'adaptateur Atlas | le contrôle des licences seulement |
-
-Les wheels et le sdist sont construits par le backend verrouillé, sans isolation
-(`python -m build --no-isolation`), pour qu'aucun outil de construction ne soit téléchargé hors
-verrou. L'image installe son verrou par `pip install --only-binary=:all: --require-hashes`, puis le
-paquet sans ses dépendances ; `pip check` fait échouer la construction s'il manque au verrou une
-dépendance que le paquet ou un paquet verrouillé déclare. Il ne voit pas une dépendance qu'apporte
-seulement un extra, comme la CLI de `mcp[cli]`. L'adaptateur Atlas entre dans le verrou avec la
-version qui publie les deux ; d'ici là, l'image l'installe sans ses dépendances.
-
-`dev.txt`, `image.txt` et `kerberos.txt` installent le paquet depuis son dossier (`-e`, ou
-`-r image.in`) ; ils laissent donc hors du verrou
-le paquet lui-même, pip et setuptools (`--unsafe-package`) : les contrôles installent `build.txt`,
-qui épingle setuptools, avec `dev.txt`. Un verrou qui épingle pip ou setuptools est compilé par
-Dependabot avec `--allow-unsafe`, qui échoue sur un paquet installé depuis son dossier. Les autres
-verrous les épinglent (`--allow-unsafe`). Le verrou `kerberos` construit gssapi et krb5 depuis
-leurs sdists (empreintes vérifiées) contre le MIT Kerberos du système (`libkrb5-dev`) ; les outils
-de construction que pip télécharge pour ces deux-là ne sont pas verrouillés, et rien n'en entre
-dans l'image.
-
-Le Dockerfile nomme son image de base une seule fois, épinglée par digest, dans ses deux étapes,
-pour que l'image soit reproductible ; Dependabot en apporte les mises à jour de sécurité, une
-version corrective de Python ou de nouveaux paquets système, sous forme d'une nouvelle étiquette et
-d'un nouveau digest. Le Python de l'image est celui des verrous : `scripts/lock.sh` le lit dans la
-version de la ligne `FROM` du Dockerfile (`LOCK_PYTHON`), et `tests/test_locks.py` vérifie que les
-verrous ont été compilés avec lui. Une nouvelle version mineure de Python se fait à la main : la
-ligne `FROM`, puis `bash scripts/lock.sh compile` sur ce Python.
-
-`scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions : `LOCK_PYTHON`,
-les versions de Python des contrôles et de l'adaptateur Atlas (`CHECK_PYTHONS`), les plateformes de
-l'image (`IMAGE_PLATFORMS`) et la glibc de l'image de base (`IMAGE_GLIBC`, que la CI vérifie sur
-l'image qu'elle construit), d'où il tire les étiquettes de wheels de chaque plateforme. Dans un
-environnement installé depuis `requirements/build.txt` et `requirements/dev.txt`, sur ce Python :
-
-```bash
-pip install --require-hashes -r requirements/build.txt -r requirements/dev.txt && pip install --no-deps --no-build-isolation -e .
-bash scripts/lock.sh compile    # après un changement d'un fichier .in ou des dépendances de pyproject.toml
-bash scripts/lock.sh check      # ce que lance la CI : compiler à nouveau, empreintes comprises, échouer si un verrou change
-bash scripts/lock.sh verify     # chaque version du verrou de l'image a une wheel pour chaque plateforme
-bash scripts/lock.sh pins pytest pytest-cov   # les versions de dev.txt, pour un job qui les installe seules
-PIP_COMPILE_ARGS="--upgrade-package sqlglot" bash scripts/lock.sh compile   # un paquet à sa dernière version
-```
-
-Le verrou `kerberos` demande `libkrb5-dev` pour être compilé. Une exécution réelle de `check`, après
-l'ajout de `pyyaml` à `image.in` sans nouvelle compilation :
-
-```text
-+    --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
-+    # via -r requirements/image.in
- referencing==0.37.0 \
-     --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231 \
-     --hash=sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8
-lock.sh: a lock is stale; run: bash scripts/lock.sh compile
-```
-
-et de `verify` :
-
-```text
-lock.sh: requirements/image.txt resolves for linux/amd64 (52 wheels)
-lock.sh: requirements/image.txt resolves for linux/arm64 (52 wheels)
-```
-
-pip-compile prévient que « The generated requirements file may be rejected by pip install » : le
-paquet lui-même reste hors des verrous à dessein, car il s'installe depuis sa source.
-
-Dependabot met les verrous à jour une fois par mois, en une seule pull request, et ne déplace une
-plage de `pyproject.toml` que lorsqu'une nouvelle version en sort
-(`versioning-strategy: increase-if-necessary`). Les lignes `-r` de `dev.in`, de `release.in` et de `kerberos.in` lui
-font compiler d'abord les verrous qu'ils lisent ; son image a les en-têtes du MIT Kerberos dont le
-verrou `kerberos` a besoin.
-
-La publication télécharge un seul outil hors pip, `mcp-publisher`, à la version exacte de
-`MCP_PUBLISHER_VERSION` dans `.github/workflows/release.yml`, et échoue si son archive ne correspond
-pas à `MCP_PUBLISHER_SHA256`. Dependabot ne peut pas le suivre : pour le changer, on reprend les deux
-depuis la nouvelle version, l'empreinte étant la ligne de `mcp-publisher_linux_amd64.tar.gz` dans son
-`registry_<version>_checksums.txt`.
 
 ## À propos
 

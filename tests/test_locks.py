@@ -480,3 +480,30 @@ def test_every_action_is_pinned_by_commit() -> None:
             assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", use.group(1)), line
             assert re.fullmatch(r"\s+# v\d+\.\d+\.\d+", use.group(2)), line
     assert seen >= 30
+
+
+def _jobs(text: str) -> dict[str, str]:
+    body = text.split("\njobs:\n", 1)[1]
+    parts = re.split(r"^  ([A-Za-z0-9_-]+):\n", body, flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2], strict=True))
+
+
+SIGNING_JOBS = {
+    ("release.yml", job) for job in ("pypi", "registry", "provenance", "image-provenance")
+}
+
+
+def test_every_workflow_is_read_only_unless_a_job_says_otherwise() -> None:
+    """Every workflow declares its token's permissions, read-only, at the top; only the jobs
+    that publish or sign request an OIDC token."""
+    signing = set()
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        text = path.read_text()
+        top = text.split("\njobs:\n", 1)[0] + "\n"
+        assert re.search(r"^permissions:\n  contents: read\n(?!  )", top, re.M), path.name
+        for name, job in _jobs(text).items():
+            if "id-token: write" in job:
+                signing.add((path.name, name))
+    assert signing == SIGNING_JOBS
+    analyze = _jobs((ROOT / ".github/workflows/codeql.yml").read_text())["analyze"]
+    assert "security-events: write" in analyze

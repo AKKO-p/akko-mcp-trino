@@ -13,6 +13,9 @@ on:
       tag:
         description: "Existing release tag (v<major>.<minor>.<patch>) whose image to push again"
         required: true
+# Read-only by default; each job that publishes or signs adds what it needs.
+permissions:
+  contents: read
 jobs:
   ref:
     runs-on: ubuntu-latest

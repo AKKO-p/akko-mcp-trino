@@ -15,7 +15,8 @@ import pytest
 
 from akko_mcp_trino.config import Config
 
-README = (pathlib.Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+README = (ROOT / "README.md").read_text(encoding="utf-8")
 
 
 def test_readme_names_the_real_entrypoint():
@@ -298,3 +299,38 @@ def test_each_readme_quotes_a_real_example_of_each_module(readme):
     text = (pathlib.Path(__file__).resolve().parents[1] / readme).read_text(encoding="utf-8")
     assert [e for e in _MODULE_EXAMPLES if e not in text] == []
     assert text.count("Not tested live") + text.count("Non testé en live") == 2, "Entra ID, Okta"
+
+
+def _sections(path):
+    text = (ROOT / path).read_text(encoding="utf-8")
+    parts = re.split(r"^(#{1,6} .+)$", text, flags=re.M)
+    return text, list(zip(parts[1::2], parts[2::2], strict=True))
+
+
+def _commands(section):
+    """The lines of the bash and text blocks of a section, comments left out."""
+    lines = []
+    for language, block in re.findall(r"^```(bash|text)\n(.*?)^```", section, re.M | re.S):
+        for line in block.splitlines():
+            line = re.sub(r"\s+#\s.*$", "", line) if language == "bash" else line
+            if line.strip():
+                lines.append(line.rstrip())
+    return lines
+
+
+def test_the_contributor_guide_exists_in_both_languages_section_for_section():
+    en_text, en = _sections("CONTRIBUTING.md")
+    fr_text, fr = _sections("CONTRIBUTING.fr.md")
+    assert "**English** · [Français](CONTRIBUTING.fr.md)" in en_text
+    assert "[English](CONTRIBUTING.md) · **Français**" in fr_text
+    assert [h.split()[0] for h, _ in en] == [h.split()[0] for h, _ in fr]
+    assert len(en) >= 8
+    for (_, en_body), (_, fr_body) in zip(en, fr, strict=True):
+        assert _commands(en_body) == _commands(fr_body)
+    titles = dict(zip([h for h, _ in en], [h for h, _ in fr], strict=True))
+    assert titles["## Dependencies and locks"] == "## Dépendances et verrous"
+    dependencies = dict(fr)["## Dépendances et verrous"]
+    assert "bash scripts/lock.sh check" in _commands(dependencies)
+    readme_fr = (ROOT / "README.fr.md").read_text(encoding="utf-8")
+    assert "# Dépendances et verrous" not in readme_fr
+    assert "](CONTRIBUTING.fr.md" in readme_fr and "](CONTRIBUTING.md" not in readme_fr

@@ -1,5 +1,7 @@
 # Contributing
 
+**English** · [Français](CONTRIBUTING.fr.md)
+
 Thank you for considering a contribution. This project is small on purpose;
 keeping it small is a feature.
 
@@ -14,7 +16,8 @@ keeping it small is a feature.
   tables, per-role SQL rewriting…) will be declined: that belongs in the engine.
 - **Fail closed.** When in doubt, refuse. A guard that cannot verify must not
   pretend to.
-- **English everywhere** — code, comments, docs, commit messages.
+- **English in the code** — code, comments, commit messages. The READMEs and
+  this guide exist in English and in French, changed together.
 
 ## Set up
 

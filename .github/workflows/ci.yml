@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+# Read-only by default; no job of the checks writes.
+permissions:
+  contents: read
 jobs:
   versions:
     # The Python versions and image platforms, from scripts/lock.sh, the one place they are set.
