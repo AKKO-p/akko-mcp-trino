@@ -1,0 +1,62 @@
+{
+ "request": {
+  "body": {
+   "excludeDeletedEntities": true,
+   "limit": 1,
+   "offset": 0,
+   "termName": "Customer identifier@finance",
+   "typeName": "hive_column"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 3,
+   "entities": [
+    {
+     "attributes": {
+      "description": "description of o'brien.été.table_07.column_11",
+      "name": "column_11",
+      "owner": "",
+      "qualifiedName": "o'brien.été.table_07.column_11@primary"
+     },
+     "classificationNames": [],
+     "displayText": "column_11",
+     "guid": "00000000-0000-4000-8000-000000000117",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [
+      "Customer identifier"
+     ],
+     "meanings": [
+      {
+       "confidence": 0,
+       "displayText": "Customer identifier",
+       "qualifiedName": "Customer identifier@finance",
+       "relationGuid": "00000000-0000-4000-8000-000000000118",
+       "termGuid": "00000000-0000-4000-8000-000000000076"
+      }
+     ],
+     "status": "ACTIVE",
+     "typeName": "hive_column"
+    }
+   ],
+   "queryType": "BASIC",
+   "searchParameters": {
+    "excludeDeletedEntities": true,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 1,
+    "offset": 0,
+    "termName": "Customer identifier@finance",
+    "typeName": "hive_column"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

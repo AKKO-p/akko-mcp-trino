@@ -1,0 +1,18 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/admin/version",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "Description": "Metadata Management and Data Governance Platform over Hadoop",
+   "Name": "apache-atlas",
+   "Revision": "0000000000000000000000000000000000000000",
+   "Version": "2.1.0"
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

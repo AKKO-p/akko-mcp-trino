@@ -1,0 +1,61 @@
+{
+ "request": {
+  "body": {
+   "entityFilters": {
+    "attributeName": "qualifiedName",
+    "attributeValue": "archive.refunds@primary",
+    "operator": "eq"
+   },
+   "excludeDeletedEntities": false,
+   "limit": 10,
+   "offset": 0,
+   "typeName": "hive_table"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 1,
+   "entities": [
+    {
+     "attributes": {
+      "createTime": 0,
+      "description": "",
+      "name": "refunds",
+      "owner": "hive",
+      "qualifiedName": "archive.refunds@primary"
+     },
+     "classificationNames": [],
+     "displayText": "refunds",
+     "guid": "00000000-0000-4000-8000-000000000097",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "DELETED",
+     "typeName": "hive_table"
+    }
+   ],
+   "queryType": "BASIC",
+   "searchParameters": {
+    "entityFilters": {
+     "attributeName": "qualifiedName",
+     "attributeValue": "archive.refunds@primary",
+     "operator": "="
+    },
+    "excludeDeletedEntities": false,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 10,
+    "offset": 0,
+    "typeName": "hive_table"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

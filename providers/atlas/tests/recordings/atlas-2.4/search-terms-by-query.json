@@ -1,0 +1,33 @@
+{
+ "request": {
+  "body": {
+   "limit": 10,
+   "offset": 0,
+   "query": "Invoice",
+   "typeName": "AtlasGlossaryTerm"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 0,
+   "queryText": "Invoice",
+   "queryType": "BASIC",
+   "searchParameters": {
+    "excludeDeletedEntities": false,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 10,
+    "offset": 0,
+    "query": "Invoice",
+    "typeName": "AtlasGlossaryTerm"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

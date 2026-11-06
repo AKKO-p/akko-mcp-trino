@@ -1,0 +1,2780 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/entity/bulk/uniqueAttribute/type/hive_table",
+  "query": [
+   [
+    "attr_0:qualifiedName",
+    "ledger.invoices@primary"
+   ],
+   [
+    "attr_1:qualifiedName",
+    "ledger.accounts@primary"
+   ],
+   [
+    "attr_2:qualifiedName",
+    "archive.refunds@primary"
+   ],
+   [
+    "attr_3:qualifiedName",
+    "o'brien.été.l'année fiscale.v2@primary"
+   ],
+   [
+    "attr_4:qualifiedName",
+    "ledger.ghosts@primary"
+   ]
+  ]
+ },
+ "response": {
+  "body": {
+   "entities": [
+    {
+     "attributes": {
+      "aliases": null,
+      "columns": [
+       {
+        "guid": "00000000-0000-4000-8000-000000000001",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000002",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000003",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000004",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000005",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000006",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000007",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000008",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000009",
+        "typeName": "hive_column"
+       }
+      ],
+      "comment": "comment of ledger.invoices",
+      "createTime": 0,
+      "db": {
+       "guid": "00000000-0000-4000-8000-000000000010",
+       "typeName": "hive_db"
+      },
+      "description": "description of ledger.invoices",
+      "displayName": null,
+      "lastAccessTime": 0,
+      "name": "invoices",
+      "owner": "hive",
+      "parameters": null,
+      "partitionKeys": [],
+      "qualifiedName": "ledger.invoices@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "retention": 0,
+      "rewriteEnable": null,
+      "sd": null,
+      "tableType": "EXTERNAL_TABLE",
+      "temporary": false,
+      "userDescription": "userDescription of ledger.invoices",
+      "viewExpandedText": null,
+      "viewOriginalText": null
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "businessName": "businessName of ledger.invoices",
+       "dataSource": "dataSource of ledger.invoices",
+       "domain": "domain of ledger.invoices",
+       "family": "family of ledger.invoices",
+       "origin": "origin of ledger.invoices",
+       "ownerTeam": "ownerTeam of ledger.invoices",
+       "reference": "reference of ledger.invoices",
+       "steward": "user_03",
+       "subfamily": "subfamily of ledger.invoices"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000011",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "columns": [
+       {
+        "displayText": "column_03",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000001",
+        "qualifiedName": "ledger.invoices.column_03@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000012",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "invoice_total",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000002",
+        "qualifiedName": "ledger.invoices.invoice_total@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000013",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_04",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000003",
+        "qualifiedName": "ledger.invoices.column_04@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000014",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "invoice_kind",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000004",
+        "qualifiedName": "ledger.invoices.invoice_kind@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000015",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_05",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000005",
+        "qualifiedName": "ledger.invoices.column_05@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000016",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_06",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000006",
+        "qualifiedName": "ledger.invoices.column_06@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000017",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_07",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000007",
+        "qualifiedName": "ledger.invoices.column_07@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000018",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_08",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000008",
+        "qualifiedName": "ledger.invoices.column_08@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000019",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_09",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000009",
+        "qualifiedName": "ledger.invoices.column_09@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000020",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       }
+      ],
+      "db": {
+       "displayText": "ledger",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000010",
+       "qualifiedName": "ledger@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_db"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000021",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_db",
+       "typeName": "hive_db"
+      },
+      "ddlQueries": [],
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "partitionKeys": [],
+      "pipeline": null,
+      "schema": [],
+      "sd": null
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_table",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    {
+     "attributes": {
+      "aliases": null,
+      "columns": [
+       {
+        "guid": "00000000-0000-4000-8000-000000000022",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000023",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000024",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000025",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000026",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000027",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000028",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000029",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000030",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000031",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000032",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000033",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000034",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000035",
+        "typeName": "hive_column"
+       }
+      ],
+      "comment": "comment of ledger.accounts",
+      "createTime": 0,
+      "db": {
+       "guid": "00000000-0000-4000-8000-000000000010",
+       "typeName": "hive_db"
+      },
+      "description": "description of ledger.accounts",
+      "displayName": null,
+      "lastAccessTime": 0,
+      "name": "accounts",
+      "owner": "hive",
+      "parameters": null,
+      "partitionKeys": [],
+      "qualifiedName": "ledger.accounts@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "retention": 0,
+      "rewriteEnable": null,
+      "sd": null,
+      "tableType": "EXTERNAL_TABLE",
+      "temporary": false,
+      "userDescription": "userDescription of ledger.accounts",
+      "viewExpandedText": null,
+      "viewOriginalText": null
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "businessName": "businessName of ledger.accounts",
+       "dataSource": "dataSource of ledger.accounts",
+       "domain": "domain of ledger.accounts",
+       "family": "family of ledger.accounts",
+       "origin": "origin of ledger.accounts",
+       "ownerTeam": "ownerTeam of ledger.accounts",
+       "reference": "reference of ledger.accounts",
+       "steward": "user_03",
+       "subfamily": "subfamily of ledger.accounts"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000036",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "columns": [
+       {
+        "displayText": "column_10",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000022",
+        "qualifiedName": "ledger.accounts.column_10@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000037",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_04",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000023",
+        "qualifiedName": "ledger.accounts.column_04@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000038",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_11",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000024",
+        "qualifiedName": "ledger.accounts.column_11@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000039",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_12",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000025",
+        "qualifiedName": "ledger.accounts.column_12@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000040",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_13",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000026",
+        "qualifiedName": "ledger.accounts.column_13@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000041",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_08",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000027",
+        "qualifiedName": "ledger.accounts.column_08@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000042",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_14",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000028",
+        "qualifiedName": "ledger.accounts.column_14@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000043",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_15",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000029",
+        "qualifiedName": "ledger.accounts.column_15@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000044",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_03",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000030",
+        "qualifiedName": "ledger.accounts.column_03@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000045",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_16",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000031",
+        "qualifiedName": "ledger.accounts.column_16@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000046",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_17",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000032",
+        "qualifiedName": "ledger.accounts.column_17@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000047",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_06",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000033",
+        "qualifiedName": "ledger.accounts.column_06@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000048",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_18",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000034",
+        "qualifiedName": "ledger.accounts.column_18@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000049",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_19",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000035",
+        "qualifiedName": "ledger.accounts.column_19@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000050",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       }
+      ],
+      "db": {
+       "displayText": "ledger",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000010",
+       "qualifiedName": "ledger@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_db"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000051",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_db",
+       "typeName": "hive_db"
+      },
+      "ddlQueries": [],
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "partitionKeys": [],
+      "pipeline": null,
+      "schema": [],
+      "sd": null
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_table",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    {
+     "attributes": {
+      "aliases": null,
+      "columns": [
+       {
+        "guid": "00000000-0000-4000-8000-000000000052",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000053",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000054",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000055",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000056",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000057",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000058",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000059",
+        "typeName": "hive_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000060",
+        "typeName": "hive_column"
+       }
+      ],
+      "comment": "comment of o'brien.été.l'année fiscale.v2",
+      "createTime": 0,
+      "db": {
+       "guid": "00000000-0000-4000-8000-000000000061",
+       "typeName": "hive_db"
+      },
+      "description": "description of o'brien.été.l'année fiscale.v2",
+      "displayName": null,
+      "lastAccessTime": 0,
+      "name": "l'année fiscale.v2",
+      "owner": "hive",
+      "parameters": null,
+      "partitionKeys": [],
+      "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "retention": 0,
+      "rewriteEnable": null,
+      "sd": null,
+      "tableType": "EXTERNAL_TABLE",
+      "temporary": false,
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2",
+      "viewExpandedText": null,
+      "viewOriginalText": null
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "businessName": "businessName of o'brien.été.l'année fiscale.v2",
+       "dataSource": "dataSource of o'brien.été.l'année fiscale.v2",
+       "domain": "domain of o'brien.été.l'année fiscale.v2",
+       "family": "family of o'brien.été.l'année fiscale.v2",
+       "origin": "origin of o'brien.été.l'année fiscale.v2",
+       "ownerTeam": "ownerTeam of o'brien.été.l'année fiscale.v2",
+       "reference": "reference of o'brien.été.l'année fiscale.v2",
+       "steward": "user_03"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000062",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "columns": [
+       {
+        "displayText": "column_20",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000052",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_20@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000063",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_21",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000053",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_21@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000064",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_22",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000054",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_22@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000065",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_23",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000055",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_23@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000066",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_24",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000056",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_24@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000067",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_25",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000057",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_25@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000068",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_26",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000058",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_26@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000069",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_04",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000059",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_04@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000070",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       },
+       {
+        "displayText": "column_08",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000060",
+        "qualifiedName": "o'brien.été.l'année fiscale.v2.column_08@primary",
+        "relationshipAttributes": {
+         "typeName": "hive_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000071",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "hive_table_columns",
+        "typeName": "hive_column"
+       }
+      ],
+      "db": {
+       "displayText": "o'brien.été",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000061",
+       "qualifiedName": "o'brien.été@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_db"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000072",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_db",
+       "typeName": "hive_db"
+      },
+      "ddlQueries": [],
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "partitionKeys": [],
+      "pipeline": null,
+      "schema": [],
+      "sd": null
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_table",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    }
+   ],
+   "referredEntities": {
+    "00000000-0000-4000-8000-000000000001": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.column_03",
+      "description": "description of ledger.invoices.column_03",
+      "displayName": null,
+      "name": "column_03",
+      "owner": null,
+      "position": 0,
+      "qualifiedName": "ledger.invoices.column_03@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.invoices.column_03"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.column_03"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000001",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000012",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000002": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.invoice_total",
+      "description": "description of ledger.invoices.invoice_total",
+      "displayName": null,
+      "name": "invoice_total",
+      "owner": null,
+      "position": 3,
+      "qualifiedName": "ledger.invoices.invoice_total@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "decimal(8,4)",
+      "userDescription": "userDescription of ledger.invoices.invoice_total"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.invoice_total"
+      }
+     },
+     "classifications": [
+      {
+       "entityGuid": "00000000-0000-4000-8000-000000000002",
+       "entityStatus": "ACTIVE",
+       "propagate": true,
+       "removePropagationsOnEntityDelete": false,
+       "typeName": "confidential"
+      }
+     ],
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000002",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [
+       {
+        "displayText": "Invoice",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000073",
+        "qualifiedName": "Invoice@finance",
+        "relationshipAttributes": {
+         "attributes": {
+          "confidence": null,
+          "createdBy": null,
+          "description": null,
+          "expression": null,
+          "source": "source of Invoice",
+          "status": null,
+          "steward": null
+         },
+         "typeName": "AtlasGlossarySemanticAssignment"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000075",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "AtlasGlossarySemanticAssignment",
+        "typeName": "AtlasGlossaryTerm"
+       }
+      ],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000013",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000003": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.column_04",
+      "description": "description of ledger.invoices.column_04",
+      "displayName": null,
+      "name": "column_04",
+      "owner": null,
+      "position": 7,
+      "qualifiedName": "ledger.invoices.column_04@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.invoices.column_04"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.column_04"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000003",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000014",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000004": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.invoice_kind",
+      "description": "description of ledger.invoices.invoice_kind",
+      "displayName": null,
+      "name": "invoice_kind",
+      "owner": null,
+      "position": 2,
+      "qualifiedName": "ledger.invoices.invoice_kind@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.invoices.invoice_kind"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.invoice_kind"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000004",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [
+       {
+        "displayText": "Invoice",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000073",
+        "qualifiedName": "Invoice@finance",
+        "relationshipAttributes": {
+         "attributes": {
+          "confidence": null,
+          "createdBy": null,
+          "description": null,
+          "expression": null,
+          "source": "source of Invoice",
+          "status": null,
+          "steward": null
+         },
+         "typeName": "AtlasGlossarySemanticAssignment"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000074",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "AtlasGlossarySemanticAssignment",
+        "typeName": "AtlasGlossaryTerm"
+       }
+      ],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000015",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000005": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.column_05",
+      "description": "description of ledger.invoices.column_05",
+      "displayName": null,
+      "name": "column_05",
+      "owner": null,
+      "position": 1,
+      "qualifiedName": "ledger.invoices.column_05@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "int",
+      "userDescription": "userDescription of ledger.invoices.column_05"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.column_05"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000005",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000016",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000006": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.column_06",
+      "description": "description of ledger.invoices.column_06",
+      "displayName": null,
+      "name": "column_06",
+      "owner": null,
+      "position": 6,
+      "qualifiedName": "ledger.invoices.column_06@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "boolean",
+      "userDescription": "userDescription of ledger.invoices.column_06"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.column_06"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000006",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000017",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000007": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.column_07",
+      "description": "description of ledger.invoices.column_07",
+      "displayName": null,
+      "name": "column_07",
+      "owner": null,
+      "position": 4,
+      "qualifiedName": "ledger.invoices.column_07@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "decimal(18,3)",
+      "userDescription": "userDescription of ledger.invoices.column_07"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.column_07"
+      }
+     },
+     "classifications": [
+      {
+       "entityGuid": "00000000-0000-4000-8000-000000000007",
+       "entityStatus": "ACTIVE",
+       "propagate": true,
+       "removePropagationsOnEntityDelete": false,
+       "typeName": "confidential"
+      }
+     ],
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000007",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000018",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000008": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.column_08",
+      "description": "description of ledger.invoices.column_08",
+      "displayName": null,
+      "name": "column_08",
+      "owner": null,
+      "position": 8,
+      "qualifiedName": "ledger.invoices.column_08@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "date",
+      "userDescription": "userDescription of ledger.invoices.column_08"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.column_08"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000008",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000019",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000009": {
+     "attributes": {
+      "comment": "comment of ledger.invoices.column_09",
+      "description": "description of ledger.invoices.column_09",
+      "displayName": null,
+      "name": "column_09",
+      "owner": null,
+      "position": 5,
+      "qualifiedName": "ledger.invoices.column_09@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.invoices.column_09"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.invoices.column_09"
+      }
+     },
+     "classifications": [
+      {
+       "entityGuid": "00000000-0000-4000-8000-000000000009",
+       "entityStatus": "ACTIVE",
+       "propagate": true,
+       "removePropagationsOnEntityDelete": false,
+       "typeName": "confidential"
+      }
+     ],
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000009",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "invoices",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000011",
+       "qualifiedName": "ledger.invoices@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000020",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000022": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_10",
+      "description": "description of ledger.accounts.column_10",
+      "displayName": null,
+      "name": "column_10",
+      "owner": null,
+      "position": 8,
+      "qualifiedName": "ledger.accounts.column_10@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_10"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_10"
+      }
+     },
+     "classifications": [
+      {
+       "entityGuid": "00000000-0000-4000-8000-000000000022",
+       "entityStatus": "ACTIVE",
+       "propagate": true,
+       "removePropagationsOnEntityDelete": false,
+       "typeName": "PII"
+      }
+     ],
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000022",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000037",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000023": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_04",
+      "description": "description of ledger.accounts.column_04",
+      "displayName": null,
+      "name": "column_04",
+      "owner": null,
+      "position": 12,
+      "qualifiedName": "ledger.accounts.column_04@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_04"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_04"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000023",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000038",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000024": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_11",
+      "description": "description of ledger.accounts.column_11",
+      "displayName": null,
+      "name": "column_11",
+      "owner": null,
+      "position": 2,
+      "qualifiedName": "ledger.accounts.column_11@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_11"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_11"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000024",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [
+       {
+        "displayText": "Customer identifier",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000076",
+        "qualifiedName": "Customer identifier@finance",
+        "relationshipAttributes": {
+         "attributes": {
+          "confidence": null,
+          "createdBy": null,
+          "description": null,
+          "expression": null,
+          "source": "source of Customer identifier",
+          "status": null,
+          "steward": null
+         },
+         "typeName": "AtlasGlossarySemanticAssignment"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000077",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "AtlasGlossarySemanticAssignment",
+        "typeName": "AtlasGlossaryTerm"
+       }
+      ],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000039",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000025": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_12",
+      "description": "description of ledger.accounts.column_12",
+      "displayName": null,
+      "name": "column_12",
+      "owner": null,
+      "position": 4,
+      "qualifiedName": "ledger.accounts.column_12@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_12"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_12"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000025",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000040",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000026": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_13",
+      "description": "description of ledger.accounts.column_13",
+      "displayName": null,
+      "name": "column_13",
+      "owner": null,
+      "position": 3,
+      "qualifiedName": "ledger.accounts.column_13@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_13"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_13"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000026",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000041",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000027": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_08",
+      "description": "description of ledger.accounts.column_08",
+      "displayName": null,
+      "name": "column_08",
+      "owner": null,
+      "position": 13,
+      "qualifiedName": "ledger.accounts.column_08@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "date",
+      "userDescription": "userDescription of ledger.accounts.column_08"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_08"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000027",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000042",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000028": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_14",
+      "description": "description of ledger.accounts.column_14",
+      "displayName": null,
+      "name": "column_14",
+      "owner": null,
+      "position": 1,
+      "qualifiedName": "ledger.accounts.column_14@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_14"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_14"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000028",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000043",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000029": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_15",
+      "description": "description of ledger.accounts.column_15",
+      "displayName": null,
+      "name": "column_15",
+      "owner": null,
+      "position": 10,
+      "qualifiedName": "ledger.accounts.column_15@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "date",
+      "userDescription": "userDescription of ledger.accounts.column_15"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_15"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000029",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000044",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000030": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_03",
+      "description": "description of ledger.accounts.column_03",
+      "displayName": null,
+      "name": "column_03",
+      "owner": null,
+      "position": 0,
+      "qualifiedName": "ledger.accounts.column_03@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_03"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_03"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000030",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000045",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000031": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_16",
+      "description": "description of ledger.accounts.column_16",
+      "displayName": null,
+      "name": "column_16",
+      "owner": null,
+      "position": 9,
+      "qualifiedName": "ledger.accounts.column_16@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_16"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_16"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000031",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000046",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000032": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_17",
+      "description": "description of ledger.accounts.column_17",
+      "displayName": null,
+      "name": "column_17",
+      "owner": null,
+      "position": 7,
+      "qualifiedName": "ledger.accounts.column_17@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_17"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_17"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000032",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000047",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000033": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_06",
+      "description": "description of ledger.accounts.column_06",
+      "displayName": null,
+      "name": "column_06",
+      "owner": null,
+      "position": 11,
+      "qualifiedName": "ledger.accounts.column_06@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "boolean",
+      "userDescription": "userDescription of ledger.accounts.column_06"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_06"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000033",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000048",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000034": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_18",
+      "description": "description of ledger.accounts.column_18",
+      "displayName": null,
+      "name": "column_18",
+      "owner": null,
+      "position": 6,
+      "qualifiedName": "ledger.accounts.column_18@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_18"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_18"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000034",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000049",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000035": {
+     "attributes": {
+      "comment": "comment of ledger.accounts.column_19",
+      "description": "description of ledger.accounts.column_19",
+      "displayName": null,
+      "name": "column_19",
+      "owner": null,
+      "position": 5,
+      "qualifiedName": "ledger.accounts.column_19@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of ledger.accounts.column_19"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "IN_REVIEW",
+       "reference": "reference of ledger.accounts.column_19"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000035",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [
+       {
+        "displayText": "Supplier",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000078",
+        "qualifiedName": "Supplier@finance",
+        "relationshipAttributes": {
+         "attributes": {
+          "confidence": null,
+          "createdBy": null,
+          "description": null,
+          "expression": null,
+          "source": "source of Supplier",
+          "status": null,
+          "steward": null
+         },
+         "typeName": "AtlasGlossarySemanticAssignment"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000079",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "AtlasGlossarySemanticAssignment",
+        "typeName": "AtlasGlossaryTerm"
+       }
+      ],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "accounts",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000036",
+       "qualifiedName": "ledger.accounts@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000050",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000052": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_20",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_20",
+      "displayName": null,
+      "name": "column_20",
+      "owner": null,
+      "position": 2,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_20@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_20"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_20"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000052",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000063",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000053": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_21",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_21",
+      "displayName": null,
+      "name": "column_21",
+      "owner": null,
+      "position": 4,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_21@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "int",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_21"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_21"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000053",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000064",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000054": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_22",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_22",
+      "displayName": null,
+      "name": "column_22",
+      "owner": null,
+      "position": 0,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_22@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_22"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_22"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000054",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000065",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000055": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_23",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_23",
+      "displayName": null,
+      "name": "column_23",
+      "owner": null,
+      "position": 1,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_23@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_23"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_23"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000055",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000066",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000056": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_24",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_24",
+      "displayName": null,
+      "name": "column_24",
+      "owner": null,
+      "position": 5,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_24@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "boolean",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_24"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_24"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000056",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000067",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000057": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_25",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_25",
+      "displayName": null,
+      "name": "column_25",
+      "owner": null,
+      "position": 6,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_25@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "boolean",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_25"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_25"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000057",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000068",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000058": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_26",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_26",
+      "displayName": null,
+      "name": "column_26",
+      "owner": null,
+      "position": 3,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_26@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_26"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_26"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000058",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000069",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000059": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_04",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_04",
+      "displayName": null,
+      "name": "column_04",
+      "owner": null,
+      "position": 7,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_04@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "string",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_04"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_04"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000059",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000070",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000060": {
+     "attributes": {
+      "comment": "comment of o'brien.été.l'année fiscale.v2.column_08",
+      "description": "description of o'brien.été.l'année fiscale.v2.column_08",
+      "displayName": null,
+      "name": "column_08",
+      "owner": null,
+      "position": 8,
+      "qualifiedName": "o'brien.été.l'année fiscale.v2.column_08@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "typeName": "hive_table"
+      },
+      "type": "date",
+      "userDescription": "userDescription of o'brien.été.l'année fiscale.v2.column_08"
+     },
+     "businessAttributes": {
+      "stewardship": {
+       "approvalDate": 1700000000000,
+       "approvalStatus": "APPROVED",
+       "reference": "reference of o'brien.été.l'année fiscale.v2.column_08"
+      }
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000060",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "l'année fiscale.v2",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000062",
+       "qualifiedName": "o'brien.été.l'année fiscale.v2@primary",
+       "relationshipAttributes": {
+        "typeName": "hive_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000071",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "hive_table_columns",
+       "typeName": "hive_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "hive_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    }
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

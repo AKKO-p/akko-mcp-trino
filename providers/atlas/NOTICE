@@ -1,0 +1,8 @@
+akko-mcp-trino-atlas
+Copyright 2026 AKKO (https://akko-ai.com)
+
+This product includes software developed by AKKO and contributors,
+licensed under the Apache License, Version 2.0.
+
+It depends on akko-mcp-trino (Apache 2.0) and httpx (BSD-3); with the
+kerberos extra, on pyspnego (MIT).

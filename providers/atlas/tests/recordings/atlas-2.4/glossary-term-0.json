@@ -1,0 +1,122 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-000000000010",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "abbreviation": "abbreviation of Invoice",
+   "additionalAttributes": {
+    "approvalStatus": "APPROVED"
+   },
+   "anchor": {
+    "glossaryGuid": "00000000-0000-4000-8000-000000000035",
+    "relationGuid": "00000000-0000-4000-8000-000000000036"
+   },
+   "assignedEntities": [
+    {
+     "displayText": "invoice_total",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000002",
+     "qualifiedName": "ledger.invoices.invoice_total@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": null,
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000030",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_column"
+    },
+    {
+     "displayText": "invoices",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000005",
+     "qualifiedName": "ledger.invoices@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": null,
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000011",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_table"
+    }
+   ],
+   "categories": [
+    {
+     "categoryGuid": "00000000-0000-4000-8000-000000000037",
+     "displayText": "Billing",
+     "relationGuid": "00000000-0000-4000-8000-000000000038"
+    }
+   ],
+   "glossaryTermHeader": {
+    "qualifiedName": "Invoice@finance",
+    "termGuid": "00000000-0000-4000-8000-000000000010"
+   },
+   "guid": "00000000-0000-4000-8000-000000000010",
+   "isA": [
+    {
+     "displayText": "Receivable",
+     "qualifiedName": "Receivable@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000039",
+     "termGuid": "00000000-0000-4000-8000-000000000040"
+    }
+   ],
+   "longDescription": "longDescription of Invoice",
+   "name": "Invoice",
+   "qualifiedName": "Invoice@finance",
+   "replacementTerms": [
+    {
+     "displayText": "Bill",
+     "qualifiedName": "Bill@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000041",
+     "termGuid": "00000000-0000-4000-8000-000000000042"
+    }
+   ],
+   "seeAlso": [
+    {
+     "displayText": "Staff",
+     "qualifiedName": "Staff@hr",
+     "relationGuid": "00000000-0000-4000-8000-000000000043",
+     "termGuid": "00000000-0000-4000-8000-000000000012"
+    },
+    {
+     "displayText": "Payment",
+     "qualifiedName": "Payment@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000044",
+     "termGuid": "00000000-0000-4000-8000-000000000028"
+    }
+   ],
+   "shortDescription": "shortDescription of Invoice",
+   "synonyms": [
+    {
+     "displayText": "Bill",
+     "qualifiedName": "Bill@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000045",
+     "termGuid": "00000000-0000-4000-8000-000000000042"
+    }
+   ]
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

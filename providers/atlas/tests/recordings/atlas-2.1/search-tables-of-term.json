@@ -1,0 +1,33 @@
+{
+ "request": {
+  "body": {
+   "excludeDeletedEntities": true,
+   "limit": 10,
+   "offset": 0,
+   "termName": "Customer identifier@finance",
+   "typeName": "hive_table"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 3,
+   "queryType": "BASIC",
+   "searchParameters": {
+    "excludeDeletedEntities": true,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 10,
+    "offset": 0,
+    "termName": "Customer identifier@finance",
+    "typeName": "hive_table"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

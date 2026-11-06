@@ -1,0 +1,193 @@
+{
+ "request": {
+  "body": {
+   "entityFilters": {
+    "attributeName": "qualifiedName",
+    "attributeValue": "@finance",
+    "operator": "endsWith"
+   },
+   "excludeDeletedEntities": true,
+   "limit": 10,
+   "offset": 10,
+   "typeName": "AtlasGlossaryTerm"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 52,
+   "entities": [
+    {
+     "attributes": {
+      "name": "Term 21",
+      "qualifiedName": "Term 21@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 21",
+     "guid": "00000000-0000-4000-8000-000000000159",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 22",
+      "qualifiedName": "Term 22@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 22",
+     "guid": "00000000-0000-4000-8000-000000000160",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Supplier",
+      "qualifiedName": "Supplier@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Supplier",
+     "guid": "00000000-0000-4000-8000-000000000078",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 23",
+      "qualifiedName": "Term 23@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 23",
+     "guid": "00000000-0000-4000-8000-000000000161",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 10",
+      "qualifiedName": "Term 10@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 10",
+     "guid": "00000000-0000-4000-8000-000000000148",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 24",
+      "qualifiedName": "Term 24@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 24",
+     "guid": "00000000-0000-4000-8000-000000000162",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 25",
+      "qualifiedName": "Term 25@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 25",
+     "guid": "00000000-0000-4000-8000-000000000163",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 26",
+      "qualifiedName": "Term 26@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 26",
+     "guid": "00000000-0000-4000-8000-000000000164",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 27",
+      "qualifiedName": "Term 27@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 27",
+     "guid": "00000000-0000-4000-8000-000000000165",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 28",
+      "qualifiedName": "Term 28@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 28",
+     "guid": "00000000-0000-4000-8000-000000000166",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    }
+   ],
+   "queryType": "BASIC",
+   "searchParameters": {
+    "entityFilters": {
+     "attributeName": "qualifiedName",
+     "attributeValue": "@finance",
+     "operator": "endsWith"
+    },
+    "excludeDeletedEntities": true,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 10,
+    "offset": 10,
+    "typeName": "AtlasGlossaryTerm"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

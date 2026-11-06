@@ -1,0 +1,33 @@
+{
+ "request": {
+  "body": {
+   "excludeDeletedEntities": true,
+   "limit": 1,
+   "offset": 1,
+   "termName": "Invoice@finance",
+   "typeName": "hive_column"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 2,
+   "queryType": "BASIC",
+   "searchParameters": {
+    "excludeDeletedEntities": true,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 1,
+    "offset": 1,
+    "termName": "Invoice@finance",
+    "typeName": "hive_column"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

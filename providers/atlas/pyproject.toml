@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "akko-mcp-trino-atlas"
+# The same number as akko-mcp-trino: the packages of the repository are released together.
+version = "0.7.2"
+description = "Apache Atlas context provider for akko-mcp-trino: descriptions, classifications, glossary terms and business metadata of the tables Trino shows the caller."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.12"
+authors = [{ name = "AKKO", email = "contact@akko-ai.com" }]
+maintainers = [{ name = "AKKO", email = "contact@akko-ai.com" }]
+keywords = [
+  "mcp", "model-context-protocol", "trino", "apache-atlas", "data-catalog",
+  "business-glossary", "data-governance", "ai-agents",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "Intended Audience :: System Administrators",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Database",
+  "Typing :: Typed",
+]
+# No upper bound on the core: the provider speaks its CONTEXT_API, which the core checks at start.
+dependencies = [
+  "akko-mcp-trino>=0.8.0",
+  "httpx>=0.28.1,<1",
+]
+
+[project.optional-dependencies]
+kerberos = ["pyspnego[kerberos]>=0.11,<1"]
+test = ["pytest==9.1.1", "pytest-cov==7.1.0"]
+dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "mypy==2.3.1"]
+
+[project.entry-points."akko_mcp_trino.context"]
+atlas = "akko_mcp_trino_atlas:from_env"
+
+[project.urls]
+Homepage = "https://github.com/AKKO-p/akko-mcp-trino/tree/main/providers/atlas"
+Documentation = "https://github.com/AKKO-p/akko-mcp-trino/blob/main/providers/atlas/README.md"
+Repository = "https://github.com/AKKO-p/akko-mcp-trino"
+Issues = "https://github.com/AKKO-p/akko-mcp-trino/issues"
+Changelog = "https://github.com/AKKO-p/akko-mcp-trino/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+include = ["akko_mcp_trino_atlas", "akko_mcp_trino_atlas.*"]
+
+[tool.setuptools.package-data]
+akko_mcp_trino_atlas = ["py.typed"]
+
+# 100 % line and branch coverage of the provider, by its own tests.
+[tool.pytest.ini_options]
+addopts = "--cov=akko_mcp_trino_atlas --cov-branch --cov-report=term-missing --cov-fail-under=100 -p no:cacheprovider"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.mypy]
+ignore_missing_imports = true
+strict_optional = true

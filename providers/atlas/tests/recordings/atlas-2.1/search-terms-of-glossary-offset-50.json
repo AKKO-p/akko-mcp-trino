@@ -1,0 +1,73 @@
+{
+ "request": {
+  "body": {
+   "entityFilters": {
+    "attributeName": "qualifiedName",
+    "attributeValue": "@finance",
+    "operator": "endsWith"
+   },
+   "excludeDeletedEntities": true,
+   "limit": 10,
+   "offset": 50,
+   "typeName": "AtlasGlossaryTerm"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 52,
+   "entities": [
+    {
+     "attributes": {
+      "name": "Term 29",
+      "qualifiedName": "Term 29@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 29",
+     "guid": "00000000-0000-4000-8000-000000000167",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    },
+    {
+     "attributes": {
+      "name": "Term 06",
+      "qualifiedName": "Term 06@finance"
+     },
+     "classificationNames": [],
+     "displayText": "Term 06",
+     "guid": "00000000-0000-4000-8000-000000000140",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [],
+     "meanings": [],
+     "status": "ACTIVE",
+     "typeName": "AtlasGlossaryTerm"
+    }
+   ],
+   "queryType": "BASIC",
+   "searchParameters": {
+    "entityFilters": {
+     "attributeName": "qualifiedName",
+     "attributeValue": "@finance",
+     "operator": "endsWith"
+    },
+    "excludeDeletedEntities": true,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 10,
+    "offset": 50,
+    "typeName": "AtlasGlossaryTerm"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

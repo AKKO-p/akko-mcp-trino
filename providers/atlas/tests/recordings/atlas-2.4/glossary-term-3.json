@@ -1,0 +1,63 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-000000000012",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "abbreviation": "abbreviation of Staff",
+   "additionalAttributes": {
+    "approvalStatus": "APPROVED"
+   },
+   "anchor": {
+    "glossaryGuid": "00000000-0000-4000-8000-000000000050",
+    "relationGuid": "00000000-0000-4000-8000-000000000051"
+   },
+   "assignedEntities": [
+    {
+     "displayText": "invoices",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000005",
+     "qualifiedName": "ledger.invoices@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": null,
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000013",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_table"
+    }
+   ],
+   "glossaryTermHeader": {
+    "qualifiedName": "Staff@hr",
+    "termGuid": "00000000-0000-4000-8000-000000000012"
+   },
+   "guid": "00000000-0000-4000-8000-000000000012",
+   "longDescription": "longDescription of Staff",
+   "name": "Staff",
+   "qualifiedName": "Staff@hr",
+   "seeAlso": [
+    {
+     "displayText": "Invoice",
+     "qualifiedName": "Invoice@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000043",
+     "termGuid": "00000000-0000-4000-8000-000000000010"
+    }
+   ],
+   "shortDescription": "shortDescription of Staff"
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

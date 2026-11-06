@@ -1,0 +1,4 @@
+# The sdist carries the provider, its tests and the catalogue answers they replay.
+include NOTICE
+recursive-include tests *.py *.json
+global-exclude __pycache__ *.py[cod]
