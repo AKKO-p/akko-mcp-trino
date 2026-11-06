@@ -50,8 +50,23 @@ TPCH_TINY_TABLES = {
 }  # fmt: skip
 NATIONS = "SELECT name FROM tpch.tiny.nation ORDER BY nationkey"
 # alice's describe_table of tpch.tiny.nation and describe_schema of tpch.tiny, as 0.7.2
-# answered them, byte for byte.
+# answered them, byte for byte: describe_schema answers the same; describe_table adds the two
+# keys of a page.
 REPLIES_072 = "/integration/replies-0.7.2.json"
+PAGE_KEYS_08 = ', "next_column_offset": null, "columns_cut": false}'
+NINE_TOOLS = {
+    "search_columns",
+    "list_catalogs",
+    "list_schemas",
+    "list_tables",
+    "describe_schema",
+    "describe_table",
+    "profile_table",
+    "explain_query",
+    "execute_query",
+}
+# The sentence a context provider adds to the description of describe_table.
+CONTEXT_SENTENCE = "text from a data catalogue"
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -84,7 +99,9 @@ async def session(url: str, bearer: str | None, extra: dict | None = None) -> di
     async with streamable_http_client(url, http_client=http) as (read, write, *_):
         async with ClientSession(read, write) as s:
             init = await s.initialize()
-            tools = {t.name: t.annotations for t in (await s.list_tools()).tools}
+            listed = (await s.list_tools()).tools
+            tools = {t.name: t.annotations for t in listed}
+            descriptions = {t.name: t.description or "" for t in listed}
 
             async def run(sql: str) -> dict:
                 res = await s.call_tool("execute_query", {"sql": sql})
@@ -93,6 +110,7 @@ async def session(url: str, bearer: str | None, extra: dict | None = None) -> di
             return {
                 "instructions": init.instructions or "",
                 "tools": tools,
+                "descriptions": descriptions,
                 "who": await run("SELECT current_user"),
                 "nations": await run(NATIONS),
                 "write": await run("CREATE TABLE tpch.tiny.x AS SELECT 1 AS a"),
@@ -253,12 +271,13 @@ def context_checks(label: str, url: str, alice: str, bob: str) -> None:
 
 async def without_context(call) -> dict:
     """The replies, as text, of the tools that would serve catalogue context, on a server
-    without a provider."""
+    without a provider, and a profile of the first rows of orders."""
     return {
         "describe_table": await call(
             "describe_table", raw=True, catalog="tpch", schema="tiny", table="nation"
         ),
         "describe_schema": await call("describe_schema", raw=True, catalog="tpch", schema="tiny"),
+        "profile": await call("profile_table", catalog="tpch", schema="tiny", table="orders"),
     }
 
 
@@ -292,6 +311,9 @@ def main() -> int:
         "jwt: a write is refused before Trino",
         "Read-only" in a["write"].get("error", ""),
         a["write"],
+    )
+    check(
+        "jwt: the server serves the nine tools", set(a["tools"]) == NINE_TOOLS, sorted(a["tools"])
     )
     check(
         "jwt: execute_query is annotated read-only, not destructive",
@@ -428,16 +450,44 @@ def main() -> int:
         paged["described"],
     )
 
-    # 1c. Without MCP_CONTEXT_PROVIDERS, the replies of 0.7.2, byte for byte.
+    # 1c. Without MCP_CONTEXT_PROVIDERS: describe_schema answers as 0.7.2 did, byte for byte;
+    # describe_table answers 0.7.2's answer plus the two keys of a page, and neither has a key
+    # or a sentence of the context.
     plain = use(JWT, alice, without_context)
     with open(REPLIES_072, encoding="utf-8") as recorded:
         replies_072 = json.load(recorded)
-    for tool in ("describe_table", "describe_schema"):
-        check(
-            f"context: without a provider, {tool} answers as 0.7.2 did, byte for byte",
-            plain[tool] == replies_072[tool],
-            plain[tool],
-        )
+    check(
+        "context: without a provider, describe_schema answers as 0.7.2 did, byte for byte",
+        plain["describe_schema"] == replies_072["describe_schema"],
+        plain["describe_schema"],
+    )
+    table_08 = replies_072["describe_table"].removesuffix("}") + PAGE_KEYS_08
+    check(
+        "context: without a provider, describe_table answers 0.7.2's answer plus "
+        '"next_column_offset": null and "columns_cut": false, byte for byte',
+        plain["describe_table"] == table_08,
+        plain["describe_table"],
+    )
+    check(
+        "context: without a provider, describe_table has no key of the context",
+        set(json.loads(plain["describe_table"]))
+        == {"columns", "rows", "truncated", "next_column_offset", "columns_cut"},
+        plain["describe_table"],
+    )
+    check(
+        "context: without a provider, no description carries the context sentence",
+        not any(CONTEXT_SENTENCE in text for text in a["descriptions"].values()),
+        a["descriptions"].get("describe_table"),
+    )
+    profile = plain["profile"]
+    check(
+        "profile_table: a sample of tpch.tiny.orders reads its first rows, as alice",
+        "error" not in profile
+        and profile.get("scope") == "first_rows"
+        and isinstance(profile.get("rows"), int)
+        and profile["rows"] > 0,
+        profile,
+    )
 
     # 1d. Catalogue context from a file, under each caller's rights in Trino.
     context_checks("context (jwt)", CONTEXT_JWT, alice, bob)
