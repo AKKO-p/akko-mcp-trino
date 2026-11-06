@@ -33,7 +33,13 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def minted(audience: str, sub: str = "alice") -> str:
     """service mode: a token signed with the test key."""
     now = int(time.time())
-    claims = {"iss": os.environ["ISSUER"], "aud": audience, "sub": sub, "iat": now, "exp": now + 300}
+    claims = {
+        "iss": os.environ["ISSUER"],
+        "aud": audience,
+        "sub": sub,
+        "iat": now,
+        "exp": now + 300,
+    }
     key = open("/keys/private.pem", encoding="ascii").read()
     return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "test"})
 
@@ -84,7 +90,11 @@ async def calls(bearer: str, user: str, nations: str) -> None:
             result = await session.call_tool(
                 "execute_query", {"sql": "SELECT count(*) FROM tiny.nation"}
             )
-            check(f"{user}: reads its rows of tpch.tiny.nation", nations in text(result), text(result)[:160])
+            check(
+                f"{user}: reads its rows of tpch.tiny.nation",
+                nations in text(result),
+                text(result)[:160],
+            )
             result = await session.call_tool("execute_query", {"sql": "DELETE FROM tiny.nation"})
             refused = result.is_error or '"kind": "read_only"' in text(result)
             check(f"{user}: a write is refused", bool(refused), text(result)[:160])
@@ -101,7 +111,10 @@ for attempt in range(30):
         time.sleep(2)
 check("no token: 401", first == 401)
 if MODE == "jwt":
-    check("a token issued for Trino, not for this server: 401", status(issued("alice", "trino-cli")) == 401)
+    check(
+        "a token issued for Trino, not for this server: 401",
+        status(issued("alice", "trino-cli")) == 401,
+    )
     # alice reads every nation; Trino's rules give bob a row filter (regionkey = 3).
     anyio.run(calls, issued("alice", "mcp-host"), "alice", "[[25]]")
     anyio.run(calls, issued("bob", "mcp-host"), "bob", "[[5]]")

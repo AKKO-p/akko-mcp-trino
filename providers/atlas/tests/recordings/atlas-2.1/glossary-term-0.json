@@ -1,0 +1,109 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-000000000076",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "abbreviation": "abbreviation of Customer identifier",
+   "additionalAttributes": {
+    "approvalStatus": "APPROVED"
+   },
+   "anchor": {
+    "glossaryGuid": "00000000-0000-4000-8000-000000000113",
+    "relationGuid": "00000000-0000-4000-8000-000000000114"
+   },
+   "assignedEntities": [
+    {
+     "displayText": "column_34",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000115",
+     "qualifiedName": "o'brien.été.table_06.column_34@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": "source of o'brien.été.table_06.column_34",
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000116",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_column"
+    },
+    {
+     "displayText": "column_11",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000117",
+     "qualifiedName": "o'brien.été.table_07.column_11@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": "source of o'brien.été.table_07.column_11",
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000118",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_column"
+    },
+    {
+     "displayText": "column_11",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000024",
+     "qualifiedName": "ledger.accounts.column_11@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": "source of ledger.accounts.column_11",
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000077",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_column"
+    }
+   ],
+   "categories": [
+    {
+     "categoryGuid": "00000000-0000-4000-8000-000000000119",
+     "displayText": "Category 01",
+     "relationGuid": "00000000-0000-4000-8000-000000000120"
+    }
+   ],
+   "examples": [
+    "examples of Customer identifier"
+   ],
+   "glossaryTermHeader": {
+    "qualifiedName": "Customer identifier@finance",
+    "termGuid": "00000000-0000-4000-8000-000000000076"
+   },
+   "guid": "00000000-0000-4000-8000-000000000076",
+   "name": "Customer identifier",
+   "qualifiedName": "Customer identifier@finance",
+   "shortDescription": "shortDescription of Customer identifier",
+   "usage": "usage of Customer identifier"
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

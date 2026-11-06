@@ -565,6 +565,11 @@ servir ses réglages empêchent le démarrage ; un catalogue injoignable, non (`
 quand un fournisseur se dit injoignable). Un secret peut être donné en fichier (`<NOM>_FILE`, relu
 quand le fichier change).
 
+Deux fournisseurs viennent avec ce dépôt : `file`, dans le cœur, la référence du contrat (un
+catalogue tenu dans un fichier JSON), et `atlas`, pour Apache Atlas, un paquet à part
+(`akko-mcp-trino-atlas`, installé par l'extra `atlas`) ; ses réglages, sa mise en place de Kerberos
+et le compte qu'il lui faut sont dans [son README](providers/atlas/README.fr.md).
+
 Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs valeurs par défaut :
 
 | Variable | Rôle | Défaut |
@@ -762,7 +767,12 @@ minuscules est refusé au lieu d'être fusionné. Voici le format :
 Un fournisseur est une classe qui implémente le protocole `akko_mcp_trino.context.ContextProvider` :
 `name`, `context_api` (à fixer à `akko_mcp_trino.context.CONTEXT_API` ; le serveur refuse une autre
 version), `maps(catalog)`, `served_sets()`, `describe(refs, deadline=…)`, `terms(keys, deadline=…)`,
-`check_lines()`, `aclose()` et `credentials_stamp()`. Son paquet enregistre une fabrique
+`check_lines()`, `aclose()` et `credentials_stamp()`. Il peut ajouter une méthode facultative
+`reset()`, que le serveur appelle sur `SIGHUP`, depuis son gestionnaire de signal, pour qu'il
+oublie ce qu'il gardait de son catalogue : une fonction ordinaire, jamais `async def` (rien ne
+l'attend), qui rend `None` tout de suite, ne bloque jamais, n'envoie aucune requête et ne lève
+rien. Une méthode qui lève est écrite au journal avec le nom du fournisseur et le type de
+l'erreur, jamais son texte, et le contrat vérifie le reste quand `reset()` existe. Son paquet enregistre une fabrique
 `(env) -> fournisseur` dans le groupe d'entrée `akko_mcp_trino.context`, par exemple
 `mycatalog = "my_package.provider:from_env"` sous `[project.entry-points."akko_mcp_trino.context"]`.
 
@@ -912,6 +922,13 @@ nomme une table (lettres, chiffres, `_` et `-`), longs de quatre caractères au 
 font partie d'aucun nom ni d'aucun texte que l'appelant a le droit de voir : le contrat les cherche,
 avec chaque texte que le catalogue leur donne à eux seuls, dans tout ce que l'appelant reçoit.
 `tests/context/test_gate_contract_file.py` le lance sur `file`.
+
+Un catalogue qui n'a pas de notion de jointure laisse `hidden_join_target` de côté (`None`) : le
+scénario de la jointure sort de chaque vérification,
+`test_a_hidden_join_target_is_checked_when_the_catalogue_gives_joins` est sautée et dit pourquoi, et
+le contrat échoue si le fournisseur rend quand même une jointure pour une table qu'il décrit (« the
+provider gives joins: set hidden_join_target ») : un fournisseur qui a des jointures ne peut pas les
+laisser sans contrôle. Avec une cible, cette vérification joue le scénario de la jointure seul.
 
 ## Configuration, extensions, exploitation
 

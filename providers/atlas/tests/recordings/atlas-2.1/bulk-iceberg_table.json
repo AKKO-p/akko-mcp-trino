@@ -1,0 +1,583 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/entity/bulk/uniqueAttribute/type/iceberg_table",
+  "query": [
+   [
+    "attr_0:qualifiedName",
+    "ledger.invoices@primary"
+   ],
+   [
+    "attr_1:qualifiedName",
+    "ledger.accounts@primary"
+   ],
+   [
+    "attr_2:qualifiedName",
+    "archive.refunds@primary"
+   ],
+   [
+    "attr_3:qualifiedName",
+    "o'brien.été.l'année fiscale.v2@primary"
+   ],
+   [
+    "attr_4:qualifiedName",
+    "ledger.ghosts@primary"
+   ]
+  ]
+ },
+ "response": {
+  "body": {
+   "entities": [
+    {
+     "attributes": {
+      "aliases": null,
+      "columns": [
+       {
+        "guid": "00000000-0000-4000-8000-000000000080",
+        "typeName": "iceberg_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000081",
+        "typeName": "iceberg_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000082",
+        "typeName": "iceberg_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000083",
+        "typeName": "iceberg_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000084",
+        "typeName": "iceberg_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000085",
+        "typeName": "iceberg_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000086",
+        "typeName": "iceberg_column"
+       }
+      ],
+      "comment": "comment of archive.refunds",
+      "createTime": 0,
+      "currentSnapshotId": null,
+      "currentSnapshotTsMs": null,
+      "db": {
+       "guid": "00000000-0000-4000-8000-000000000087",
+       "typeName": "hive_db"
+      },
+      "description": "description of archive.refunds",
+      "displayName": null,
+      "lastAccessTime": 0,
+      "manifestsCreated": null,
+      "manifestsKept": null,
+      "manifestsReplaced": null,
+      "migratedToIceberg": null,
+      "name": "refunds",
+      "numFiles": null,
+      "owner": "hive",
+      "parameters": null,
+      "partitionKeys": [],
+      "partitionSpec": null,
+      "qualifiedName": "archive.refunds@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "retention": 0,
+      "sd": null,
+      "snapshotCount": null,
+      "tableType": "EXTERNAL_TABLE",
+      "temporary": false,
+      "userDescription": null,
+      "viewExpandedText": null,
+      "viewOriginalText": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000088",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "columns": [
+       {
+        "displayText": "column_27",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000080",
+        "qualifiedName": "archive.refunds.column_27@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000089",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       },
+       {
+        "displayText": "column_28",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000081",
+        "qualifiedName": "archive.refunds.column_28@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000090",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       },
+       {
+        "displayText": "column_29",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000082",
+        "qualifiedName": "archive.refunds.column_29@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000091",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       },
+       {
+        "displayText": "column_30",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000083",
+        "qualifiedName": "archive.refunds.column_30@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000092",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       },
+       {
+        "displayText": "column_31",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000084",
+        "qualifiedName": "archive.refunds.column_31@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000093",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       },
+       {
+        "displayText": "column_32",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000085",
+        "qualifiedName": "archive.refunds.column_32@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000094",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       },
+       {
+        "displayText": "column_33",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000086",
+        "qualifiedName": "archive.refunds.column_33@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000095",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       }
+      ],
+      "db": {
+       "displayText": "archive",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000087",
+       "qualifiedName": "archive@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_db"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000096",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_db",
+       "typeName": "hive_db"
+      },
+      "ddlQueries": [],
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "partitionKeys": [],
+      "pipeline": null,
+      "schema": [],
+      "sd": null
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_table",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    }
+   ],
+   "referredEntities": {
+    "00000000-0000-4000-8000-000000000080": {
+     "attributes": {
+      "comment": "comment of archive.refunds.column_27",
+      "description": "description of archive.refunds.column_27",
+      "displayName": null,
+      "name": "column_27",
+      "owner": null,
+      "position": 6,
+      "qualifiedName": "archive.refunds.column_27@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "typeName": "iceberg_table"
+      },
+      "type": "date",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000080",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "refunds",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "qualifiedName": "archive.refunds@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000089",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000081": {
+     "attributes": {
+      "comment": "comment of archive.refunds.column_28",
+      "description": "description of archive.refunds.column_28",
+      "displayName": null,
+      "name": "column_28",
+      "owner": null,
+      "position": 3,
+      "qualifiedName": "archive.refunds.column_28@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "typeName": "iceberg_table"
+      },
+      "type": "string",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000081",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "refunds",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "qualifiedName": "archive.refunds@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000090",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000082": {
+     "attributes": {
+      "comment": "comment of archive.refunds.column_29",
+      "description": "description of archive.refunds.column_29",
+      "displayName": null,
+      "name": "column_29",
+      "owner": null,
+      "position": 5,
+      "qualifiedName": "archive.refunds.column_29@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "typeName": "iceberg_table"
+      },
+      "type": "string",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000082",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "refunds",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "qualifiedName": "archive.refunds@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000091",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000083": {
+     "attributes": {
+      "comment": "comment of archive.refunds.column_30",
+      "description": "description of archive.refunds.column_30",
+      "displayName": null,
+      "name": "column_30",
+      "owner": null,
+      "position": 0,
+      "qualifiedName": "archive.refunds.column_30@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "typeName": "iceberg_table"
+      },
+      "type": "bigint",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000083",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "refunds",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "qualifiedName": "archive.refunds@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000092",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000084": {
+     "attributes": {
+      "comment": "comment of archive.refunds.column_31",
+      "description": "description of archive.refunds.column_31",
+      "displayName": null,
+      "name": "column_31",
+      "owner": null,
+      "position": 4,
+      "qualifiedName": "archive.refunds.column_31@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "typeName": "iceberg_table"
+      },
+      "type": "string",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000084",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "refunds",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "qualifiedName": "archive.refunds@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000093",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000085": {
+     "attributes": {
+      "comment": "comment of archive.refunds.column_32",
+      "description": "description of archive.refunds.column_32",
+      "displayName": null,
+      "name": "column_32",
+      "owner": null,
+      "position": 1,
+      "qualifiedName": "archive.refunds.column_32@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "typeName": "iceberg_table"
+      },
+      "type": "bigint",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000085",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "refunds",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "qualifiedName": "archive.refunds@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000094",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000086": {
+     "attributes": {
+      "comment": "comment of archive.refunds.column_33",
+      "description": "description of archive.refunds.column_33",
+      "displayName": null,
+      "name": "column_33",
+      "owner": null,
+      "position": 2,
+      "qualifiedName": "archive.refunds.column_33@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "typeName": "iceberg_table"
+      },
+      "type": "string",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000086",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "refunds",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000088",
+       "qualifiedName": "archive.refunds@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000095",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    }
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

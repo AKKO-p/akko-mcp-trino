@@ -1,0 +1,73 @@
+{
+ "request": {
+  "body": {
+   "excludeDeletedEntities": true,
+   "limit": 10,
+   "offset": 0,
+   "termName": "Invoice@finance",
+   "typeName": "hive_table"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 2,
+   "entities": [
+    {
+     "attributes": {
+      "createTime": 0,
+      "description": "description of ledger.invoices",
+      "name": "invoices",
+      "owner": "billing-team",
+      "qualifiedName": "ledger.invoices@primary"
+     },
+     "classificationNames": [
+      "draft"
+     ],
+     "displayText": "invoices",
+     "guid": "00000000-0000-4000-8000-000000000005",
+     "isIncomplete": false,
+     "labels": [],
+     "meaningNames": [
+      "Invoice",
+      "Staff"
+     ],
+     "meanings": [
+      {
+       "confidence": 0,
+       "displayText": "Invoice",
+       "qualifiedName": "Invoice@finance",
+       "relationGuid": "00000000-0000-4000-8000-000000000011",
+       "termGuid": "00000000-0000-4000-8000-000000000010"
+      },
+      {
+       "confidence": 0,
+       "displayText": "Staff",
+       "qualifiedName": "Staff@hr",
+       "relationGuid": "00000000-0000-4000-8000-000000000013",
+       "termGuid": "00000000-0000-4000-8000-000000000012"
+      }
+     ],
+     "status": "ACTIVE",
+     "typeName": "hive_table"
+    }
+   ],
+   "queryType": "BASIC",
+   "searchParameters": {
+    "excludeDeletedEntities": true,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 10,
+    "offset": 0,
+    "termName": "Invoice@finance",
+    "typeName": "hive_table"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

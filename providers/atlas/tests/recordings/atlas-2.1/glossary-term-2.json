@@ -1,0 +1,95 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-000000000073",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "abbreviation": "abbreviation of Invoice",
+   "additionalAttributes": {
+    "approvalStatus": "IN_REVIEW"
+   },
+   "anchor": {
+    "glossaryGuid": "00000000-0000-4000-8000-000000000113",
+    "relationGuid": "00000000-0000-4000-8000-000000000128"
+   },
+   "assignedEntities": [
+    {
+     "displayText": "invoice_kind",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000004",
+     "qualifiedName": "ledger.invoices.invoice_kind@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": "source of ledger.invoices.invoice_kind",
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000075",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_column"
+    },
+    {
+     "displayText": "invoice_total",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000002",
+     "qualifiedName": "ledger.invoices.invoice_total@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": "source of ledger.invoices.invoice_total",
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000074",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_column"
+    }
+   ],
+   "categories": [
+    {
+     "categoryGuid": "00000000-0000-4000-8000-000000000129",
+     "displayText": "Category 03",
+     "relationGuid": "00000000-0000-4000-8000-000000000130"
+    }
+   ],
+   "examples": [
+    "examples of Invoice"
+   ],
+   "glossaryTermHeader": {
+    "qualifiedName": "Invoice@finance",
+    "termGuid": "00000000-0000-4000-8000-000000000073"
+   },
+   "guid": "00000000-0000-4000-8000-000000000073",
+   "name": "Invoice",
+   "qualifiedName": "Invoice@finance",
+   "seeAlso": [
+    {
+     "displayText": "Term 04",
+     "qualifiedName": "Term 04@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000131",
+     "termGuid": "00000000-0000-4000-8000-000000000132"
+    }
+   ],
+   "shortDescription": "shortDescription of Invoice",
+   "usage": "usage of Invoice"
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

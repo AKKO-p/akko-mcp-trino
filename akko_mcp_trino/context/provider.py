@@ -12,6 +12,13 @@ class ContextProvider(Protocol):
 
     ``deadline`` is an instant of ``time.monotonic()``. A provider never receives
     the Trino client or the caller's identity, and never writes to its catalogue.
+
+    One member is optional and is not part of what ``isinstance`` checks:
+    ``reset(self) -> None``, which the server calls on ``SIGHUP``, from its signal
+    handler, so that the provider forgets what it remembered of its catalogue. It is a
+    plain function, never a coroutine function (nothing awaits it); it returns ``None``
+    at once, never blocks, sends no request and does not raise (what it raises is
+    logged by type and dropped). ``ContextContract`` checks it when it is defined.
     """
 
     name: str

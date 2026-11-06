@@ -1043,6 +1043,11 @@ or a factory that cannot serve its settings refuses to start; a catalogue that i
 variables from the environment; a secret can be given as a file (`<NAME>_FILE`, read again when the
 file changes) instead of a value.
 
+Two providers come with this repository: `file`, in the core, the reference for the contract (a
+catalogue kept in one JSON file), and `atlas`, for Apache Atlas, a package of its own
+(`akko-mcp-trino-atlas`, installed by the `atlas` extra); its settings, its Kerberos set-up and
+the account it needs are in [its README](providers/atlas/README.md).
+
 Context follows what Trino lists for the caller: a name that comes from a catalogue is never used
 before Trino has listed it for that caller, a provider never receives the Trino client or the
 caller's identity, and it never writes to its catalogue. The text of a provider's error never
@@ -1230,7 +1235,12 @@ table, or the same column, twice once folded is refused instead of merged.
 A provider is a class that implements the protocol `akko_mcp_trino.context.ContextProvider`:
 `name`, `context_api` (set it to `akko_mcp_trino.context.CONTEXT_API`; the server refuses another
 version), `maps(catalog)`, `served_sets()`, `describe(refs, deadline=…)`, `terms(keys, deadline=…)`,
-`check_lines()`, `aclose()` and `credentials_stamp()`. Its package registers a factory
+`check_lines()`, `aclose()` and `credentials_stamp()`. It may add an optional `reset()`, which the
+server calls on `SIGHUP`, from its signal handler, so that it forgets what it remembered of its
+catalogue: a plain function, never `async def` (nothing awaits it), that returns `None` at once,
+never blocks, sends no request and does not raise. One that raises is logged by the provider's
+name and the error's type, never its text, and the contract checks the rest when `reset()` is
+defined. Its package registers a factory
 `(env) -> provider` under the entry-point group `akko_mcp_trino.context`:
 
 ```toml
@@ -1373,6 +1383,12 @@ a table (letters, digits, `_` and `-`), four characters long at least, and their
 no name or text the caller may see: the contract looks for them, and for each text the catalogue
 gives them alone, in everything the caller receives. `tests/context/test_gate_contract_file.py`
 runs it on `file`.
+
+A catalogue with no notion of a join leaves `hidden_join_target` out (`None`): the join scenario
+leaves every check, `test_a_hidden_join_target_is_checked_when_the_catalogue_gives_joins` is skipped
+and says why, and the contract fails if the provider gives a join for any table it describes all
+the same ("the provider gives joins: set hidden_join_target"), so that a provider with joins cannot
+leave them unchecked. With a target, that test plays the join scenario alone.
 
 ### Serving
 

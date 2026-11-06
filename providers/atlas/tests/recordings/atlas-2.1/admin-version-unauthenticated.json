@@ -1,0 +1,18 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/admin/version",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "message": "Full authentication is required to access this resource",
+   "servlet": "jersey-servlet",
+   "status": "401",
+   "url": "/api/atlas/admin/version"
+  },
+  "content_type": "application/json",
+  "status": 401
+ }
+}

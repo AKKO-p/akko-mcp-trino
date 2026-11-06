@@ -1,0 +1,63 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-000000000036",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "abbreviation": "abbreviation of Payment",
+   "additionalAttributes": {
+    "approvalStatus": "APPROVED"
+   },
+   "anchor": {
+    "glossaryGuid": "00000000-0000-4000-8000-000000000050",
+    "relationGuid": "00000000-0000-4000-8000-000000000063"
+   },
+   "assignedEntities": [
+    {
+     "displayText": "payment_ref",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000018",
+     "qualifiedName": "ledger.payments.payment_ref@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": null,
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000037",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_column"
+    }
+   ],
+   "glossaryTermHeader": {
+    "qualifiedName": "Payment@finance",
+    "termGuid": "00000000-0000-4000-8000-000000000036"
+   },
+   "guid": "00000000-0000-4000-8000-000000000036",
+   "longDescription": "longDescription of Payment",
+   "name": "Payment",
+   "qualifiedName": "Payment@finance",
+   "seeAlso": [
+    {
+     "displayText": "Invoice",
+     "qualifiedName": "Invoice@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000059",
+     "termGuid": "00000000-0000-4000-8000-000000000014"
+    }
+   ],
+   "shortDescription": "shortDescription of Payment"
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

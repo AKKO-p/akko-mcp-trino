@@ -1,0 +1,18 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/entity/bulk/uniqueAttribute/type/hive_table",
+  "query": [
+   [
+    "attr_0:qualifiedName",
+    "ledger.ghosts@primary"
+   ]
+  ]
+ },
+ "response": {
+  "body": {},
+  "content_type": "application/json",
+  "status": 200
+ }
+}

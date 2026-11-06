@@ -1,0 +1,39 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-000000000055",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "abbreviation": "abbreviation of Receivable",
+   "additionalAttributes": {
+    "approvalStatus": "APPROVED"
+   },
+   "anchor": {
+    "glossaryGuid": "00000000-0000-4000-8000-000000000050",
+    "relationGuid": "00000000-0000-4000-8000-000000000066"
+   },
+   "classifies": [
+    {
+     "displayText": "Invoice",
+     "qualifiedName": "Invoice@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000054",
+     "termGuid": "00000000-0000-4000-8000-000000000014"
+    }
+   ],
+   "glossaryTermHeader": {
+    "qualifiedName": "Receivable@finance",
+    "termGuid": "00000000-0000-4000-8000-000000000055"
+   },
+   "guid": "00000000-0000-4000-8000-000000000055",
+   "longDescription": "longDescription of Receivable",
+   "name": "Receivable",
+   "qualifiedName": "Receivable@finance",
+   "shortDescription": "shortDescription of Receivable"
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

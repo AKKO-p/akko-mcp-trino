@@ -2,7 +2,9 @@ FROM python:3.12-slim AS build
 WORKDIR /src
 COPY pyproject.toml README.md LICENSE NOTICE ./
 COPY akko_mcp_trino ./akko_mcp_trino
-RUN pip install --no-cache-dir build && python -m build --wheel
+COPY providers/atlas ./providers/atlas
+RUN pip install --no-cache-dir build && python -m build --wheel \
+ && python -m build --wheel --outdir dist providers/atlas
 
 FROM python:3.12-slim
 LABEL org.opencontainers.image.title="akko-mcp-trino" \
@@ -12,7 +14,12 @@ LABEL org.opencontainers.image.title="akko-mcp-trino" \
 RUN useradd --create-home --uid 10001 mcp
 COPY --from=build /src/dist/*.whl /tmp/
 COPY image-requirements.txt /tmp/
-RUN pip install --no-cache-dir -c /tmp/image-requirements.txt /tmp/*.whl && rm /tmp/*.whl /tmp/image-requirements.txt
+# The Atlas provider is installed but inactive: nothing is loaded unless MCP_CONTEXT_PROVIDERS
+# names it. --no-deps until 0.8.0: it requires akko-mcp-trino>=0.8.0, and its only other
+# dependency, httpx, comes with the core.
+RUN pip install --no-cache-dir -c /tmp/image-requirements.txt /tmp/akko_mcp_trino-*.whl \
+ && pip install --no-cache-dir --no-deps /tmp/akko_mcp_trino_atlas-*.whl \
+ && rm /tmp/*.whl /tmp/image-requirements.txt
 USER mcp
 EXPOSE 3000 3001
 HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"MCP_HEALTH_PORT\",\"3001\")}/health')"

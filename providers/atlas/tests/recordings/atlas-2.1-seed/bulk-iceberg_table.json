@@ -1,0 +1,256 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/entity/bulk/uniqueAttribute/type/iceberg_table",
+  "query": [
+   [
+    "attr_0:qualifiedName",
+    "ledger.invoices@primary"
+   ],
+   [
+    "attr_1:qualifiedName",
+    "ledger.payments@primary"
+   ],
+   [
+    "attr_2:qualifiedName",
+    "ledger.accounts@primary"
+   ],
+   [
+    "attr_3:qualifiedName",
+    "ledger.legacy_invoices@primary"
+   ],
+   [
+    "attr_4:qualifiedName",
+    "o'brien.l'année fiscale@primary"
+   ],
+   [
+    "attr_5:qualifiedName",
+    "archive.snapshots@primary"
+   ],
+   [
+    "attr_6:qualifiedName",
+    "ledger.ghosts@primary"
+   ]
+  ]
+ },
+ "response": {
+  "body": {
+   "entities": [
+    {
+     "attributes": {
+      "aliases": null,
+      "columns": [
+       {
+        "guid": "00000000-0000-4000-8000-000000000039",
+        "typeName": "iceberg_column"
+       },
+       {
+        "guid": "00000000-0000-4000-8000-000000000040",
+        "typeName": "iceberg_column"
+       }
+      ],
+      "comment": "comment of archive.snapshots",
+      "createTime": 0,
+      "currentSnapshotId": null,
+      "currentSnapshotTsMs": null,
+      "db": {
+       "guid": "00000000-0000-4000-8000-000000000041",
+       "typeName": "hive_db"
+      },
+      "description": "description of archive.snapshots",
+      "displayName": null,
+      "lastAccessTime": 0,
+      "manifestsCreated": null,
+      "manifestsKept": null,
+      "manifestsReplaced": null,
+      "migratedToIceberg": null,
+      "name": "snapshots",
+      "numFiles": null,
+      "owner": "steward",
+      "parameters": null,
+      "partitionKeys": [],
+      "partitionSpec": null,
+      "qualifiedName": "archive.snapshots@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "retention": 0,
+      "sd": null,
+      "snapshotCount": null,
+      "tableType": "EXTERNAL_TABLE",
+      "temporary": false,
+      "userDescription": "userDescription of archive.snapshots",
+      "viewExpandedText": null,
+      "viewOriginalText": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000042",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "columns": [
+       {
+        "displayText": "snapshot_day",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000039",
+        "qualifiedName": "archive.snapshots.snapshot_day@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000043",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       },
+       {
+        "displayText": "rows_kept",
+        "entityStatus": "ACTIVE",
+        "guid": "00000000-0000-4000-8000-000000000040",
+        "qualifiedName": "archive.snapshots.rows_kept@primary",
+        "relationshipAttributes": {
+         "typeName": "iceberg_table_columns"
+        },
+        "relationshipGuid": "00000000-0000-4000-8000-000000000044",
+        "relationshipStatus": "ACTIVE",
+        "relationshipType": "iceberg_table_columns",
+        "typeName": "iceberg_column"
+       }
+      ],
+      "db": {
+       "displayText": "archive",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000041",
+       "qualifiedName": "archive@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_db"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000045",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_db",
+       "typeName": "hive_db"
+      },
+      "ddlQueries": [],
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "partitionKeys": [],
+      "pipeline": null,
+      "schema": [],
+      "sd": null
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_table",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    }
+   ],
+   "referredEntities": {
+    "00000000-0000-4000-8000-000000000039": {
+     "attributes": {
+      "comment": "comment of archive.snapshots.snapshot_day",
+      "description": "description of archive.snapshots.snapshot_day",
+      "displayName": null,
+      "name": "snapshot_day",
+      "owner": "steward",
+      "position": 0,
+      "qualifiedName": "archive.snapshots.snapshot_day@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000042",
+       "typeName": "iceberg_table"
+      },
+      "type": "string",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000039",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "snapshots",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000042",
+       "qualifiedName": "archive.snapshots@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000043",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    },
+    "00000000-0000-4000-8000-000000000040": {
+     "attributes": {
+      "comment": "comment of archive.snapshots.rows_kept",
+      "description": "description of archive.snapshots.rows_kept",
+      "displayName": null,
+      "name": "rows_kept",
+      "owner": "steward",
+      "position": 1,
+      "qualifiedName": "archive.snapshots.rows_kept@primary",
+      "replicatedFrom": null,
+      "replicatedTo": null,
+      "table": {
+       "guid": "00000000-0000-4000-8000-000000000042",
+       "typeName": "iceberg_table"
+      },
+      "type": "string",
+      "userDescription": null
+     },
+     "createTime": 1700000000000,
+     "createdBy": "admin",
+     "guid": "00000000-0000-4000-8000-000000000040",
+     "isIncomplete": false,
+     "labels": [],
+     "relationshipAttributes": {
+      "inputToProcesses": [],
+      "meanings": [],
+      "model": null,
+      "outputFromProcesses": [],
+      "pipeline": null,
+      "schema": [],
+      "table": {
+       "displayText": "snapshots",
+       "entityStatus": "ACTIVE",
+       "guid": "00000000-0000-4000-8000-000000000042",
+       "qualifiedName": "archive.snapshots@primary",
+       "relationshipAttributes": {
+        "typeName": "iceberg_table_columns"
+       },
+       "relationshipGuid": "00000000-0000-4000-8000-000000000044",
+       "relationshipStatus": "ACTIVE",
+       "relationshipType": "iceberg_table_columns",
+       "typeName": "iceberg_table"
+      }
+     },
+     "status": "ACTIVE",
+     "typeName": "iceberg_column",
+     "updateTime": 1700000000000,
+     "updatedBy": "admin",
+     "version": 0
+    }
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

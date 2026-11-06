@@ -1,0 +1,41 @@
+{
+ "request": {
+  "body": {
+   "entityFilters": {
+    "attributeName": "qualifiedName",
+    "attributeValue": "INVOI",
+    "operator": "contains"
+   },
+   "excludeDeletedEntities": true,
+   "limit": 10,
+   "offset": 0,
+   "typeName": "AtlasGlossaryTerm"
+  },
+  "method": "POST",
+  "path": "/api/atlas/v2/search/basic",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "approximateCount": 2,
+   "queryType": "BASIC",
+   "searchParameters": {
+    "entityFilters": {
+     "attributeName": "qualifiedName",
+     "attributeValue": "INVOI",
+     "operator": "contains"
+    },
+    "excludeDeletedEntities": true,
+    "excludeHeaderAttributes": false,
+    "includeClassificationAttributes": false,
+    "includeSubClassifications": true,
+    "includeSubTypes": true,
+    "limit": 10,
+    "offset": 0,
+    "typeName": "AtlasGlossaryTerm"
+   }
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

@@ -1,0 +1,108 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-000000000078",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "additionalAttributes": {
+    "approvalStatus": "APPROVED"
+   },
+   "anchor": {
+    "glossaryGuid": "00000000-0000-4000-8000-000000000113",
+    "relationGuid": "00000000-0000-4000-8000-000000000121"
+   },
+   "assignedEntities": [
+    {
+     "displayText": "column_19",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000122",
+     "qualifiedName": "schema_04.table_08.column_19@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": "source of schema_04.table_08.column_19",
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000123",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "iceberg_column"
+    },
+    {
+     "displayText": "column_19",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000124",
+     "qualifiedName": "schema_04.table_09.column_19@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": "source of schema_04.table_09.column_19",
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000125",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "iceberg_column"
+    },
+    {
+     "displayText": "column_19",
+     "entityStatus": "ACTIVE",
+     "guid": "00000000-0000-4000-8000-000000000035",
+     "qualifiedName": "ledger.accounts.column_19@primary",
+     "relationshipAttributes": {
+      "attributes": {
+       "confidence": null,
+       "createdBy": null,
+       "description": null,
+       "expression": null,
+       "source": "source of ledger.accounts.column_19",
+       "status": null,
+       "steward": null
+      },
+      "typeName": "AtlasGlossarySemanticAssignment"
+     },
+     "relationshipGuid": "00000000-0000-4000-8000-000000000079",
+     "relationshipStatus": "ACTIVE",
+     "relationshipType": "AtlasGlossarySemanticAssignment",
+     "typeName": "hive_column"
+    }
+   ],
+   "categories": [
+    {
+     "categoryGuid": "00000000-0000-4000-8000-000000000126",
+     "displayText": "Category 02",
+     "relationGuid": "00000000-0000-4000-8000-000000000127"
+    }
+   ],
+   "examples": [
+    "examples of Supplier"
+   ],
+   "glossaryTermHeader": {
+    "qualifiedName": "Supplier@finance",
+    "termGuid": "00000000-0000-4000-8000-000000000078"
+   },
+   "guid": "00000000-0000-4000-8000-000000000078",
+   "name": "Supplier",
+   "qualifiedName": "Supplier@finance",
+   "shortDescription": "shortDescription of Supplier",
+   "usage": "usage of Supplier"
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

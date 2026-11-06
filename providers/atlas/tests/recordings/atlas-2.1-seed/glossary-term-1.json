@@ -1,0 +1,54 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-000000000057",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "abbreviation": "abbreviation of Bill",
+   "additionalAttributes": {
+    "approvalStatus": "DEPRECATED"
+   },
+   "anchor": {
+    "glossaryGuid": "00000000-0000-4000-8000-000000000050",
+    "relationGuid": "00000000-0000-4000-8000-000000000061"
+   },
+   "categories": [
+    {
+     "categoryGuid": "00000000-0000-4000-8000-000000000052",
+     "displayText": "Billing",
+     "relationGuid": "00000000-0000-4000-8000-000000000062"
+    }
+   ],
+   "glossaryTermHeader": {
+    "qualifiedName": "Bill@finance",
+    "termGuid": "00000000-0000-4000-8000-000000000057"
+   },
+   "guid": "00000000-0000-4000-8000-000000000057",
+   "longDescription": "longDescription of Bill",
+   "name": "Bill",
+   "qualifiedName": "Bill@finance",
+   "replacedBy": [
+    {
+     "displayText": "Invoice",
+     "qualifiedName": "Invoice@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000056",
+     "termGuid": "00000000-0000-4000-8000-000000000014"
+    }
+   ],
+   "shortDescription": "shortDescription of Bill",
+   "synonyms": [
+    {
+     "displayText": "Invoice",
+     "qualifiedName": "Invoice@finance",
+     "relationGuid": "00000000-0000-4000-8000-000000000060",
+     "termGuid": "00000000-0000-4000-8000-000000000014"
+    }
+   ]
+  },
+  "content_type": "application/json",
+  "status": 200
+ }
+}

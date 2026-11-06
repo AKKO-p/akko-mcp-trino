@@ -1,0 +1,21 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/entity/uniqueAttribute/type/hive_table",
+  "query": [
+   [
+    "attr:qualifiedName",
+    "ledger.legacy_invoices@primary"
+   ]
+  ]
+ },
+ "response": {
+  "body": {
+   "errorCode": "ATLAS-404-00-009",
+   "errorMessage": "Instance hive_table with unique attribute {qualifiedName=ledger.legacy_invoices@primary} does not exist"
+  },
+  "content_type": "application/json",
+  "status": 404
+ }
+}

@@ -416,14 +416,15 @@ def main() -> int:
     )
     paged = use(PAGED, alice, discovery)
     check(
-        "discovery: list_tables walked by offset gives the eight tables in three pages, no duplicate",
+        "discovery: list_tables walked by offset gives the eight tables in three pages, "
+        "no duplicate",
         sorted(paged["tables"][0]) == sorted(TPCH_TINY_TABLES) and paged["tables"][1] == 3,
         paged["tables"],
     )
     check(
-        "discovery: describe_schema walked by offset gives the eight tables in three pages, no duplicate",
-        sorted(paged["described"][0]) == sorted(TPCH_TINY_TABLES)
-        and paged["described"][1] == 3,
+        "discovery: describe_schema walked by offset gives the eight tables in three pages, "
+        "no duplicate",
+        sorted(paged["described"][0]) == sorted(TPCH_TINY_TABLES) and paged["described"][1] == 3,
         paged["described"],
     )
 
