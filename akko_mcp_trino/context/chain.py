@@ -198,9 +198,18 @@ class ContextChain:
         """Let every source that refused the account be called again at once.
 
         It may run in a signal handler: the breakers it lifts are closed on their next
-        call, and their gauges read 0 now.
+        call, and their gauges read 0 now. A source with a ``reset()`` method is told too,
+        so that it forgets what it remembered of its catalogue; the hook must be quick and
+        must not block, and what it raises is dropped, never raised in the signal handler.
         """
         self._refused_generation += 1
+        for provider in self._providers:
+            hook = getattr(provider, "reset", None)
+            if callable(hook):
+                try:
+                    hook()
+                except Exception:  # noqa: BLE001 - a signal handler must not raise
+                    pass
         if self._metrics is None:
             return
         for name, breaker in list(self._breakers.items()):

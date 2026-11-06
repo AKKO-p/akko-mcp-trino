@@ -1230,7 +1230,9 @@ table, or the same column, twice once folded is refused instead of merged.
 A provider is a class that implements the protocol `akko_mcp_trino.context.ContextProvider`:
 `name`, `context_api` (set it to `akko_mcp_trino.context.CONTEXT_API`; the server refuses another
 version), `maps(catalog)`, `served_sets()`, `describe(refs, deadline=…)`, `terms(keys, deadline=…)`,
-`check_lines()`, `aclose()` and `credentials_stamp()`. Its package registers a factory
+`check_lines()`, `aclose()` and `credentials_stamp()`. It may add `reset()`, which the server calls
+on `SIGHUP` so that it forgets what it remembered of its catalogue; it must be quick, must not
+block, and what it raises is dropped. Its package registers a factory
 `(env) -> provider` under the entry-point group `akko_mcp_trino.context`:
 
 ```toml

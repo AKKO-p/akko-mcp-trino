@@ -3,19 +3,21 @@
 A Trino table ``catalog.schema.table`` is the Atlas entity whose qualified name is
 ``schema.table@<cluster of the catalog>`` (``ATLAS_CLUSTERS``), looked up under each type
 of ``ATLAS_TABLE_TYPES`` with ``GET /api/atlas/v2/entity/bulk/uniqueAttribute/type/{type}``,
-the names split in requests whose query stays under ``ATLAS_MAX_QUERY_CHARS``. A type
-Atlas does not know yields nothing. Only names Trino listed are asked for; nothing is
-searched.
+the names split in requests whose query stays under ``ATLAS_MAX_QUERY_CHARS``. Only names
+Trino listed are asked for, nothing is searched, and the cluster keeps the case
+``ATLAS_CLUSTERS`` gives it, since Atlas matches a qualified name exactly. A type Atlas
+says does not exist yields nothing, and is not asked again until ``reset()`` (the
+server's SIGHUP) or a change of the secret's file.
 
 An entity whose status is not ``ACTIVE`` is ignored, and so is a relation (a column, a
 partition key, a glossary term) when the relation or its target is not ``ACTIVE``, or a
 classification propagated from an entity that is not. The columns come from ``columns``
 and ``partitionKeys``.
 
-Every name returned is folded to lower case, as Trino lists it. When two Atlas names
+Every name returned is folded to lower case, as Trino lists it. When two Atlas columns
 fold to the same Trino name, the one already written in lower case wins, else the first
-in code point order; across entity types, the first type of ``ATLAS_TABLE_TYPES`` wins.
-The choice does not depend on the order of Atlas's answer.
+in code point order, whatever the order of Atlas's answer; across entity types, the
+first type of ``ATLAS_TABLE_TYPES`` that holds the table wins.
 
 What is served beyond descriptions is what the allow lists name, by exact name:
 ``ATLAS_GLOSSARIES`` (by the glossary suffix of a term's qualified name),
@@ -45,7 +47,7 @@ from akko_mcp_trino.context import (
     Term,
 )
 
-from .client import AtlasClient
+from .client import AtlasClient, Missing
 from .settings import AtlasSettings
 
 BULK = "/api/atlas/v2/entity/bulk/uniqueAttribute/type/"
@@ -129,6 +131,9 @@ class AtlasProvider:
         """Build the provider; ``transport`` replaces the network (tests, the contract)."""
         self.settings = settings
         self._client = AtlasClient(settings, transport)
+        # Entity types Atlas said do not exist, and the secret they were learnt under.
+        self._absent: frozenset[str] = frozenset()
+        self._absent_stamp = settings.credentials_stamp()
 
     # -- the contract
 
@@ -159,8 +164,8 @@ class AtlasProvider:
         for ref in refs:
             cluster = self.settings.clusters.get(ref.catalog.lower())
             if cluster is not None:
-                name = f"{ref.schema}.{ref.table}@{cluster}"
-                wanted.setdefault(name.lower(), []).append(ref)
+                # Trino's names, already lower case, and the cluster as Atlas writes it.
+                wanted.setdefault(f"{ref.schema}.{ref.table}@{cluster}", []).append(ref)
         if not wanted:
             return {}
         try:
@@ -200,33 +205,40 @@ class AtlasProvider:
         """Return a value that changes when the secret's file changes; empty without one."""
         return self.settings.credentials_stamp()
 
+    def reset(self) -> None:
+        """Forget the entity types Atlas said do not exist; the server calls it on SIGHUP."""
+        self._absent = frozenset()
+
+    def _types(self) -> list[str]:
+        """The types to ask, without those Atlas said do not exist under this secret."""
+        stamp = self.settings.credentials_stamp()
+        if stamp != self._absent_stamp:
+            self._absent, self._absent_stamp = frozenset(), stamp
+        return [t for t in self.settings.table_types if t not in self._absent]
+
     # -- reading
 
     async def _entities(
         self, names: list[str]
     ) -> dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]]:
-        """Each table found, by folded qualified name, with the entities it refers to."""
+        """Each table found, by the qualified name asked, with the entities it refers to."""
         found: dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
-        for type_name in self.settings.table_types:
+        for type_name in self._types():
             left = [name for name in names if name not in found]
-            this_type: dict[str, dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]]] = {}
             for group in batches(left, self.settings.max_query_chars):
                 doc = await self._client.get(
                     BULK + quote(type_name, safe=""),
                     {f"attr_{i}:qualifiedName": name for i, name in enumerate(group)},
                 )
+                if doc is Missing.TYPE:
+                    self._absent |= {type_name}
+                    break
                 body = _object(doc)
                 referred = _object(body.get("referredEntities"))
-                asked = set(group)
                 for entity in _items(body.get("entities")):
                     qualified = _text(_object(entity.get("attributes")).get("qualifiedName"))
-                    if qualified.lower() in asked and _active(entity):
-                        this_type.setdefault(qualified.lower(), {})[qualified] = (
-                            entity,
-                            referred,
-                        )
-            for name, spellings in this_type.items():
-                found[name] = spellings[_wins(spellings)]
+                    if qualified in group and _active(entity):
+                        found.setdefault(qualified, (entity, referred))
         return found
 
     def _table(self, entity: Mapping[str, Any], referred: Mapping[str, Any]) -> TableContext:

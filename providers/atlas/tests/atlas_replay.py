@@ -46,16 +46,15 @@ def _referred_guids(entity: dict[str, Any]) -> set[str]:
 class FakeAtlas:
     """Answers the bulk reads of one recorded version; records every request it gets.
 
-    ``fold=True`` plays an Atlas whose index ignores case: a name asked in lower case
-    finds an entity whose qualified name is written in mixed case.
+    A qualified name is matched exactly, case included, as Atlas's unique attribute
+    lookup does.
     """
 
-    def __init__(self, version: str, *, fold: bool = False) -> None:
+    def __init__(self, version: str) -> None:
         self.bulk: dict[str, dict[str, Any]] = {}
         for path in sorted((RECORDINGS / version).glob("bulk-*.json")):
             if not path.stem.endswith("-unknown-only"):
                 self.bulk[path.stem.removeprefix("bulk-")] = recording(version, path.stem)
-        self.fold = fold
         self.requests: list[httpx.Request] = []
 
     def entities(self, type_name: str) -> list[dict[str, Any]]:
@@ -88,10 +87,9 @@ class FakeAtlas:
         if response["status"] != 200:
             return httpx.Response(response["status"], json=response["body"])
         names = asked(request)
-        key: Callable[[str], str] = str.lower if self.fold else str
-        wanted = {key(n) for n in names}
+        wanted = set(names)
         body = copy.deepcopy(response["body"])
-        entities = [e for e in body["entities"] if key(e["attributes"]["qualifiedName"]) in wanted]
+        entities = [e for e in body["entities"] if e["attributes"]["qualifiedName"] in wanted]
         guids = set().union(*map(_referred_guids, entities)) if entities else set()
         referred = {g: e for g, e in body["referredEntities"].items() if g in guids}
         answer = {"entities": entities, "referredEntities": referred} if entities else {}

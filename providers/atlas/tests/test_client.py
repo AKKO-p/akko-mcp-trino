@@ -170,10 +170,46 @@ def test_an_error_answer_never_reaches_the_exception():
         assert PASSWORD not in text and "atlas-a" not in text and "rejected" not in text
 
 
-def test_a_404_or_a_400_is_nothing():
-    for status in (400, 404):
-        (found,) = calls(build(lambda request, s=status: httpx.Response(s), ATLAS_URL=ATLAS))
-        assert found == {}
+def test_only_atlas_instance_not_found_is_nothing(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+
+    def missing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"errorCode": "ATLAS-404-00-009"})
+
+    (found,) = calls(build(missing, ATLAS_URL=ATLAS))
+    assert found == {} and not caplog.records
+
+    # Any other 404 or 400 is a wrong path or request (a Knox topology without the role,
+    # a wrong prefix in ATLAS_URL): unavailable, never "nothing known".
+    others = [
+        httpx.Response(404, headers={"content-type": "text/html"}, text="<h1>Not Found</h1>"),
+        httpx.Response(404, json={"errorCode": "ATLAS-404-00-005"}),
+        httpx.Response(404, json=["ATLAS-404-00-009"]),
+        httpx.Response(404, headers={"content-type": "application/json"}, content=b"{"),
+        httpx.Response(400, json={"errorCode": "ATLAS-400-00-001"}),
+        httpx.Response(400, text="bad request"),
+    ]
+    for answer in others:
+        caplog.clear()
+        (error,) = calls(build(lambda request, a=answer: a, ATLAS_URL=ATLAS))
+        assert isinstance(error, ProviderUnavailable)
+        assert [r.getMessage() for r in caplog.records] == ["atlas unreachable"]
+
+
+def test_a_default_port_written_or_not_is_the_same_address():
+    atlas = FakeAtlas("atlas-2.4")
+    gateway = "https://knox/gateway/cdp/atlas"
+
+    def explicit_port(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "atlas-a":
+            path = "https://knox:443/gateway/cdp/atlas" + request.url.raw_path.decode()
+            return httpx.Response(307, headers={"location": path})
+        path = request.url.path.removeprefix("/gateway/cdp/atlas")
+        return atlas(httpx.Request("GET", request.url.copy_with(path=path)))
+
+    (found,) = calls(build(explicit_port, ATLAS_URL=f"{ATLAS},{gateway}"))
+    assert INVOICES in found
 
 
 def test_a_json_media_type_with_a_suffix_is_json():
@@ -312,4 +348,4 @@ def test_the_password_file_comes_first_and_the_stamp_follows_it(tmp_path):
 def test_network_settings_are_checked_at_start(setting, value, says):
     with pytest.raises(ValueError, match=says) as raised:
         read_settings({**BASE, setting: value})
-    assert PASSWORD not in str(raised.value)
+    assert PASSWORD not in str(raised.value) and value not in str(raised.value)

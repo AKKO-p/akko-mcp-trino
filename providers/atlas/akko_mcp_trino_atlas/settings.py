@@ -141,7 +141,7 @@ def _verify(env: Mapping[str, str]) -> ssl.SSLContext | bool:
     try:
         return ssl.create_default_context(cafile=path)
     except (OSError, ssl.SSLError) as exc:
-        raise ValueError(f"ATLAS_CA_BUNDLE: cannot read {path!r} ({type(exc).__name__})") from None
+        raise ValueError(f"ATLAS_CA_BUNDLE: cannot read the file ({type(exc).__name__})") from None
 
 
 def _proxy(env: Mapping[str, str]) -> str:

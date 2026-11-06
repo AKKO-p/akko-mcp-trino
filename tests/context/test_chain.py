@@ -306,6 +306,21 @@ def test_a_changed_secret_file_or_reset_retries_a_refused_provider_at_once(loop)
     assert len(fake.calls) == 3
 
 
+def test_a_reset_tells_every_provider_that_has_a_reset_hook(loop):
+    listening, silent, broken = Fake("one"), Fake("two"), Fake("three")
+    resets = []
+    listening.reset = lambda: resets.append("one")
+
+    def fails():
+        resets.append("three")
+        raise RuntimeError("cannot forget")
+
+    broken.reset = fails
+    chain = _chain(loop, listening, silent, broken)
+    chain.reset_refused()  # a hook that raises never escapes the signal handler
+    assert resets == ["one", "three"]
+
+
 def test_a_reset_does_not_close_a_breaker_opened_by_an_outage(loop):
     fake = Fake("one")
     fake.fail = ProviderUnavailable("down")

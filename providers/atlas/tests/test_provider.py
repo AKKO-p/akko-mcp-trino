@@ -134,30 +134,28 @@ def test_an_inactive_entity_or_relation_is_ignored():
 
 
 def test_mixed_case_catalogue_names_attach_to_trino_lower_case_names():
-    atlas = FakeAtlas("atlas-2.4", fold=True)
-    invoices = atlas.entity("hive_table", "ledger.invoices@primary")
-    invoices["attributes"]["qualifiedName"] = "Ledger.Invoices@primary"
-    env = {"ATLAS_CLUSTERS": '{"LAKE": "primary"}'}
-
-    p = provider(atlas, **env)
+    atlas = FakeAtlas("atlas-2.4")
+    for entity in atlas.entities("hive_table"):
+        name = entity["attributes"]["qualifiedName"]
+        entity["attributes"]["qualifiedName"] = name.replace("@primary", "@Primary")
+    # The Trino catalog is folded; the cluster keeps Atlas's case, which is matched exactly.
+    p = provider(atlas, ATLAS_CLUSTERS='{"LAKE": "Primary"}')
     assert p.maps("lake") and p.maps("LAKE")
     found = describe(p, [INVOICES])
 
     assert set(found) == {INVOICES}
+    assert asked(atlas.requests[0]) == ["ledger.invoices@Primary"]
     columns = found[INVOICES].columns
     assert "payment_ref" in columns and "Payment_Ref" not in columns
     assert all(name == name.lower() for name in columns)
+    # The cluster written in another case than Atlas's finds nothing.
+    assert describe(provider(atlas, ATLAS_CLUSTERS='{"lake": "primary"}'), [INVOICES]) == {}
 
 
-def test_two_atlas_names_of_one_trino_name_keep_the_lower_case_one_whatever_the_order():
+def test_two_atlas_columns_of_one_trino_column_keep_the_lower_case_one_whatever_the_order():
     def answer(reverse: bool):
-        atlas = FakeAtlas("atlas-2.4", fold=True)
+        atlas = FakeAtlas("atlas-2.4")
         invoices = atlas.entity("hive_table", "ledger.invoices@primary")
-        twin = {**invoices, "attributes": {**invoices["attributes"]}}
-        twin["attributes"]["qualifiedName"] = "LEDGER.INVOICES@primary"
-        twin["attributes"]["userDescription"] = "the twin"
-        entities = atlas.entities("hive_table")
-        entities.insert(0, twin)
         # Two columns that fold to payment_ref: the one already in lower case wins.
         guid = "00000000-0000-4000-8000-0000000000ff"
         referred = atlas.referred("hive_table")
@@ -176,13 +174,11 @@ def test_two_atlas_names_of_one_trino_name_keep_the_lower_case_one_whatever_the_
         headers = invoices["relationshipAttributes"]["columns"]
         headers.append({**header, "guid": guid, "displayText": "payment_ref"})
         if reverse:
-            entities.reverse()
             headers.reverse()
         return describe(provider(atlas), [INVOICES])[INVOICES]
 
     first, second = answer(False), answer(True)
     assert first == second
-    assert first.description == "userDescription of ledger.invoices"
     assert first.columns["payment_ref"].description == "lower"
 
 
@@ -354,3 +350,38 @@ def test_check_lines_name_the_addresses_and_sets_never_the_secret():
     assert bare.check_lines()[1].endswith("business metadata: none; owner: not served")
     asyncio.run(bare.aclose())
     assert all("reader-pass" not in line for line in lines)
+
+
+def test_an_absent_type_is_remembered_until_a_reset_or_a_new_secret(tmp_path):
+    secret = tmp_path / "password"
+    secret.write_text("first-password\n", encoding="utf-8")
+    atlas = FakeAtlas("atlas-2.4")
+    env = {**BASE, "ATLAS_PASSWORD": "", "ATLAS_PASSWORD_FILE": str(secret)}
+    p = provider(atlas, **env)
+
+    def types_asked() -> list[str]:
+        sent = [r.url.path.rsplit("/", 1)[1] for r in atlas.requests]
+        atlas.requests.clear()
+        return sent
+
+    async def run():
+        for step in ("first", "second", "reset", "after", "rotated"):
+            if step == "reset":
+                p.reset()
+                continue
+            if step == "rotated":
+                secret.write_text("second-password-longer\n", encoding="utf-8")
+            await p.describe([GHOSTS], deadline=time.monotonic() + 5)
+            yield step, types_asked()
+        await p.aclose()
+
+    async def collect():
+        return [item async for item in run()]
+
+    steps = dict(asyncio.run(collect()))
+    # Atlas 2.4 answers 400 for iceberg_table: asked once, then no more.
+    assert steps["first"] == ["hive_table", "iceberg_table"]
+    assert steps["second"] == ["hive_table"]
+    # SIGHUP (the core's reset) or a rotated secret brings the type back.
+    assert steps["after"] == ["hive_table", "iceberg_table"]
+    assert steps["rotated"] == ["hive_table", "iceberg_table"]

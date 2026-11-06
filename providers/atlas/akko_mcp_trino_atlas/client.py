@@ -15,8 +15,11 @@ What an answer means:
   ``ProviderUnavailable``;
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
-- 400 and 404: nothing (``None``); Atlas 2.4 answers 400 for an entity type it does not
-  know.
+- Atlas's own "does not exist" answers, by their error code: a 404 with
+  ``ATLAS-404-00-009`` (no instance has that unique attribute) is ``Missing.INSTANCE``,
+  and a 400 with ``ATLAS-400-00-014`` (the type does not exist; Atlas 2.4 without the
+  Iceberg model) is ``Missing.TYPE``. Any other 400 or 404 (a page, another code, a wrong
+  path behind Knox) is ``ProviderUnavailable``.
 
 Each ``ProviderUnavailable`` logs one line, ``atlas unreachable``, word for word, with no
 address, user or object name; a refusal is logged by the server, as
@@ -26,6 +29,7 @@ secret.
 
 import logging
 from collections.abc import Generator, Mapping
+from enum import Enum
 from importlib.metadata import version
 from typing import Any
 
@@ -40,8 +44,21 @@ USER_AGENT = f"akko-mcp-trino-atlas/{version('akko-mcp-trino-atlas')}"
 SESSION_COOKIE = "ATLASSESSIONID"
 # The passive server of Atlas in high availability redirects once to the active one.
 _MAX_REDIRECTS = 3
-_NOTHING = (400, 404)
 _REFUSED = (401, 403)
+
+
+class Missing(Enum):
+    """An answer by which Atlas says that what was asked does not exist."""
+
+    INSTANCE = "instance"
+    TYPE = "type"
+
+
+# The error codes recorded from Atlas 2.1 and 2.4, by status.
+_MISSING = {
+    404: {"ATLAS-404-00-009": Missing.INSTANCE},
+    400: {"ATLAS-400-00-014": Missing.TYPE},
+}
 
 
 class _Outage(Exception):
@@ -79,6 +96,18 @@ def client_options(settings: AtlasSettings) -> dict[str, Any]:
     }
 
 
+def _error_code(response: httpx.Response) -> str:
+    """The ``errorCode`` of an Atlas error answer, or an empty string."""
+    if not _is_json(response):
+        return ""
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    code = body.get("errorCode") if isinstance(body, dict) else None
+    return code if isinstance(code, str) else ""
+
+
 def _is_json(response: httpx.Response) -> bool:
     kind = response.headers.get("content-type", "").split(";")[0].strip().lower()
     return kind == "application/json" or kind.endswith("+json")
@@ -100,8 +129,9 @@ class AtlasClient:
         self._http = httpx.AsyncClient(transport=transport, **options)
 
     async def get(self, path: str, params: Mapping[str, str] | None = None) -> Any:
-        """Return the JSON Atlas answers for ``path`` (under ``/api/atlas``), or ``None``
-        for a 400 or a 404; raises ``ProviderRefused`` or ``ProviderUnavailable``."""
+        """Return the JSON Atlas answers for ``path`` (under ``/api/atlas``), or ``Missing``
+        when Atlas says it does not exist; raises ``ProviderRefused`` or
+        ``ProviderUnavailable``."""
         count = len(self._urls)
         for step in range(count):
             index = (self._first + step) % count
@@ -150,8 +180,8 @@ class AtlasClient:
             # A new session is opened on the next call, under the secret read then.
             self._http.cookies.clear()
             raise ProviderRefused(f"atlas answered {status}")
-        if status in _NOTHING:
-            return None
+        if missing := _MISSING.get(status, {}).get(_error_code(response)):
+            return missing
         if status != 200:
             raise self._unavailable(f"atlas answered {status}")
         if not _is_json(response):

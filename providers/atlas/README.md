@@ -61,18 +61,23 @@ A Trino table `catalog.schema.table` is the Atlas entity whose qualified name is
 `schema.table@<cluster of the catalog>`, read with
 `GET /api/atlas/v2/entity/bulk/uniqueAttribute/type/{type}` for the whole batch the server asks
 for, under each type of `ATLAS_TABLE_TYPES`. Only the names Trino listed are asked; nothing is
-searched. A type Atlas does not know (Atlas 2.4 answers 400 for `iceberg_table` without the
-Iceberg model) yields nothing.
+searched. Schema and table are Trino's names, in lower case; the cluster is sent exactly as
+`ATLAS_CLUSTERS` writes it, because Atlas matches a qualified name case included.
+
+A type Atlas says does not exist (Atlas 2.4 answers 400 with `ATLAS-400-00-014` for
+`iceberg_table` without the Iceberg model) yields nothing and is not asked again. **An
+administrator who adds a table type to Atlas sends `SIGHUP` to the server**, which makes the
+provider ask for it again; a change of the secret's file does too.
 
 - The description is the steward's (`userDescription`), else `description`, else the
   metastore comment. Columns come from `columns` and `partitionKeys`.
 - An entity that is not `ACTIVE` is ignored, and so is a column, a partition key or a glossary
   term whose relation or target is not `ACTIVE`, and a classification propagated from an
   entity that is not.
-- Every name returned is folded to lower case, as Trino lists it. When two Atlas names fold to
+- Every name returned is folded to lower case, as Trino lists it. When two Atlas columns fold to
   the same Trino name, the one already written in lower case wins, else the first in code point
-  order; across types, the first type of `ATLAS_TABLE_TYPES` wins. The choice does not depend on
-  the order of Atlas's answer.
+  order, whatever the order of Atlas's answer; across types, the first type of
+  `ATLAS_TABLE_TYPES` that holds the table wins.
 - A business metadata value is served as text, a list joined by commas.
 
 ## Network, high availability and errors
@@ -87,7 +92,9 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
 | 401 or 403 | is refused at once; the session cookie is dropped |
 | a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
-| 400 or 404 | knows nothing of these tables |
+| 404 with `ATLAS-404-00-009` (no such instance) | knows nothing of these tables |
+| 400 with `ATLAS-400-00-014` (no such type) | knows nothing under that type, and remembers it until `SIGHUP` |
+| any other 400 or 404 (a page, another code, a wrong path behind Knox) | is unavailable |
 
 When unavailable, it logs `atlas unreachable`, with no address, user or object name; a refusal
 is logged by the server as `atlas refused the account`. Neither the logs nor an error carry an

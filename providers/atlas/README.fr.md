@@ -61,18 +61,24 @@ Une table Trino `catalogue.schéma.table` est l'entité Atlas dont le nom qualif
 `schéma.table@<cluster du catalogue>`, lue par
 `GET /api/atlas/v2/entity/bulk/uniqueAttribute/type/{type}` pour tout le lot que demande le
 serveur, sous chaque type d'`ATLAS_TABLE_TYPES`. Seuls les noms que Trino a listés sont
-demandés ; rien n'est cherché. Un type qu'Atlas ne connaît pas (Atlas 2.4 répond 400 pour
-`iceberg_table` sans le modèle Iceberg) ne donne rien.
+demandés ; rien n'est cherché. Le schéma et la table sont les noms de Trino, en minuscules ;
+le cluster est envoyé tel qu'`ATLAS_CLUSTERS` l'écrit, car Atlas compare un nom qualifié casse
+comprise.
+
+Un type dont Atlas dit qu'il n'existe pas (Atlas 2.4 répond 400 avec `ATLAS-400-00-014` pour
+`iceberg_table` sans le modèle Iceberg) ne donne rien et n'est plus demandé. **Un
+administrateur qui ajoute un type de table dans Atlas envoie `SIGHUP` au serveur**, et le
+fournisseur le demande de nouveau ; un changement du fichier du secret aussi.
 
 - La description est celle du responsable (`userDescription`), sinon `description`, sinon le
   commentaire du métastore. Les colonnes viennent de `columns` et de `partitionKeys`.
 - Une entité qui n'est pas `ACTIVE` est ignorée, de même qu'une colonne, une clé de partition
   ou un terme de glossaire dont la relation ou la cible n'est pas `ACTIVE`, et qu'une
   classification propagée depuis une entité qui ne l'est pas.
-- Chaque nom rendu est replié en minuscules, comme Trino le liste. Quand deux noms d'Atlas
-  donnent le même nom Trino, celui déjà écrit en minuscules l'emporte, sinon le premier dans
-  l'ordre des points de code ; entre types, le premier type d'`ATLAS_TABLE_TYPES` l'emporte. Le
-  choix ne dépend pas de l'ordre de la réponse d'Atlas.
+- Chaque nom rendu est replié en minuscules, comme Trino le liste. Quand deux colonnes d'Atlas
+  donnent le même nom Trino, celle déjà écrite en minuscules l'emporte, sinon la première dans
+  l'ordre des points de code, quel que soit l'ordre de la réponse d'Atlas ; entre types, le
+  premier type d'`ATLAS_TABLE_TYPES` qui contient la table l'emporte.
 - Une valeur de métadonnée métier est servie en texte, une liste jointe par des virgules.
 
 ## Réseau, haute disponibilité et erreurs
@@ -87,7 +93,9 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
 | 401 ou 403 | se dit refusé tout de suite ; le cookie de session est oublié |
 | un 200 qui n'est pas du JSON (une page de connexion Knox), un JSON illisible, un autre statut | se dit indisponible |
-| 400 ou 404 | ne sait rien de ces tables |
+| 404 avec `ATLAS-404-00-009` (aucune instance) | ne sait rien de ces tables |
+| 400 avec `ATLAS-400-00-014` (aucun type) | ne sait rien sous ce type, et s'en souvient jusqu'au `SIGHUP` |
+| tout autre 400 ou 404 (une page, un autre code, un mauvais chemin derrière Knox) | se dit indisponible |
 
 Indisponible, il écrit au journal `atlas unreachable`, sans adresse, utilisateur ni nom
 d'objet ; un refus est écrit par le serveur, `atlas refused the account`. Ni le journal ni une
