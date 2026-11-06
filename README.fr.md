@@ -604,6 +604,28 @@ nommer.
 
 La ligne d'audit garde seulement le code de l'erreur, inchangé.
 
+## Déploiement avec un catalogue
+
+Le serveur fonctionne avec un catalogue de données selon l'un de deux modes.
+
+**Mode 1, Trino seul.** Le serveur tourne sans fournisseur de contexte. Une équipe qui fait
+déjà tourner le serveur MCP de son catalogue le garde, à côté : rien dans ce serveur ne le bloque
+ni ne le remplace. Ce mode convient quand les métadonnées du catalogue ne sont pas sensibles.
+
+**Mode 2, avec un fournisseur de contexte.** Le sens métier (descriptions, termes de glossaire,
+classifications, propriétaire) n'est montré que pour les tables et les colonnes que Trino laisse
+lire à l'appelant. Ce mode convient quand les métadonnées doivent suivre les droits sur les
+données.
+
+**Droits.** Le contexte suit les droits de Trino. Le fournisseur lit le catalogue avec un compte
+technique en lecture seule, et ne sert que ce que nomment ses listes blanches, fermées par défaut
+(pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA` ; vide veut
+dire aucun). Un glossaire ou une classification restreints dans le catalogue ne sont donc jamais
+servis, sauf si l'administrateur les nomme. La lecture du catalogue sous l'identité de l'appelant
+n'est pas dans cette version.
+
+Sans fournisseur, aucun code de catalogue n'est chargé et aucun catalogue n'est appelé.
+
 ## Contexte d'un catalogue
 
 Un catalogue de données peut décrire ce que Trino liste : le propriétaire d'une table, sa
@@ -725,7 +747,8 @@ coûterait une requête par table : `describe_table` sert le reste. Les mêmes g
 s'il reste moins de `MCP_CONTEXT_RESERVE_SECONDS`, aucun fournisseur n'est appelé et les sources
 disent `unavailable`, une requête lente du filtre ne prouve rien, tout autre échec sert la page sans
 contexte et dit `error` pour chaque source, et l'appel ne répond jamais `time_budget` à cause du
-contexte. Sans fournisseur, `describe_schema` répond et se décrit exactement comme en 0.7.2.
+contexte. Sans fournisseur, `describe_schema` n'ajoute aucune clé de contexte à sa réponse ni
+aucune phrase à sa description.
 
 Les greffons lisent les catalogues par `tools.context.tables(refs)`, une liste de `TableRef`
 construits par `TableRef.of`. La réponse a la forme de celle de `describe_schema`, `descriptions`

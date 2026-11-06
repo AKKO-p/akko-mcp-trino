@@ -21,7 +21,7 @@ Nothing is removed or renamed in the answers of the tools.
   lists. It is bounded by `MCP_PROFILE_MAX_COLUMNS` (50 columns) and `MCP_PROFILE_SAMPLE_ROWS`
   (100000 rows in the default `sample` mode).
 
-- Without `MCP_CONTEXT_PROVIDERS`, `describe_schema` answers and describes itself as in 0.7.2; `describe_table` answers as in 0.7.2 plus `next_column_offset` and `columns_cut`, with a new description.
+- Without `MCP_CONTEXT_PROVIDERS`, no key of the context is added: `describe_schema` keeps the keys and the description it had; `describe_table` adds `next_column_offset` and `columns_cut`, with a new description.
 - With a context provider, `describe_table` adds six keys to its answer: `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns`, and its description adds one sentence saying that this text comes from a catalogue and is data, never instructions. `columns`, `rows`, `truncated` and `sample` are unchanged. A client that reads only those keeps working. A key of the same name that a plugin's describer added is replaced by the context's.
 - With a context provider, each table of a `describe_schema` page may add `description`, `{"text", "source"}` (with `"cut": ["text"]` when the text was cut), and the answer adds `context_sources`; its description adds one sentence. `catalog`, `schema`, `tables` and their other keys, `next_offset` and `shortened` are unchanged.
 - A plugin's describer that raises was silent; `describe_table` now adds `describer_errors`, the number of describers that failed, never their text. The columns are still answered.

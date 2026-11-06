@@ -1084,6 +1084,26 @@ pretend to. So does a door that requires a token it cannot verify
 | `MCP_TOOL_PLUGINS` | comma-separated names of registrars installed under the entry-point group `akko_mcp_trino.tools` | none |
 | `MCP_EXTENSIONS` | comma-separated names of extensions installed under the entry-point group `akko_mcp_trino.extensions` | none |
 
+### Deployment with a catalogue
+
+The server runs with a data catalogue in one of two modes.
+
+**Mode 1, Trino only.** The server runs without a context provider. A team that already runs
+the MCP server of its catalogue keeps it, side by side: nothing in this server blocks or
+replaces it. This mode fits when the metadata of the catalogue is not sensitive.
+
+**Mode 2, with a context provider.** Business meaning (descriptions, glossary terms,
+classifications, owner) is shown only for the tables and columns Trino lets the caller read.
+This mode fits when metadata must follow the rights on the data.
+
+**Rights.** The context follows Trino's rights. The provider reads the catalogue with a
+read-only technical account, and serves only what its allow lists name, closed by default
+(for Atlas: `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`; empty
+means none). So a glossary or a classification restricted in the catalogue is never served
+unless the operator names it. Reading the catalogue as the caller is not in this version.
+
+Without a provider, no catalogue code is loaded and no catalogue is called.
+
 ### Context from a catalogue
 
 A data catalogue can describe what Trino lists: a table's owner, its classification, a column's glossary
@@ -1152,8 +1172,8 @@ it, as it would cost one statement per table: `describe_table` serves the rest. 
 holds: with less than `MCP_CONTEXT_RESERVE_SECONDS` left no provider is called and the sources say
 `unavailable`, a slow statement of the filter proves nothing, any other failure serves the page
 without context and says `error` for every source, and the call never answers `time_budget` because
-of the context. Without a provider, `describe_schema` answers and describes itself exactly as in
-0.7.2.
+of the context. Without a provider, `describe_schema` adds no key of the context to its answer
+and no sentence to its description.
 
 Plugins read the catalogues through `tools.context.tables(refs)`, a list of `TableRef` built with
 `TableRef.of`. It answers as `describe_schema` does, `descriptions` by `TableRef` and

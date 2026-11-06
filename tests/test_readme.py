@@ -203,3 +203,31 @@ def test_the_public_texts_count_the_nine_tools(path, word):
     text = (pathlib.Path(__file__).resolve().parents[1] / path).read_text(encoding="utf-8")
     assert word in text
     assert not re.search(r"\b(eight|huit) tools\b", text, re.I), "a count from 0.7"
+
+
+@pytest.mark.parametrize(
+    "readme, heading, allow_lists",
+    [
+        (
+            "README.md",
+            "### Deployment with a catalogue",
+            "serves only what its allow lists name, closed by default (for Atlas: "
+            "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`; empty means "
+            "none)",
+        ),
+        (
+            "README.fr.md",
+            "## Déploiement avec un catalogue",
+            "ne sert que ce que nomment ses listes blanches, fermées par défaut (pour Atlas : "
+            "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA` ; vide veut "
+            "dire aucun)",
+        ),
+    ],
+)
+def test_the_readme_says_how_to_deploy_with_a_catalogue_and_what_its_rights_are(
+    readme, heading, allow_lists
+):
+    text = (pathlib.Path(__file__).resolve().parents[1] / readme).read_text(encoding="utf-8")
+    flat = " ".join(text.replace("\u202f", " ").replace("\u00a0", " ").split())
+    assert heading in text
+    assert allow_lists in flat
