@@ -2,8 +2,7 @@
 
 [English](CONTRIBUTING.md) · **Français**
 
-Merci d'envisager une contribution. Ce projet est petit à dessein ; le garder petit est une
-fonctionnalité.
+Merci d'envisager une contribution. Ce projet est petit à dessein, et il doit le rester.
 
 ## Règles de base
 
@@ -16,8 +15,8 @@ fonctionnalité.
   réécriture du SQL par rôle…) sera refusé : cela relève du moteur.
 - **Échouer fermé.** Dans le doute, refuser. Une garde qui ne peut pas vérifier ne doit pas faire
   semblant.
-- **L'anglais dans le code** : code, commentaires, messages de commit. Les README et ce guide
-  existent en anglais et en français, modifiés ensemble.
+- **L'anglais dans le code.** Le code, les commentaires et les messages de commit sont en anglais.
+  Les README et ce guide existent en anglais et en français, et changent ensemble.
 
 ## Installation
 
