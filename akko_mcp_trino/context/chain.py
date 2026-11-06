@@ -200,7 +200,8 @@ class ContextChain:
         It may run in a signal handler: the breakers it lifts are closed on their next
         call, and their gauges read 0 now. A source with a ``reset()`` method is told too,
         so that it forgets what it remembered of its catalogue; the hook must be quick and
-        must not block, and what it raises is dropped, never raised in the signal handler.
+        must not block. One that raises is logged by the source's name and the type of the
+        error, never its text, and the error never leaves the signal handler.
         """
         self._refused_generation += 1
         for provider in self._providers:
@@ -208,8 +209,10 @@ class ContextChain:
             if callable(hook):
                 try:
                     hook()
-                except Exception:  # noqa: BLE001 - a signal handler must not raise
-                    pass
+                except Exception as exc:  # noqa: BLE001 - a signal handler must not raise
+                    log.warning(
+                        "context provider %s: reset failed (%s)", provider.name, type(exc).__name__
+                    )
         if self._metrics is None:
             return
         for name, breaker in list(self._breakers.items()):

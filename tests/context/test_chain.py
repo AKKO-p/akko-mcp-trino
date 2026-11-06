@@ -306,7 +306,7 @@ def test_a_changed_secret_file_or_reset_retries_a_refused_provider_at_once(loop)
     assert len(fake.calls) == 3
 
 
-def test_a_reset_tells_every_provider_that_has_a_reset_hook(loop):
+def test_a_reset_tells_every_provider_that_has_a_reset_hook(loop, caplog):
     listening, silent, broken = Fake("one"), Fake("two"), Fake("three")
     resets = []
     listening.reset = lambda: resets.append("one")
@@ -317,8 +317,14 @@ def test_a_reset_tells_every_provider_that_has_a_reset_hook(loop):
 
     broken.reset = fails
     chain = _chain(loop, listening, silent, broken)
-    chain.reset_refused()  # a hook that raises never escapes the signal handler
+    with caplog.at_level(logging.WARNING, logger="akko_mcp_trino.context.chain"):
+        chain.reset_refused()  # a hook that raises never escapes the signal handler
     assert resets == ["one", "three"]
+    # Said once, by the provider's name and the type of the error, never its text.
+    assert [r.getMessage() for r in caplog.records] == [
+        "context provider three: reset failed (RuntimeError)"
+    ]
+    assert "cannot forget" not in caplog.text
 
 
 def test_a_reset_does_not_close_a_breaker_opened_by_an_outage(loop):

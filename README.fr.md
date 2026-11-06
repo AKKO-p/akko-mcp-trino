@@ -762,9 +762,12 @@ minuscules est refusé au lieu d'être fusionné. Voici le format :
 Un fournisseur est une classe qui implémente le protocole `akko_mcp_trino.context.ContextProvider` :
 `name`, `context_api` (à fixer à `akko_mcp_trino.context.CONTEXT_API` ; le serveur refuse une autre
 version), `maps(catalog)`, `served_sets()`, `describe(refs, deadline=…)`, `terms(keys, deadline=…)`,
-`check_lines()`, `aclose()` et `credentials_stamp()`. Il peut ajouter `reset()`, que le serveur
-appelle sur `SIGHUP` pour qu'il oublie ce qu'il gardait de son catalogue ; elle doit être rapide,
-ne jamais bloquer, et ce qu'elle lève est ignoré. Son paquet enregistre une fabrique
+`check_lines()`, `aclose()` et `credentials_stamp()`. Il peut ajouter une méthode facultative
+`reset()`, que le serveur appelle sur `SIGHUP`, depuis son gestionnaire de signal, pour qu'il
+oublie ce qu'il gardait de son catalogue : une fonction ordinaire, jamais `async def` (rien ne
+l'attend), qui rend `None` tout de suite, ne bloque jamais, n'envoie aucune requête et ne lève
+rien. Une méthode qui lève est écrite au journal avec le nom du fournisseur et le type de
+l'erreur, jamais son texte, et le contrat vérifie le reste quand `reset()` existe. Son paquet enregistre une fabrique
 `(env) -> fournisseur` dans le groupe d'entrée `akko_mcp_trino.context`, par exemple
 `mycatalog = "my_package.provider:from_env"` sous `[project.entry-points."akko_mcp_trino.context"]`.
 

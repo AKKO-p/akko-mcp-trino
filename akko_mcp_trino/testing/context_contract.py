@@ -22,6 +22,7 @@ keep the entry point's factory in that module, or in one that imports no more.
 
 import asyncio
 import base64
+import inspect
 import json
 import logging
 import re
@@ -448,12 +449,15 @@ class ContextContract:
     that does not answer in time. Both are class attributes: an adapter whose tests run on
     a slow CI raises them in its subclass (``DEADLINE_SECONDS = 15.0``), and the contract
     reads them on every check. Keep ``SLOW_DEADLINE_SECONDS`` well under 30 seconds, the
-    time the contract's slow catalogue takes to answer.
+    time the contract's slow catalogue takes to answer. ``RESET_SECONDS`` bounds the
+    optional ``reset()``, which the server calls from its signal handler.
     """
 
     REPLY_MARGIN_SECONDS = 0.5
     DEADLINE_SECONDS = 5.0
     SLOW_DEADLINE_SECONDS = 1.0
+    # The longest an optional ``reset()`` may take: it runs in the server's signal handler.
+    RESET_SECONDS = 0.1
 
     def _skip_without_http(self, harness: ContractHarness) -> None:
         with _running(harness) as run:
@@ -772,6 +776,39 @@ class ContextContract:
             not unfolded,
             f"names must be folded as Trino lists them (lower case): {len(unfolded)} are not",
         )
+
+    def test_a_reset_hook_is_synchronous_quick_and_quiet(self, harness: ContractHarness) -> None:
+        """A provider that defines the optional ``reset()`` defines it as a plain function
+        that returns ``None`` within ``RESET_SECONDS``, sends no request and does not raise,
+        since the server calls it from its signal handler; one without it is not checked."""
+        with _running(harness) as run:
+            hook = getattr(run.provider, "reset", None)
+            if hook is None:
+                pytest.skip("the provider has no reset(): nothing to check")
+            _require(
+                callable(hook)
+                and not inspect.iscoroutinefunction(hook)
+                and not inspect.isasyncgenfunction(hook),
+                "reset() must be a plain function, not a coroutine function: the server's "
+                "signal handler never awaits it",
+            )
+            run.describe([harness.names.described], self.DEADLINE_SECONDS)
+            sent = len(run.transport.sent)
+            raised = False
+            started = time.monotonic()
+            try:
+                result = hook()
+            except Exception:  # noqa: BLE001 - the check says it, never the error's text
+                result, raised = None, True
+            elapsed = time.monotonic() - started
+            asked = len(run.transport.sent) - sent
+        _require(not raised, "reset() must not raise")
+        _require(result is None, "reset() must return None")
+        _require(
+            elapsed <= self.RESET_SECONDS,
+            f"reset() must return within {self.RESET_SECONDS}s; it took {elapsed:.2f}s",
+        )
+        _require(not asked, "reset() must send no request")
 
     def test_snapshot_pages_without_duplicate_or_loss(self, harness: ContractHarness) -> None:
         """``snapshot`` is checked from 0.8.x, with pre-warming; no provider offers it in 0.8."""

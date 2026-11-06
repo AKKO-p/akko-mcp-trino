@@ -465,6 +465,53 @@ class Retrying(Recorded):
             return await super()._get(path, params)
 
 
+class Resetting(Recorded):
+    """Forgets what it remembered of its catalogue on reset(), at once and without a request."""
+
+    def reset(self) -> None:
+        self.forgotten = True
+
+
+class AsyncReset(Recorded):
+    """Writes reset() as a coroutine function: the server's signal handler never awaits it."""
+
+    async def reset(self) -> None:
+        self.forgotten = True
+
+
+class RaisingReset(Recorded):
+    """Fails in reset()."""
+
+    def reset(self) -> None:
+        raise RuntimeError("cannot forget")
+
+
+class SlowReset(Recorded):
+    """Blocks in reset()."""
+
+    def reset(self) -> None:
+        time.sleep(0.5)
+
+
+class AnsweringReset(Recorded):
+    """Returns something from reset()."""
+
+    def reset(self) -> bool:
+        return True
+
+
+class AskingReset(Recorded):
+    """Asks its catalogue from reset(), on the loop the provider runs on."""
+
+    async def describe(self, refs, *, deadline, on_behalf_of=None):
+        self.loop = asyncio.get_running_loop()
+        return await super().describe(refs, deadline=deadline)
+
+    def reset(self) -> None:
+        call = self._get("/v1/table", self._params(NAMES.described))
+        asyncio.run_coroutine_threadsafe(call, self.loop).result(5)
+
+
 class Resurrecting(Recorded):
     """Ignores that the catalogue deleted an entity."""
 
@@ -534,6 +581,7 @@ class Ownerless(Recorded):
 LOGS = "test_logs_and_check_lines_never_hold_the_secret_or_an_object_name"
 OWNER_CHECK = "test_the_owner_follows_the_configuration"
 REFLECT = "test_served_sets_reflect_the_configuration"
+RESET = "test_a_reset_hook_is_synchronous_quick_and_quiet"
 
 
 @pytest.mark.parametrize(
@@ -574,6 +622,11 @@ REFLECT = "test_served_sets_reflect_the_configuration"
             "a tag or a classification must belong",
         ),
         (Valued, "test_no_type_carries_a_data_value", "exactly the core types"),
+        (AsyncReset, RESET, "a plain function, not a coroutine function"),
+        (RaisingReset, RESET, "reset\\(\\) must not raise"),
+        (SlowReset, RESET, "reset\\(\\) must return within"),
+        (AnsweringReset, RESET, "reset\\(\\) must return None"),
+        (AskingReset, RESET, "reset\\(\\) must send no request"),
         (
             Resurrecting,
             "test_a_deleted_entity_is_never_returned",
@@ -637,6 +690,13 @@ def test_the_contract_refuses_a_secret_too_short_to_be_found():
     harness.secret = "s"
     with pytest.raises(pytest.fail.Exception, match="8 characters"):
         ContextContract().test_trap_names_are_looked_up_as_trino_lists_them(harness)
+
+
+def test_a_reset_hook_that_keeps_the_rules_passes_and_none_is_skipped():
+    contract = ContextContract()
+    getattr(contract, RESET)(harness_of(Resetting))
+    with pytest.raises(pytest.skip.Exception, match="no reset"):
+        getattr(contract, RESET)(harness_of(Recorded))
 
 
 def test_a_provider_without_an_owner_passes_and_says_why_the_owner_is_not_checked():

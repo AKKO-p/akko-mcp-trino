@@ -26,6 +26,7 @@ What is served beyond descriptions is what the allow lists name, by exact name:
 """
 
 import asyncio
+import itertools
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from types import MappingProxyType
@@ -131,9 +132,13 @@ class AtlasProvider:
         """Build the provider; ``transport`` replaces the network (tests, the contract)."""
         self.settings = settings
         self._client = AtlasClient(settings, transport)
-        # Entity types Atlas said do not exist, and the secret they were learnt under.
-        self._absent: frozenset[str] = frozenset()
-        self._absent_stamp = settings.credentials_stamp()
+        # Entity types Atlas said do not exist, each with the reset generation and the
+        # secret's stamp it was learnt under; a record from an older one is stale. Only the
+        # event loop writes ``_absent``, only ``reset()`` writes ``_generation``: neither
+        # write can undo the other, and the signal handler takes no lock.
+        self._absent: Mapping[str, tuple[int, str]] = MappingProxyType({})
+        self._resets = itertools.count(1)
+        self._generation = 0
 
     # -- the contract
 
@@ -206,15 +211,10 @@ class AtlasProvider:
         return self.settings.credentials_stamp()
 
     def reset(self) -> None:
-        """Forget the entity types Atlas said do not exist; the server calls it on SIGHUP."""
-        self._absent = frozenset()
-
-    def _types(self) -> list[str]:
-        """The types to ask, without those Atlas said do not exist under this secret."""
-        stamp = self.settings.credentials_stamp()
-        if stamp != self._absent_stamp:
-            self._absent, self._absent_stamp = frozenset(), stamp
-        return [t for t in self.settings.table_types if t not in self._absent]
+        """Forget the entity types Atlas said do not exist; the server calls it on SIGHUP,
+        from its signal handler. It only stores a new generation, so it never waits, and
+        a type found absent by a read already under way is forgotten too."""
+        self._generation = next(self._resets)
 
     # -- reading
 
@@ -223,7 +223,9 @@ class AtlasProvider:
     ) -> dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]]:
         """Each table found, by the qualified name asked, with the entities it refers to."""
         found: dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
-        for type_name in self._types():
+        learnt = (self._generation, self.settings.credentials_stamp())
+        types = [t for t in self.settings.table_types if self._absent.get(t) != learnt]
+        for type_name in types:
             left = [name for name in names if name not in found]
             for group in batches(left, self.settings.max_query_chars):
                 doc = await self._client.get(
@@ -231,7 +233,7 @@ class AtlasProvider:
                     {f"attr_{i}:qualifiedName": name for i, name in enumerate(group)},
                 )
                 if doc is Missing.TYPE:
-                    self._absent |= {type_name}
+                    self._absent = MappingProxyType({**self._absent, type_name: learnt})
                     break
                 body = _object(doc)
                 referred = _object(body.get("referredEntities"))

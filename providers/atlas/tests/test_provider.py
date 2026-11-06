@@ -1,6 +1,7 @@
 """Tables read by batch from the recorded Atlas 2.1 and 2.4, under the allow lists."""
 
 import asyncio
+import inspect
 import time
 
 import pytest
@@ -385,3 +386,25 @@ def test_an_absent_type_is_remembered_until_a_reset_or_a_new_secret(tmp_path):
     # SIGHUP (the core's reset) or a rotated secret brings the type back.
     assert steps["after"] == ["hive_table", "iceberg_table"]
     assert steps["rotated"] == ["hive_table", "iceberg_table"]
+
+
+def test_a_reset_during_the_read_that_finds_a_type_absent_is_not_lost():
+    atlas = FakeAtlas("atlas-2.4")
+
+    def answer(request):
+        if request.url.path.endswith("/iceberg_table"):
+            p.reset()  # SIGHUP lands while Atlas is answering that the type does not exist
+        return atlas(request)
+
+    p = AtlasProvider(read_settings(BASE), transport=transport(answer))
+    assert not inspect.iscoroutinefunction(p.reset) and p.reset() is None
+
+    async def run():
+        for _ in range(2):
+            await p.describe([GHOSTS], deadline=time.monotonic() + 5)
+        await p.aclose()
+
+    asyncio.run(run())
+    sent = [r.url.path.rsplit("/", 1)[1] for r in atlas.requests]
+    # The 400 learnt before the reset is forgotten: the second call asks the type again.
+    assert sent == ["hive_table", "iceberg_table", "hive_table", "iceberg_table"]
