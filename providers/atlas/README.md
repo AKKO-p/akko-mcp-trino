@@ -8,8 +8,9 @@ account of its own, through the REST API v2 only, and never writes to it.
 
 *French version: [README.fr.md](README.fr.md).*
 
-> **Status.** The package, its entry point and its settings check are in place; the reads of
-> tables and glossary terms come in the next commits of 0.8.
+> **Status.** Tables and columns are read by batch, with the allow lists, high availability and
+> Basic authentication or a Knox token; glossary terms (their definitions) and Kerberos come in
+> the next commits of 0.8.
 
 ## Install
 
@@ -24,18 +25,73 @@ akko-mcp-trino carries it, inactive, without the Kerberos libraries for now.
 
 ## Settings
 
-The server refuses to start when the provider has no address or no way to authenticate. No
-message names an address or a secret.
+The server refuses to start when the provider has no address, no way to authenticate or no
+`ATLAS_CLUSTERS`, or when a setting is malformed. No message names an address, a proxy or a
+secret.
 
 | Variable | Role | Default |
 |---|---|---|
 | `ATLAS_URL` | Atlas address, `http` or `https`; several, separated by commas, for Atlas in high availability. Never with credentials in it. | required |
 | `ATLAS_AUTH` | `basic` (a user and a password, or a Knox token) or `kerberos` | `basic` |
-| `ATLAS_USER`, `ATLAS_PASSWORD` or `ATLAS_PASSWORD_FILE` | Basic authentication, with a read-only account | empty |
-| `ATLAS_KNOX_TOKEN` or `ATLAS_KNOX_TOKEN_FILE` | a Knox token, for Atlas behind a Knox topology with the `ATLAS` role; not with `ATLAS_USER` | empty |
+| `ATLAS_USER`, `ATLAS_PASSWORD` or `ATLAS_PASSWORD_FILE` | Basic authentication, with a read-only account; the file comes first | empty |
+| `ATLAS_KNOX_TOKEN` or `ATLAS_KNOX_TOKEN_FILE` | a Knox token, sent as `Authorization: Bearer`, for Atlas behind a Knox topology with the `ATLAS` role; not with `ATLAS_USER` | empty |
 | `ATLAS_PRINCIPAL`, `ATLAS_KEYTAB` | Kerberos (SPNEGO), with `ATLAS_AUTH=kerberos` | empty |
+| `ATLAS_CLUSTERS` | JSON object, Trino catalog to Atlas cluster: `{"lake": "primary"}`. Catalogs are folded to lower case, as Trino lists them; two that fold to the same name are refused. A catalog not named here is not mapped and nothing is asked about it. | required |
+| `ATLAS_TABLE_TYPES` | entity types a table is looked up under, in order; the first that holds it wins | `hive_table,iceberg_table` |
+| `ATLAS_MAX_QUERY_CHARS` | longest query string of one bulk read; a batch of tables is split under it | `6000` |
+| `ATLAS_GLOSSARIES` | glossaries whose terms may be served, by exact name (the suffix of a term's qualified name, `<term>@<glossary>`) | empty: none |
+| `ATLAS_CLASSIFICATIONS` | classifications that may be served, by exact name | empty: none |
+| `ATLAS_BUSINESS_METADATA` | business metadata sets that may be served, by exact name | empty: none |
+| `ATLAS_OWNER_ATTRIBUTE` | the business metadata attribute that holds a table's owner, `<set>.<attribute>` | empty: no owner |
+| `ATLAS_TERM_STATUS_ATTRIBUTE` | the term attribute (in `additionalAttributes`) that holds its status | empty |
+| `ATLAS_CA_BUNDLE` | CA bundle to check Atlas's certificate against | the system's |
+| `ATLAS_PROXY` | `http` or `https` proxy to reach Atlas; the environment's proxy settings are never read | none |
+| `ATLAS_TIMEOUT_SECONDS` | timeout of one request to Atlas | `5` |
 
 A secret given as a file (`*_FILE`) is read again when the file changes.
+
+**Without allow lists, nothing but descriptions is served.** The three lists are closed by
+default: empty serves no glossary term, no classification and no business metadata, and `*` is
+a name like any other, never a wildcard. Each set must be named. The server removes again
+anything outside them.
+
+## How tables are read
+
+A Trino table `catalog.schema.table` is the Atlas entity whose qualified name is
+`schema.table@<cluster of the catalog>`, read with
+`GET /api/atlas/v2/entity/bulk/uniqueAttribute/type/{type}` for the whole batch the server asks
+for, under each type of `ATLAS_TABLE_TYPES`. Only the names Trino listed are asked; nothing is
+searched. A type Atlas does not know (Atlas 2.4 answers 400 for `iceberg_table` without the
+Iceberg model) yields nothing.
+
+- The description is the steward's (`userDescription`), else `description`, else the
+  metastore comment. Columns come from `columns` and `partitionKeys`.
+- An entity that is not `ACTIVE` is ignored, and so is a column, a partition key or a glossary
+  term whose relation or target is not `ACTIVE`, and a classification propagated from an
+  entity that is not.
+- Every name returned is folded to lower case, as Trino lists it. When two Atlas names fold to
+  the same Trino name, the one already written in lower case wins, else the first in code point
+  order; across types, the first type of `ATLAS_TABLE_TYPES` wins. The choice does not depend on
+  the order of Atlas's answer.
+- A business metadata value is served as text, a list joined by commas.
+
+## Network, high availability and errors
+
+The client reads nothing from the environment (no implicit proxy), sends `X-XSRF-HEADER` and
+a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
+
+| Atlas answers | The provider |
+|---|---|
+| a refused connection, a timeout or a 5xx | tries the next address of `ATLAS_URL`, then is unavailable |
+| a redirect to an address of `ATLAS_URL` (the passive server of Atlas HA) | follows it |
+| a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
+| 401 or 403 | is refused at once; the session cookie is dropped |
+| a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
+| 400 or 404 | knows nothing of these tables |
+
+When unavailable, it logs `atlas unreachable`, with no address, user or object name; a refusal
+is logged by the server as `atlas refused the account`. Neither the logs nor an error carry an
+answer's text or the secret.
 
 ## Atlas versions
 
