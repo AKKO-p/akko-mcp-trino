@@ -3,9 +3,10 @@
 The tools are closures over a `TrinoClient`, so they are testable with a fake
 client. Their docstrings are the descriptions MCP hosts show to the model, so
 they are written for a model: what the tool is for, what it returns, and what
-a masked value or a missing row means. The core serves the eight tools an agent
+a masked value or a missing row means. The core serves the nine tools an agent
 needs to read Trino: search tables and columns by words, list catalogs, schemas and
-tables, describe a schema or a table, explain a statement, run a read-only query. A
+tables, describe a schema or a table, profile a table, explain a statement, run a
+read-only query. A
 product built on this core adds its own tools through the same registrar hook, or an
 extension (see `akko_mcp_trino.extensions`).
 
@@ -30,6 +31,8 @@ import decimal
 import functools
 import inspect
 import json
+import math
+import re
 import time
 import uuid
 from typing import Any, Callable, Optional, Sequence
@@ -52,6 +55,8 @@ from .config import (
     DEFAULT_DESCRIBE_SCHEMA_TABLES,
     DEFAULT_MAX_CATALOGS,
     DEFAULT_MAX_ROWS,
+    DEFAULT_PROFILE_MAX_COLUMNS,
+    DEFAULT_PROFILE_SAMPLE_ROWS,
     DEFAULT_SEARCH_MAX_WORD_LENGTH,
     DEFAULT_SEARCH_MAX_WORDS,
     DEFAULT_SEARCH_MIN_LENGTH,
@@ -397,6 +402,90 @@ _EXPLAIN_PLAN_DOC = (
     + "\n        "
 )
 
+# The types whose values Trino orders, by family, as DESCRIBE writes them: profile_table
+# reads their distinct count, minimum and maximum. Any other type, an unknown one
+# included, has its count only, and is never tried.
+_ORDERED_TYPE = re.compile(
+    r"boolean|tinyint|smallint|integer|bigint|real|double|varbinary|date|uuid|ipaddress"
+    r"|decimal\(\d+, ?\d+\)|varchar(\(\d+\))?|char(\(\d+\))?"
+    r"|(time|timestamp)(\(\d+\))?( with time zone)?"
+    r"|interval year to month|interval day to second"
+)
+# The modes of profile_table and the scope each one says it read.
+_PROFILE_SCOPES = {"sample": "first_rows", "bernoulli": "random_sample", "full": "visible_rows"}
+_SKIPPED = ["distinct", "min", "max"]
+
+
+def _quoted(name: str) -> str:
+    """A column name as a quoted identifier, a double quote in it doubled."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _sample_percent(mode: str, percent: Any) -> float:
+    """The percent of ``mode``, checked: in bernoulli, a finite number with
+    ``0 < percent <= 100``; in any other mode, 0 (not given). Raises ValueError."""
+    number = (
+        isinstance(percent, (int, float))
+        and not isinstance(percent, bool)
+        and math.isfinite(percent)
+    )
+    if mode == "bernoulli":
+        if not number or not 0 < percent <= 100:
+            raise ValueError(
+                f"Invalid percent: {percent!r}. In mode bernoulli, percent is a number "
+                "above 0 and at most 100."
+            )
+        return float(percent)
+    if not number or percent != 0:
+        raise ValueError(f"Invalid percent: {percent!r}. percent is only for mode bernoulli.")
+    return 0.0
+
+
+def _profiled_columns(
+    columns: Optional[list[str]], described: dict[str, str], bound: int
+) -> list[str]:
+    """The columns to profile: ``columns``, each named exactly as DESCRIBE listed it,
+    once, at most ``bound`` of them; by default the first ``bound`` DESCRIBE listed.
+    Raises ValueError."""
+    if columns is None:
+        return list(described)[:bound]
+    if not isinstance(columns, list) or not columns:
+        raise ValueError("Invalid columns: name one column at least, or leave it out.")
+    unknown = [c for c in columns if not isinstance(c, str) or c not in described]
+    if unknown:
+        raise ValueError(
+            f"Invalid columns: {unknown!r} are not columns describe_table lists for you."
+        )
+    if len(set(columns)) != len(columns):
+        raise ValueError("Invalid columns: a column is named twice.")
+    if len(columns) > bound:
+        raise ValueError(f"Invalid columns: {len(columns)} columns, at most {bound} a call.")
+    return list(columns)
+
+
+# The description of profile_table, written for a model.
+_PROFILE_DOC = (
+    "Profile a table from the rows you may read: an aggregate query runs as you, so masks "
+    "and row filters apply as in execute_query."
+    """
+
+        Args: catalog, schema, table as bare names; columns, optional, the columns to
+        profile, named exactly as describe_table lists them (by default the first ones it
+        lists, up to the server's limit); mode, optional: "sample" (the default) reads the
+        first rows, up to the server's limit, in no chosen order; "bernoulli" reads a
+        random sample of percent of the rows, percent above 0 and at most 100; "full"
+        reads every row you may read, within the call's time budget; percent, only with
+        "bernoulli". Returns JSON {"table", "scope", "rows": n, "columns": [{"column",
+        "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}: scope is
+        "first_rows", "random_sample" or "visible_rows", after the mode; rows is the count
+        of the rows read; null_fraction is null when rows is 0. A column whose type has no
+        order (array, map, row, json and the like) has its count only and "skipped":
+        ["distinct", "min", "max"]. On failure returns {"error": "...", "kind": "..."};
+        "time_budget" means the query ran past the call's budget: profile fewer columns,
+        or use "sample".
+        """
+)
+
 # A describer adds to what describe_table answers, from what Trino described:
 # ``(catalog, schema, table, rows) -> dict``, merged into the answer.
 Describer = Callable[[str, str, str, list], dict]
@@ -551,6 +640,8 @@ def register_query_tools(
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS,
     extra_reads: frozenset[str] = frozenset(),
     context: ContextSetup | None = None,
+    profile_max_columns: int = DEFAULT_PROFILE_MAX_COLUMNS,
+    profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -575,7 +666,10 @@ def register_query_tools(
     (`MCP_SEARCH_MIN_LENGTH`, `MCP_SEARCH_MAX_WORDS`, `MCP_SEARCH_MAX_WORD_LENGTH`,
     `MCP_SEARCH_RESERVE_SECONDS`). `extra_reads` are the read commands the allow-list
     refuses by default and the administrator opened (`MCP_EXTRA_READ_COMMANDS`): with
-    EXPLAIN among them, explain_query prints the plan; without it, it only checks."""
+    EXPLAIN among them, explain_query prints the plan; without it, it only checks.
+    `profile_table` profiles `profile_max_columns` columns at most, and its sample reads
+    the first `profile_sample_rows` rows (`MCP_PROFILE_MAX_COLUMNS`,
+    `MCP_PROFILE_SAMPLE_ROWS`)."""
     tools = ToolContext(
         mcp,
         client,
@@ -994,6 +1088,79 @@ def register_query_tools(
         if extra:
             describe_table.__doc__ = (describe_table.__doc__ or "").rstrip() + "\n" + extra + "\n"
     tool("Describe table", governed=True)(describe_table)
+
+    def profile_table(
+        catalog: str,
+        schema: str,
+        table: str,
+        columns: list[str] | None = None,
+        mode: str = "sample",
+        percent: float = 0.0,
+    ) -> str:
+        try:
+            if not isinstance(mode, str) or mode not in _PROFILE_SCOPES:
+                raise ValueError(f"Invalid mode: {mode!r}. A mode is sample, bernoulli or full.")
+            share = _sample_percent(mode, percent)
+            cat = governed_catalog(catalog)
+            sch = validate_identifier(schema, "schema")
+            tbl = validate_identifier(table, "table")
+            fqn = f"{cat}.{sch}.{tbl}"
+            note(tables=[fqn])
+            described = {str(r[0]): str(r[1]) for r in run(f"DESCRIBE {fqn}")["rows"]}
+            chosen = _profiled_columns(columns, described, profile_max_columns)
+            ordered = {c: bool(_ORDERED_TYPE.fullmatch(described[c])) for c in chosen}
+            aggregates = ["count(*)"]
+            for c in chosen:
+                aggregates.append(f"count({_quoted(c)})")
+                if ordered[c]:
+                    aggregates += [f"{f}({_quoted(c)})" for f in ("approx_distinct", "min", "max")]
+            if mode == "sample":
+                source = (
+                    f"(SELECT {', '.join(_quoted(c) for c in chosen)} FROM {fqn} "
+                    f"LIMIT {profile_sample_rows})"
+                )
+            elif mode == "bernoulli":
+                source = f"{fqn} TABLESAMPLE BERNOULLI ({share!r})"
+            else:
+                source = fqn
+            statement = f"SELECT {', '.join(aggregates)} FROM {source}"
+            # The same refusal as execute_query: a statement it would refuse is refused here.
+            if not is_read_only_sql(statement, session_catalog, extra_reads):
+                return refusal_reply(
+                    "read_only",
+                    f"Read-only mode: only {_allowed_reads(extra_reads)} are allowed",
+                    kind=READ_ONLY,
+                )
+            note(sql=statement)
+            row = iter(run(statement)["rows"][0])
+            note(rows=1)
+            rows = next(row)
+            profiled = []
+            for c in chosen:
+                non_null = next(row)
+                entry: dict[str, Any] = {
+                    "column": c,
+                    "type": described[c],
+                    "non_null": non_null,
+                    "null_fraction": None if rows == 0 else 1 - non_null / rows,
+                    "approx_distinct": None,
+                    "min": None,
+                    "max": None,
+                }
+                if ordered[c]:
+                    entry.update(approx_distinct=next(row), min=next(row), max=next(row))
+                else:
+                    entry["skipped"] = list(_SKIPPED)
+                profiled.append(entry)
+            # Rendered as the cells of execute_query are; nothing else of the query.
+            return dumps(
+                {"table": fqn, "scope": _PROFILE_SCOPES[mode], "rows": rows, "columns": profiled}
+            )
+        except Exception as e:  # noqa: BLE001
+            return error_reply(e)
+
+    profile_table.__doc__ = _PROFILE_DOC
+    tool("Profile table")(profile_table)
 
     show_plan = "EXPLAIN" in extra_reads
 

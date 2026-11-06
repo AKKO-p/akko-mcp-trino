@@ -129,6 +129,8 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         f"search_columns: words of {config.search_min_length} to "
         f"{config.search_max_word_length} characters, {config.search_max_words} words at "
         f"most, {config.search_reserve_seconds:g} s of the call's budget kept in reserve",
+        f"profile_table: up to {config.profile_max_columns} columns, sample of "
+        f"{config.profile_sample_rows} first rows",
         f"tool plugins: {config.tool_plugins or 'none'}",
         f"extensions: {', '.join(extension_names(config.extensions)) or 'none'}",
         *[line for ext in extensions for line in ext.check_lines()],

@@ -54,6 +54,9 @@ DEFAULT_SEARCH_MIN_LENGTH = 3
 DEFAULT_SEARCH_MAX_WORDS = 8
 DEFAULT_SEARCH_MAX_WORD_LENGTH = 64
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
+# The most columns `profile_table` profiles in one call, and the rows its sample reads.
+DEFAULT_PROFILE_MAX_COLUMNS = 50
+DEFAULT_PROFILE_SAMPLE_ROWS = 100000
 # The least MCP_CONTEXT_RESERVE_SECONDS a server with a context provider accepts. Past its
 # deadline, the chain waits up to 0.25 s for a provider to hand back control (its
 # ``_GRACE_SECONDS``, which includes the 0.1 s a cancelled read is given to end): a shorter
@@ -229,8 +232,8 @@ class Config:
     context_text_chars: int = 500
     context_response_chars: int = 60000
     context_max_columns: int = 500
-    profile_max_columns: int = 50
-    profile_sample_rows: int = 100000
+    profile_max_columns: int = DEFAULT_PROFILE_MAX_COLUMNS
+    profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS
     # The raw `MCP_VISIBILITY_ENABLED`, kept only to refuse `false`: the filter by Trino's
     # rights cannot be turned off.
     visibility_switch: str = ""
@@ -510,7 +513,11 @@ class Config:
             context_text_chars=int(os.environ.get("MCP_CONTEXT_TEXT_CHARS", "500")),
             context_response_chars=int(os.environ.get("MCP_CONTEXT_RESPONSE_CHARS", "60000")),
             context_max_columns=int(os.environ.get("MCP_CONTEXT_MAX_COLUMNS", "500")),
-            profile_max_columns=int(os.environ.get("MCP_PROFILE_MAX_COLUMNS", "50")),
-            profile_sample_rows=int(os.environ.get("MCP_PROFILE_SAMPLE_ROWS", "100000")),
+            profile_max_columns=int(
+                os.environ.get("MCP_PROFILE_MAX_COLUMNS", str(DEFAULT_PROFILE_MAX_COLUMNS))
+            ),
+            profile_sample_rows=int(
+                os.environ.get("MCP_PROFILE_SAMPLE_ROWS", str(DEFAULT_PROFILE_SAMPLE_ROWS))
+            ),
             visibility_switch=os.environ.get("MCP_VISIBILITY_ENABLED", ""),
         )

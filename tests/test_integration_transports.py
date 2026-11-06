@@ -174,7 +174,7 @@ def test_each_http_transport_announces_the_package_version_in_initialize(served)
     assert server_info.name == "t", "the configured server name"
 
 
-def test_each_http_transport_lists_the_eight_tools(served):
+def test_each_http_transport_lists_the_nine_tools(served):
     transport, url = served
     headers = {"Authorization": f"Bearer {_token('alice')}"}
 
@@ -194,6 +194,7 @@ def test_each_http_transport_lists_the_eight_tools(served):
             "explain_query",
             "execute_query",
             "search_columns",
+            "profile_table",
         ]
     )
 

@@ -537,6 +537,7 @@ The [examples](examples/README.md) folder has the details.
 | `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
 | `describe_schema` | `catalog`, `schema`, `offset` (optional) | `{"catalog", "schema", "tables": [{"table", "type", "comment", "columns": [{"column", "type", "comment"}]}], "next_offset": n or null, "shortened": bool}`: one page of tables, each complete, with their comments and columns; with a context provider, a `description` per table and `context_sources` (see [Context from a catalogue](#context-from-a-catalogue)) |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add, and `describer_errors` when one failed; with a context provider, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns` (see [Context from a catalogue](#context-from-a-catalogue)) |
+| `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (all but the table optional) | `{"table", "scope", "rows": n, "columns": [{"column", "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}`: aggregates of the rows the caller may read, computed by one query run as the caller, so masks and row filters apply as in `execute_query`. `columns` are named as `DESCRIBE` lists them, the first `MCP_PROFILE_MAX_COLUMNS` by default. `mode` is `sample` (the default: the first `MCP_PROFILE_SAMPLE_ROWS` rows, `"scope": "first_rows"`, not a random sample), `bernoulli` (`TABLESAMPLE BERNOULLI (percent)`, `0 < percent <= 100`, `"scope": "random_sample"`, scans every row to draw the sample) or `full` (every row the caller may read, `"scope": "visible_rows"`, within the call's time budget, else `"kind": "time_budget"`). `null_fraction` is null when `rows` is 0. A type with no order (`array`, `map`, `row`, `json`, any type not known to be ordered) gets its count only and `"skipped": ["distinct", "min", "max"]`; `min` and `max` are rendered as the cells of `execute_query` |
 | `explain_query` | `sql` | `{"valid": true}`: Trino analyzed a read-only statement as the caller, without running it; `{"plan": "..."}` only once `EXPLAIN` is in `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (optional, lower than the server cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
 
@@ -1149,7 +1150,7 @@ supported.
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true`: context is served only for tables the caller may read | `false` |
 | `MCP_CONTEXT_CANARY` | one table, `catalog.schema.table`, that no caller of this server may see: context is served to a caller only while Trino hides it from them; unset is warned of when a provider is loaded | none |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | the longest text of one context field, the longest context in one response, and the most columns described in one table, 1 at least | `500`, `60000`, `500` |
-| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bounds of the profile of a table, 1 at least | `50`, `100000` |
+| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | the most columns `profile_table` profiles in one call, and the rows its `sample` mode reads, 1 at least | `50`, `100000` |
 | `MCP_VISIBILITY_ENABLED` | removed in 0.8: the filter by Trino's rights cannot be turned off, and `false` refuses to start | none |
 
 `--check` prints a `context:` line (the providers and every setting above from
@@ -1495,7 +1496,7 @@ Every module in `akko_mcp_trino/` has one responsibility and its tests, in
 | `transport_security.py` | the Host header filter (`MCP_ALLOWED_HOSTS`) |
 | `audit.py` | the audit line, the request id, the record and the time budget of a call |
 | `sql_guard.py` | identifier validation, read-only decision on the AST |
-| `tools.py`, `plugins.py` | the eight tools and the `ToolContext`, loading tool plugins |
+| `tools.py`, `plugins.py` | the nine tools and the `ToolContext`, loading tool plugins |
 | `trino_client.py` | the Trino connection, the identity modes (`jwt`, `impersonation`, `oauth2`, `service` in the core) and the time budgets |
 | `token_exchange.py` | OAuth 2.0 Token Exchange (RFC 8693): a token for Trino in exchange for the caller's |
 | `health.py`, `metrics.py` | `/health`, `/ready` and `/metrics`; the Prometheus counters |

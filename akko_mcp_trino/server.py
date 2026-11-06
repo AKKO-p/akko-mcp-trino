@@ -159,6 +159,8 @@ def build_server(
         search_reserve_seconds=config.search_reserve_seconds,
         extra_reads=parse_extra_reads(config.extra_read_commands),
         context=context,
+        profile_max_columns=config.profile_max_columns,
+        profile_sample_rows=config.profile_sample_rows,
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)
     registrars = [r for ext in exts for r in ext.tool_registrars()]

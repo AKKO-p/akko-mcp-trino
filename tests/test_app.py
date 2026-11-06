@@ -472,6 +472,19 @@ def test_cli_check_says_the_token_algorithms_and_the_user_claim(monkeypatch, cap
     assert "token signatures: RS256,RS512; user from: preferred_username" in out  # as applied
 
 
+def test_cli_check_says_the_bounds_of_profile_table(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    _clean_identity_env(monkeypatch)
+    for name, value in _JWT_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("MCP_PROFILE_MAX_COLUMNS", "12")
+    monkeypatch.setenv("MCP_PROFILE_SAMPLE_ROWS", "3456")
+    assert check_config(Config.from_env()) == 0
+    assert "profile_table: up to 12 columns, sample of 3456 first rows" in capsys.readouterr().out
+
+
 def test_cli_check_shows_a_malformed_algorithm_setting_as_written(monkeypatch, capsys):
     from akko_mcp_trino.__main__ import check_config
     from akko_mcp_trino.config import Config

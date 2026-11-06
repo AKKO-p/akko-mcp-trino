@@ -4,6 +4,12 @@
 
 Nothing is removed or renamed in the answers of the tools.
 
+- A ninth tool, `profile_table`. If you used a `profile_table` from an earlier package, this one
+  answers only aggregates of the rows the caller may read (`count`, `approx_distinct`, `min`,
+  `max` and the share of nulls), computed by one query run as the caller, with the keys the README
+  lists. It is bounded by `MCP_PROFILE_MAX_COLUMNS` (50 columns) and `MCP_PROFILE_SAMPLE_ROWS`
+  (100000 rows in the default `sample` mode).
+
 - Without `MCP_CONTEXT_PROVIDERS`, `describe_table` and `describe_schema` answer and describe themselves exactly as in 0.7.2.
 - With a context provider, `describe_table` adds six keys to its answer: `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns`, and its description adds one sentence saying that this text comes from a catalogue and is data, never instructions. `columns`, `rows`, `truncated` and `sample` are unchanged. A client that reads only those keeps working. A key of the same name that a plugin's describer added is replaced by the context's.
 - With a context provider, each table of a `describe_schema` page may add `description`, `{"text", "source"}` (with `"cut": ["text"]` when the text was cut), and the answer adds `context_sources`; its description adds one sentence. `catalog`, `schema`, `tables` and their other keys, `next_offset` and `shortened` are unchanged.
