@@ -14,7 +14,7 @@ jobs:
       platforms: ${{ steps.lock.outputs.platforms }}
       glibc: ${{ steps.lock.outputs.glibc }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - id: lock
         run: bash scripts/lock.sh outputs >> "$GITHUB_OUTPUT"
   locks:
@@ -26,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: versions
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ needs.versions.outputs.python }}
       - run: |
@@ -51,8 +51,8 @@ jobs:
         python: ${{ fromJSON(needs.versions.outputs.pythons) }}
         packages: [core, core+atlas]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ matrix.python }}
       # The tools and every dependency from the locks, with their hashes; the package itself from
@@ -129,8 +129,8 @@ jobs:
       matrix:
         resolution: [lowest-direct, highest]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
         with:
           python-version: ${{ needs.versions.outputs.python }}
       # uv and the test tools at the versions of requirements/dev.txt; the package's dependencies
@@ -148,7 +148,7 @@ jobs:
     needs: test
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Build, start, check, remove
         run: bash integration/run.sh
   image:
@@ -156,9 +156,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [versions, test]
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/build-push-action@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           push: false

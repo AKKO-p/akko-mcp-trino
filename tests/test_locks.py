@@ -7,6 +7,8 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 BASE = re.compile(r"^FROM (python:(\d+\.\d+)\.\d+-slim@sha256:[0-9a-f]{64})(?: AS \w+)?$", re.M)
 
@@ -172,20 +174,73 @@ def test_the_job_that_runs_the_code_of_a_tag_cannot_sign() -> None:
     assert not re.search(r"run:.*\$\{\{\s*inputs\.", workflow)
 
 
+def _installs_the_package(source: Path) -> bool:
+    """Whether a source installs the package from its directory, itself or through its -r
+    lines, as editable() of scripts/lock.sh reads it."""
+    text = source.read_text()
+    if re.search(r"^-e ", text, re.M):
+        return True
+    return any(
+        _installs_the_package(source.parent / child.strip())
+        for child in re.findall(r"^-r\s*(\S+)", text, re.M)
+    )
+
+
+def _lock_problems(root: Path) -> list[str]:
+    """What would make Dependabot compile a lock with --allow-unsafe on the package's directory:
+    a lock that installs the package and pins pip, setuptools or the package, or whose command
+    (the header's pip-compile line, not its comments) asks for --allow-unsafe."""
+    problems = []
+    for source in _lock_default("LOCKS").split():
+        lock = (root / source).with_suffix(".txt").read_text()
+        commands = re.findall(r"^#\s+(pip-compile .*)$", lock, re.M)
+        if len(commands) != 1:
+            problems.append(f"{source}: {len(commands)} pip-compile lines in the header")
+            continue
+        options = commands[0].split()
+        if _installs_the_package(root / source):
+            if re.search(r"^(pip|setuptools|distribute)==|^-e ", lock, re.M):
+                problems.append(f"{source}: pins pip, setuptools or the package")
+            if "--allow-unsafe" in options:
+                problems.append(f"{source}: --allow-unsafe")
+            for package in ("pip", "setuptools"):
+                if f"--unsafe-package={package}" not in options:
+                    problems.append(f"{source}: no --unsafe-package={package}")
+        elif "--allow-unsafe" not in options:
+            problems.append(f"{source}: no --allow-unsafe")
+    return problems
+
+
 def test_a_lock_that_installs_the_package_leaves_pip_and_setuptools_out() -> None:
     """Dependabot adds --allow-unsafe to a lock that pins pip or setuptools; on a lock that
     installs the package from its directory, pip-compile then fails."""
-    sources = _lock_default("LOCKS").split()
-    assert sources
-    for source in sources:
-        text = (ROOT / source).read_text()
-        lock = (ROOT / source.removesuffix(".in")).with_suffix(".txt").read_text()
-        header = "".join(line for line in lock.splitlines(True) if line.startswith("#"))
-        if re.search(r"^-e ", text, re.M):
-            assert not re.search(r"^(pip|setuptools|distribute)==|^-e ", lock, re.M), source
-            assert "--unsafe-package=pip --unsafe-package=setuptools" in header, source
-        else:
-            assert "--allow-unsafe" in header, source
+    assert _installs_the_package(ROOT / "requirements/kerberos.in")
+    assert not _installs_the_package(ROOT / "requirements/release.in")
+    assert _lock_problems(ROOT) == []
+
+
+def _copy_of_the_locks(tmp_path: Path) -> Path:
+    for path in (ROOT / "requirements").iterdir():
+        (tmp_path / "requirements").mkdir(exist_ok=True)
+        shutil.copy(path, tmp_path / "requirements" / path.name)
+    return tmp_path
+
+
+def test_the_lock_check_catches_pip_in_a_lock_that_installs_the_package(tmp_path: Path) -> None:
+    root = _copy_of_the_locks(tmp_path)
+    lock = root / "requirements/kerberos.txt"
+    pip = f"pip==26.3 \\\n    --hash=sha256:{'0' * 64}\n"
+    lock.write_text(re.sub(r"^(pycparser==)", pip + r"\1", lock.read_text(), count=1, flags=re.M))
+    assert _lock_problems(root) == ["requirements/kerberos.in: pins pip, setuptools or the package"]
+
+
+def test_the_lock_check_reads_the_command_not_the_footer(tmp_path: Path) -> None:
+    root = _copy_of_the_locks(tmp_path)
+    lock = root / "requirements/kerberos.txt"
+    text = lock.read_text()
+    assert "--allow-unsafe" in text  # in the footer warning only
+    lock.write_text(text.replace(" --strip-extras", " --allow-unsafe --strip-extras", 1))
+    assert _lock_problems(root) == ["requirements/kerberos.in: --allow-unsafe"]
 
 
 def test_the_dev_lock_installs_with_build_txt_and_keeps_its_versions() -> None:
@@ -287,18 +342,119 @@ def test_the_release_builds_only_a_version_tag_reachable_from_main(tmp_path: Pat
         assert reason in done.stderr, (tag, done.stderr)
 
 
-def test_every_download_of_the_workflows_is_pinned_and_checked() -> None:
-    """A tool fetched outside pip names an exact version and is checked against its sha256."""
-    downloads = 0
-    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
-        text = path.read_text()
-        assert "releases/latest" not in text, path.name
-        assert not re.search(r"(curl|wget)[^\n]*\|\s*(tar|sh|bash)", text), path.name
-        for name in re.findall(r"curl [^\n]*-\w*o (\S+) ", text):
-            downloads += 1
-            check = rf"\$\{{\w+_SHA256\}}  {re.escape(name)}\" \| sha256sum -c -"
-            assert re.search(check, text), name
-    assert downloads >= 3
+OURS = re.compile(r"(^|/)akko-mcp-trino(:|$)")
+DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+RUN_OPTIONS_WITH_VALUE = {"-v", "-e", "-w", "-p", "-u", "--name", "--volume", "--env", "--workdir"}
+RUN_OPTIONS_WITH_VALUE |= {"--entrypoint", "--network", "--user", "--platform", "--publish"}
+
+
+def _unchecked_downloads(text: str) -> list[str]:
+    """The downloads of a workflow that are not pinned and checked, and its container images that
+    are not pinned by digest (the image this repository builds and publishes aside)."""
+    problems = []
+    variables = dict(re.findall(r"^\s*([A-Z][A-Z0-9_]*):\s*(\S+)\s*$", text, re.M))
+
+    def checked(name: str) -> bool:
+        return bool(re.search(rf"\$\{{\w+_SHA256\}}  {re.escape(name)}\" \| sha256sum -c -", text))
+
+    def image(token: str) -> str:
+        token = token.strip("\"'")
+        variable = re.fullmatch(r"\$\{?(\w+)\}?", token)
+        return variables.get(variable.group(1), token) if variable else token
+
+    for line in text.splitlines():
+        if re.search(r"releases/latest", line):
+            problems.append(f"latest: {line.strip()}")
+        downloader = re.search(r"\b(curl|wget)\b|\bgh release download\b", line)
+        if downloader:
+            command = line[downloader.start() :]
+            if re.search(r"\|\s*(tar|sh|bash|python3?)\b", command):
+                problems.append(f"piped: {line.strip()}")
+            outputs = re.findall(
+                r"(?:\s-[A-Za-z]*[oO]|\s--output(?:-document)?(?:=|\s)|\s>)\s*(\S+)", command
+            )
+            if command.startswith("gh release download"):
+                outputs = outputs or ["(gh release download)"]
+            if re.search(r"\s-[A-Za-z]*O(\s|$)", command) and command.startswith("curl"):
+                outputs.append("(curl -O)")
+            for name in outputs:
+                if name != "/dev/null" and not checked(name):
+                    problems.append(f"unchecked {name}: {line.strip()}")
+        run = re.search(r"\bdocker (?:run|pull)\b(.*)", line)
+        if run:
+            tokens = run.group(1).split()
+            while tokens and tokens[0].startswith("-"):
+                option = tokens.pop(0)
+                if option in RUN_OPTIONS_WITH_VALUE and tokens:
+                    tokens.pop(0)
+            reference = image(tokens[0]) if tokens else ""
+            if not OURS.search(reference) and not DIGEST.search(reference):
+                problems.append(f"image {reference}: {line.strip()}")
+        key = re.match(r"\s*(?:-\s*)?(?:image|container|[A-Z0-9_]*_IMAGE):\s*(\S+)\s*$", line)
+        if key and not OURS.search(key.group(1)) and not DIGEST.search(key.group(1)):
+            problems.append(f"image {key.group(1)}: {line.strip()}")
+    return problems
+
+
+def test_every_download_and_image_of_the_workflows_is_pinned_and_checked() -> None:
+    """A tool fetched outside pip names an exact version and is checked against its sha256; a
+    container image is pinned by digest."""
+    texts = [p.read_text() for p in sorted((ROOT / ".github/workflows").glob("*.yml"))]
+    for text in texts:
+        assert _unchecked_downloads(text) == []
+    assert sum(len(re.findall(r"sha256sum -c -", text)) for text in texts) >= 3
+
+
+SHA = "0" * 64
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        'curl -fsSL "https://example.invalid/releases/latest/download/t.tgz" -o t.tgz',
+        "curl -fsSL https://example.invalid/t.tgz | tar xz",
+        "wget -qO- https://example.invalid/i.sh | sh",
+        "curl -fsSLo t.tgz https://example.invalid/t.tgz",
+        "curl -fsSL https://example.invalid/t.tgz -o t.tgz",
+        "curl -fsSL --output t.tgz https://example.invalid/t.tgz",
+        "curl -fsSL --output=t.tgz https://example.invalid/t.tgz",
+        "curl -fsSL https://example.invalid/t.sh > t.sh",
+        "curl -fsSLO https://example.invalid/t.tgz",
+        "wget -O t.tgz https://example.invalid/t.tgz",
+        "wget --output-document t.tgz https://example.invalid/t.tgz",
+        "gh release download v1.0.0 -R owner/tool -p t.tgz",
+        "docker run --rm alpine:3.20 true",
+        'docker run --rm -v "$PWD:/w" -w /w "$TOOL_IMAGE" true',
+        "docker pull ghcr.io/owner/tool:1.0",
+        "image: postgres:16",
+        f"OTHER_IMAGE: ghcr.io/owner/tool:1.0@sha256:{SHA[:63]}",
+    ],
+)
+def test_the_download_check_catches(step: str) -> None:
+    text = f"env:\n  TOOL_IMAGE: ghcr.io/owner/tool:1.0\njobs:\n  run: |\n    {step}\n"
+    assert _unchecked_downloads(text), step
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        'curl -fsSLo t.tgz "https://example.invalid/v1.0.0/t.tgz"\n'
+        '    echo "${T_SHA256}  t.tgz" | sha256sum -c -',
+        'curl -fsSL "https://example.invalid/v1.0.0/t.tgz" -o t.tgz\n'
+        '    echo "${T_SHA256}  t.tgz" | sha256sum -c -',
+        'wget -O t.tgz "https://example.invalid/v1.0.0/t.tgz"\n'
+        '    echo "${T_SHA256}  t.tgz" | sha256sum -c -',
+        'curl -fsS "https://pypi.org/pypi/akko-mcp-trino/1.0.0/json" >/dev/null',
+        "docker run --rm akko-mcp-trino:ci ldd --version",
+        'docker run --rm -v "$PWD:/w" -w /w "$GOOD_IMAGE" true',
+        f"docker run --rm alpine:3.20@sha256:{SHA} true",
+        f"image: postgres:16@sha256:{SHA}",
+        "images: |\n      ghcr.io/akko-p/akko-mcp-trino",
+    ],
+)
+def test_the_download_check_accepts(step: str) -> None:
+    text = f"env:\n  GOOD_IMAGE: ghcr.io/owner/tool:1.0@sha256:{SHA}\njobs:\n  run: |\n    {step}\n"
+    assert _unchecked_downloads(text) == [], step
 
 
 def test_dependabot_finds_every_lock() -> None:
@@ -306,3 +462,18 @@ def test_dependabot_finds_every_lock() -> None:
     for source in _lock_default("LOCKS").split():
         assert source.count("/") <= 1, source
         assert (ROOT / source).exists() and (ROOT / source).with_suffix(".txt").exists(), source
+
+
+def test_every_action_is_pinned_by_commit() -> None:
+    """Every action a workflow uses is pinned by its full commit SHA, its version as a comment,
+    which Dependabot's github-actions updates keep current."""
+    seen = 0
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for line in path.read_text().splitlines():
+            use = re.match(r"\s*(?:-\s*)?uses:\s*(\S+)(.*)$", line)
+            if not use or use.group(1).startswith("./"):
+                continue
+            seen += 1
+            assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", use.group(1)), line
+            assert re.fullmatch(r"\s+# v\d+\.\d+\.\d+", use.group(2)), line
+    assert seen >= 30
