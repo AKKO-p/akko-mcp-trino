@@ -208,8 +208,10 @@ def test_the_public_texts_count_the_nine_tools(path, word):
 _RIGHTS = {
     "README.md": [
         "### Deployment with a catalogue",
-        "It serves the descriptions of the tables and columns Trino lists to the caller; with "
-        "`MCP_CONTEXT_REQUIRE_SELECT=true`, only of those the caller may also select.",
+        "Descriptions follow what Trino lists to the caller. With "
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` also requires that Trino validates a "
+        "select by the caller of the columns it lists, while `describe_schema` keeps serving the "
+        "descriptions of the tables Trino lists.",
         "It serves glossary terms, classifications and business metadata only when their "
         "glossary, classification or set is named in the allow lists, closed by default, and the "
         "owner only when it is configured (for Atlas: `ATLAS_GLOSSARIES`, "
@@ -219,9 +221,10 @@ _RIGHTS = {
     ],
     "README.fr.md": [
         "## Déploiement avec un catalogue",
-        "Il sert les descriptions des tables et des colonnes que Trino liste à l'appelant ; "
-        "avec `MCP_CONTEXT_REQUIRE_SELECT=true`, seulement de celles que l'appelant peut aussi "
-        "interroger par un SELECT.",
+        "Les descriptions suivent ce que Trino liste à l'appelant. Avec "
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` exige en plus que Trino valide un "
+        "SELECT par l'appelant des colonnes qu'il liste, tandis que `describe_schema` continue de "
+        "servir les descriptions des tables que Trino liste.",
         "Il ne sert les termes de glossaire, les classifications et les métadonnées métier "
         "que si leur glossaire, leur classification ou leur ensemble est nommé dans les listes "
         "blanches, fermées par défaut, et le propriétaire seulement s'il est configuré (pour "
@@ -231,17 +234,20 @@ _RIGHTS = {
         "de gain.",
     ],
     "providers/atlas/README.md": [
-        "It serves the descriptions of the tables and columns Trino lists to the caller; with "
-        "`MCP_CONTEXT_REQUIRE_SELECT=true`, only of those the caller may also select.",
+        "Descriptions follow what Trino lists to the caller. With "
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` also requires that Trino validates a "
+        "select by the caller of the columns it lists, while `describe_schema` keeps serving the "
+        "descriptions of the tables Trino lists.",
         "It serves glossary terms, classifications and business metadata only when their "
         "glossary, classification or set is named in `ATLAS_GLOSSARIES`, "
         "`ATLAS_CLASSIFICATIONS` or `ATLAS_BUSINESS_METADATA`, closed by default (empty means "
         "none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set.",
     ],
     "providers/atlas/README.fr.md": [
-        "Il sert les descriptions des tables et des colonnes que Trino liste à l'appelant ; "
-        "avec `MCP_CONTEXT_REQUIRE_SELECT=true`, seulement de celles que l'appelant peut aussi "
-        "interroger par un SELECT.",
+        "Les descriptions suivent ce que Trino liste à l'appelant. Avec "
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` exige en plus que Trino valide un "
+        "SELECT par l'appelant des colonnes qu'il liste, tandis que `describe_schema` continue de "
+        "servir les descriptions des tables que Trino liste.",
         "Il ne sert les termes de glossaire, les classifications et les métadonnées métier "
         "que si leur glossaire, leur classification ou leur ensemble est nommé dans "
         "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` ou `ATLAS_BUSINESS_METADATA`, fermées par "
@@ -262,3 +268,5 @@ def test_the_readme_says_what_the_context_of_a_catalogue_serves_and_under_which_
         assert sentence in flat, sentence
     assert "what its allow lists name" not in flat and "nomment ses listes blanches" not in flat
     assert "lets the caller read" not in flat and "laisse lire à l'appelant" not in flat
+    assert "only of those the caller may also select" not in flat
+    assert "seulement de celles que l'appelant peut aussi" not in flat

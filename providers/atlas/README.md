@@ -187,15 +187,15 @@ What the container needs:
    so that the provider never locks it in a directory that counts failed logins.
 
 **Rights.** The context follows Trino's rights: a caller gets it only for the tables and columns
-Trino lists to them. The provider reads Atlas with this read-only technical account. It serves
-the descriptions of the tables and columns Trino lists to the caller; with
-`MCP_CONTEXT_REQUIRE_SELECT=true`, only of those the caller may also
-select. It serves glossary terms,
-classifications and business metadata only when their glossary, classification or set is named
-in `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` or `ATLAS_BUSINESS_METADATA`, closed by default
-(empty means none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set. So a glossary or a
-classification restricted in Atlas is never served unless the operator names it. Reading Atlas as
-the caller is not in this version.
+Trino lists to them. The provider reads Atlas with this read-only technical account. Descriptions
+follow what Trino lists to the caller. With `MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table`
+also requires that Trino validates a select by the caller of the columns it lists, while
+`describe_schema` keeps serving the descriptions of the tables Trino lists. It serves glossary
+terms, classifications and business metadata only when their glossary, classification or set is
+named in `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` or `ATLAS_BUSINESS_METADATA`, closed by
+default (empty means none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set. So a glossary
+or a classification restricted in Atlas is never served unless the operator names it. Reading Atlas
+as the caller is not in this version.
 
 ## Checking the configuration
 

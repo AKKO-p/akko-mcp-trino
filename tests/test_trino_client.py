@@ -1300,3 +1300,22 @@ def test_a_cancellation_stops_its_queries_side_by_side_and_returns_at_once(monke
     assert len(errors) == 3 and all(isinstance(e, tc.QueryCancelled) for e in errors)
     stop.wait()
     assert not [t for t in threading.enumerate() if t.name.startswith("mcp-cancel")]
+
+
+def test_a_stop_with_no_thread_to_spare_runs_in_the_cancelling_thread(monkeypatch):
+    """When a thread cannot start (resources exhausted), the stop runs where cancel is
+    called, so whoever cancels still goes on, and wait() has nothing left to join."""
+    import threading
+
+    stop = tc.Cancellation()
+    seen = []
+    stop.watch(lambda: seen.append(threading.current_thread().name))
+
+    def cannot_start(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(tc.threading.Thread, "start", cannot_start)
+    stop.cancel()
+    monkeypatch.undo()
+    stop.wait()
+    assert seen == [threading.current_thread().name], "stopped inline, by the caller"

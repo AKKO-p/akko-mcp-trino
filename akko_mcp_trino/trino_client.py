@@ -118,8 +118,12 @@ class Cancellation:
             stops, self._stops = self._stops, []
         for stop in stops:
             thread = threading.Thread(target=stop, name="mcp-cancel", daemon=True)
+            try:
+                thread.start()
+            except Exception:  # noqa: BLE001 - no thread to spare: stopped here, at once
+                stop()
+                continue
             self._threads.append(thread)
-            thread.start()
 
     def wait(self) -> None:
         """Return once every stop ``cancel`` started has ended."""

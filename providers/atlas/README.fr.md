@@ -194,14 +194,14 @@ Ce qu'il faut au conteneur :
 
 **Droits.** Le contexte suit les droits de Trino : un appelant ne le reçoit que pour les tables et
 les colonnes que Trino lui liste. Le fournisseur lit Atlas avec ce compte technique en lecture
-seule. Il sert les descriptions des tables et des colonnes que Trino liste à l'appelant ; avec
-`MCP_CONTEXT_REQUIRE_SELECT=true`, seulement de celles que l'appelant peut
-aussi interroger par un SELECT. Il
-ne sert les termes de glossaire, les classifications et les métadonnées métier que si leur
-glossaire, leur classification ou leur ensemble est nommé dans `ATLAS_GLOSSARIES`,
-`ATLAS_CLASSIFICATIONS` ou `ATLAS_BUSINESS_METADATA`, fermées par défaut (vide veut dire aucun),
-et le propriétaire seulement si `ATLAS_OWNER_ATTRIBUTE` est posé. Un glossaire ou une
-classification restreints dans Atlas ne sont donc jamais servis, sauf si l'administrateur les
+seule. Les descriptions suivent ce que Trino liste à l'appelant. Avec
+`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` exige en plus que Trino valide un SELECT par
+l'appelant des colonnes qu'il liste, tandis que `describe_schema` continue de servir les
+descriptions des tables que Trino liste. Il ne sert les termes de glossaire, les classifications et
+les métadonnées métier que si leur glossaire, leur classification ou leur ensemble est nommé dans
+`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` ou `ATLAS_BUSINESS_METADATA`, fermées par défaut (vide
+veut dire aucun), et le propriétaire seulement si `ATLAS_OWNER_ATTRIBUTE` est posé. Un glossaire ou
+une classification restreints dans Atlas ne sont donc jamais servis, sauf si l'administrateur les
 nomme. La lecture d'Atlas sous l'identité de l'appelant n'est pas dans cette version.
 
 ## Vérifier la configuration

@@ -618,15 +618,16 @@ l'appelant. Ce mode convient quand les métadonnées doivent suivre les droits s
 données.
 
 **Droits.** Le contexte suit les droits de Trino. Le fournisseur lit le catalogue avec un compte
-technique en lecture seule. Il sert les descriptions des tables et des colonnes que Trino liste à
-l'appelant ; avec `MCP_CONTEXT_REQUIRE_SELECT=true`, seulement de celles que l'appelant peut aussi
-interroger par un SELECT. Il ne sert les termes de glossaire, les classifications et les
-métadonnées métier que si leur glossaire, leur classification ou leur ensemble est nommé dans les
-listes blanches, fermées par défaut, et le propriétaire seulement s'il est configuré (pour Atlas :
-`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, vide veut dire aucun, et
-`ATLAS_OWNER_ATTRIBUTE`). Un glossaire ou une classification restreints dans le catalogue
-ne sont donc jamais servis, sauf si l'administrateur les nomme. La lecture du catalogue sous
-l'identité de l'appelant n'est pas dans cette version.
+technique en lecture seule. Les descriptions suivent ce que Trino liste à l'appelant. Avec
+`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` exige en plus que Trino valide un SELECT par
+l'appelant des colonnes qu'il liste, tandis que `describe_schema` continue de servir les
+descriptions des tables que Trino liste. Il ne sert les termes de glossaire, les classifications
+et les métadonnées métier que si leur glossaire, leur classification ou leur ensemble est nommé
+dans les listes blanches, fermées par défaut, et le propriétaire seulement s'il est configuré
+(pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, vide veut
+dire aucun, et `ATLAS_OWNER_ATTRIBUTE`). Un glossaire ou une classification restreints dans le
+catalogue ne sont donc jamais servis, sauf si l'administrateur les nomme. La lecture du
+catalogue sous l'identité de l'appelant n'est pas dans cette version.
 
 Sans fournisseur, aucun code de catalogue n'est chargé et aucun catalogue n'est appelé.
 

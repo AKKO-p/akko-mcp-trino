@@ -1097,14 +1097,15 @@ classifications, owner) is shown only for the tables and columns Trino lists to 
 This mode fits when metadata must follow the rights on the data.
 
 **Rights.** The context follows Trino's rights. The provider reads the catalogue with a
-read-only technical account. It serves the descriptions of the tables and columns Trino lists
-to the caller; with `MCP_CONTEXT_REQUIRE_SELECT=true`, only of those the caller may also select.
-It serves glossary terms, classifications and business metadata only when their glossary,
-classification or set is named in the allow lists, closed by default, and the owner only when
-it is configured (for Atlas: `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`,
+read-only technical account. Descriptions follow what Trino lists to the caller. With
+`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` also requires that Trino validates a select
+by the caller of the columns it lists, while `describe_schema` keeps serving the descriptions of
+the tables Trino lists. It serves glossary terms, classifications and business metadata only
+when their glossary, classification or set is named in the allow lists, closed by default, and
+the owner only when it is configured (for Atlas: `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`,
 `ATLAS_BUSINESS_METADATA`, empty means none, and `ATLAS_OWNER_ATTRIBUTE`). So a glossary or a
-classification restricted in the catalogue is never served unless the operator names it.
-Reading the catalogue as the caller is not in this version.
+classification restricted in the catalogue is never served unless the operator names it. Reading
+the catalogue as the caller is not in this version.
 
 Without a provider, no catalogue code is loaded and no catalogue is called.
 
