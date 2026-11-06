@@ -303,6 +303,9 @@ def test_lock_sh_maps_each_platform_to_its_wheel_tags() -> None:
 
 
 def _repository(path: Path) -> Path:
+    if shutil.which("git") is None:
+        # Not a skip: a CI without git must not pass these tests silently.
+        pytest.fail("this test needs git on PATH")
     names = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
     environ = os.environ | dict.fromkeys(names, "t@example.invalid")
 
