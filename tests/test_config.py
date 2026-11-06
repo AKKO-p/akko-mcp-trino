@@ -70,6 +70,7 @@ _ENV_KEYS = [
     "MCP_PROFILE_MAX_CONCURRENT",
     "MCP_DESCRIBE_MAX_COLUMNS",
     "MCP_SEARCH_CONCURRENCY",
+    "MCP_PROFILE_TYPE_CHARS",
     "MCP_VISIBILITY_ENABLED",
 ]
 
@@ -795,4 +796,19 @@ def test_search_concurrency_outside_1_to_32_refuses_to_start(monkeypatch, count)
     monkeypatch.setenv("MCP_SEARCH_CONCURRENCY", count)
     assert Config.from_env().problems() == [
         f"MCP_SEARCH_CONCURRENCY={count}: search_columns reads 1 to 32 catalogs at once"
+    ]
+
+
+def test_the_bound_of_a_type_is_500_by_default_and_read_from_its_variable(monkeypatch):
+    assert Config.from_env().profile_type_chars == 500
+    monkeypatch.setenv("MCP_PROFILE_TYPE_CHARS", "100000")
+    assert Config.from_env().profile_type_chars == 100000
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "100001"])
+def test_a_bound_of_a_type_outside_1_to_100000_refuses_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_PROFILE_TYPE_CHARS", count)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_TYPE_CHARS={count}: profile_table serves 1 to 100000 characters of a type"
     ]

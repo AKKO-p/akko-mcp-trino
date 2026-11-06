@@ -487,12 +487,14 @@ def test_cli_check_says_the_bounds_of_profile_table(monkeypatch, capsys):
     monkeypatch.setenv("MCP_PROFILE_CLIENT_TAG", "agents-profile")
     monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "4.5")
     monkeypatch.setenv("MCP_PROFILE_MAX_CONCURRENT", "7")
+    monkeypatch.setenv("MCP_PROFILE_TYPE_CHARS", "321")
     monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "60")
     monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "120")
     assert check_config(Config.from_env()) == 0
     assert (
         "profile_table: modes sample, full; up to 12 columns, sample of 3456 first rows, "
-        "values cut at 78 characters, DESCRIBE read up to 901 rows, client tag agents-profile, "
+        "values cut at 78 characters, types at 321, DESCRIBE read up to 901 rows, "
+        "client tag agents-profile, "
         "7 at once, time budget 4.5 s"
     ) in capsys.readouterr().out
     monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "0")

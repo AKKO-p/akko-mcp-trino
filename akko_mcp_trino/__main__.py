@@ -134,7 +134,8 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         "columns at most",
         f"profile_table: modes {', '.join(config.allowed_profile_modes())}; up to "
         f"{config.profile_max_columns} columns, sample of {config.profile_sample_rows} first "
-        f"rows, values cut at {config.profile_value_chars} characters, DESCRIBE read up to "
+        f"rows, values cut at {config.profile_value_chars} characters, types at "
+        f"{config.profile_type_chars}, DESCRIBE read up to "
         f"{config.profile_describe_rows} rows, client tag {config.profile_client_tag}, "
         f"{config.profile_max_concurrent} at once, time budget "
         + (

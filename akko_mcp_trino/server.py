@@ -165,6 +165,7 @@ def build_server(
         profile_sample_rows=config.profile_sample_rows,
         profile_modes=config.allowed_profile_modes(),
         profile_value_chars=config.profile_value_chars,
+        profile_type_chars=config.profile_type_chars,
         profile_describe_rows=config.profile_describe_rows,
         profile_client_tag=config.profile_client_tag,
         profile_timeout_seconds=config.profile_timeout_seconds,

@@ -75,6 +75,10 @@ DEFAULT_PROFILE_MODES = ",".join(PROFILE_MODES)
 # The characters of a text or binary min or max it serves, the rows of its DESCRIBE it reads,
 # and the client tag of its aggregate query, by which Trino may put it in a resource group.
 DEFAULT_PROFILE_VALUE_CHARS = 200
+# The characters of a column's type it serves, and the most it may be set to: a nested row
+# type can be written in thousands of characters.
+DEFAULT_PROFILE_TYPE_CHARS = 500
+MAX_PROFILE_TYPE_CHARS = 100000
 DEFAULT_PROFILE_DESCRIBE_ROWS = 5000
 DEFAULT_PROFILE_CLIENT_TAG = "mcp-profile"
 # The calls of `profile_table` one process runs at once, and the most it may be set to: a
@@ -271,6 +275,7 @@ class Config:
     profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS
     profile_modes: str = DEFAULT_PROFILE_MODES
     profile_value_chars: int = DEFAULT_PROFILE_VALUE_CHARS
+    profile_type_chars: int = DEFAULT_PROFILE_TYPE_CHARS
     profile_describe_rows: int = DEFAULT_PROFILE_DESCRIBE_ROWS
     profile_client_tag: str = DEFAULT_PROFILE_CLIENT_TAG
     # The time budget of the aggregate query of `profile_table`; 0: the smallest of the others.
@@ -444,6 +449,11 @@ class Config:
             found.append(
                 f"MCP_PROFILE_MAX_COLUMNS={self.profile_max_columns}: profile_table profiles "
                 f"{MAX_PROFILE_MAX_COLUMNS} columns at most"
+            )
+        if not 1 <= self.profile_type_chars <= MAX_PROFILE_TYPE_CHARS:
+            found.append(
+                f"MCP_PROFILE_TYPE_CHARS={self.profile_type_chars}: profile_table serves 1 to "
+                f"{MAX_PROFILE_TYPE_CHARS} characters of a type"
             )
         if not 1 <= self.profile_max_concurrent <= MAX_PROFILE_MAX_CONCURRENT:
             found.append(
@@ -645,6 +655,9 @@ class Config:
             profile_modes=os.environ.get("MCP_PROFILE_MODES", DEFAULT_PROFILE_MODES),
             profile_value_chars=int(
                 os.environ.get("MCP_PROFILE_VALUE_CHARS", str(DEFAULT_PROFILE_VALUE_CHARS))
+            ),
+            profile_type_chars=int(
+                os.environ.get("MCP_PROFILE_TYPE_CHARS", str(DEFAULT_PROFILE_TYPE_CHARS))
             ),
             profile_describe_rows=int(
                 os.environ.get("MCP_PROFILE_DESCRIBE_ROWS", str(DEFAULT_PROFILE_DESCRIBE_ROWS))

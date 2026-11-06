@@ -699,12 +699,23 @@ def test_a_refusal_quotes_ten_unknown_names_at_most_and_their_count():
     assert "n09" in out["error"] and "n10" not in out["error"]
 
 
-def test_a_long_type_is_cut_and_says_so():
-    kind = "row(" + ", ".join(f"f{i} integer" for i in range(50)) + ")"
+def test_a_long_type_is_cut_at_its_own_bound_and_says_so():
+    kind = "row(" + ", ".join(f"field{i:03d} integer" for i in range(40)) + ")"
+    assert len(kind) > 600
     tool, _ = _profile(_described(("r", kind)), _aggregates(1, 1), profile_value_chars=10)
     (column,) = _call(tool, "tpch", "tiny", "orders")["columns"]
-    assert column["type"] == kind[:10] and column["cut"] == ["type"]
+    assert column["type"] == kind[:500] and column["cut"] == ["type"], "500 by default"
     assert column["skipped"] == ["distinct", "min", "max"], "the whole type decides"
+    tool, _ = _profile(_described(("r", kind)), _aggregates(1, 1), profile_type_chars=20)
+    assert _call(tool, "tpch", "tiny", "orders")["columns"][0]["type"] == kind[:20]
+
+
+@pytest.mark.parametrize("kind", ["decimal(12,2)", "timestamp(3) with time zone"])
+def test_the_bound_of_values_never_cuts_a_type(kind):
+    row = _aggregates(1, 1, 1, None, None)
+    tool, _ = _profile(_described(("x", kind)), row, profile_value_chars=10)
+    (column,) = _call(tool, "tpch", "tiny", "orders")["columns"]
+    assert column["type"] == kind and "cut" not in column
 
 
 def test_the_description_says_bernoulli_reads_every_row():

@@ -62,6 +62,7 @@ from .config import (
     DEFAULT_PROFILE_MAX_COLUMNS,
     DEFAULT_PROFILE_MAX_CONCURRENT,
     DEFAULT_PROFILE_SAMPLE_ROWS,
+    DEFAULT_PROFILE_TYPE_CHARS,
     DEFAULT_PROFILE_VALUE_CHARS,
     DEFAULT_SEARCH_CONCURRENCY,
     DEFAULT_SEARCH_MAX_WORD_LENGTH,
@@ -758,6 +759,7 @@ def register_query_tools(
     profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS,
     profile_modes: Sequence[str] = PROFILE_MODES,
     profile_value_chars: int = DEFAULT_PROFILE_VALUE_CHARS,
+    profile_type_chars: int = DEFAULT_PROFILE_TYPE_CHARS,
     profile_describe_rows: int = DEFAULT_PROFILE_DESCRIBE_ROWS,
     profile_client_tag: str = DEFAULT_PROFILE_CLIENT_TAG,
     profile_timeout_seconds: float = 0.0,
@@ -793,7 +795,8 @@ def register_query_tools(
     `profile_table` profiles `profile_max_columns` columns at most, and its sample reads
     the first `profile_sample_rows` rows (`MCP_PROFILE_MAX_COLUMNS`,
     `MCP_PROFILE_SAMPLE_ROWS`); it serves the modes of `profile_modes` only, cuts a text or
-    binary min or max at `profile_value_chars` characters, reads `DESCRIBE` up to
+    binary min or max at `profile_value_chars` characters and a type at
+    `profile_type_chars` (`MCP_PROFILE_TYPE_CHARS`), reads `DESCRIBE` up to
     `profile_describe_rows` rows, and runs its aggregate query with the client tag
     `profile_client_tag`, within `profile_timeout_seconds` when above 0, and always within
     the query's and the call's budgets; it runs `profile_max_concurrent` calls at once at
@@ -1303,7 +1306,8 @@ def register_query_tools(
             profiled = []
             for c in chosen:
                 non_null = next(row)
-                kind, kind_cut = _cut(described[c], profile_value_chars)
+                # A type has its own bound: a bound of values never cuts it.
+                kind, kind_cut = _cut(described[c], profile_type_chars)
                 entry: dict[str, Any] = {
                     "column": c,
                     "type": kind,
