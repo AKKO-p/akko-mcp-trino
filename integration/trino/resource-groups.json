@@ -1,0 +1,18 @@
+{
+  "rootGroups": [
+    {
+      "name": "global",
+      "softMemoryLimit": "80%",
+      "hardConcurrencyLimit": 100,
+      "maxQueued": 1000,
+      "subGroups": [
+        {"name": "agents", "softMemoryLimit": "40%", "hardConcurrencyLimit": 20, "maxQueued": 100},
+        {"name": "other", "softMemoryLimit": "60%", "hardConcurrencyLimit": 80, "maxQueued": 900}
+      ]
+    }
+  ],
+  "selectors": [
+    {"clientTags": ["tool=execute_query"], "group": "global.agents"},
+    {"group": "global.other"}
+  ]
+}

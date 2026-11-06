@@ -13,6 +13,7 @@ import os
 import re
 from dataclasses import dataclass
 
+from .audit import DEFAULT_AUDIT_MAX_NAMES
 from .sql_guard import governed_catalog, parse_extra_reads, validate_identifier
 
 # The token signature algorithms the server may accept: public-key ones only, verified
@@ -55,6 +56,8 @@ DEFAULT_SEARCH_MIN_LENGTH = 3
 DEFAULT_SEARCH_MAX_WORDS = 8
 DEFAULT_SEARCH_MAX_WORD_LENGTH = 64
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
+# The most names a list of the audit record may be set to keep (``MCP_AUDIT_MAX_NAMES``).
+MAX_AUDIT_MAX_NAMES = 100000
 # The catalogs one call of `search_columns` reads at once, and the most it may be set to:
 # each is one metadata statement in flight in Trino, for that one call.
 DEFAULT_SEARCH_CONCURRENCY = 8
@@ -97,6 +100,15 @@ _CLIENT_TAG_RE = re.compile(r"[A-Za-z0-9_.:=/-]{1,100}")
 # reserve lets the context end past the call's own deadline, and the call then answers its
 # time_budget error instead of the columns.
 MIN_CONTEXT_RESERVE_SECONDS = 0.3
+
+
+# What a claim the server reads may be called: a top-level claim, never a path.
+_CLAIM_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_:./#-]*")
+
+
+def claim_names(value: str) -> tuple[str, ...]:
+    """The claim names a comma-separated setting lists, each once, in order."""
+    return tuple(dict.fromkeys(n.strip() for n in value.split(",") if n.strip()))
 
 
 def provider_names(value: str) -> list[str]:
@@ -202,6 +214,12 @@ class Config:
     # opaque id the access rules do not know (Keycloak's UUID) names another claim
     # (`preferred_username`, `upn`, `uid`...). A token without it is refused.
     jwt_user_claim: str = "sub"
+    # The claims that name the application that asked for the token, and the claims that
+    # hold its scopes, comma-separated, in order: the first one present wins. `azp` (OpenID
+    # Connect) then `client_id` (RFC 9068), and `scope` (RFC 6749 §3.3), by default; Entra ID
+    # names `appid` and `scp`, Okta `cid` and `scp`.
+    jwt_client_claims: str = "azp,client_id"
+    jwt_scope_claims: str = "scope"
     # This server's canonical URI (RFC 8707, RFC 9728), such as https://mcp.example.com/mcp.
     # Accepted as a token audience besides `MCP_OIDC_AUDIENCE`, named in the protected
     # resource metadata the server then publishes, and in the challenge of a 401.
@@ -223,6 +241,9 @@ class Config:
     # The most catalogs `list_catalogs` reads, past the row cap, before it pages them:
     # above it the tool answers an error, never a cut list.
     max_catalogs: int = DEFAULT_MAX_CATALOGS
+    # The names each list of a call's audit record keeps (its tables, the tables whose
+    # description it served); the others are counted, once each, never written.
+    audit_max_names: int = DEFAULT_AUDIT_MAX_NAMES
     # A page of `describe_schema`: at most this many tables, and whole tables only while
     # their columns add up to this many at most; the first table of a page comes whole,
     # however wide, and the answer says when a page was shortened.
@@ -290,6 +311,14 @@ class Config:
     # rights cannot be turned off.
     visibility_switch: str = ""
 
+    def client_claims(self) -> tuple[str, ...]:
+        """The claims that name a token's client, in order (``MCP_JWT_CLIENT_CLAIMS``)."""
+        return claim_names(self.jwt_client_claims)
+
+    def scope_claims(self) -> tuple[str, ...]:
+        """The claims that hold a token's scopes, in order (``MCP_JWT_SCOPE_CLAIMS``)."""
+        return claim_names(self.jwt_scope_claims)
+
     def allowed_profile_modes(self) -> tuple[str, ...]:
         """The modes of ``profile_table`` this server allows (``MCP_PROFILE_MODES``)."""
         return profile_mode_names(self.profile_modes)
@@ -335,6 +364,11 @@ class Config:
             found.append(
                 f"MCP_DESCRIBE_SCHEMA_COLUMNS={self.describe_schema_columns}: "
                 "describe_schema must be allowed 1 column or more"
+            )
+        if not 1 <= self.audit_max_names <= MAX_AUDIT_MAX_NAMES:
+            found.append(
+                f"MCP_AUDIT_MAX_NAMES={self.audit_max_names}: an audit line keeps 1 to "
+                f"{MAX_AUDIT_MAX_NAMES} names a list"
             )
         if not 1 <= self.describe_max_columns <= MAX_DESCRIBE_MAX_COLUMNS:
             found.append(
@@ -385,7 +419,17 @@ class Config:
             parse_jwt_algorithms(self.jwt_algorithms)
         except ValueError as exc:
             found.append(str(exc))
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_:./#-]*", self.jwt_user_claim):
+        for setting, claims in (
+            ("MCP_JWT_CLIENT_CLAIMS", self.jwt_client_claims),
+            ("MCP_JWT_SCOPE_CLAIMS", self.jwt_scope_claims),
+        ):
+            names = claim_names(claims)
+            if not names or not all(_CLAIM_NAME.fullmatch(n) for n in names):
+                found.append(
+                    f"{setting}={claims!r}: name one claim at least, comma-separated, each a "
+                    "top-level claim of letters, digits and _ : . / # -"
+                )
+        if not _CLAIM_NAME.fullmatch(self.jwt_user_claim):
             found.append(
                 f"MCP_JWT_USER_CLAIM={self.jwt_user_claim!r}: a claim name is a top-level claim, "
                 "letters, digits and _ : . / # - (sub, upn, preferred_username, "
@@ -603,6 +647,8 @@ class Config:
             extra_read_commands=os.environ.get("MCP_EXTRA_READ_COMMANDS", ""),
             jwt_algorithms=os.environ.get("MCP_JWT_ALGORITHMS", "RS256"),
             jwt_user_claim=os.environ.get("MCP_JWT_USER_CLAIM", "sub").strip() or "sub",
+            jwt_client_claims=os.environ.get("MCP_JWT_CLIENT_CLAIMS", "azp,client_id"),
+            jwt_scope_claims=os.environ.get("MCP_JWT_SCOPE_CLAIMS", "scope"),
             resource_url=os.environ.get("MCP_RESOURCE_URL", ""),
             token_exchange_url=os.environ.get("TRINO_TOKEN_EXCHANGE_URL", ""),
             token_exchange_client_id=os.environ.get("TRINO_TOKEN_EXCHANGE_CLIENT_ID", ""),
@@ -613,6 +659,9 @@ class Config:
             trino_client_cert=os.environ.get("TRINO_CLIENT_CERT", ""),
             trino_client_key=os.environ.get("TRINO_CLIENT_KEY", ""),
             max_catalogs=int(os.environ.get("MCP_MAX_CATALOGS", str(DEFAULT_MAX_CATALOGS))),
+            audit_max_names=int(
+                os.environ.get("MCP_AUDIT_MAX_NAMES", str(DEFAULT_AUDIT_MAX_NAMES))
+            ),
             describe_schema_tables=int(
                 os.environ.get("MCP_DESCRIBE_SCHEMA_TABLES", str(DEFAULT_DESCRIBE_SCHEMA_TABLES))
             ),

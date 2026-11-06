@@ -5,6 +5,9 @@ import pytest
 from akko_mcp_trino.config import Config
 
 _ENV_KEYS = [
+    "MCP_AUDIT_MAX_NAMES",
+    "MCP_JWT_CLIENT_CLAIMS",
+    "MCP_JWT_SCOPE_CLAIMS",
     "MCP_EXTRA_READ_COMMANDS",
     "TRINO_HOST",
     "TRINO_PORT",
@@ -838,3 +841,39 @@ def test_describe_reading_more_columns_than_profile_is_warned_of(monkeypatch):
     assert warning not in Config.from_env().warnings()
     monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", "6000")
     assert warning in Config.from_env().warnings()
+
+
+def test_the_claims_of_the_client_and_the_scopes_have_their_defaults_and_variables(monkeypatch):
+    c = Config.from_env()
+    assert (c.jwt_client_claims, c.jwt_scope_claims) == ("azp,client_id", "scope")
+    assert (c.client_claims(), c.scope_claims()) == (("azp", "client_id"), ("scope",))
+    monkeypatch.setenv("MCP_JWT_CLIENT_CLAIMS", " cid , azp,cid")
+    monkeypatch.setenv("MCP_JWT_SCOPE_CLAIMS", "scp")
+    c = Config.from_env()
+    assert (c.client_claims(), c.scope_claims()) == (("cid", "azp"), ("scp",))
+    assert c.problems() == []
+
+
+@pytest.mark.parametrize("name", ["MCP_JWT_CLIENT_CLAIMS", "MCP_JWT_SCOPE_CLAIMS"])
+@pytest.mark.parametrize("value", [" , ", "a b", "x;y"])
+def test_a_claim_list_with_no_name_or_a_bad_name_refuses_to_start(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    (problem,) = Config.from_env().problems()
+    assert problem.startswith(f"{name}={value!r}: ")
+
+
+def test_the_names_an_audit_line_keeps_are_200_by_default_and_read_from_their_variable(
+    monkeypatch,
+):
+    assert Config.from_env().audit_max_names == 200
+    monkeypatch.setenv("MCP_AUDIT_MAX_NAMES", "100000")
+    assert Config.from_env().audit_max_names == 100000
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "100001"])
+def test_names_kept_outside_1_to_100000_refuse_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_AUDIT_MAX_NAMES", count)
+    assert Config.from_env().problems() == [
+        f"MCP_AUDIT_MAX_NAMES={count}: an audit line keeps 1 to 100000 names a list"
+    ]

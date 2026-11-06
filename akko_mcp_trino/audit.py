@@ -41,6 +41,9 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, Optional, Protocol
 
 REQUEST_ID_HEADER = "x-request-id"
+# The names a record keeps in each of its lists (``MCP_AUDIT_MAX_NAMES``): past them, it counts
+# the others, once each, so that a line is never without a bound.
+DEFAULT_AUDIT_MAX_NAMES = 200
 
 _current_request_id: ContextVar[str | None] = ContextVar("mcp_current_request_id", default=None)
 
@@ -127,6 +130,12 @@ class ToolCall:
     budget_seconds: float = 0.0  # 0: no deadline
     deadline: float = 0.0  # on the time.monotonic() clock, when there is a budget
     expired: bool = False
+    # The names each list keeps at most, and how many more were noted, once each.
+    max_names: int = DEFAULT_AUDIT_MAX_NAMES
+    tables_cut: int = 0
+    metadata_served_cut: int = 0
+    # Every name noted, by list: kept or counted once each, at a constant cost.
+    _seen: dict[str, set[str]] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     def time_left(self) -> Optional[float]:
         """Seconds left before the deadline (negative once past it); None without a budget."""
@@ -151,10 +160,12 @@ def current_call() -> Optional[ToolCall]:
     return _current_call.get()
 
 
-def bind_call(tool: str, budget_seconds: float = 0.0) -> tuple[ToolCall, Token]:
-    """Start the record of one call of ``tool``, due within ``budget_seconds`` when above 0;
-    returns it and the token for ``reset_call``."""
-    call = ToolCall(tool=tool, budget_seconds=max(0.0, budget_seconds))
+def bind_call(
+    tool: str, budget_seconds: float = 0.0, max_names: int = DEFAULT_AUDIT_MAX_NAMES
+) -> tuple[ToolCall, Token]:
+    """Start the record of one call of ``tool``, due within ``budget_seconds`` when above 0,
+    whose lists keep ``max_names`` names each; returns it and the token for ``reset_call``."""
+    call = ToolCall(tool=tool, budget_seconds=max(0.0, budget_seconds), max_names=max_names)
     if call.budget_seconds:
         call.deadline = time.monotonic() + call.budget_seconds
     return call, _current_call.set(call)
@@ -183,10 +194,19 @@ def time_allowed(timeout: float) -> float:
     return min(timeout, left) if timeout > 0 else left
 
 
-def _add(into: list[str], names: Iterable[str]) -> None:
+def _add(call: ToolCall, key: str, names: Iterable[str]) -> None:
+    """Add ``names`` to the list ``key`` of ``call``, each once and in order, up to its
+    ``max_names``; count the others in ``<key>_cut``, once each too."""
+    seen = call._seen.setdefault(key, set())
+    kept: list[str] = getattr(call, key)
     for name in names:
-        if name not in into:
-            into.append(name)
+        if name in seen:
+            continue
+        seen.add(name)
+        if len(kept) < call.max_names:
+            kept.append(name)
+        else:
+            setattr(call, f"{key}_cut", getattr(call, f"{key}_cut") + 1)
 
 
 def note(
@@ -201,7 +221,9 @@ def note(
     """Add to the current call's record what the tool did; nothing outside a call.
 
     ``sql`` is the statement run for the caller, exactly as sent (only its
-    SHA-256 is kept); ``tables`` the tables it names or the call is about;
+    SHA-256 is kept); ``tables`` the tables it names or the call is about (each list keeps
+    the call's ``max_names`` names, and counts the others in ``tables_cut`` and
+    ``metadata_served_cut``);
     ``rows`` the rows or items returned; ``truncated`` whether they were cut;
     ``metadata_served`` the tables an extension served descriptions of;
     ``error`` the code of the failure the tool returns, never its message.
@@ -211,12 +233,12 @@ def note(
         return
     if sql is not None:
         call.sql_sha256 = sql_digest(sql)
-    _add(call.tables, tables)
+    _add(call, "tables", tables)
     if rows is not None:
         call.rows = rows
     if truncated is not None:
         call.truncated = truncated
-    _add(call.metadata_served, metadata_served)
+    _add(call, "metadata_served", metadata_served)
     if error is not None:
         call.error = error
 

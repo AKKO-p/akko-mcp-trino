@@ -456,6 +456,8 @@ def test_cli_check_reports_effective_config_without_secrets(monkeypatch, capsys)
     assert "tok-secret" not in out and "exchange-secret" not in out, "a secret leaked"
     assert "extensions: none" in out and "WARNING" not in out
     assert "token signatures: RS256; user from: sub" in out
+    assert "client from: azp,client_id; scopes from: scope" in out
+    assert "audit: up to 200 names a list, the rest counted" in out
 
 
 def test_cli_check_says_the_token_algorithms_and_the_user_claim(monkeypatch, capsys):

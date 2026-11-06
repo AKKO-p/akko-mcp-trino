@@ -12,7 +12,7 @@ import base64
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Protocol, Sequence, Union
+from typing import Any, Optional, Protocol, Sequence, Union
 
 from .config import parse_jwt_algorithms
 
@@ -28,10 +28,12 @@ class Principal:
     email: str = ""
     # The token's `jti`, for the audit join. Never the token itself.
     token_id: str = ""
-    # The application that asked for the token: `azp` (OpenID Connect), else
-    # `client_id` (RFC 9068). Empty when the token names none.
+    # The application that asked for the token: the first of `MCP_JWT_CLIENT_CLAIMS` the
+    # token carries (`azp`, OpenID Connect, else `client_id`, RFC 9068, by default). Empty
+    # when the token names none.
     client_id: str = ""
-    # The scopes the token carries (`scope`, space-delimited, RFC 6749 §3.3).
+    # The scopes the token carries: the first of `MCP_JWT_SCOPE_CLAIMS` it holds (`scope`,
+    # space-delimited, RFC 6749 §3.3, by default).
     scopes: tuple[str, ...] = ()
 
 
@@ -129,6 +131,8 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
         refused_audiences=refused,
         algorithms=parse_jwt_algorithms(config.jwt_algorithms),
         user_claim=config.jwt_user_claim,
+        client_claims=config.client_claims(),
+        scope_claims=config.scope_claims(),
     )
 
 
@@ -143,15 +147,41 @@ def accepted_audiences(config, extra: Sequence[str] = ()) -> list[str]:
     return audiences
 
 
+# The claims read by default: those of 0.7.
+CLIENT_CLAIMS = ("azp", "client_id")
+SCOPE_CLAIMS = ("scope",)
+
+
+def _first(claims: dict, names: Sequence[str]) -> Any:
+    """The value of the first of ``names`` the token carries, whatever it holds (an empty
+    one included: the next claim is then never read), or None when it carries none."""
+    for name in names:
+        if name in claims:
+            return claims[name]
+    return None
+
+
+def _client(claim) -> str:
+    """The client a claim names: its text; any other value is no client, never a conversion."""
+    return claim if isinstance(claim, str) else ""
+
+
 def _scopes(claim) -> tuple[str, ...]:
+    """The scopes of a claim: a space-delimited string, or a list of strings. Any other value,
+    a list holding anything but strings included, is no scope: never a conversion."""
     if isinstance(claim, str):
         return tuple(claim.split())
-    if isinstance(claim, list):
-        return tuple(str(s) for s in claim)
+    if isinstance(claim, list) and all(isinstance(s, str) for s in claim):
+        return tuple(claim)
     return ()
 
 
-def _principal_from_claims(claims: dict, user_claim: str = "sub") -> Optional[Principal]:
+def _principal_from_claims(
+    claims: dict,
+    user_claim: str = "sub",
+    client_claims: Sequence[str] = CLIENT_CLAIMS,
+    scope_claims: Sequence[str] = SCOPE_CLAIMS,
+) -> Optional[Principal]:
     """The caller a verified token names: the text in the ``user_claim`` claim
     (``MCP_JWT_USER_CLAIM``, ``sub`` by default), a top-level claim read as written. A token
     without it, or whose value is not text, is empty, or has surrounding spaces or control
@@ -171,8 +201,8 @@ def _principal_from_claims(claims: dict, user_claim: str = "sub") -> Optional[Pr
         roles=roles if isinstance(roles, list) else [],
         email=str(claims.get("email") or ""),
         token_id=str(claims.get("jti") or ""),
-        client_id=str(claims.get("azp") or claims.get("client_id") or ""),
-        scopes=_scopes(claims.get("scope")),
+        client_id=_client(_first(claims, client_claims)),
+        scopes=_scopes(_first(claims, scope_claims)),
     )
 
 
@@ -206,15 +236,20 @@ class JwksJwtAuth:
         leeway_seconds: int = 30,
         refused_audiences: Sequence[str] = (),
         user_claim: str = "sub",
+        client_claims: Sequence[str] = CLIENT_CLAIMS,
+        scope_claims: Sequence[str] = SCOPE_CLAIMS,
     ):
         """Verify tokens against ``jwks_url`` for ``issuer`` and ``audience`` (one value or
         several, any of which may match), refusing a token that also names one of
         ``refused_audiences``; ``jwks_client`` is injectable for tests. ``algorithms`` are
         public-key ones only (``JWT_ALGORITHMS``), RS256 when none is given: a shared-secret
-        algorithm or ``none`` raises ValueError, here as at start.
+        algorithm or ``none`` raises ValueError, here as at start. ``client_claims`` and
+        ``scope_claims`` name the claims read for the client and the scopes, in order.
         """
         self._refused = frozenset(refused_audiences)
         self._user_claim = user_claim
+        self._client_claims = tuple(client_claims)
+        self._scope_claims = tuple(scope_claims)
         self._issuer = issuer
         self._audience = audience if isinstance(audience, str) else list(audience)
         self._leeway = leeway_seconds
@@ -255,7 +290,9 @@ class JwksJwtAuth:
         if self._refused & set([aud] if isinstance(aud, str) else aud or []):
             log.info("token refused: issued for another resource")
             return None
-        principal = _principal_from_claims(claims, self._user_claim)
+        principal = _principal_from_claims(
+            claims, self._user_claim, self._client_claims, self._scope_claims
+        )
         if principal is None:
             log.info("token refused: no %s claim", self._user_claim)
         return principal

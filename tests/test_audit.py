@@ -244,3 +244,92 @@ def test_an_extensions_fields_follow_the_cores_on_the_line():
     doc = json.loads(records[-1])
     assert doc["duration_ms"] == 12 and doc["rows"] == 3
     assert "call" not in doc and "principal" not in doc and "extra" not in doc
+
+
+# ---- names kept within a bound, each once, at a constant cost
+
+
+def test_the_names_of_a_call_are_bounded_and_say_how_many_were_left():
+    call, token = bind_call("describe_schema", max_names=3)
+    try:
+        note(tables=["a", "b", "c", "d", "e", "a"])
+        note(tables=["d", "f"], metadata_served=["m1", "m2", "m3", "m4"])
+        note(metadata_served=["m4", "m1"])
+    finally:
+        reset_call(token)
+    assert call.tables == ["a", "b", "c"] and call.tables_cut == 3, "d, e and f, once each"
+    assert call.metadata_served == ["m1", "m2", "m3"] and call.metadata_served_cut == 1
+
+
+def test_a_call_within_its_bound_cuts_nothing():
+    call, token = bind_call("describe_table")
+    try:
+        note(tables=["a.b.c"], metadata_served=["a.b.c"])
+    finally:
+        reset_call(token)
+    assert (call.max_names, call.tables_cut, call.metadata_served_cut) == (200, 0, 0)
+
+
+def test_many_names_cost_a_constant_time_each():
+    """Fifty thousand distinct names: the list keeps its bound, and keeping them once each
+    does not scan the list for every name."""
+    import time
+
+    call, token = bind_call("search_columns")
+    started = time.monotonic()
+    try:
+        note(tables=[f"c{i}.s.t" for i in range(50000)])
+        note(tables=[f"c{i}.s.t" for i in range(50000)])
+    finally:
+        reset_call(token)
+    assert len(call.tables) == 200 and call.tables_cut == 49800
+    assert time.monotonic() - started < 2
+
+
+# The line LoggingAudit wrote at 4af0a1b for this call, recorded by running that version.
+LINE_0_8_DEV = (
+    '{"request_id":"edge-42","tool":"describe_schema","subject":"alice","ok":true,'
+    '"error":"","duration_ms":84}'
+)
+
+
+def test_the_core_line_is_the_same_byte_for_byte_when_names_are_cut(caplog):
+    call, token = bind_call("describe_schema", max_names=1)
+    try:
+        note(tables=["demo.sales.a", "demo.sales.b"], rows=2)
+    finally:
+        reset_call(token)
+    with caplog.at_level(logging.INFO, logger="audit-bytes"):
+        LoggingAudit(logging.getLogger("audit-bytes")).record(
+            AuditEvent(
+                request_id="edge-42",
+                tool="describe_schema",
+                subject="alice",
+                ok=True,
+                duration_ms=84,
+                call=call,
+            )
+        )
+    assert [r.getMessage() for r in caplog.records] == [LINE_0_8_DEV]
+    assert call.tables_cut == 1, "the record was cut, the line does not say it"
+
+
+def test_the_new_fields_of_the_record_come_after_those_of_0_7():
+    """A plugin that builds a record by position keeps its budget where it was; the set of
+    names seen is not an argument."""
+    from dataclasses import fields
+
+    names = [f.name for f in fields(ToolCall)]
+    assert names[: names.index("expired") + 1] == [
+        "tool",
+        "sql_sha256",
+        "tables",
+        "rows",
+        "truncated",
+        "metadata_served",
+        "error",
+        "budget_seconds",
+        "deadline",
+        "expired",
+    ]
+    assert not [f for f in fields(ToolCall) if f.name == "_seen" and f.init]

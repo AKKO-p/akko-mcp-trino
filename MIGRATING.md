@@ -4,6 +4,20 @@
 
 Nothing is removed or renamed in the answers of the tools.
 
+- **The former bundle of extensions.** A deployment that loaded the former bundle of extensions
+  sets `MCP_EXTENSIONS=token-policy,fingerprint-audit,trino-tags` (each may be loaded alone).
+  `MCP_ALLOWED_CLIENTS` and `MCP_REQUIRED_SCOPES` keep their names; with neither set,
+  `token-policy` refuses to start, and a value outside the characters of an OAuth scope-token
+  refuses to start too. This version does not include: agent keys, quotas, the revocation of
+  tokens, the `agent` field of the audit line, and an `impersonate` mode without authentication
+  (use `impersonation`, which requires a verified token).
+- **The client and the scopes of a token.** The claims are read by presence, in the order of
+  `MCP_JWT_CLIENT_CLAIMS` and `MCP_JWT_SCOPE_CLAIMS`: the first one the token carries is read,
+  even empty. A scope claim that is a list holding anything but text gives no scope, where 0.7
+  converted its items to text; a client claim that is not text gives no client, where 0.7
+  converted it. With the defaults, a token whose `azp` is present but empty now names no
+  client, where 0.7 read its `client_id`.
+
 - `describe_table` answers one page of a table's columns, the row cap of them, as it did, and
   adds `next_column_offset` and `columns_cut`: a table wider than the row cap is now read to its
   last column with `column_offset`. `sample_rows` with a `column_offset` above 0 is refused. A

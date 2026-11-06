@@ -190,6 +190,27 @@ services:
       MCP_CONTEXT_FILE_GLOSSARIES: geography
       MCP_CONTEXT_CANARY: tpch.sf1.nation
 
+  # The jwt server with the three modules of the core: a token must come from the host's
+  # client, the audit line carries the fingerprint, and each query its request id and tool.
+  mcp-modules:
+    <<: *mcp
+    environment:
+      <<: *jwt-environment
+      MCP_RESOURCE_URL: http://mcp-modules:3000/mcp
+      MCP_EXTENSIONS: token-policy,fingerprint-audit,trino-tags
+      MCP_ALLOWED_CLIENTS: mcp-host
+
+  # token-policy with a scope no token of the realm carries: every caller gets 403
+  # insufficient_scope, and the challenge names the scope to ask for.
+  mcp-scoped:
+    <<: *mcp
+    environment:
+      <<: *jwt-environment
+      MCP_RESOURCE_URL: http://mcp-scoped:3000/mcp
+      MCP_EXTENSIONS: token-policy
+      MCP_ALLOWED_CLIENTS: mcp-host
+      MCP_REQUIRED_SCOPES: data:query
+
   # Service mode with an open door, chosen explicitly: it must say so to every host.
   mcp-service:
     <<: *mcp
