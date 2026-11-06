@@ -17,7 +17,8 @@ from akko_mcp_trino_atlas.settings import read_settings
 from akko_mcp_trino_atlas.spnego import SpnegoAuth
 
 OTHER = "http://atlas-b:21000"
-KEYTAB = "/run/secrets/service-keytab/atlas-reader.keytab"
+# Set for each test to a file of its own (see ``keytab_file``): it must exist at start.
+KEYTAB = "service-keytab/atlas-reader.keytab"
 PRINCIPAL = "svc-reader@EXAMPLE.TEST"
 KERBEROS = {
     "ATLAS_URL": ATLAS,
@@ -28,6 +29,45 @@ KERBEROS = {
 }
 INVOICES = TableRef("lake", "ledger", "invoices")
 CHALLENGE = {"www-authenticate": "Negotiate"}
+
+
+class Krb5Error(Exception):
+    """As ``krb5.Krb5Error`` carries it: a message and an MIT Kerberos code."""
+
+    def __init__(self, message: str, err_code: int) -> None:
+        super().__init__(message)
+        self.err_code = err_code
+
+
+class SpnegoError(Exception):
+    """As ``spnego.exceptions.SpnegoError`` wraps a GSSAPI error, whose minor code is
+    unsigned."""
+
+    def __init__(self, base_error: Exception) -> None:
+        super().__init__("Getting GSSAPI credential")
+        self.base_error = base_error
+
+
+class GSSError(Exception):
+    def __init__(self, min_code: int) -> None:
+        super().__init__("Cannot contact any KDC")
+        self.min_code = min_code
+
+
+PREAUTH_FAILED = -1765328360  # KRB5KDC_ERR_PREAUTH_FAILED
+PRINCIPAL_UNKNOWN = -1765328378  # KRB5KDC_ERR_C_PRINCIPAL_UNKNOWN
+KDC_UNREACH = -1765328228  # KRB5_KDC_UNREACH
+
+
+@pytest.fixture(autouse=True)
+def keytab_file(tmp_path, monkeypatch):
+    """A keytab of the test's own: the provider checks at start that it can be read."""
+    path = tmp_path / "service-keytab" / "atlas-reader.keytab"
+    path.parent.mkdir()
+    path.write_bytes(b"\x05\x02 not a real keytab")
+    monkeypatch.setattr(sys.modules[__name__], "KEYTAB", str(path))
+    monkeypatch.setitem(KERBEROS, "ATLAS_KEYTAB", str(path))
+    return path
 
 
 def build(handler, **env: str) -> AtlasProvider:
@@ -107,7 +147,7 @@ def test_a_negotiate_challenge_is_answered_from_the_keytab(monkeypatch):
         "username": ("keytab", PRINCIPAL, KEYTAB),
         "hostname": "atlas-a",
         "service": "HTTP",
-        "protocol": "kerberos",
+        "protocol": "negotiate",
     }
 
     # ATLAS_SPN names the service, for an address that is not the host's canonical name.
@@ -174,23 +214,90 @@ def test_a_rejected_token_or_another_challenge_is_refused(monkeypatch):
     assert isinstance(error, ProviderRefused) and fake.contexts == []
 
 
-def test_a_failed_negotiation_is_unavailable_and_tries_no_other_address(monkeypatch, caplog):
-    caplog.set_level(logging.INFO)
-    caplog.set_level(logging.WARNING, logger="httpx")
-    fake = install(monkeypatch)
-    fake.fail = RuntimeError(f"cannot find {PRINCIPAL} in {KEYTAB}")
-    seen = []
-
+def challenge_counting(seen: list[str]):
     def challenge(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.host)
         return httpx.Response(401, headers=CHALLENGE)
 
-    (error,) = calls(build(challenge, ATLAS_URL=f"{ATLAS},{OTHER}"))
+    return challenge
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        Krb5Error(f"Preauthentication failed for {PRINCIPAL}", PREAUTH_FAILED),
+        Krb5Error(f"Client {PRINCIPAL} not found in Kerberos database", PRINCIPAL_UNKNOWN),
+        OSError(f"No such file or directory: {KEYTAB}"),  # the keytab cannot be used
+    ],
+)
+def test_a_negotiation_the_kdc_refuses_closes_like_a_refused_account(monkeypatch, caplog, failure):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    fake = install(monkeypatch)
+    fake.fail = failure
+    seen: list[str] = []
+
+    (error,) = calls(build(challenge_counting(seen), ATLAS_URL=f"{ATLAS},{OTHER}"))
+
+    # A refusal, as a 401: the core keeps the source closed for MCP_CONTEXT_REFUSED_RETRY_SECONDS,
+    # so a stale keytab is not tried again every few seconds against the KDC.
+    assert isinstance(error, ProviderRefused)
+    assert seen == ["atlas-a"]  # no other address, the same credentials would fail there
+    assert not caplog.records
+    text = repr(error) + repr(error.__cause__) + repr(error.__context__)
+    assert KEYTAB not in text and PRINCIPAL not in text
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        Krb5Error("Cannot contact any KDC for realm", KDC_UNREACH),
+        SpnegoError(GSSError(KDC_UNREACH & 0xFFFFFFFF)),
+    ],
+)
+def test_a_kdc_that_cannot_be_reached_is_an_outage(monkeypatch, caplog, failure):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    fake = install(monkeypatch)
+    fake.fail = failure
+    seen: list[str] = []
+
+    (error,) = calls(build(challenge_counting(seen), ATLAS_URL=f"{ATLAS},{OTHER}"))
+
     assert isinstance(error, ProviderUnavailable)
     assert seen == ["atlas-a"]
     assert [r.getMessage() for r in caplog.records] == ["atlas unreachable"]
-    text = repr(error) + repr(error.__cause__) + repr(error.__context__)
-    assert KEYTAB not in text and PRINCIPAL not in text
+
+
+def test_the_check_says_a_refused_negotiation_is_refused(monkeypatch):
+    fake = install(monkeypatch)
+    fake.fail = Krb5Error("Preauthentication failed", PREAUTH_FAILED)
+    p = build(challenge_counting([]))
+    lines = p.check_lines()
+    asyncio.run(p.aclose())
+    assert lines[-1] == "UNREACHABLE: atlas refused the account"
+
+
+def test_the_keytab_must_be_readable_at_start(monkeypatch, tmp_path):
+    install(monkeypatch)
+    missing = str(tmp_path / "service-keytab" / "gone.keytab")
+    for path in (missing, str(tmp_path)):  # a missing file, a directory
+        with pytest.raises(ValueError, match="ATLAS_KEYTAB: the file cannot be read") as raised:
+            read_settings({**KERBEROS, "ATLAS_KEYTAB": path})
+        assert path not in str(raised.value) and "service-keytab" not in str(raised.value)
+
+
+def test_a_rotated_keytab_changes_the_stamp(monkeypatch, keytab_file):
+    install(monkeypatch)
+    p = build(negotiating(FakeAtlas("atlas-2.4")))
+    before = p.credentials_stamp()
+    keytab_file.write_bytes(b"\x05\x02 another keytab, longer")
+    after = p.credentials_stamp()
+    keytab_file.unlink()  # a keytab removed while the server runs changes the stamp too
+    gone = p.credentials_stamp()
+    asyncio.run(p.aclose())
+    assert before and after != before and gone not in (before, after)
+    assert KEYTAB not in before + after and "keytab" not in (before + after).lower()
 
 
 def test_the_keytab_path_is_never_printed(monkeypatch, caplog):
@@ -200,7 +307,8 @@ def test_the_keytab_path_is_never_printed(monkeypatch, caplog):
     atlas = FakeAtlas("atlas-2.4")
     p = build(negotiating(atlas))
     lines = p.check_lines()
-    assert f"atlas: kerberos principal {PRINCIPAL}, service HTTP@<host of each address>" in lines
+    authentication = f"kerberos, principal {PRINCIPAL}, service HTTP@<host of each address>"
+    assert f"atlas: authentication: {authentication}" in lines
     calls(p)
     printed = "\n".join(lines) + repr(p.settings) + repr(SpnegoAuth(PRINCIPAL, KEYTAB, ""))
     assert KEYTAB not in printed and "keytab" not in repr(p.settings).lower()

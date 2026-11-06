@@ -365,6 +365,28 @@ def test_the_concurrency_bound_has_a_default_and_is_printed():
         read_settings({**BASE, "ATLAS_MAX_CONCURRENT_REQUESTS": "32"}).max_concurrent_requests == 32
     )
     p = build(FakeAtlas("atlas-2.4"), ATLAS_MAX_CONCURRENT_REQUESTS="2")
-    line = p.check_lines()[0]
+    lines = p.check_lines()
     asyncio.run(p.aclose())
-    assert line.endswith("; at most 2 requests at once")
+    assert "atlas: term reads: 2 at once at most" in lines
+
+
+def test_a_term_atlas_refuses_to_the_account_is_left_out_and_said_once(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    atlas = FakeAtlas("atlas-2.4")
+
+    def refuses_some(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith((BILL, PAYMENT)):
+            # Constructed as Atlas's UNAUTHORIZED_ACCESS: to be replaced by a recording.
+            return httpx.Response(
+                403,
+                json={
+                    "errorCode": "ATLAS-403-00-001",
+                    "errorMessage": "reader is not authorized to perform read entity",
+                },
+            )
+        return atlas(request)
+
+    found = read(build(refuses_some), [INVOICE, BILL, PAYMENT])
+    assert set(found) == {INVOICE}
+    assert [r.getMessage() for r in caplog.records] == ["atlas refused some objects to the account"]

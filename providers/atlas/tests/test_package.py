@@ -83,6 +83,15 @@ REFUSED = [
     ({**GOOD, "ATLAS_TIMEOUT_SECONDS": "-1"}, "ATLAS_TIMEOUT_SECONDS"),
     ({**GOOD, "ATLAS_TIMEOUT_SECONDS": "nan"}, "ATLAS_TIMEOUT_SECONDS"),
     ({**GOOD, "ATLAS_OWNER_ATTRIBUTE": "owner"}, "ATLAS_OWNER_ATTRIBUTE"),
+    ({**GOOD, "ATLAS_URL": "http://atlas:21000/?x=1"}, "a query or a fragment"),
+    ({**GOOD, "ATLAS_URL": "http://atlas:21000/#top"}, "a query or a fragment"),
+    ({**GOOD, "ATLAS_URL": "http://atlas:21000?"}, "a query or a fragment"),
+    ({**GOOD, "ATLAS_CONNECT_TIMEOUT_SECONDS": "0"}, "ATLAS_CONNECT_TIMEOUT_SECONDS"),
+    ({**GOOD, "ATLAS_CONNECT_TIMEOUT_SECONDS": "5"}, "below ATLAS_TIMEOUT_SECONDS"),
+    (
+        {**GOOD, "ATLAS_TIMEOUT_SECONDS": "0.5", "ATLAS_CONNECT_TIMEOUT_SECONDS": "0.5"},
+        "below ATLAS_TIMEOUT_SECONDS",
+    ),
     ({**GOOD, "ATLAS_OWNER_ATTRIBUTE": ".owner"}, "ATLAS_OWNER_ATTRIBUTE"),
 ]
 
@@ -109,18 +118,20 @@ def test_from_env_requires_the_url_a_way_to_authenticate_and_the_clusters(tmp_pa
     assert (plain.auth, plain.secret()) == ("basic", "p")
     knox = read_settings({**url, "ATLAS_KNOX_TOKEN_FILE": str(token)})
     assert (knox.auth, knox.user, knox.secret()) == ("knox", "", "knox-token")
+    keytab = tmp_path / "reader.keytab"
+    keytab.write_bytes(b"keytab")
     kerberos = read_settings(
         {
             **url,
             "ATLAS_AUTH": "kerberos",
             "ATLAS_PRINCIPAL": "reader@EXAMPLE",
-            "ATLAS_KEYTAB": " /k ",
+            "ATLAS_KEYTAB": f" {keytab} ",
         }
     )
     assert (kerberos.auth, kerberos.principal, kerberos.keytab, kerberos.secret()) == (
         "kerberos",
         "reader@EXAMPLE",
-        "/k",
+        str(keytab),
         "",
     )
     assert isinstance(kerberos, AtlasSettings) and PASSWORD not in repr(basic)
@@ -131,6 +142,7 @@ def test_the_settings_have_their_defaults_and_fold_the_catalogs():
     assert dict(settings.clusters) == {"lake": "primary"}
     assert settings.table_types == ("hive_table", "iceberg_table")
     assert (settings.max_query_chars, settings.timeout_seconds) == (6000, 5.0)
+    assert settings.connect_timeout_seconds == 1.0
     assert settings.glossaries == settings.classifications == frozenset()
     assert settings.business_metadata == frozenset()
     assert (settings.owner_attribute, settings.term_status_attribute) == ("", "")

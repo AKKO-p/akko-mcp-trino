@@ -55,6 +55,7 @@ secret.
 | `ATLAS_CA_BUNDLE` | CA bundle to check Atlas's certificate against | the system's |
 | `ATLAS_PROXY` | `http` or `https` proxy to reach Atlas; the environment's proxy settings are never read | none |
 | `ATLAS_TIMEOUT_SECONDS` | timeout of one request to Atlas | `5` |
+| `ATLAS_CONNECT_TIMEOUT_SECONDS` | time to open a connection to one address, below `ATLAS_TIMEOUT_SECONDS`, so that a silent address gives way to the next one within the call | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | glossary term reads sent at once, from 1 to 32 | `4` |
 
 A secret given as a file (`*_FILE`) is read again when the file changes.
@@ -119,10 +120,12 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 
 | Atlas answers | The provider |
 |---|---|
-| a refused connection, a timeout or a 5xx | tries the next address of `ATLAS_URL`, then is unavailable |
-| a redirect to an address of `ATLAS_URL` (the passive server of Atlas HA) | follows it |
+| a refused connection, or none opened within `ATLAS_CONNECT_TIMEOUT_SECONDS` | tries the next address of `ATLAS_URL`, and starts the next calls there; then is unavailable |
+| a timeout once connected, a body that cannot be decoded, or a 5xx | tries the next address of `ATLAS_URL`, then is unavailable |
+| a redirect to an address of `ATLAS_URL` (the passive server of Atlas HA) | follows it, and starts the next calls at that address |
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
-| 401 or 403 | is refused at once; the session cookie is dropped |
+| 401, or a 403 other than below | is refused at once; the session cookie is dropped |
+| 403 with `ATLAS-403-00-001` (Atlas refuses the account some of the objects asked) | serves nothing of that read (the whole batch of tables, or that term), stays open, and logs `atlas refused some objects to the account` once for the call |
 | a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
 | 404 with `ATLAS-404-00-009` to a table read (no such instance) | knows nothing of these tables |
 | 404 with `ATLAS-404-00-005` to a term read (no such GUID) | leaves that term out |
@@ -139,9 +142,15 @@ With `ATLAS_AUTH=kerberos`, the provider answers Atlas's `WWW-Authenticate: Nego
 from `pyspnego`. Each negotiation gets a new ticket from the keytab, kept in a cache in memory
 (`MEMORY:`), so an expired ticket is never used and no process of its own renews one; it is one
 request to the KDC. Once Atlas opens a session (`ATLASSESSIONID`), no new negotiation happens until
-Atlas asks for one, and a redirect of Atlas's passive server negotiates again with the active one. A
-negotiation that fails makes the provider unavailable for the call, with no other address tried.
+Atlas asks for one, and a redirect of Atlas's passive server negotiates again with the active one.
 Mutual authentication of Atlas is left to TLS (`https` and `ATLAS_CA_BUNDLE`).
+
+A negotiation that fails is a refusal of the account, as a 401 is, with no other address tried: a
+keytab the KDC refuses (a password reset in the directory, a wrong principal, a keytab that cannot
+be used) is not tried again for `MCP_CONTEXT_REFUSED_RETRY_SECONDS`, so that the provider never
+locks the account with failed pre-authentications. Only a KDC that cannot be found or reached makes
+the provider unavailable, retried as an outage. `ATLAS_KEYTAB` must be a file the server can read
+at start; a rotated keytab (its time or size changes) lifts the refusal, as `SIGHUP` does.
 
 What the container needs:
 
@@ -160,8 +169,11 @@ What the container needs:
 
 1. **Read only.** The account needs to read entities, glossaries and their terms, and nothing
    else: no write, no administration. On Atlas with its own users, a user of the
-   `DATA_SCIENTIST` role is enough: the recorded answers of the contract were read with one. On
-   Atlas governed by Ranger, a policy of the `atlas` service that only reads.
+   `DATA_SCIENTIST` role is enough: the seeded reference answers (`atlas-2.1-seed`) were read
+   with one. On Atlas governed by Ranger, a policy of the `atlas` service that only reads.
+   **The account must read every table it serves**, under the mapped clusters, and every term
+   of the allowed glossaries: Atlas refuses a whole bulk read when one of its tables is denied
+   (403 `ATLAS-403-00-001`), and that batch then gets no context.
 2. **It sees what is served to everyone.** The provider serves what this account reads, within
    the allow lists, to every caller who sees the object in Trino. Give it only the glossaries,
    classifications and business metadata that anyone who sees the table may read.
@@ -172,11 +184,17 @@ What the container needs:
 
 ## Checking the configuration
 
-`akko-mcp-trino --check` prints the addresses (never with credentials), the authentication,
-the principal for Kerberos, the catalogs, the sets served and the bound on parallel reads. It
-then asks Atlas its version (`GET /api/atlas/admin/version`) and prints
-`atlas: answers, version <version>`, or a line that starts with `UNREACHABLE:` when Atlas
-refuses the account or does not answer; `--check --strict` then exits 2.
+`akko-mcp-trino --check` prints one line per setting: the addresses (never with credentials),
+the authentication (the user, or the principal and service for Kerberos, never a secret or the
+keytab's path), each catalog and its cluster, the table types, the timeouts, the bound on the
+query of a bulk read and on parallel term reads, the sets served, the owner and term status
+attributes, and whether a CA bundle and a proxy are set (never the proxy's address). It then asks
+Atlas its version (`GET /api/atlas/admin/version`) and prints `atlas: answers, version
+<version>`, or a line that starts with `UNREACHABLE:` when Atlas refuses the account (a refused
+Kerberos negotiation included) or does not answer; `--check --strict` then exits 2. Last, it asks
+each table type for a name no table carries, and prints the types Atlas does not know: when it
+knows none of them (`atlas: knows none of the table types`), the provider serves nothing, and logs
+that line once when it finds out.
 
 ## Atlas versions
 

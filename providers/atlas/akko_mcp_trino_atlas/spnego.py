@@ -11,7 +11,13 @@ cookie is sent and no new negotiation happens until Atlas asks for one. Atlas's 
 mutual authentication token is not checked: TLS authenticates Atlas.
 
 The service name is ``ATLAS_SPN`` when set (``HTTP@<host>``), else ``HTTP@<host of the
-request>``. No message, log or exception names the principal, the keytab or the token.
+request>``. The token is SPNEGO (``protocol="negotiate"``), as ``curl --negotiate`` sends.
+No message, log or exception names the principal, the keytab or the token.
+
+A negotiation that fails is a refusal of the account (``NegotiationError`` with
+``unreachable`` false), since a retry every few seconds with a keytab the KDC refuses would
+lock the account in a directory that counts failed pre-authentications; only a KDC that
+cannot be found or reached (the Kerberos codes of ``KDC_UNREACHABLE``) is an outage.
 """
 
 import base64
@@ -21,10 +27,41 @@ from typing import Any
 import httpx
 
 _NEGOTIATE = "negotiate"
+# MIT Kerberos codes of a KDC that was never reached: KRB5_KDC_UNREACH (cannot contact any
+# KDC), KRB5_REALM_UNKNOWN (cannot find a KDC for the realm) and KRB5_REALM_CANT_RESOLVE
+# (cannot resolve its address). Any other failure reached the KDC, or the keytab.
+KDC_UNREACHABLE = frozenset(code & 0xFFFFFFFF for code in (-1765328228, -1765328229, -1765328164))
 
 
 class NegotiationError(Exception):
-    """The security context could not be built or stepped; the reason stays out."""
+    """The security context could not be built or stepped; the reason stays out.
+
+    ``unreachable`` says the KDC could not be found or reached: an outage, not a refusal.
+    """
+
+    def __init__(self, unreachable: bool) -> None:
+        """Say whether the KDC could not be reached; the message is fixed."""
+        super().__init__("the kerberos negotiation failed")
+        self.unreachable = unreachable
+
+
+def _codes(error: BaseException) -> set[int]:
+    """The Kerberos and GSSAPI codes an error carries, its causes and base error included
+    (``krb5.Krb5Error.err_code``, ``gssapi`` ``min_code``), as unsigned 32-bit numbers."""
+    codes: set[int] = set()
+    seen: list[BaseException] = []
+    pending: list[BaseException | None] = [error]
+    while pending:
+        current = pending.pop()
+        if current is None or any(current is s for s in seen) or len(seen) > 8:
+            continue
+        seen.append(current)
+        for name in ("err_code", "min_code"):
+            value = getattr(current, name, None)
+            if isinstance(value, int):
+                codes.add(value & 0xFFFFFFFF)
+        pending += [current.__cause__, current.__context__, getattr(current, "base_error", None)]
+    return codes
 
 
 def load_spnego() -> Any:
@@ -77,7 +114,7 @@ class SpnegoAuth(httpx.Auth):
         service, host = self._service(request)
         credential = self._spnego.KerberosKeytab(keytab=self._keytab, principal=self._principal)
         return self._spnego.client(
-            username=credential, hostname=host, service=service, protocol="kerberos"
+            username=credential, hostname=host, service=service, protocol="negotiate"
         )
 
     def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
@@ -88,7 +125,8 @@ class SpnegoAuth(httpx.Auth):
         try:
             context = self._context(request)
             token = context.step()
-        except Exception:  # noqa: BLE001 - spnego's errors may name the principal
-            raise NegotiationError("the kerberos negotiation failed") from None
+        except Exception as exc:  # noqa: BLE001 - spnego's errors may name the principal
+            unreachable = bool(_codes(exc) & KDC_UNREACHABLE)
+            raise NegotiationError(unreachable) from None
         request.headers["Authorization"] = "Negotiate " + base64.b64encode(token).decode()
         yield request

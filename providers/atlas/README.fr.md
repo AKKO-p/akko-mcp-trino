@@ -55,6 +55,7 @@ cite une adresse, un proxy ni un secret.
 | `ATLAS_CA_BUNDLE` | autorités de certification contre lesquelles vérifier le certificat d'Atlas | celles du système |
 | `ATLAS_PROXY` | proxy `http` ou `https` pour joindre Atlas ; les réglages de proxy de l'environnement ne sont jamais lus | aucun |
 | `ATLAS_TIMEOUT_SECONDS` | délai d'une requête à Atlas | `5` |
+| `ATLAS_CONNECT_TIMEOUT_SECONDS` | délai pour ouvrir une connexion à une adresse, inférieur à `ATLAS_TIMEOUT_SECONDS`, pour qu'une adresse muette laisse la place à la suivante dans le temps de l'appel | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | lectures de termes de glossaire envoyées à la fois, de 1 à 32 | `4` |
 
 Un secret donné par fichier (`*_FILE`) est relu quand le fichier change.
@@ -120,10 +121,12 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 
 | Atlas répond | Le fournisseur |
 |---|---|
-| une connexion refusée, un délai dépassé ou un 5xx | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible |
-| une redirection vers une adresse d'`ATLAS_URL` (le serveur passif d'Atlas HA) | la suit |
+| une connexion refusée, ou aucune ouverte en `ATLAS_CONNECT_TIMEOUT_SECONDS` | essaie l'adresse suivante d'`ATLAS_URL`, et commence par elle aux appels suivants ; puis se dit indisponible |
+| un délai dépassé une fois connecté, un corps qui ne se décode pas, ou un 5xx | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible |
+| une redirection vers une adresse d'`ATLAS_URL` (le serveur passif d'Atlas HA) | la suit, et commence par cette adresse aux appels suivants |
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
-| 401 ou 403 | se dit refusé tout de suite ; le cookie de session est oublié |
+| 401, ou un 403 autre que celui d'en dessous | se dit refusé tout de suite ; le cookie de session est oublié |
+| 403 avec `ATLAS-403-00-001` (Atlas refuse au compte une partie des objets demandés) | ne sert rien de cette lecture (tout le lot de tables, ou ce terme), reste ouvert, et écrit une fois pour l'appel `atlas refused some objects to the account` |
 | un 200 qui n'est pas du JSON (une page de connexion Knox), un JSON illisible, un autre statut | se dit indisponible |
 | 404 avec `ATLAS-404-00-009` à une lecture de tables (aucune instance) | ne sait rien de ces tables |
 | 404 avec `ATLAS-404-00-005` à une lecture de terme (aucun GUID) | écarte ce terme |
@@ -141,9 +144,16 @@ jeton de `pyspnego`. Chaque négociation obtient un ticket neuf depuis le keytab
 en mémoire (`MEMORY:`) : un ticket expiré n'est jamais utilisé et aucun processus à part ne le
 renouvelle ; c'est une requête au KDC. Une fois qu'Atlas a ouvert une session (`ATLASSESSIONID`),
 aucune nouvelle négociation n'a lieu tant qu'Atlas n'en demande pas, et une redirection du serveur
-passif d'Atlas renégocie avec l'actif. Une négociation qui échoue rend le fournisseur indisponible
-pour l'appel, sans essayer d'autre adresse. L'authentification mutuelle d'Atlas est laissée à TLS
+passif d'Atlas renégocie avec l'actif. L'authentification mutuelle d'Atlas est laissée à TLS
 (`https` et `ATLAS_CA_BUNDLE`).
+
+Une négociation qui échoue est un refus du compte, comme un 401, sans essayer d'autre adresse : un
+keytab que le KDC refuse (un mot de passe changé dans l'annuaire, un mauvais principal, un keytab
+inutilisable) n'est plus essayé pendant `MCP_CONTEXT_REFUSED_RETRY_SECONDS`, pour que le
+fournisseur ne verrouille jamais le compte par des échecs de pré-authentification. Seul un KDC
+introuvable ou injoignable rend le fournisseur indisponible, réessayé comme une panne.
+`ATLAS_KEYTAB` doit être un fichier que le serveur peut lire au démarrage ; un keytab remplacé (son
+heure ou sa taille change) lève le refus, comme `SIGHUP`.
 
 Ce qu'il faut au conteneur :
 
@@ -162,9 +172,12 @@ Ce qu'il faut au conteneur :
 
 1. **Lecture seule.** Le compte doit lire les entités, les glossaires et leurs termes, rien
    d'autre : aucune écriture, aucune administration. Sur un Atlas à utilisateurs propres, un
-   utilisateur du rôle `DATA_SCIENTIST` suffit : les réponses enregistrées du contrat ont été lues
-   avec un tel compte. Sur un Atlas gouverné par Ranger, une règle du service `atlas` qui ne fait
-   que lire.
+   utilisateur du rôle `DATA_SCIENTIST` suffit : les réponses de référence garnies
+   (`atlas-2.1-seed`) ont été lues avec un tel compte. Sur un Atlas gouverné par Ranger, une règle
+   du service `atlas` qui ne fait que lire. **Le compte doit lire chaque table qu'il sert**, sous
+   les clusters rattachés, et chaque terme des glossaires autorisés : Atlas refuse toute une
+   lecture par lot dès qu'une de ses tables est interdite (403 `ATLAS-403-00-001`), et ce lot n'a
+   alors aucun contexte.
 2. **Il voit ce qui est servi à tous.** Le fournisseur sert ce que lit ce compte, dans la limite
    des listes blanches, à chaque appelant qui voit l'objet dans Trino. Ne lui donnez que les
    glossaires, classifications et métadonnées métier que toute personne qui voit la table peut
@@ -177,11 +190,18 @@ Ce qu'il faut au conteneur :
 
 ## Vérifier la configuration
 
-`akko-mcp-trino --check` affiche les adresses (jamais avec des identifiants), l'authentification,
-le principal pour Kerberos, les catalogues, les ensembles servis et la borne des lectures en
-parallèle. Il demande ensuite sa version à Atlas (`GET /api/atlas/admin/version`) et affiche
-`atlas: answers, version <version>`, ou une ligne qui commence par `UNREACHABLE:` quand Atlas
-refuse le compte ou ne répond pas ; `--check --strict` sort alors avec le code 2.
+`akko-mcp-trino --check` affiche une ligne par réglage : les adresses (jamais avec des
+identifiants), l'authentification (l'utilisateur, ou le principal et le service pour Kerberos,
+jamais un secret ni le chemin du keytab), chaque catalogue et son cluster, les types de table, les
+délais, les bornes de la requête d'une lecture par lot et des lectures de termes en parallèle, les
+ensembles servis, les attributs du propriétaire et du statut des termes, et si des autorités de
+certification et un proxy sont posés (jamais l'adresse du proxy). Il demande ensuite sa version à
+Atlas (`GET /api/atlas/admin/version`) et affiche `atlas: answers, version <version>`, ou une
+ligne qui commence par `UNREACHABLE:` quand Atlas refuse le compte (une négociation Kerberos
+refusée comprise) ou ne répond pas ; `--check --strict` sort alors avec le code 2. Enfin, il
+demande à chaque type de table un nom qu'aucune table ne porte, et affiche les types qu'Atlas ne
+connaît pas : s'il n'en connaît aucun (`atlas: knows none of the table types`), le fournisseur ne
+sert rien, et écrit cette ligne au journal une fois quand il le découvre.
 
 ## Versions d'Atlas
 

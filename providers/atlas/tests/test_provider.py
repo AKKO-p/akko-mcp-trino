@@ -328,20 +328,102 @@ def test_a_name_longer_than_the_query_length_goes_alone():
     assert batches([], 40) == []
 
 
-def test_check_lines_name_the_addresses_and_sets_never_the_secret():
+def test_check_lines_print_every_setting_and_never_a_secret(tmp_path):
+    import certifi
+
     p = provider(FakeAtlas("atlas-2.4"), **SERVED)
     lines = p.check_lines()
     asyncio.run(p.aclose())
+    # Atlas 2.4 has no iceberg_table type: the check says so.
     assert lines == [
-        f"atlas: {ATLAS} (basic); catalogs: lake; at most 4 requests at once",
-        "atlas: glossaries: finance; classifications: confidential; "
-        "business metadata: stewardship; owner: served",
+        f"atlas: addresses: {ATLAS}",
+        "atlas: authentication: basic, user reader",
+        "atlas: catalogs: lake -> primary",
+        "atlas: table types: hive_table, iceberg_table",
+        "atlas: timeouts: connect 1 s, read 5 s",
+        "atlas: bulk reads: 6000 characters of query at most",
+        "atlas: term reads: 4 at once at most",
+        "atlas: glossaries: finance",
+        "atlas: classifications: confidential",
+        "atlas: business metadata: stewardship",
+        "atlas: owner: stewardship.ownerTeam",
+        "atlas: term status attribute: none",
+        "atlas: CA bundle: the system's",
+        "atlas: proxy: none",
         "atlas: answers, version 2.4.0",
+        "atlas: does not know the table types iceberg_table",
     ]
-    bare = provider(FakeAtlas("atlas-2.4"))
-    assert bare.check_lines()[1].endswith("business metadata: none; owner: not served")
+    token = tmp_path / "token"
+    token.write_text("knox-secret-token\n", encoding="utf-8")
+    tuned = {
+        "ATLAS_USER": "",
+        "ATLAS_PASSWORD": "",
+        "ATLAS_KNOX_TOKEN_FILE": str(token),
+        "ATLAS_CLUSTERS": '{"lake": "primary", "Archive": "secondary"}',
+        "ATLAS_TABLE_TYPES": "hive_table",
+        "ATLAS_TIMEOUT_SECONDS": "2.5",
+        "ATLAS_CONNECT_TIMEOUT_SECONDS": "0.5",
+        "ATLAS_MAX_QUERY_CHARS": "3000",
+        "ATLAS_MAX_CONCURRENT_REQUESTS": "8",
+        "ATLAS_TERM_STATUS_ATTRIBUTE": "approvalStatus",
+        "ATLAS_CA_BUNDLE": certifi.where(),
+        "ATLAS_PROXY": "http://proxy-user:proxy-pass@proxy:3128",
+    }
+    bare = provider(FakeAtlas("atlas-2.4"), **tuned)
+    other = bare.check_lines()
     asyncio.run(bare.aclose())
-    assert all("reader-pass" not in line for line in lines)
+    assert other[1:7] == [
+        "atlas: authentication: knox token",
+        "atlas: catalogs: archive -> secondary, lake -> primary",
+        "atlas: table types: hive_table",
+        "atlas: timeouts: connect 0.5 s, read 2.5 s",
+        "atlas: bulk reads: 3000 characters of query at most",
+        "atlas: term reads: 8 at once at most",
+    ]
+    assert other[7:14] == [
+        "atlas: glossaries: none",
+        "atlas: classifications: none",
+        "atlas: business metadata: none",
+        "atlas: owner: not served",
+        "atlas: term status attribute: approvalStatus",
+        "atlas: CA bundle: set",
+        "atlas: proxy: set",
+    ]
+    printed = "\n".join(lines + other)
+    for secret in ("reader-pass", "knox-secret-token", "proxy-user", "proxy-pass", "proxy:3128"):
+        assert secret not in printed
+    assert certifi.where() not in printed
+
+
+def test_a_catalogue_that_knows_none_of_the_table_types_says_so(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    atlas = FakeAtlas("atlas-2.4")
+    p = provider(atlas, ATLAS_TABLE_TYPES="hive_tables,iceberg_table")
+    assert (
+        p.check_lines()[-1] == "atlas: knows none of the table types (hive_tables, iceberg_table)"
+    )
+
+    async def run():
+        try:
+            for _ in range(2):
+                assert await p.describe([INVOICES], deadline=time.monotonic() + 5) == {}
+        finally:
+            await p.aclose()
+
+    asyncio.run(run())
+    # Said once, when the last type turns out unknown; the next call asks nothing.
+    assert [r.getMessage() for r in caplog.records] == ["atlas knows none of the table types"]
+
+
+def test_a_term_without_a_glossary_in_its_qualified_name_is_not_attached():
+    atlas = FakeAtlas("atlas-2.4")
+    invoices = atlas.entity("hive_table", "ledger.invoices@primary")
+    meanings = invoices["relationshipAttributes"]["meanings"]
+    meanings[0]["qualifiedName"] = "finance"  # no "@": the glossary is not "finance"
+    meanings[1]["qualifiedName"] = "Staff@"  # an empty glossary
+    found = describe(provider(atlas, ATLAS_GLOSSARIES="finance,hr"), [INVOICES])
+    assert found[INVOICES].terms == ()
 
 
 def test_an_absent_type_is_remembered_until_a_reset_or_a_new_secret(tmp_path):

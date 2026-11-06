@@ -40,6 +40,7 @@ relations (``classifies``, ``replacementTerms``, ``antonyms``...) are not read.
 
 import asyncio
 import itertools
+import logging
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -65,9 +66,14 @@ from akko_mcp_trino.context import (
 )
 
 from .client import INSTANCE_BY_ATTRIBUTE, INSTANCE_BY_GUID, UNKNOWN_TYPE, AtlasClient, Missing
-from .settings import KERBEROS, AtlasSettings
+from .settings import KERBEROS, KNOX, AtlasSettings
+
+log = logging.getLogger(__name__)
 
 BULK = "/api/atlas/v2/entity/bulk/uniqueAttribute/type/"
+# A name no table carries, asked by --check under each table type: a type Atlas does not
+# know answers that it does not exist.
+PROBE_NAME = "check.probe@check"
 TERM = "/api/atlas/v2/glossary/term/"
 VERSION = "/api/atlas/admin/version"
 # A bulk read says nothing of a table Atlas does not hold, or of a type it does not know.
@@ -135,6 +141,12 @@ def _first_of(group: BaseExceptionGroup) -> BaseException:
             if isinstance(error, kind):
                 return error
     return errors[0]
+
+
+def _said_refused(refused: list[str]) -> None:
+    """Log, once for a call, that Atlas refused the account some of the objects asked."""
+    if refused:
+        log.warning("atlas refused some objects to the account")
 
 
 def _wins(names: Iterable[str]) -> str:
@@ -237,56 +249,89 @@ class AtlasProvider:
         unique = [key for key in dict.fromkeys(keys) if key]
         if not unique:
             return {}
+        refused: list[str] = []
         try:
             async with asyncio.timeout(deadline - time.monotonic()):
-                first = await self._term(unique[0])
-                rest = await self._parallel(unique[1:])
+                first = await self._term(unique[0], refused)
+                rest = await self._parallel(unique[1:], refused)
         except TimeoutError:
             raise ProviderUnavailable("the deadline passed before atlas answered") from None
+        _said_refused(refused)
         return {term.key: term for term in (first, *rest) if term is not None}
 
     def check_lines(self) -> list[str]:
-        """Return the addresses, the authentication and what is served, never a secret."""
+        """Return one line per setting, never a secret, a keytab's path or a proxy's address,
+        then what Atlas answers: its version, and the table types it does not know."""
         s, sets = self.settings, self.served_sets()
 
         def names(values: Iterable[str]) -> str:
             return ", ".join(sorted(values)) or "none"
 
-        lines = [
-            f"atlas: {', '.join(s.urls)} ({s.auth}); catalogs: {names(s.clusters)}; "
-            f"at most {s.max_concurrent_requests} requests at once",
-            f"atlas: glossaries: {names(sets[GLOSSARY])}; classifications: "
-            f"{names(sets[CLASSIFICATION])}; business metadata: {names(sets[PROPERTY])}; "
-            "owner: " + ("served" if sets[OWNER] else "not served"),
-        ]
         if s.auth == KERBEROS:
             service = s.spn or "HTTP@<host of each address>"
-            lines.append(f"atlas: kerberos principal {s.principal}, service {service}")
-        return [*lines, self._probe()]
+            authentication = f"kerberos, principal {s.principal}, service {service}"
+        elif s.auth == KNOX:
+            authentication = "knox token"
+        else:
+            authentication = f"basic, user {s.user}"
+        clusters = ", ".join(f"{c} -> {s.clusters[c]}" for c in sorted(s.clusters)) or "none"
+        return [
+            f"atlas: addresses: {', '.join(s.urls)}",
+            f"atlas: authentication: {authentication}",
+            f"atlas: catalogs: {clusters}",
+            f"atlas: table types: {', '.join(s.table_types)}",
+            f"atlas: timeouts: connect {s.connect_timeout_seconds:g} s, "
+            f"read {s.timeout_seconds:g} s",
+            f"atlas: bulk reads: {s.max_query_chars} characters of query at most",
+            f"atlas: term reads: {s.max_concurrent_requests} at once at most",
+            f"atlas: glossaries: {names(sets[GLOSSARY])}",
+            f"atlas: classifications: {names(sets[CLASSIFICATION])}",
+            f"atlas: business metadata: {names(sets[PROPERTY])}",
+            f"atlas: owner: {s.owner_attribute or 'not served'}",
+            f"atlas: term status attribute: {s.term_status_attribute or 'none'}",
+            "atlas: CA bundle: " + ("set" if s.verify is not True else "the system's"),
+            "atlas: proxy: " + ("set" if s.proxy else "none"),
+            *self._probe(),
+        ]
 
-    def _probe(self) -> str:
-        """Ask Atlas its version, on a client and an event loop of the probe's own, so that
-        it runs from any thread; the line says whether Atlas answered, never why in its
-        own words."""
+    def _probe(self) -> list[str]:
+        """Ask Atlas its version, then each table type for a name no table carries, on a
+        client and an event loop of the probe's own, so that it runs from any thread; the
+        lines say what Atlas answered, never in its own words."""
 
-        async def ask() -> Any:
+        async def ask() -> tuple[Any, list[str]]:
             client = AtlasClient(self.settings, self._transport)
             try:
-                return await client.get(VERSION)
+                version = await client.get(VERSION)
+                absent = []
+                for type_name in self.settings.table_types:
+                    answer = await client.get(
+                        BULK + quote(type_name, safe=""),
+                        {"attr_0:qualifiedName": PROBE_NAME},
+                        missing=_BULK_MISSING,
+                    )
+                    if answer is Missing.TYPE:
+                        absent.append(type_name)
+                return version, absent
             finally:
                 await client.aclose()
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             try:
-                answer = pool.submit(asyncio.run, ask()).result()
+                answer, absent = pool.submit(asyncio.run, ask()).result()
             except ProviderRefused:
-                return "UNREACHABLE: atlas refused the account"
+                return ["UNREACHABLE: atlas refused the account"]
             except ProviderUnavailable:
-                return "UNREACHABLE: atlas did not answer"
+                return ["UNREACHABLE: atlas did not answer"]
             except Exception as exc:  # noqa: BLE001 - the check says it failed, by type
-                return f"UNREACHABLE: the atlas check failed ({type(exc).__name__})"
+                return [f"UNREACHABLE: the atlas check failed ({type(exc).__name__})"]
         version = _text(_object(answer).get("Version")).strip()
-        return f"atlas: answers, version {version or 'not given'}"
+        lines = [f"atlas: answers, version {version or 'not given'}"]
+        if len(absent) == len(self.settings.table_types):
+            lines.append(f"atlas: knows none of the table types ({', '.join(absent)})")
+        elif absent:
+            lines.append(f"atlas: does not know the table types {', '.join(absent)}")
+        return lines
 
     async def aclose(self) -> None:
         """Close the HTTP client."""
@@ -304,14 +349,14 @@ class AtlasProvider:
 
     # -- reading
 
-    async def _parallel(self, keys: list[str]) -> list[Term | None]:
+    async def _parallel(self, keys: list[str], refused: list[str]) -> list[Term | None]:
         """Read terms, at most ``ATLAS_MAX_CONCURRENT_REQUESTS`` at a time; the first
         failure cancels the others and is the call's error."""
         slots = asyncio.Semaphore(self.settings.max_concurrent_requests)
 
         async def one(key: str) -> Term | None:
             async with slots:
-                return await self._term(key)
+                return await self._term(key, refused)
 
         try:
             async with asyncio.TaskGroup() as group:
@@ -320,9 +365,12 @@ class AtlasProvider:
             raise _first_of(raised) from None
         return [task.result() for task in tasks]
 
-    async def _term(self, key: str) -> Term | None:
-        """One term, or ``None`` when Atlas does not hold it or it may not be served."""
+    async def _term(self, key: str, refused: list[str]) -> Term | None:
+        """One term, or ``None`` when Atlas does not hold it, refuses it to the account (noted
+        in ``refused``) or it may not be served."""
         doc = await self._client.get(TERM + quote(key, safe=""), missing=INSTANCE_BY_GUID)
+        if doc is Missing.FORBIDDEN:
+            refused.append(key)
         if isinstance(doc, Missing):
             return None
         body = _object(doc)
@@ -367,6 +415,7 @@ class AtlasProvider:
         found: dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
         learnt = (self._generation, self.settings.credentials_stamp())
         types = [t for t in self.settings.table_types if self._absent.get(t) != learnt]
+        refused: list[str] = []
         for type_name in types:
             left = [name for name in names if name not in found]
             for group in batches(left, self.settings.max_query_chars):
@@ -377,13 +426,20 @@ class AtlasProvider:
                 )
                 if doc is Missing.TYPE:
                     self._absent = MappingProxyType({**self._absent, type_name: learnt})
+                    if all(self._absent.get(t) == learnt for t in self.settings.table_types):
+                        log.warning("atlas knows none of the table types")
                     break
+                if doc is Missing.FORBIDDEN:
+                    # One table the account may not read hides its whole batch.
+                    refused += group
+                    continue
                 body = _object(doc)
                 referred = _object(body.get("referredEntities"))
                 for entity in _items(body.get("entities")):
                     qualified = _text(_object(entity.get("attributes")).get("qualifiedName"))
                     if qualified in group and _active(entity):
                         found.setdefault(qualified, (entity, referred))
+        _said_refused(refused)
         return found
 
     def _table(self, entity: Mapping[str, Any], referred: Mapping[str, Any]) -> TableContext:
@@ -440,7 +496,7 @@ class AtlasProvider:
         keys = (
             _text(m.get("guid"))
             for m in meanings
-            if _active(m) and _text(m.get("qualifiedName")).rpartition("@")[2] in allowed
+            if _active(m) and _glossary(m.get("qualifiedName")) in allowed
         )
         return tuple(key for key in dict.fromkeys(keys) if key)
 

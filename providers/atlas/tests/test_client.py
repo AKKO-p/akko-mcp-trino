@@ -256,7 +256,7 @@ def test_the_client_ignores_the_environment_and_sends_its_headers(tmp_path):
     assert options["trust_env"] is False and options["follow_redirects"] is False
     assert isinstance(options["verify"], ssl.SSLContext)
     assert options["proxy"] == "http://proxy:3128"
-    assert options["timeout"] == 5.0
+    assert options["timeout"] == httpx.Timeout(5.0, connect=1.0)
     assert client_options(read_settings(BASE))["proxy"] is None
     assert client_options(read_settings(BASE))["verify"] is True
     assert USER_AGENT == f"akko-mcp-trino-atlas/{akko_mcp_trino_atlas.__version__}"
@@ -308,7 +308,14 @@ def test_a_knox_token_is_sent_as_a_bearer_and_kerberos_sends_no_password(tmp_pat
     assert {r.headers["authorization"] for r in atlas.requests} == {"Bearer knox-token-1"}
 
     atlas.requests.clear()
-    kerberos = {**env, "ATLAS_AUTH": "kerberos", "ATLAS_PRINCIPAL": "r", "ATLAS_KEYTAB": "/k"}
+    keytab = tmp_path / "reader.keytab"
+    keytab.write_bytes(b"keytab")
+    kerberos = {
+        **env,
+        "ATLAS_AUTH": "kerberos",
+        "ATLAS_PRINCIPAL": "r",
+        "ATLAS_KEYTAB": str(keytab),
+    }
     calls(AtlasProvider(read_settings(kerberos), transport=transport(atlas)))
     assert atlas.requests and not any("authorization" in r.headers for r in atlas.requests)
 
@@ -351,3 +358,114 @@ def test_network_settings_are_checked_at_start(setting, value, says):
     with pytest.raises(ValueError, match=says) as raised:
         read_settings({**BASE, setting: value})
     assert PASSWORD not in str(raised.value) and value not in str(raised.value)
+
+
+def test_a_silent_first_address_gives_way_to_the_next_within_the_deadline():
+    atlas = FakeAtlas("atlas-2.4")
+    connects: list[float] = []
+
+    async def silent_first(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "atlas-a":
+            # A node that drops packets: the connection never opens, httpx gives up after
+            # the connect timeout it was given.
+            connects.append(request.extensions["timeout"]["connect"])
+            await asyncio.sleep(request.extensions["timeout"]["connect"])
+            raise httpx.ConnectTimeout("silent")
+        return atlas(request)
+
+    started = time.monotonic()
+    first, second = calls(build(silent_first, ATLAS_CONNECT_TIMEOUT_SECONDS="0.2"), count=2)
+    assert INVOICES in first and first == second
+    assert connects == [0.2]  # the next calls start at the address that answered
+    assert time.monotonic() - started < 2
+
+
+def test_an_address_that_refuses_connections_is_not_tried_first_again():
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host)
+        if request.url.host == "atlas-a":
+            raise httpx.ConnectError("refused")
+        raise httpx.ReadTimeout("slow")  # connected, then too slow: an outage of the call
+
+    first, second = calls(build(handler), count=2)
+    assert isinstance(first, ProviderUnavailable) and isinstance(second, ProviderUnavailable)
+    # The first call tried a, then b; b is tried first from then on.
+    assert seen[:2] == ["atlas-a", "atlas-b"] and seen[2] == "atlas-b"
+
+
+def test_a_passive_redirect_makes_the_active_server_the_first_address():
+    atlas = FakeAtlas("atlas-2.4")
+    seen: list[str] = []
+
+    def passive(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host)
+        if request.url.host == "atlas-a":
+            target = request.url.copy_with(host="atlas-b")
+            return httpx.Response(303, headers={"location": str(target)})
+        return atlas(request)
+
+    first, second = calls(build(passive, ATLAS_TABLE_TYPES="hive_table"), count=2)
+    assert INVOICES in first and first == second
+    assert seen == ["atlas-a", "atlas-b", "atlas-b"]
+
+
+def objects_refused() -> httpx.Response:
+    """Atlas's answer when the account may not read one of the objects asked.
+
+    Constructed in the format of the recorded error answers, with the code of Atlas's
+    UNAUTHORIZED_ACCESS. To be replaced by the recording of that answer from Atlas.
+    """
+    return httpx.Response(
+        403,
+        json={
+            "errorCode": "ATLAS-403-00-001",
+            "errorMessage": "reader is not authorized to perform read entity",
+        },
+    )
+
+
+def test_an_object_atlas_refuses_to_the_account_is_nothing_and_said_once(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    seen: list[str] = []
+
+    def refuses_objects(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return objects_refused()
+
+    first, second = calls(build(refuses_objects, ATLAS_URL=ATLAS), count=2)
+    # Nothing for the batch, and the account stays open: the second call reads again.
+    assert first == second == {}
+    assert len(seen) == 4  # both types, in each call
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages == ["atlas refused some objects to the account"] * 2  # once a call
+    assert "reader" not in caplog.text and "invoices" not in caplog.text
+
+
+def test_any_other_403_is_a_refusal_of_the_account():
+    others = [
+        httpx.Response(403, headers={"content-type": "text/html"}, text="<h1>Forbidden</h1>"),
+        httpx.Response(403, json={"errorCode": "ATLAS-403-00-002"}),
+        httpx.Response(403, json=["ATLAS-403-00-001"]),
+    ]
+    for answer in others:
+        (error,) = calls(build(lambda request, a=answer: a, ATLAS_URL=ATLAS))
+        assert isinstance(error, ProviderRefused)
+
+
+def test_a_body_that_cannot_be_decoded_is_an_outage(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+
+    def garbled(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json", "content-encoding": "gzip"},
+            content=b"not gzip at all",
+        )
+
+    (error,) = calls(build(garbled, ATLAS_URL=ATLAS))
+    assert isinstance(error, ProviderUnavailable)
+    assert [r.getMessage() for r in caplog.records] == ["atlas unreachable"]

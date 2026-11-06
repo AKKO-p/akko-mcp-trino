@@ -5,6 +5,7 @@ address, a proxy or a secret.
 """
 
 import json
+import os
 import ssl
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -28,6 +29,8 @@ DEFAULT_TABLE_TYPES = ("hive_table", "iceberg_table")
 # Under the 8 KiB request header limit of the Jetty that serves Atlas, request line included.
 DEFAULT_MAX_QUERY_CHARS = 6000
 DEFAULT_TIMEOUT_SECONDS = 5.0
+# Well under a call's deadline, so that a silent address gives way to the next one in time.
+DEFAULT_CONNECT_TIMEOUT_SECONDS = 1.0
 DEFAULT_MAX_CONCURRENT_REQUESTS = 4
 MAX_CONCURRENT_REQUESTS = 32
 
@@ -57,6 +60,7 @@ class AtlasSettings:
     owner_attribute: str = ""
     term_status_attribute: str = ""
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    connect_timeout_seconds: float = DEFAULT_CONNECT_TIMEOUT_SECONDS
     max_concurrent_requests: int = DEFAULT_MAX_CONCURRENT_REQUESTS
     verify: ssl.SSLContext | bool = field(default=True, repr=False, compare=False)
     proxy: str = field(default="", repr=False)
@@ -67,8 +71,20 @@ class AtlasSettings:
         return self._secret.value() if isinstance(self._secret, FileSecret) else self._secret
 
     def credentials_stamp(self) -> str:
-        """Return a value that changes with the secret's file; empty without one."""
+        """Return a value that changes with the secret's file or the keytab; empty without
+        either. It never holds the secret or the keytab's path."""
+        if self.keytab:
+            return _file_stamp(self.keytab)
         return self._secret.stamp() if isinstance(self._secret, FileSecret) else ""
+
+
+def _file_stamp(path: str) -> str:
+    """What changes when a mounted file is rotated: the file, its time and its size."""
+    try:
+        status = os.stat(path)
+    except OSError:
+        return "missing"
+    return f"{status.st_ino}:{status.st_mtime_ns}:{status.st_size}"
 
 
 def _urls(env: Mapping[str, str]) -> tuple[str, ...]:
@@ -82,6 +98,8 @@ def _urls(env: Mapping[str, str]) -> tuple[str, ...]:
             raise ValueError("ATLAS_URL: each address must be an http or https URL with a host")
         if parts.username or parts.password:
             raise ValueError("ATLAS_URL: an address must not hold credentials")
+        if parts.query or parts.fragment or "?" in url or "#" in url:
+            raise ValueError("ATLAS_URL: an address must not hold a query or a fragment")
         try:
             parts.port
         except ValueError:
@@ -143,6 +161,16 @@ def _concurrency(env: Mapping[str, str]) -> int:
     return int(text)
 
 
+def _connect_timeout(env: Mapping[str, str]) -> float:
+    connect = _positive(
+        env, "ATLAS_CONNECT_TIMEOUT_SECONDS", DEFAULT_CONNECT_TIMEOUT_SECONDS, float
+    )
+    timeout = _positive(env, "ATLAS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS, float)
+    if connect >= timeout:
+        raise ValueError("ATLAS_CONNECT_TIMEOUT_SECONDS must be below ATLAS_TIMEOUT_SECONDS")
+    return connect
+
+
 def _owner(env: Mapping[str, str]) -> str:
     owner = env.get("ATLAS_OWNER_ATTRIBUTE", "").strip()
     if owner:
@@ -184,12 +212,15 @@ def _auth(env: Mapping[str, str]) -> dict:
         service, at, host = spn.partition("@")
         if spn and (not at or not service or not host):
             raise ValueError("ATLAS_SPN must read <service>@<host>, such as HTTP@atlas.example")
+        keytab = env["ATLAS_KEYTAB"].strip()
+        if not os.path.isfile(keytab) or not os.access(keytab, os.R_OK):
+            raise ValueError("ATLAS_KEYTAB: the file cannot be read")
         load_spnego()
         return {
             "spn": spn,
             "auth": KERBEROS,
             "principal": env["ATLAS_PRINCIPAL"].strip(),
-            "keytab": env["ATLAS_KEYTAB"].strip(),
+            "keytab": keytab,
         }
     if auth != BASIC:
         raise ValueError("ATLAS_AUTH must be basic or kerberos")
@@ -238,6 +269,7 @@ def read_settings(env: Mapping[str, str]) -> AtlasSettings:
         owner_attribute=_owner(env),
         term_status_attribute=env.get("ATLAS_TERM_STATUS_ATTRIBUTE", "").strip(),
         timeout_seconds=_positive(env, "ATLAS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS, float),
+        connect_timeout_seconds=_connect_timeout(env),
         max_concurrent_requests=_concurrency(env),
         verify=_verify(env),
         proxy=_proxy(env),

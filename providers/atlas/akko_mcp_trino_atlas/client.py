@@ -10,9 +10,12 @@ What an answer means:
 
 - 401 or 403, or a redirect to an address outside ``ATLAS_URL`` (a Knox login on another
   host): ``ProviderRefused``, at once, with no other address tried, so that no loop of
-  attempts locks the account;
-- a refused connection, a timeout or a 5xx: the next address is tried; when none answers,
-  ``ProviderUnavailable``;
+  attempts locks the account. A 403 with ``ATLAS-403-00-001`` is not a refusal of the
+  account: Atlas refused it some of the objects asked, and the read is ``Missing.FORBIDDEN``;
+- a refused connection, a connection that does not open within
+  ``ATLAS_CONNECT_TIMEOUT_SECONDS``, a timeout, a body that cannot be decoded or a 5xx: the
+  next address is tried; when none answers, ``ProviderUnavailable``. An address that could
+  not be connected to is left for the next one in the calls that follow;
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
 - Atlas's own "does not exist" answers, by status and error code, only those the read
@@ -56,6 +59,7 @@ class Missing(Enum):
 
     INSTANCE = "instance"
     TYPE = "type"
+    FORBIDDEN = "forbidden"
 
 
 MissingCodes = Mapping[tuple[int, str], Missing]
@@ -67,10 +71,18 @@ INSTANCE_BY_ATTRIBUTE: MissingCodes = MappingProxyType(
 INSTANCE_BY_GUID: MissingCodes = MappingProxyType({(404, "ATLAS-404-00-005"): Missing.INSTANCE})
 UNKNOWN_TYPE: MissingCodes = MappingProxyType({(400, "ATLAS-400-00-014"): Missing.TYPE})
 _NONE: MissingCodes = MappingProxyType({})
+# Atlas's answer when the account may not read one of the objects asked (Atlas's
+# UNAUTHORIZED_ACCESS): the account is open, those objects are not served.
+OBJECTS_REFUSED = "ATLAS-403-00-001"
 
 
 class _Outage(Exception):
-    """This address could not answer; the next one may."""
+    """This address could not answer; the next one may. ``connect`` says no connection
+    could be opened to it."""
+
+    def __init__(self, connect: bool = False) -> None:
+        super().__init__("outage")
+        self.connect = connect
 
 
 class _BearerAuth(httpx.Auth):
@@ -98,7 +110,9 @@ def client_options(settings: AtlasSettings) -> dict[str, Any]:
         "trust_env": False,
         "verify": settings.verify,
         "proxy": settings.proxy or None,
-        "timeout": settings.timeout_seconds,
+        "timeout": httpx.Timeout(
+            settings.timeout_seconds, connect=settings.connect_timeout_seconds
+        ),
         "follow_redirects": False,
         "headers": {"X-XSRF-HEADER": "", "User-Agent": USER_AGENT, "Accept": "application/json"},
     }
@@ -151,14 +165,18 @@ class AtlasClient:
         """Return the JSON Atlas answers for ``path`` (under ``/api/atlas``), or the
         ``Missing`` that ``missing`` gives the answer's status and error code; raises
         ``ProviderRefused`` or ``ProviderUnavailable``."""
-        count = len(self._urls)
+        count, start = len(self._urls), self._first
         for step in range(count):
-            index = (self._first + step) % count
+            index = (start + step) % count
             try:
                 response = await self._send(self._urls[index] + path, params)
-            except _Outage:
+            except _Outage as outage:
+                if outage.connect:
+                    # A silent or closed address is not tried first again.
+                    self._first = (index + 1) % count
                 continue
-            self._first = index
+            # The address that answered, after a passive server's redirect included.
+            self._first = self._index(response.url, index)
             return self._read(response, missing)
         raise self._unavailable("no address of ATLAS_URL answered")
 
@@ -168,11 +186,16 @@ class AtlasClient:
             try:
                 auth = _auth(self._settings, self._kerberos) or httpx.USE_CLIENT_DEFAULT
                 response = await self._http.get(url, params=params, auth=auth)
-            except httpx.TransportError:
+            except (httpx.ConnectError, httpx.ConnectTimeout):
+                raise _Outage(connect=True) from None
+            except (httpx.TransportError, httpx.DecodingError):
                 raise _Outage from None
-            except NegotiationError:
+            except NegotiationError as failed:
                 # The same credentials fail on every address: none is tried.
-                raise self._unavailable("the kerberos negotiation failed") from None
+                if failed.unreachable:
+                    raise self._unavailable("the kerberos KDC could not be reached") from None
+                self._http.cookies.clear()
+                raise ProviderRefused("the kerberos negotiation was refused") from None
             if response.status_code >= 500:
                 raise _Outage
             location = response.headers.get("location")
@@ -187,16 +210,22 @@ class AtlasClient:
 
     def _ours(self, url: httpx.URL) -> bool:
         """Whether ``url`` lies under one of the addresses of ``ATLAS_URL``."""
-        for base in self._urls:
+        return self._index(url, -1) >= 0
+
+    def _index(self, url: httpx.URL, default: int) -> int:
+        """The index of the address of ``ATLAS_URL`` that ``url`` lies under, or ``default``."""
+        for index, base in enumerate(self._urls):
             own = httpx.URL(base)
             if (url.scheme, url.host, url.port) == (own.scheme, own.host, own.port) and (
                 url.path == own.path or url.path.startswith(own.path.rstrip("/") + "/")
             ):
-                return True
-        return False
+                return index
+        return default
 
     def _read(self, response: httpx.Response, missing: MissingCodes) -> Any:
         status = response.status_code
+        if status == 403 and _error_code(response) == OBJECTS_REFUSED:
+            return Missing.FORBIDDEN
         if status in _REFUSED:
             # A new session is opened on the next call, under the secret read then.
             self._http.cookies.clear()
