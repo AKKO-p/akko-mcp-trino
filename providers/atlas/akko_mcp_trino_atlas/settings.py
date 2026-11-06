@@ -167,7 +167,10 @@ def _connect_timeout(env: Mapping[str, str]) -> float:
     )
     timeout = _positive(env, "ATLAS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS, float)
     if connect >= timeout:
-        raise ValueError("ATLAS_CONNECT_TIMEOUT_SECONDS must be below ATLAS_TIMEOUT_SECONDS")
+        raise ValueError(
+            "ATLAS_CONNECT_TIMEOUT_SECONDS (default 1) must be below ATLAS_TIMEOUT_SECONDS: "
+            "lower it or raise ATLAS_TIMEOUT_SECONDS"
+        )
     return connect
 
 

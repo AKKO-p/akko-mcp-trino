@@ -161,3 +161,20 @@ def test_the_settings_have_their_defaults_and_fold_the_catalogs():
     assert (tuned.max_query_chars, tuned.timeout_seconds) == (4000, 2.5)
     assert tuned.glossaries == frozenset({"finance", "*"})
     assert tuned.term_status_attribute == "validation"
+
+
+def test_a_short_read_timeout_says_which_setting_to_change():
+    says = (
+        "ATLAS_CONNECT_TIMEOUT_SECONDS (default 1) must be below ATLAS_TIMEOUT_SECONDS: "
+        "lower it or raise ATLAS_TIMEOUT_SECONDS"
+    )
+    for timeout in ("1", "0.5"):
+        with pytest.raises(ValueError) as raised:
+            read_settings({**GOOD, "ATLAS_TIMEOUT_SECONDS": timeout})
+        assert str(raised.value) == says
+    assert (
+        read_settings(
+            {**GOOD, "ATLAS_TIMEOUT_SECONDS": "0.5", "ATLAS_CONNECT_TIMEOUT_SECONDS": "0.2"}
+        ).connect_timeout_seconds
+        == 0.2
+    )

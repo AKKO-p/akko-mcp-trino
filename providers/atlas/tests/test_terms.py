@@ -389,4 +389,6 @@ def test_a_term_atlas_refuses_to_the_account_is_left_out_and_said_once(caplog):
 
     found = read(build(refuses_some), [INVOICE, BILL, PAYMENT])
     assert set(found) == {INVOICE}
-    assert [r.getMessage() for r in caplog.records] == ["atlas refused some objects to the account"]
+    assert [r.getMessage() for r in caplog.records] == [
+        "atlas refused some objects to the account; an account with no read grant serves nothing"
+    ]

@@ -146,7 +146,10 @@ def _first_of(group: BaseExceptionGroup) -> BaseException:
 def _said_refused(refused: list[str]) -> None:
     """Log, once for a call, that Atlas refused the account some of the objects asked."""
     if refused:
-        log.warning("atlas refused some objects to the account")
+        log.warning(
+            "atlas refused some objects to the account; "
+            "an account with no read grant serves nothing"
+        )
 
 
 def _wins(names: Iterable[str]) -> str:

@@ -125,7 +125,7 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 | a redirect to an address of `ATLAS_URL` (the passive server of Atlas HA) | follows it, and starts the next calls at that address |
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
 | 401, or a 403 other than below | is refused at once; the session cookie is dropped |
-| 403 with `ATLAS-403-00-001` (Atlas refuses the account some of the objects asked) | serves nothing of that read (the whole batch of tables, or that term), stays open, and logs `atlas refused some objects to the account` once for the call |
+| 403 with `ATLAS-403-00-001` (Atlas refuses the account some of the objects asked) | serves nothing of that read (the whole batch of tables, or that term), stays open, and logs `atlas refused some objects to the account; an account with no read grant serves nothing` once for the call |
 | a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
 | 404 with `ATLAS-404-00-009` to a table read (no such instance) | knows nothing of these tables |
 | 404 with `ATLAS-404-00-005` to a term read (no such GUID) | leaves that term out |
@@ -173,7 +173,11 @@ What the container needs:
    with one. On Atlas governed by Ranger, a policy of the `atlas` service that only reads.
    **The account must read every table it serves**, under the mapped clusters, and every term
    of the allowed glossaries: Atlas refuses a whole bulk read when one of its tables is denied
-   (403 `ATLAS-403-00-001`), and that batch then gets no context.
+   (403 `ATLAS-403-00-001`), and that batch then gets no context. An account with no read grant
+   at all gets that answer on every read: the provider then serves nothing, and its log says so
+   (`atlas refused some objects to the account; an account with no read grant serves nothing`,
+   once a call). `--check` may not see it: it reads the version, and a name no table carries
+   under each type, never an object the account could be refused.
 2. **It sees what is served to everyone.** The provider serves what this account reads, within
    the allow lists, to every caller who sees the object in Trino. Give it only the glossaries,
    classifications and business metadata that anyone who sees the table may read.

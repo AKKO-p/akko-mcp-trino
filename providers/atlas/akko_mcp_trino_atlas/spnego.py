@@ -27,10 +27,11 @@ from typing import Any
 import httpx
 
 _NEGOTIATE = "negotiate"
-# MIT Kerberos codes of a KDC that was never reached: KRB5_KDC_UNREACH (cannot contact any
-# KDC), KRB5_REALM_UNKNOWN (cannot find a KDC for the realm) and KRB5_REALM_CANT_RESOLVE
-# (cannot resolve its address). Any other failure reached the KDC, or the keytab.
-KDC_UNREACHABLE = frozenset(code & 0xFFFFFFFF for code in (-1765328228, -1765328229, -1765328164))
+# MIT Kerberos codes (krb5.h) of a KDC that was never reached: KRB5_KDC_UNREACH (-1765328228,
+# cannot contact any KDC), KRB5_REALM_UNKNOWN (-1765328230, cannot find a KDC for the realm)
+# and KRB5_REALM_CANT_RESOLVE (-1765328164, cannot resolve its address). Any other failure,
+# KRB5_SERVICE_UNKNOWN (-1765328229) included, reached the KDC, or the keytab.
+KDC_UNREACHABLE = frozenset(code & 0xFFFFFFFF for code in (-1765328228, -1765328230, -1765328164))
 
 
 class NegotiationError(Exception):

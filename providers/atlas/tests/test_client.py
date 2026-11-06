@@ -440,7 +440,10 @@ def test_an_object_atlas_refuses_to_the_account_is_nothing_and_said_once(caplog)
     assert first == second == {}
     assert len(seen) == 4  # both types, in each call
     messages = [r.getMessage() for r in caplog.records]
-    assert messages == ["atlas refused some objects to the account"] * 2  # once a call
+    refused = (
+        "atlas refused some objects to the account; an account with no read grant serves nothing"
+    )
+    assert messages == [refused] * 2  # once a call
     assert "reader" not in caplog.text and "invoices" not in caplog.text
 
 

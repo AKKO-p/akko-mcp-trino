@@ -126,7 +126,7 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 | une redirection vers une adresse d'`ATLAS_URL` (le serveur passif d'Atlas HA) | la suit, et commence par cette adresse aux appels suivants |
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
 | 401, ou un 403 autre que celui d'en dessous | se dit refusé tout de suite ; le cookie de session est oublié |
-| 403 avec `ATLAS-403-00-001` (Atlas refuse au compte une partie des objets demandés) | ne sert rien de cette lecture (tout le lot de tables, ou ce terme), reste ouvert, et écrit une fois pour l'appel `atlas refused some objects to the account` |
+| 403 avec `ATLAS-403-00-001` (Atlas refuse au compte une partie des objets demandés) | ne sert rien de cette lecture (tout le lot de tables, ou ce terme), reste ouvert, et écrit une fois pour l'appel `atlas refused some objects to the account; an account with no read grant serves nothing` |
 | un 200 qui n'est pas du JSON (une page de connexion Knox), un JSON illisible, un autre statut | se dit indisponible |
 | 404 avec `ATLAS-404-00-009` à une lecture de tables (aucune instance) | ne sait rien de ces tables |
 | 404 avec `ATLAS-404-00-005` à une lecture de terme (aucun GUID) | écarte ce terme |
@@ -177,7 +177,11 @@ Ce qu'il faut au conteneur :
    du service `atlas` qui ne fait que lire. **Le compte doit lire chaque table qu'il sert**, sous
    les clusters rattachés, et chaque terme des glossaires autorisés : Atlas refuse toute une
    lecture par lot dès qu'une de ses tables est interdite (403 `ATLAS-403-00-001`), et ce lot n'a
-   alors aucun contexte.
+   alors aucun contexte. Un compte sans aucun droit de lecture reçoit cette réponse à chaque
+   lecture : le fournisseur ne sert alors rien, et son journal le dit (`atlas refused some objects
+   to the account; an account with no read grant serves nothing`, une fois par appel). `--check` ne
+   le voit pas forcément : il lit la version, et sous chaque type un nom qu'aucune table ne porte,
+   jamais un objet qui pourrait être refusé au compte.
 2. **Il voit ce qui est servi à tous.** Le fournisseur sert ce que lit ce compte, dans la limite
    des listes blanches, à chaque appelant qui voit l'objet dans Trino. Ne lui donnez que les
    glossaires, classifications et métadonnées métier que toute personne qui voit la table peut

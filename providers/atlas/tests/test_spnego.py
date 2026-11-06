@@ -56,7 +56,11 @@ class GSSError(Exception):
 
 PREAUTH_FAILED = -1765328360  # KRB5KDC_ERR_PREAUTH_FAILED
 PRINCIPAL_UNKNOWN = -1765328378  # KRB5KDC_ERR_C_PRINCIPAL_UNKNOWN
+# From krb5.h of MIT Kerberos.
 KDC_UNREACH = -1765328228  # KRB5_KDC_UNREACH
+REALM_UNKNOWN = -1765328230  # KRB5_REALM_UNKNOWN
+REALM_CANT_RESOLVE = -1765328164  # KRB5_REALM_CANT_RESOLVE
+SERVICE_UNKNOWN = -1765328229  # KRB5_SERVICE_UNKNOWN: the KDC answered
 
 
 @pytest.fixture(autouse=True)
@@ -228,6 +232,7 @@ def challenge_counting(seen: list[str]):
         Krb5Error(f"Preauthentication failed for {PRINCIPAL}", PREAUTH_FAILED),
         Krb5Error(f"Client {PRINCIPAL} not found in Kerberos database", PRINCIPAL_UNKNOWN),
         OSError(f"No such file or directory: {KEYTAB}"),  # the keytab cannot be used
+        Krb5Error("Server not found in Kerberos database", SERVICE_UNKNOWN),
     ],
 )
 def test_a_negotiation_the_kdc_refuses_closes_like_a_refused_account(monkeypatch, caplog, failure):
@@ -252,7 +257,10 @@ def test_a_negotiation_the_kdc_refuses_closes_like_a_refused_account(monkeypatch
     "failure",
     [
         Krb5Error("Cannot contact any KDC for realm", KDC_UNREACH),
+        Krb5Error("Cannot find KDC for realm", REALM_UNKNOWN),
+        Krb5Error("Cannot resolve network address for KDC in realm", REALM_CANT_RESOLVE),
         SpnegoError(GSSError(KDC_UNREACH & 0xFFFFFFFF)),
+        SpnegoError(GSSError(REALM_UNKNOWN & 0xFFFFFFFF)),
     ],
 )
 def test_a_kdc_that_cannot_be_reached_is_an_outage(monkeypatch, caplog, failure):
