@@ -35,9 +35,12 @@ value.
 
 import base64
 import binascii
+import contextvars
 import hashlib
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -219,6 +222,10 @@ def decode_cursor(token: str) -> Cursor:
     )
 
 
+class _Abandoned(Exception):
+    """A catalog read at the same time as others that the pass no longer needs."""
+
+
 def _not_searched(catalog: str, schema: Optional[str], reason: str) -> dict:
     """One part of the scope not searched: a schema, or a whole catalog (schema None)."""
     return {"catalog": catalog, "schema": schema, "reason": reason}
@@ -236,6 +243,7 @@ def search(
     max_word_length: int,
     reserve_seconds: float,
     max_catalogs: int,
+    concurrency: int = 1,
 ) -> dict:
     """Search the tables and columns that hold every word of ``text``, for the verified caller.
 
@@ -253,7 +261,9 @@ def search(
     ends with an answer. A refused metadata view answers its error, which names what to
     allow. A complete search that found nothing, over every call of its chain of cursors,
     adds ``hint``; with several words, it goes on with the per-word pass, whose pages carry
-    ``partial`` and say what that pass searched."""
+    ``partial`` and say what that pass searched. ``concurrency`` catalogs are read at once,
+    each as the caller and within the call; the answer is the one of a search of one
+    catalog at a time."""
     words = search_words(text, min_length)
     if not words:
         raise ValueError(
@@ -419,10 +429,124 @@ def search(
         """The words whose flag is true, in the order given."""
         return [w for w, hit in zip(words, flags) if hit]
 
+    def stalled(begin: Optional[Cursor], cat: str, sch: str, phase: str, offset: int) -> bool:
+        """Whether a stop here is exactly where this call resumed, so it moved nothing: with
+        every read bounded by the call (no query timeout of its own, or one as long as the
+        call), resuming here again would stop every later call at the same place."""
+        return begin is not None and (cat, sch, phase, offset) == (
+            begin.catalog,
+            begin.schema,
+            begin.phase,
+            begin.row_offset,
+        )
+
+    def walk(
+        mode: str,
+        begin: Optional[Cursor],
+        cat: str,
+        used: int,
+        cancelled: Optional[threading.Event],
+    ) -> list[tuple]:
+        """One catalog of a pass, from ``begin`` when it is that catalog's, as the events
+        the pass then replays in order: ``used`` rows already taken before it (0 when the
+        catalog is read at the same time as others, which then take theirs first).
+
+        A read asks for as many rows as the page has room for after ``used``: read alone,
+        that is the room the replay finds, and read at the same time as others, it is
+        more, of which the replay takes the first rows. The order of each read is total,
+        so its first rows are the rows a read of less room answers. A walk stops where the
+        pass would: on the row cap, on a stop for time or on a refused view."""
+        events: list[tuple] = []
+        at = begin if begin is not None and cat == begin.catalog else None
+        first = at.schema if at is not None else ""
+        here = (first, *((at.phase, at.row_offset) if at is not None else (TABLES, 0)))
+
+        def ask() -> None:
+            """Before a statement: none starts once the pass no longer needs this catalog."""
+            if cancelled is not None and cancelled.is_set():
+                raise _Abandoned
+
+        try:
+            governed_catalog(cat)
+        except ValueError:  # a name the statement cannot carry is named, never queried
+            return [("gap", _not_searched(cat, None, INVALID_ARGUMENT))]
+        schemas = [only_schema]
+        if not only_schema:
+            events.append(("open", here))
+            if used >= ctx.page_size:
+                return events
+            ask()
+            try:
+                schemas = schemas_of(cat, first)
+            except CallTimeout:
+                raise
+            except TimeoutError:
+                # Slower than one query may be, or than a whole call: resuming would not help.
+                if time_remains() or stalled(begin, cat, *here):
+                    return [*events, ("gap", _not_searched(cat, None, TIME_BUDGET))]
+                return [*events, ("stop", (*here, TIME_BUDGET))]
+            except Exception as e:  # noqa: BLE001 - this catalog only, said in the answer
+                return [*events, ("gap", _not_searched(cat, None, explain_error(e)["kind"]))]
+        for sch in schemas:
+            phase, offset = (
+                (at.phase, at.row_offset) if at is not None and sch == first else (TABLES, 0)
+            )
+            skipped = False
+            for phase in _PHASES[_PHASES.index(phase) :]:
+                events.append(("before", sch, phase, offset))
+                room = ctx.page_size - used
+                if room <= 0:
+                    return events
+                ask()
+                try:
+                    res = read(mode, phase, cat, sch, offset, room)
+                except CallTimeout:
+                    raise
+                except TimeoutError:
+                    # Slower than one query may be, or than a whole call: named and skipped,
+                    # or every resumed call would stop here again. Stopped by what was left
+                    # of the call after some progress: resumed here.
+                    if time_remains() or stalled(begin, cat, sch, phase, offset):
+                        events.append(("gap", _not_searched(cat, sch, TIME_BUDGET)))
+                        skipped = True
+                        break
+                    return [*events, ("stop", (sch, phase, offset, TIME_BUDGET))]
+                except Exception as e:  # noqa: BLE001 - this schema only, said in the answer
+                    out = metadata_view_error(e)
+                    if out["kind"] in VIEW_REFUSED:  # a view itself: nothing is searched
+                        return [*events, ("error", out, error_code(e))]
+                    events.append(("gap", _not_searched(cat, sch, out["kind"])))
+                    skipped = True
+                    break
+                rows = []
+                for row in res["rows"][:room]:
+                    where = {"catalog": cat, "schema": sch, "table": row[0]}
+                    if phase == TABLES:
+                        entry = {**where, "comment": row[1]}
+                    else:
+                        entry = {**where, "column": row[1], "type": row[2], "comment": row[3]}
+                    if mode == PER_WORD:
+                        entry["words"] = found_by(row[2:] if phase == TABLES else row[4:])
+                    rows.append(entry)
+                more = bool(res.get("truncated")) or len(res["rows"]) > room
+                events.append(("rows", sch, phase, offset, rows, more))
+                used += len(rows)
+                if more:
+                    return events
+                offset = 0
+            if not skipped:
+                events.append(("searched",))
+        return events
+
     def scan(mode: str, begin: Optional[Cursor]) -> dict:
         """One pass over the scope, from ``begin`` (None: from the start), within the row
         cap and the call's time: what it found, what it skipped, where it stopped. A
-        refused metadata view answers its error, as ``{"error"}``."""
+        refused metadata view answers its error, as ``{"error"}``.
+
+        The catalogs are walked one at a time, or ``concurrency`` at once; either way their
+        events are replayed in the order of the catalogs, against the row cap the pass has
+        left, so the answer and the cursor are those of the walk one at a time: what a
+        catalog after the stop found is never served, and resuming reads it again."""
         tables: list[dict] = []
         matches: list[dict] = []
         gaps: list[dict] = []
@@ -430,109 +554,78 @@ def search(
         catalogs = all_catalogs
         if begin is not None:
             catalogs = [c for c in catalogs if c >= begin.catalog]
-
-        def stalled(cat: str, sch: str, phase: str, offset: int) -> bool:
-            """Whether a stop here is exactly where this call resumed, so it moved
-            nothing: with every read bounded by the call (no query timeout of its own, or
-            one as long as the call), resuming here again would stop every later call at
-            the same place."""
-            return begin is not None and (cat, sch, phase, offset) == (
-                begin.catalog,
-                begin.schema,
-                begin.phase,
-                begin.row_offset,
-            )
-
         # Where the pass stopped: the catalog's index, the schema ("" for the catalog's
         # first), the phase and the row offset in it, and why.
         stop: Optional[tuple[int, str, str, int, str]] = None
-        for index, cat in enumerate(catalogs):
-            at = begin if begin is not None and cat == begin.catalog else None
-            first = at.schema if at is not None else ""
-            # Before its schemas are read, the pass of this catalog resumes where it was.
-            here = (index, first, *((at.phase, at.row_offset) if at is not None else (TABLES, 0)))
-            try:
-                governed_catalog(cat)
-            except ValueError:  # a name the statement cannot carry is named, never queried
-                gaps.append(_not_searched(cat, None, INVALID_ARGUMENT))
-                continue
-            schemas = [only_schema]
-            if not only_schema:
-                if len(tables) + len(matches) >= ctx.page_size:
-                    stop = (*here, ROW_CAP)
-                    break
-                try:
-                    schemas = schemas_of(cat, first)
-                except CallTimeout:
-                    raise
-                except TimeoutError:
-                    # Slower than one query may be, or than a whole call: resuming would
-                    # not help.
-                    if time_remains() or stalled(cat, *here[1:]):
-                        gaps.append(_not_searched(cat, None, TIME_BUDGET))
-                        continue
-                    stop = (*here, TIME_BUDGET)
-                    break
-                except Exception as e:  # noqa: BLE001 - this catalog only, said in the answer
-                    gaps.append(_not_searched(cat, None, explain_error(e)["kind"]))
-                    continue
-            for sch in schemas:
-                phase, offset = (
-                    (at.phase, at.row_offset) if at is not None and sch == first else (TABLES, 0)
-                )
-                skipped = False
-                for phase in _PHASES[_PHASES.index(phase) :]:
-                    room = ctx.page_size - len(tables) - len(matches)
-                    if room <= 0:
-                        stop = (index, sch, phase, offset, ROW_CAP)
-                        break
-                    try:
-                        res = read(mode, phase, cat, sch, offset, room)
-                    except CallTimeout:
-                        raise
-                    except TimeoutError:
-                        # Slower than one query may be, or than a whole call: named and
-                        # skipped, or every resumed call would stop here again. Stopped by
-                        # what was left of the call after some progress: resumed here.
-                        if time_remains() or stalled(cat, sch, phase, offset):
-                            gaps.append(_not_searched(cat, sch, TIME_BUDGET))
-                            skipped = True
-                            break
-                        stop = (index, sch, phase, offset, TIME_BUDGET)
-                        break
-                    except Exception as e:  # noqa: BLE001 - this schema only, said in the answer
-                        out = metadata_view_error(e)
-                        if out["kind"] in VIEW_REFUSED:  # a view itself: nothing is searched
-                            note(error=error_code(e))
-                            return {"error": out}
-                        gaps.append(_not_searched(cat, sch, out["kind"]))
-                        skipped = True
-                        break
-                    rows = res["rows"][:room]
-                    for row in rows:
-                        where = {"catalog": cat, "schema": sch, "table": row[0]}
-                        if phase == TABLES:
-                            entry = {**where, "comment": row[1]}
-                        else:
-                            entry = {
-                                **where,
-                                "column": row[1],
-                                "type": row[2],
-                                "comment": row[3],
-                            }
-                        if mode == PER_WORD:
-                            entry["words"] = found_by(row[2:] if phase == TABLES else row[4:])
-                        (tables if phase == TABLES else matches).append(entry)
-                    if res.get("truncated") or len(res["rows"]) > room:
-                        stop = (index, sch, phase, offset + len(rows), ROW_CAP)
-                        break
-                    offset = 0
+
+        def replay(index: int, events: list[tuple]) -> Optional[dict]:
+            """The events of the catalog at ``index``, taken in order until the pass
+            stops; a refused view's error, or None."""
+            nonlocal stop, searched
+            for event in events:
+                kind = event[0]
+                used = len(tables) + len(matches)
+                if kind == "gap":
+                    gaps.append(event[1])
+                elif kind == "open" and used >= ctx.page_size:
+                    stop = (index, *event[1], ROW_CAP)
+                elif kind == "before" and used >= ctx.page_size:
+                    stop = (index, *event[1:], ROW_CAP)
+                elif kind == "rows":
+                    _, sch, phase, offset, rows, more = event
+                    room = ctx.page_size - used
+                    taken = rows[:room]
+                    (tables if phase == TABLES else matches).extend(taken)
+                    if more or len(rows) > room:
+                        stop = (index, sch, phase, offset + len(taken), ROW_CAP)
+                elif kind == "stop":
+                    stop = (index, *event[1])
+                elif kind == "error":
+                    note(error=event[2])
+                    return {"error": event[1]}
+                elif kind == "searched":
+                    searched += 1
+                if stop is not None:
+                    return None
+            return None
+
+        if concurrency <= 1 or len(catalogs) <= 1:
+            for index, cat in enumerate(catalogs):
+                failed = replay(index, walk(mode, begin, cat, len(tables) + len(matches), None))
+                if failed is not None:
+                    return failed
                 if stop is not None:
                     break
-                if not skipped:
-                    searched += 1
-            if stop is not None:
-                break
+        else:
+            cancelled = threading.Event()
+
+            def walk_alone(cat: str) -> Optional[list[tuple]]:
+                """The walk of ``cat`` read at the same time as others; None once the pass
+                no longer needs it."""
+                try:
+                    return walk(mode, begin, cat, 0, cancelled)
+                except _Abandoned:
+                    return None
+
+            pool = ThreadPoolExecutor(
+                max_workers=min(concurrency, len(catalogs)), thread_name_prefix="mcp-search"
+            )
+            try:
+                # Each walk runs as the caller, within the call: the context of this call.
+                futures = [
+                    pool.submit(contextvars.copy_context().run, walk_alone, cat) for cat in catalogs
+                ]
+                for index, future in enumerate(futures):
+                    failed = replay(index, future.result() or [])
+                    if failed is not None:
+                        return failed
+                    if stop is not None:
+                        break
+            finally:
+                # No statement starts past the stop, and none outlives the call: each read
+                # in flight is bounded by what is left of it, and cancelled in Trino then.
+                cancelled.set()
+                pool.shutdown(wait=True, cancel_futures=True)
         return {
             "tables": tables,
             "matches": matches,

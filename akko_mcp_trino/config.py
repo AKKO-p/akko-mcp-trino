@@ -55,6 +55,14 @@ DEFAULT_SEARCH_MIN_LENGTH = 3
 DEFAULT_SEARCH_MAX_WORDS = 8
 DEFAULT_SEARCH_MAX_WORD_LENGTH = 64
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
+# The catalogs one call of `search_columns` reads at once, and the most it may be set to:
+# each is one metadata statement in flight in Trino, for that one call.
+DEFAULT_SEARCH_CONCURRENCY = 8
+MAX_SEARCH_CONCURRENCY = 32
+# The most columns of a table `describe_table` reads, page by page, and the most it may be
+# set to: a page past the first reads DESCRIBE from the first column to the end of the page.
+DEFAULT_DESCRIBE_MAX_COLUMNS = 5000
+MAX_DESCRIBE_MAX_COLUMNS = 100000
 # The most columns `profile_table` profiles in one call, and the rows its sample reads.
 DEFAULT_PROFILE_MAX_COLUMNS = 50
 # The most columns a server may let it profile in one call: each adds five references to the
@@ -212,6 +220,7 @@ class Config:
     # however wide, and the answer says when a page was shortened.
     describe_schema_tables: int = DEFAULT_DESCRIBE_SCHEMA_TABLES
     describe_schema_columns: int = DEFAULT_DESCRIBE_SCHEMA_COLUMNS
+    describe_max_columns: int = DEFAULT_DESCRIBE_MAX_COLUMNS
     # `search_columns`: the shortest word it searches (shorter words are ignored), so that
     # a letter or two does not read every column, and the seconds of the call's budget it
     # keeps in reserve, so that it stops early enough to answer what it searched rather
@@ -222,6 +231,7 @@ class Config:
     search_max_words: int = DEFAULT_SEARCH_MAX_WORDS
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
+    search_concurrency: int = DEFAULT_SEARCH_CONCURRENCY
     # Read commands the allow-list refuses by default, named one by one by the
     # administrator (comma-separated: EXPLAIN, SHOW STATS, SHOW CREATE, SHOW GRANTS,
     # SHOW ROLES, SHOW SESSION). They can show facts beyond a row filter or a column
@@ -315,6 +325,16 @@ class Config:
             found.append(
                 f"MCP_DESCRIBE_SCHEMA_COLUMNS={self.describe_schema_columns}: "
                 "describe_schema must be allowed 1 column or more"
+            )
+        if not 1 <= self.describe_max_columns <= MAX_DESCRIBE_MAX_COLUMNS:
+            found.append(
+                f"MCP_DESCRIBE_MAX_COLUMNS={self.describe_max_columns}: describe_table reads "
+                f"1 to {MAX_DESCRIBE_MAX_COLUMNS} columns of a table"
+            )
+        if not 1 <= self.search_concurrency <= MAX_SEARCH_CONCURRENCY:
+            found.append(
+                f"MCP_SEARCH_CONCURRENCY={self.search_concurrency}: search_columns reads 1 to "
+                f"{MAX_SEARCH_CONCURRENCY} catalogs at once"
             )
         if self.search_min_length < 1:
             found.append(
@@ -573,6 +593,9 @@ class Config:
             describe_schema_columns=int(
                 os.environ.get("MCP_DESCRIBE_SCHEMA_COLUMNS", str(DEFAULT_DESCRIBE_SCHEMA_COLUMNS))
             ),
+            describe_max_columns=int(
+                os.environ.get("MCP_DESCRIBE_MAX_COLUMNS", str(DEFAULT_DESCRIBE_MAX_COLUMNS))
+            ),
             search_min_length=int(
                 os.environ.get("MCP_SEARCH_MIN_LENGTH", str(DEFAULT_SEARCH_MIN_LENGTH))
             ),
@@ -584,6 +607,9 @@ class Config:
             ),
             search_reserve_seconds=float(
                 os.environ.get("MCP_SEARCH_RESERVE_SECONDS", str(DEFAULT_SEARCH_RESERVE_SECONDS))
+            ),
+            search_concurrency=int(
+                os.environ.get("MCP_SEARCH_CONCURRENCY", str(DEFAULT_SEARCH_CONCURRENCY))
             ),
             context_providers=os.environ.get("MCP_CONTEXT_PROVIDERS", ""),
             context_timeout_seconds=float(os.environ.get("MCP_CONTEXT_TIMEOUT_SECONDS", "5")),

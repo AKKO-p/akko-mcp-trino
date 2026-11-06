@@ -52,6 +52,7 @@ from .audit import (
     set_current_request_id,
 )
 from .config import (
+    DEFAULT_DESCRIBE_MAX_COLUMNS,
     DEFAULT_DESCRIBE_SCHEMA_COLUMNS,
     DEFAULT_DESCRIBE_SCHEMA_TABLES,
     DEFAULT_MAX_CATALOGS,
@@ -62,6 +63,7 @@ from .config import (
     DEFAULT_PROFILE_MAX_CONCURRENT,
     DEFAULT_PROFILE_SAMPLE_ROWS,
     DEFAULT_PROFILE_VALUE_CHARS,
+    DEFAULT_SEARCH_CONCURRENCY,
     DEFAULT_SEARCH_MAX_WORD_LENGTH,
     DEFAULT_SEARCH_MAX_WORDS,
     DEFAULT_SEARCH_MIN_LENGTH,
@@ -507,8 +509,17 @@ def _sample_percent(mode: str, percent: Any) -> float:
     return 0.0
 
 
-# The most unknown column names a refusal of profile_table quotes.
+# The most unknown column names a refusal of profile_table quotes, and the characters of
+# each it quotes.
 _QUOTED_NAMES = 10
+_QUOTED_NAME_CHARS = 100
+
+
+def _quoted_name(name: Any) -> Any:
+    """An unknown column name as a refusal quotes it: cut at ``_QUOTED_NAME_CHARS``, "…" said."""
+    if isinstance(name, str) and len(name) > _QUOTED_NAME_CHARS:
+        return name[:_QUOTED_NAME_CHARS] + "\u2026"
+    return name
 
 
 def _profiled_columns(
@@ -528,9 +539,11 @@ def _profiled_columns(
         raise ValueError(f"Invalid columns: {len(columns)} columns, at most {bound} a call.")
     unknown = [c for c in columns if not isinstance(c, str) or c not in described]
     if unknown:
+        quoted = [_quoted_name(c) for c in unknown[:_QUOTED_NAMES]]
         raise ValueError(
-            f"Invalid columns: {len(unknown)} are not columns describe_table lists for you, "
-            f"among them {unknown[:_QUOTED_NAMES]!r}."
+            f"Invalid columns: {len(unknown)} are not columns listed for you, among them "
+            f"{quoted!r}; find a column's exact name with describe_table, page by page "
+            "with its column_offset."
         )
     if len(set(columns)) != len(columns):
         raise ValueError("Invalid columns: a column is named twice.")
@@ -737,6 +750,8 @@ def register_query_tools(
     search_max_words: int = DEFAULT_SEARCH_MAX_WORDS,
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH,
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS,
+    search_concurrency: int = DEFAULT_SEARCH_CONCURRENCY,
+    describe_max_columns: int = DEFAULT_DESCRIBE_MAX_COLUMNS,
     extra_reads: frozenset[str] = frozenset(),
     context: ContextSetup | None = None,
     profile_max_columns: int = DEFAULT_PROFILE_MAX_COLUMNS,
@@ -769,7 +784,10 @@ def register_query_tools(
     `search_max_words` words or a word longer than `search_max_word_length`, and keeps
     `search_reserve_seconds` of the call's budget so that it ends with an answer
     (`MCP_SEARCH_MIN_LENGTH`, `MCP_SEARCH_MAX_WORDS`, `MCP_SEARCH_MAX_WORD_LENGTH`,
-    `MCP_SEARCH_RESERVE_SECONDS`). `extra_reads` are the read commands the allow-list
+    `MCP_SEARCH_RESERVE_SECONDS`), and reads `search_concurrency` catalogs at once
+    (`MCP_SEARCH_CONCURRENCY`). `describe_table` reads a table's columns a page of
+    `max_rows` at a time, up to `describe_max_columns` (`MCP_DESCRIBE_MAX_COLUMNS`).
+    `extra_reads` are the read commands the allow-list
     refuses by default and the administrator opened (`MCP_EXTRA_READ_COMMANDS`): with
     EXPLAIN among them, explain_query prints the plan; without it, it only checks.
     `profile_table` profiles `profile_max_columns` columns at most, and its sample reads
@@ -925,6 +943,7 @@ def register_query_tools(
                     max_word_length=search_max_word_length,
                     reserve_seconds=search_reserve_seconds,
                     max_catalogs=max_catalogs,
+                    concurrency=search_concurrency,
                 )
             )
         except Exception as e:  # noqa: BLE001
@@ -1145,40 +1164,67 @@ def register_query_tools(
         )
     tool("Describe schema")(describe_schema)
 
-    def describe_table(catalog: str, schema: str, table: str, sample_rows: int = 0) -> str:
+    def describe_table(
+        catalog: str, schema: str, table: str, sample_rows: int = 0, column_offset: int = 0
+    ) -> str:
         """Describe a table: its columns, their types and comments, and optionally
         a few sample rows.
 
         Args: catalog, schema, table as bare names; sample_rows (0 to 20) adds
-        that many rows of data. Returns JSON {"columns": [...], "rows": [...],
-        "truncated": bool} where each row is [name, type, extra, comment] and
-        truncated says the server's row cap cut the columns; plus {"sample": {...}}
+        that many rows of data, on the first page only; column_offset, optional, the
+        first column of the page (0, the default, is the first page). Returns JSON
+        {"columns": [...], "rows": [...], "truncated": bool, "next_column_offset": n or
+        null, "columns_cut": bool} where each row is [name, type, extra, comment]: one
+        page of the columns, the server's row cap of them. truncated says the page does
+        not hold every column. When next_column_offset is not null, more columns follow:
+        call again with column_offset=next_column_offset for the next page. columns_cut
+        says the table has more columns than the server reads; plus {"sample": {...}}
         when sample_rows > 0.
         """
         try:
             cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
             tbl = validate_identifier(table, "table")
+            start = check_offset(column_offset)
+            if start >= describe_max_columns:
+                raise ValueError(
+                    f"Invalid column_offset: {start}. This server reads the first "
+                    f"{describe_max_columns} columns of a table (MCP_DESCRIBE_MAX_COLUMNS)."
+                )
+            n = max(0, min(int(sample_rows), MAX_SAMPLE_ROWS))
+            if n and start:
+                raise ValueError(
+                    "Invalid sample_rows: sample rows come with the first page, column_offset 0."
+                )
             fqn = f"{cat}.{sch}.{tbl}"
             note(tables=[fqn])
-            described_rows = run(f"DESCRIBE {fqn}")
+            # DESCRIBE has no offset: it is read from the first column to the end of the
+            # page, one row more telling whether more follow, never past the server's bound.
+            end = min(start + tools.page_size, describe_max_columns)
+            described = run(f"DESCRIBE {fqn}", row_limit=end)
+            listed = described["rows"][:end]
+            more = was_cut(described) or len(described["rows"]) > end
+            rows = listed[start:end]
+            columns_cut = more and end == describe_max_columns
+            next_column = start + len(rows) if more and not columns_cut else None
             out: dict[str, Any] = {
-                "columns": described_rows["columns"],
-                "rows": described_rows["rows"],
-                "truncated": was_cut(described_rows),
+                "columns": described["columns"],
+                "rows": rows,
+                "truncated": start > 0 or more,
+                "next_column_offset": next_column,
+                "columns_cut": columns_cut,
             }
             # Read before a describer can change the answer.
             complete = not out["truncated"]
-            note(rows=len(described_rows["rows"]), truncated=out["truncated"])
+            note(rows=len(rows), truncated=out["truncated"])
             failed = 0
             for describer in tools.describers:
                 try:
-                    out.update(describer(cat, sch, tbl, described_rows["rows"]) or {})
+                    out.update(describer(cat, sch, tbl, rows) or {})
                 except Exception:  # noqa: BLE001 - a catalogue down must not hide the columns
                     failed += 1
             if failed:
                 out["describer_errors"] = failed
-            n = max(0, min(int(sample_rows), MAX_SAMPLE_ROWS))
             if n:
                 # Rows of data are read: the audit line names that statement and its rows.
                 statement = f"SELECT * FROM {fqn} LIMIT {n}"
@@ -1186,8 +1232,10 @@ def register_query_tools(
                 out["sample"] = run(statement)
                 note(rows=len(out["sample"]["rows"]))
             # The context comes last: it takes only what the call has left past its reserve.
+            # It is of the columns of this page, the ones Trino has just listed; a page that
+            # does not hold them all is partial, and serves no grain.
             if service is not None:
-                visible = [str(r[0]) for r in described_rows["rows"]]
+                visible = [str(r[0]) for r in rows]
                 ref = TableRef.of(cat, sch, tbl)
                 out.update(service.for_table(ref, visible, complete=complete))
             return dumps(out)

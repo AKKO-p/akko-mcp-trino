@@ -4,6 +4,13 @@
 
 Nothing is removed or renamed in the answers of the tools.
 
+- `describe_table` answers one page of a table's columns, the row cap of them, as it did, and
+  adds `next_column_offset` and `columns_cut`: a table wider than the row cap is now read to its
+  last column with `column_offset`. `sample_rows` with a `column_offset` above 0 is refused.
+- `search_columns` reads 8 catalogs at once by default (`MCP_SEARCH_CONCURRENCY`), with the same
+  answers as one at a time: Trino receives up to 8 metadata statements at once for each call. Set
+  `MCP_SEARCH_CONCURRENCY=1` for the load of 0.7.
+
 - A ninth tool, `profile_table`. If you used a `profile_table` from an earlier package, this one
   answers only aggregates of the rows the caller may read (`count`, `approx_distinct`, `min`,
   `max` and the share of nulls), computed by one query run as the caller, with the keys the README

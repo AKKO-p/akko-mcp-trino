@@ -68,6 +68,8 @@ _ENV_KEYS = [
     "MCP_PROFILE_CLIENT_TAG",
     "MCP_PROFILE_TIMEOUT_SECONDS",
     "MCP_PROFILE_MAX_CONCURRENT",
+    "MCP_DESCRIBE_MAX_COLUMNS",
+    "MCP_SEARCH_CONCURRENCY",
     "MCP_VISIBILITY_ENABLED",
 ]
 
@@ -765,3 +767,32 @@ def test_full_profiles_without_any_budget_are_warned_of(monkeypatch):
     monkeypatch.setenv("MCP_PROFILE_MODES", "full")
     monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "30")
     assert warning not in Config.from_env().warnings()
+
+
+# ---- describe_table pages its columns; search_columns reads several catalogs at once
+
+
+def test_the_discovery_settings_have_their_defaults_and_variables(monkeypatch):
+    c = Config.from_env()
+    assert (c.describe_max_columns, c.search_concurrency) == (5000, 8)
+    monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", "100000")
+    monkeypatch.setenv("MCP_SEARCH_CONCURRENCY", "32")
+    c = Config.from_env()
+    assert (c.describe_max_columns, c.search_concurrency) == (100000, 32)
+    assert c.problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "100001"])
+def test_describe_max_columns_outside_1_to_100000_refuses_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", count)
+    assert Config.from_env().problems() == [
+        f"MCP_DESCRIBE_MAX_COLUMNS={count}: describe_table reads 1 to 100000 columns of a table"
+    ]
+
+
+@pytest.mark.parametrize("count", ["0", "33"])
+def test_search_concurrency_outside_1_to_32_refuses_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_SEARCH_CONCURRENCY", count)
+    assert Config.from_env().problems() == [
+        f"MCP_SEARCH_CONCURRENCY={count}: search_columns reads 1 to 32 catalogs at once"
+    ]

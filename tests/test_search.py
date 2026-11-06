@@ -8,6 +8,8 @@ whole call when the budget runs out: it answers what it searched and where to re
 import base64
 import json
 import re
+import threading
+import time
 
 import pytest
 
@@ -349,6 +351,7 @@ def _server(
     audit=None,
     max_words=8,
     max_word_length=64,
+    concurrency=1,
 ):
     mcp = FakeMCP()
     register_query_tools(
@@ -361,6 +364,7 @@ def _server(
         search_max_words=max_words,
         search_max_word_length=max_word_length,
         search_reserve_seconds=reserve,
+        search_concurrency=concurrency,
     )
     return mcp.tools["search_columns"]
 
@@ -377,6 +381,7 @@ def _ask(trino, clock, *args, **kw):
             "audit",
             "max_words",
             "max_word_length",
+            "concurrency",
         )
         if k in kw
     }
@@ -1885,3 +1890,164 @@ def test_the_description_says_how_to_use_the_answer_and_that_comments_are_data()
         '"words"',
     ):
         assert said in doc, said
+
+
+# ---- several catalogs at once: the same answers, in the same order, as one at a time
+
+
+def _many(n=12, schemas=3):
+    """``n`` catalogs of ``schemas`` schemas each; every schema holds a table with an email
+    column and one without, so every catalog has rows to find."""
+    names = {f"c{i:02d}": [f"s{j}" for j in range(schemas)] for i in range(n)}
+    columns = {
+        (cat, sch): [
+            ("customers", "email", "varchar", "Contact address"),
+            ("customers", "id", "bigint", None),
+            (f"t_{cat}_{sch}", "email_backup", "varchar", None),
+        ]
+        for cat, schs in names.items()
+        for sch in schs
+    }
+    return names, columns
+
+
+_SCENARIOS = {
+    "one catalog after another": (lambda: Trino(_DEMO, _COLUMNS), ("email",), {}),
+    "a row cap of one": (lambda: Trino(_DEMO, _COLUMNS), ("email",), {"max_rows": 1}),
+    "many catalogs, row cap of five": (lambda: Trino(*_many()), ("email",), {"max_rows": 5}),
+    "many catalogs, row cap of seven": (lambda: Trino(*_many()), ("email",), {"max_rows": 7}),
+    "many catalogs, one page": (lambda: Trino(*_many(6, 2)), ("email",), {"max_rows": 100}),
+    "a catalog in error": (
+        lambda: Trino(*_many(6, 2), fail={"c03": _UserError("CATALOG_NOT_FOUND", "gone")}),
+        ("email",),
+        {"max_rows": 4},
+    ),
+    "a schema in error": (
+        lambda: Trino(*_many(6, 2), fail={("c02", "s1"): _InternalError("broken")}),
+        ("email",),
+        {"max_rows": 6},
+    ),
+    "a refused view": (
+        lambda: Trino(
+            *_many(6, 2),
+            fail={("c04", "s0"): _UserError("PERMISSION_DENIED", "Access Denied: columns")},
+        ),
+        ("email",),
+        {"max_rows": 100},
+    ),
+    "the per-word pass": (lambda: Trino(*_many(5, 2)), ("email zebra",), {"max_rows": 4}),
+    "nothing found": (lambda: Trino(*_many(5, 2)), ("zebra",), {}),
+    "one catalog named": (lambda: Trino(*_many(4, 6)), ("email", "c01"), {"max_rows": 4}),
+}
+
+
+# The scenarios that answer in one page; every other one follows a chain of cursors.
+_ONE_PAGE = {
+    "one catalog after another",
+    "many catalogs, one page",
+    "a refused view",
+    "nothing found",
+}
+
+
+def _chain(clock, make, args, settings, concurrency):
+    """Every page of a search, following next_cursor to its end."""
+    pages, cursor = [], ""
+    for _ in range(100):
+        trino = make()
+        out = _ask(
+            trino, clock, *args, cursor=cursor, budget=100000, concurrency=concurrency, **settings
+        )
+        pages.append(out)
+        cursor = out.get("next_cursor")
+        if not cursor:
+            return pages
+    raise AssertionError("the chain of cursors never ends")
+
+
+@pytest.mark.parametrize("name", list(_SCENARIOS))
+@pytest.mark.parametrize("concurrency", [2, 8, 32])
+def test_several_catalogs_at_once_answer_as_one_at_a_time(clock, name, concurrency):
+    make, args, settings = _SCENARIOS[name]
+    one = _chain(clock, make, args, settings, 1)
+    assert _chain(clock, make, args, settings, concurrency) == one
+    assert len(one) > 1 or name in _ONE_PAGE, "the scenario follows a chain of cursors"
+
+
+def test_one_catalog_at_a_time_sends_the_statements_of_0_8_in_their_order(clock):
+    """MCP_SEARCH_CONCURRENCY=1 is the sequential search: same statements, same order."""
+    trino = Trino(*_many(4, 2))
+    _ask(trino, clock, "email", max_rows=5, concurrency=1)
+    statements = [sql for sql, _ in trino.calls]
+    assert statements[0] == "SHOW CATALOGS"
+    opened = [re.search(r"FROM (\S+)\.information_schema", s) for s in statements[1:]]
+    order = [m.group(1) for m in opened if m]
+    assert order == sorted(order), "catalogs opened one after another, in order"
+
+
+class _Barrier(Trino):
+    """Trino whose read of the schemas of each catalog waits for ``n`` such reads at once."""
+
+    def __init__(self, n, *args, **kw):
+        super().__init__(*args, **kw)
+        self.barrier = threading.Barrier(n, timeout=5)
+
+    def query(self, sql, user=None, params=None, **kw):
+        if "information_schema.schemata" in sql:
+            self.barrier.wait()
+        return super().query(sql, user, params, **kw)
+
+
+def test_several_catalogs_are_read_at_once(clock):
+    names, columns = _many(4, 1)
+    out = _ask(_Barrier(4, names, columns), clock, "email", budget=100000, concurrency=4)
+    assert out["not_searched"] == [] and out["complete"] is True
+    assert {m["catalog"] for m in out["matches"]} == set(names)
+
+
+def test_one_at_a_time_never_reads_two_catalogs_at_once(clock):
+    names, columns = _many(2, 1)
+    trino = _Barrier(2, names, columns)
+    trino.barrier = threading.Barrier(2, timeout=0.2)
+    out = _ask(trino, clock, "email", budget=100000, concurrency=1)
+    assert out["complete"] is False, "the reads waited for a second one that never came"
+
+
+class _Slow(Trino):
+    """Trino whose catalogs after the first answer their schemas only after ``pause``
+    seconds of real time, and that records which catalogs it was asked about."""
+
+    def __init__(self, pause, *args, **kw):
+        super().__init__(*args, **kw)
+        self.pause = pause
+        self.opened = []
+        self.lock = threading.Lock()
+
+    def query(self, sql, user=None, params=None, **kw):
+        found = re.search(r"FROM (\S+)\.information_schema\.schemata", sql)
+        if found:
+            with self.lock:
+                self.opened.append(found.group(1))
+            if found.group(1) != "c00":
+                time.sleep(self.pause)
+        return super().query(sql, user, params, **kw)
+
+
+def _search_threads():
+    return [t for t in threading.enumerate() if t.name.startswith("mcp-search")]
+
+
+def test_no_thread_outlives_the_call_and_no_catalog_starts_after_the_stop(clock):
+    names, columns = _many(20, 1)
+    trino = _Slow(0.2, names, columns)
+    out = _ask(trino, clock, "email", max_rows=2, budget=100000, concurrency=2)
+    assert out["tables"][0]["catalog"] == "c00" and out["next_cursor"] is not None
+    assert _search_threads() == [], "every thread of the call has ended with it"
+    assert "c19" not in trino.opened, "a catalog not started when the page was full never is"
+
+
+def test_each_read_of_several_at_once_is_bounded_by_what_is_left_of_the_call(clock):
+    trino = Trino(*_many(6, 2))
+    _ask(trino, clock, "email", budget=500, reserve=2, concurrency=4)
+    reads = [kw for sql, kw in trino.calls if sql != "SHOW CATALOGS"]
+    assert reads and all(0 < kw["timeout"] <= 498 for kw in reads)

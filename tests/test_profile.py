@@ -717,3 +717,11 @@ def test_the_description_says_a_masked_value_is_the_policy():
 
     tool, _ = _profile()
     assert tool.__doc__.rstrip().endswith(_GOVERNANCE_NOTE)
+
+
+def test_a_refusal_cuts_each_quoted_name_and_says_where_to_find_the_names():
+    tool, _ = _profile(DESCRIBED)
+    out = _call(tool, "tpch", "tiny", "orders", columns=["x" * 300])
+    assert out["kind"] == "invalid_argument"
+    assert "x" * 100 + "\u2026" in out["error"] and "x" * 101 not in out["error"]
+    assert "describe_table" in out["error"] and "column_offset" in out["error"]

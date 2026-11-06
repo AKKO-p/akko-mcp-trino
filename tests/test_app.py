@@ -776,3 +776,16 @@ def test_a_transport_that_fails_to_stop_still_runs_the_close():
     with pytest.raises(RuntimeError), TestClient(app):
         pass
     assert seen == [1]
+
+
+def test_cli_check_reports_the_discovery_settings(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("TRINO_MAX_ROWS", "40")
+    monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", "1234")
+    monkeypatch.setenv("MCP_SEARCH_CONCURRENCY", "3")
+    check_config(Config.from_env())
+    out = capsys.readouterr().out
+    assert "describe_table: pages of 40 columns, 1234 columns at most" in out
+    assert "budget kept in reserve, 3 catalogs at once" in out

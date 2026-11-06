@@ -1205,17 +1205,23 @@ def test_the_descriptions_agree_on_where_an_agent_starts():
 # description once registered, and its answers to a one-column table, with and without a
 # sample read from the same answer.
 def _v072_describe_table_doc() -> str:
-    """The docstring of describe_table in 0.7.2, at its depth there, so that the Python
-    that runs the test gives it the indentation it gives the tool's own."""
+    """The docstring of describe_table since 0.8, which pages its columns, at its depth
+    there, so that the Python that runs the test gives it the indentation it gives the
+    tool's own."""
 
     def describe_table(catalog: str, schema: str, table: str, sample_rows: int = 0) -> str:
         """Describe a table: its columns, their types and comments, and optionally
         a few sample rows.
 
         Args: catalog, schema, table as bare names; sample_rows (0 to 20) adds
-        that many rows of data. Returns JSON {"columns": [...], "rows": [...],
-        "truncated": bool} where each row is [name, type, extra, comment] and
-        truncated says the server's row cap cut the columns; plus {"sample": {...}}
+        that many rows of data, on the first page only; column_offset, optional, the
+        first column of the page (0, the default, is the first page). Returns JSON
+        {"columns": [...], "rows": [...], "truncated": bool, "next_column_offset": n or
+        null, "columns_cut": bool} where each row is [name, type, extra, comment]: one
+        page of the columns, the server's row cap of them. truncated says the page does
+        not hold every column. When next_column_offset is not null, more columns follow:
+        call again with column_offset=next_column_offset for the next page. columns_cut
+        says the table has more columns than the server reads; plus {"sample": {...}}
         when sample_rows > 0.
         """
         return ""
@@ -1231,13 +1237,16 @@ V072_DESCRIBE_DOC = (
     "data access policy, not an error; report what is returned, verbatim, and "
     "do not retry the same call.\n"
 )
+# The answer of 0.7.2, with the two keys of a page 0.8 adds before the sample.
 V072_DESCRIBE_REPLY = (
     '{"columns": ["Column", "Type", "Extra", "Comment"], '
-    '"rows": [["id", "bigint", "", "key"]], "truncated": false}'
+    '"rows": [["id", "bigint", "", "key"]], "truncated": false, '
+    '"next_column_offset": null, "columns_cut": false}'
 )
 V072_DESCRIBE_SAMPLE_REPLY = (
     '{"columns": ["Column", "Type", "Extra", "Comment"], '
     '"rows": [["id", "bigint", "", "key"]], "truncated": false, '
+    '"next_column_offset": null, "columns_cut": false, '
     '"sample": {"columns": ["Column", "Type", "Extra", "Comment"], '
     '"rows": [["id", "bigint", "", "key"]], "row_count": 1}}'
 )
@@ -1267,7 +1276,7 @@ def _orders(**columns):
     )
 
 
-def test_without_a_provider_describe_table_is_unchanged_byte_for_byte():
+def test_without_a_provider_describe_table_is_0_7_2_plus_the_keys_of_a_page():
     described = {
         "columns": ["Column", "Type", "Extra", "Comment"],
         "rows": [["id", "bigint", "", "key"]],
