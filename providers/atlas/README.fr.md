@@ -192,6 +192,18 @@ Ce qu'il faut au conteneur :
    changement de son fichier secret, ou jusqu'à `SIGHUP`, pour que le fournisseur ne le
    verrouille jamais dans un annuaire qui compte les échecs de connexion.
 
+**Droits.** Le contexte suit les droits de Trino : un appelant ne le reçoit que pour les tables et
+les colonnes que Trino lui liste. Le fournisseur lit Atlas avec ce compte technique en lecture
+seule. Les descriptions suivent ce que Trino liste à l'appelant. Avec
+`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` exige en plus que Trino valide un SELECT par
+l'appelant des colonnes qu'il liste, tandis que `describe_schema` continue de servir les
+descriptions des tables que Trino liste. Il ne sert les termes de glossaire, les classifications et
+les métadonnées métier que si leur glossaire, leur classification ou leur ensemble est nommé dans
+`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` ou `ATLAS_BUSINESS_METADATA`, fermées par défaut (vide
+veut dire aucun), et le propriétaire seulement si `ATLAS_OWNER_ATTRIBUTE` est posé. Un glossaire ou
+une classification restreints dans Atlas ne sont donc jamais servis, sauf si l'administrateur les
+nomme. La lecture d'Atlas sous l'identité de l'appelant n'est pas dans cette version.
+
 ## Vérifier la configuration
 
 `akko-mcp-trino --check` affiche une ligne par réglage : les adresses (jamais avec des

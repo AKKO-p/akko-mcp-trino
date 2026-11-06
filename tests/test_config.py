@@ -62,6 +62,16 @@ _ENV_KEYS = [
     "MCP_CONTEXT_MAX_COLUMNS",
     "MCP_PROFILE_MAX_COLUMNS",
     "MCP_PROFILE_SAMPLE_ROWS",
+    "MCP_PROFILE_MODES",
+    "MCP_PROFILE_VALUE_CHARS",
+    "MCP_PROFILE_DESCRIBE_ROWS",
+    "MCP_PROFILE_CLIENT_TAG",
+    "MCP_PROFILE_TIMEOUT_SECONDS",
+    "MCP_PROFILE_MAX_CONCURRENT",
+    "MCP_DESCRIBE_MAX_COLUMNS",
+    "MCP_SEARCH_CONCURRENCY",
+    "MCP_PROFILE_TYPE_CHARS",
+    "MCP_SEARCH_MAX_THREADS",
     "MCP_VISIBILITY_ENABLED",
 ]
 
@@ -569,6 +579,8 @@ def test_the_least_reserve_covers_the_wait_of_the_chain_past_its_deadline():
         "MCP_CONTEXT_MAX_COLUMNS",
         "MCP_PROFILE_MAX_COLUMNS",
         "MCP_PROFILE_SAMPLE_ROWS",
+        "MCP_PROFILE_VALUE_CHARS",
+        "MCP_PROFILE_DESCRIBE_ROWS",
     ],
 )
 def test_a_bound_below_one_is_refused(monkeypatch, name):
@@ -609,3 +621,220 @@ def test_context_warnings_come_only_with_a_provider(monkeypatch):
 def test_a_providers_list_of_nothing_warns_of_nothing(monkeypatch):
     monkeypatch.setenv("MCP_CONTEXT_PROVIDERS", " , ")
     assert Config.from_env().warnings() == []
+
+
+# ---- profile_table: modes, value length, DESCRIBE rows, client tag, time budget
+
+
+def test_the_profile_settings_have_their_defaults():
+    c = Config.from_env()
+    assert (c.profile_modes, c.profile_value_chars, c.profile_describe_rows) == (
+        "sample,bernoulli,full",
+        200,
+        5000,
+    )
+    assert (c.profile_client_tag, c.profile_timeout_seconds) == ("mcp-profile", 0.0)
+    assert c.allowed_profile_modes() == ("sample", "bernoulli", "full")
+    assert c.problems() == []
+
+
+def test_the_profile_settings_are_read_from_their_variables(monkeypatch):
+    for name, value in {
+        "MCP_PROFILE_MODES": " Sample , full,sample",
+        "MCP_PROFILE_VALUE_CHARS": "21",
+        "MCP_PROFILE_DESCRIBE_ROWS": "22",
+        "MCP_PROFILE_CLIENT_TAG": "agents-profile",
+        "MCP_PROFILE_TIMEOUT_SECONDS": "2.5",
+    }.items():
+        monkeypatch.setenv(name, value)
+    c = Config.from_env()
+    assert c.allowed_profile_modes() == ("sample", "full"), "folded, once each, in order"
+    assert (c.profile_value_chars, c.profile_describe_rows) == (21, 22)
+    assert (c.profile_client_tag, c.profile_timeout_seconds) == ("agents-profile", 2.5)
+    assert c.problems() == []
+
+
+@pytest.mark.parametrize("modes", ["", " , ", "sample,stats", "all"])
+def test_profile_modes_empty_or_unknown_refuse_to_start(monkeypatch, modes):
+    monkeypatch.setenv("MCP_PROFILE_MODES", modes)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_MODES={modes!r}: name one mode at least, comma-separated, among "
+        "sample, bernoulli and full"
+    ]
+
+
+@pytest.mark.parametrize("tag", ["", " ", "a,b", "a b", "é", "x" * 101])
+def test_a_profile_client_tag_trino_cannot_carry_refuses_to_start(monkeypatch, tag):
+    monkeypatch.setenv("MCP_PROFILE_CLIENT_TAG", tag)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_CLIENT_TAG={tag.strip()!r}: a client tag is 1 to 100 letters, digits "
+        "and _ . : = / -, without a comma"
+    ]
+
+
+@pytest.mark.parametrize("seconds", ["-1", "nan", "inf"])
+def test_a_negative_or_infinite_profile_timeout_refuses_to_start(monkeypatch, seconds):
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", seconds)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_TIMEOUT_SECONDS={float(seconds):g}: a time budget is 0 (the call's) "
+        "or a number of seconds above 0"
+    ]
+
+
+def test_a_profile_timeout_past_the_call_budget_refuses_to_start(monkeypatch):
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "5")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "6")
+    assert Config.from_env().problems() == [
+        "MCP_PROFILE_TIMEOUT_SECONDS=6 is past MCP_CALL_TIMEOUT_SECONDS=5: the aggregate "
+        "query runs within its call; set it to 5 or less, or 0 for the call's budget"
+    ]
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "5")
+    assert Config.from_env().problems() == []
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "600")
+    assert Config.from_env().problems() == [], "without any other budget, any budget of its own"
+
+
+def test_profile_calls_at_once_are_four_by_default_and_read_from_their_variable(monkeypatch):
+    assert Config.from_env().profile_max_concurrent == 4
+    monkeypatch.setenv("MCP_PROFILE_MAX_CONCURRENT", "64")
+    assert Config.from_env().profile_max_concurrent == 64
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "65"])
+def test_profile_calls_at_once_outside_1_to_64_refuse_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_PROFILE_MAX_CONCURRENT", count)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_MAX_CONCURRENT={count}: profile_table runs 1 to 64 calls at once"
+    ]
+
+
+def test_profile_columns_past_the_hard_cap_refuse_to_start(monkeypatch):
+    from akko_mcp_trino.config import MAX_PROFILE_MAX_COLUMNS
+
+    assert MAX_PROFILE_MAX_COLUMNS == 500
+    monkeypatch.setenv("MCP_PROFILE_MAX_COLUMNS", "500")
+    assert Config.from_env().problems() == []
+    monkeypatch.setenv("MCP_PROFILE_MAX_COLUMNS", "501")
+    assert Config.from_env().problems() == [
+        "MCP_PROFILE_MAX_COLUMNS=501: profile_table profiles 500 columns at most"
+    ]
+
+
+def test_a_profile_timeout_past_the_query_budget_refuses_to_start(monkeypatch):
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "900")
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "60")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "600")
+    assert Config.from_env().problems() == [
+        "MCP_PROFILE_TIMEOUT_SECONDS=600 is past TRINO_QUERY_TIMEOUT_SECONDS=60: the "
+        "aggregate query is a Trino query; set it to 60 or less, or raise "
+        "TRINO_QUERY_TIMEOUT_SECONDS"
+    ]
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize(
+    "own, query, call, effective",
+    [
+        ("0", "60", "120", 60.0),
+        ("0", "0", "120", 120.0),
+        ("0", "200", "120", 120.0),
+        ("30", "60", "120", 30.0),
+        ("30", "0", "0", 30.0),
+        ("0", "45", "0", 45.0),
+        ("0", "0", "0", 0.0),
+    ],
+)
+def test_the_budget_of_the_aggregate_is_the_smallest_set(monkeypatch, own, query, call, effective):
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", own)
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", query)
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", call)
+    assert Config.from_env().profile_budget_seconds() == effective
+
+
+def test_full_profiles_without_any_budget_are_warned_of(monkeypatch):
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    warning = (
+        "MCP_PROFILE_MODES allows full while MCP_PROFILE_TIMEOUT_SECONDS, "
+        "TRINO_QUERY_TIMEOUT_SECONDS and MCP_CALL_TIMEOUT_SECONDS are 0: a full profile reads "
+        "every row it may read with no time limit"
+    )
+    assert warning in Config.from_env().warnings()
+    monkeypatch.setenv("MCP_PROFILE_MODES", "sample,bernoulli")
+    assert warning not in Config.from_env().warnings()
+    monkeypatch.setenv("MCP_PROFILE_MODES", "full")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "30")
+    assert warning not in Config.from_env().warnings()
+
+
+# ---- describe_table pages its columns; search_columns reads several catalogs at once
+
+
+def test_the_discovery_settings_have_their_defaults_and_variables(monkeypatch):
+    c = Config.from_env()
+    assert (c.describe_max_columns, c.search_concurrency) == (5000, 8)
+    monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", "100000")
+    monkeypatch.setenv("MCP_SEARCH_CONCURRENCY", "32")
+    c = Config.from_env()
+    assert (c.describe_max_columns, c.search_concurrency) == (100000, 32)
+    assert c.problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "100001"])
+def test_describe_max_columns_outside_1_to_100000_refuses_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", count)
+    assert Config.from_env().problems() == [
+        f"MCP_DESCRIBE_MAX_COLUMNS={count}: describe_table reads 1 to 100000 columns of a table"
+    ]
+
+
+@pytest.mark.parametrize("count", ["0", "33"])
+def test_search_concurrency_outside_1_to_32_refuses_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_SEARCH_CONCURRENCY", count)
+    assert Config.from_env().problems() == [
+        f"MCP_SEARCH_CONCURRENCY={count}: search_columns reads 1 to 32 catalogs at once"
+    ]
+
+
+def test_the_bound_of_a_type_is_500_by_default_and_read_from_its_variable(monkeypatch):
+    assert Config.from_env().profile_type_chars == 500
+    monkeypatch.setenv("MCP_PROFILE_TYPE_CHARS", "100000")
+    assert Config.from_env().profile_type_chars == 100000
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "100001"])
+def test_a_bound_of_a_type_outside_1_to_100000_refuses_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_PROFILE_TYPE_CHARS", count)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_TYPE_CHARS={count}: profile_table serves 1 to 100000 characters of a type"
+    ]
+
+
+def test_search_threads_of_a_process_are_32_by_default_and_read_from_their_variable(monkeypatch):
+    assert Config.from_env().search_max_threads == 32
+    monkeypatch.setenv("MCP_SEARCH_MAX_THREADS", "256")
+    assert Config.from_env().search_max_threads == 256
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "257"])
+def test_search_threads_outside_1_to_256_refuse_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_SEARCH_MAX_THREADS", count)
+    assert Config.from_env().problems() == [
+        f"MCP_SEARCH_MAX_THREADS={count}: search_columns runs 1 to 256 reads at once in a process"
+    ]
+
+
+def test_describe_reading_more_columns_than_profile_is_warned_of(monkeypatch):
+    warning = (
+        "MCP_DESCRIBE_MAX_COLUMNS=6000 is above MCP_PROFILE_DESCRIBE_ROWS=5000: describe_table "
+        "shows columns profile_table cannot name"
+    )
+    assert warning not in Config.from_env().warnings()
+    monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", "6000")
+    assert warning in Config.from_env().warnings()

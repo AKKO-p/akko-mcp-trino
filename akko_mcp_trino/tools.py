@@ -3,9 +3,10 @@
 The tools are closures over a `TrinoClient`, so they are testable with a fake
 client. Their docstrings are the descriptions MCP hosts show to the model, so
 they are written for a model: what the tool is for, what it returns, and what
-a masked value or a missing row means. The core serves the eight tools an agent
+a masked value or a missing row means. The core serves the nine tools an agent
 needs to read Trino: search tables and columns by words, list catalogs, schemas and
-tables, describe a schema or a table, explain a statement, run a read-only query. A
+tables, describe a schema or a table, profile a table, explain a statement, run a
+read-only query. A
 product built on this core adds its own tools through the same registrar hook, or an
 extension (see `akko_mcp_trino.extensions`).
 
@@ -30,6 +31,9 @@ import decimal
 import functools
 import inspect
 import json
+import math
+import re
+import threading
 import time
 import uuid
 from typing import Any, Callable, Optional, Sequence
@@ -48,20 +52,38 @@ from .audit import (
     set_current_request_id,
 )
 from .config import (
+    DEFAULT_DESCRIBE_MAX_COLUMNS,
     DEFAULT_DESCRIBE_SCHEMA_COLUMNS,
     DEFAULT_DESCRIBE_SCHEMA_TABLES,
     DEFAULT_MAX_CATALOGS,
     DEFAULT_MAX_ROWS,
+    DEFAULT_PROFILE_CLIENT_TAG,
+    DEFAULT_PROFILE_DESCRIBE_ROWS,
+    DEFAULT_PROFILE_MAX_COLUMNS,
+    DEFAULT_PROFILE_MAX_CONCURRENT,
+    DEFAULT_PROFILE_SAMPLE_ROWS,
+    DEFAULT_PROFILE_TYPE_CHARS,
+    DEFAULT_PROFILE_VALUE_CHARS,
+    DEFAULT_SEARCH_CONCURRENCY,
+    DEFAULT_SEARCH_MAX_THREADS,
     DEFAULT_SEARCH_MAX_WORD_LENGTH,
     DEFAULT_SEARCH_MAX_WORDS,
     DEFAULT_SEARCH_MIN_LENGTH,
     DEFAULT_SEARCH_RESERVE_SECONDS,
+    PROFILE_MODES,
 )
 from .context import ContextSetup
 from .context.reply import ContextReader, ContextService
 from .context.types import TableRef
 from .context.visibility import Visibility
-from .errors import INVALID_ARGUMENT, READ_ONLY, TIME_BUDGET, explain_error, metadata_view_error
+from .errors import (
+    BUSY,
+    INVALID_ARGUMENT,
+    READ_ONLY,
+    TIME_BUDGET,
+    explain_error,
+    metadata_view_error,
+)
 from .identity import current_principal, current_subject
 from .search import search
 from .sql_guard import (
@@ -75,7 +97,7 @@ from .sql_guard import (
     tables_for_column,
     validate_identifier,
 )
-from .trino_client import TrinoClient, every_row, gate_runner
+from .trino_client import TrinoClient, every_row, gate_runner, query_tags
 
 MAX_SAMPLE_ROWS = 20
 # The most tables of the agent's statement the advice on an unknown column checks, each by
@@ -217,19 +239,60 @@ def audited(
     return wrapped
 
 
+# What an interval year to month may carry besides its years and months: the relative parts
+# must be 0 and the absolute ones None (dateutil's relativedelta has both kinds), or absent.
+_RELATIVE_PARTS = ("days", "hours", "minutes", "seconds", "microseconds", "leapdays")
+_ABSOLUTE_PARTS = ("year", "month", "day", "weekday", "hour", "minute", "second", "microsecond")
+
+
+def _day_to_second(value: dt.timedelta) -> str:
+    """An interval day to second as Trino prints it: ``D HH:MM:SS.mmm``, ``-`` in front."""
+    micros = (value.days * 86400 + value.seconds) * 1_000_000 + value.microseconds
+    sign = "-" if micros < 0 else ""
+    millis = abs(micros) // 1000
+    days, millis = divmod(millis, 86_400_000)
+    hours, millis = divmod(millis, 3_600_000)
+    minutes, millis = divmod(millis, 60_000)
+    seconds, millis = divmod(millis, 1000)
+    return f"{sign}{days} {hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+
+def _year_to_month(value: Any) -> Optional[str]:
+    """An interval year to month as Trino prints it, ``Y-M`` with ``-`` in front, for a
+    value with whole ``years`` and ``months`` and nothing else set (the Trino client gives
+    dateutil's relativedelta, which the core does not import); None for any other value."""
+    years, months = getattr(value, "years", None), getattr(value, "months", None)
+    if not isinstance(years, int) or not isinstance(months, int):
+        return None
+    if isinstance(years, bool) or isinstance(months, bool):
+        return None
+    if any(getattr(value, name, 0) for name in _RELATIVE_PARTS):
+        return None
+    if any(getattr(value, name, None) is not None for name in _ABSOLUTE_PARTS):
+        return None
+    total = years * 12 + months
+    sign = "-" if total < 0 else ""
+    return f"{sign}{abs(total) // 12}-{abs(total) % 12}"
+
+
 def _plain(value: Any) -> Any:
     """What JSON cannot carry, rendered the way SQL would print it.
 
-    Trino returns dates, timestamps, decimals, varbinary and UUIDs as Python
-    objects. A date column must not make a whole result unserialisable."""
+    Trino returns dates, timestamps, intervals, decimals, varbinary and UUIDs as
+    Python objects. A date column must not make a whole result unserialisable."""
     if isinstance(value, (dt.datetime, dt.date, dt.time)):
         return value.isoformat()
+    if isinstance(value, dt.timedelta):
+        return _day_to_second(value)
     if isinstance(value, decimal.Decimal):
         return str(value)  # exact digits; a float would silently round money
     if isinstance(value, (bytes, bytearray, memoryview)):
         return bytes(value).hex()
     if isinstance(value, uuid.UUID):
         return str(value)
+    interval = _year_to_month(value)
+    if interval is not None:
+        return interval
     raise TypeError(f"unserialisable value of type {type(value).__name__}")
 
 
@@ -397,6 +460,146 @@ _EXPLAIN_PLAN_DOC = (
     + "\n        "
 )
 
+# The types whose values Trino orders, by family, as DESCRIBE writes them: profile_table
+# reads their distinct count, minimum and maximum. Any other type, an unknown one
+# included, has its count only, and is never tried.
+_ORDERED_TYPE = re.compile(
+    r"boolean|tinyint|smallint|integer|bigint|real|double|varbinary|date|uuid|ipaddress"
+    r"|decimal\(\d+, ?\d+\)|varchar(\(\d+\))?|char(\(\d+\))?"
+    r"|(time|timestamp)(\(\d+\))?( with time zone)?"
+    r"|interval year to month|interval day to second"
+)
+# The modes of profile_table and the scope each one says it read.
+_PROFILE_SCOPES = {"sample": "first_rows", "bernoulli": "random_sample", "full": "visible_rows"}
+_SKIPPED = ["distinct", "min", "max"]
+# The types whose min and max are text, or binary: Trino reads them cut, one character or
+# byte past MCP_PROFILE_VALUE_CHARS. A prefix keeps the order, so the cut min and max are
+# exact prefixes of the true ones. A number, a date or a boolean is never cut.
+_CUT_TYPE = re.compile(r"varchar(\(\d+\))?|char(\(\d+\))?|varbinary")
+
+
+def _cut(value: Any, size: int) -> tuple[Any, bool]:
+    """``value`` cut at ``size`` characters, or bytes for a binary one (whole bytes, so its
+    hexadecimal never ends in half a byte); and whether it was cut."""
+    if isinstance(value, (str, bytes, bytearray, memoryview)) and len(value) > size:
+        return value[:size], True
+    return value, False
+
+
+def _quoted(name: str) -> str:
+    """A column name as a quoted identifier, a double quote in it doubled."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _sample_percent(mode: str, percent: Any) -> float:
+    """The percent of ``mode``, checked: in bernoulli, a finite number with
+    ``0 < percent <= 100``; in any other mode, 0 (not given). Raises ValueError."""
+    number = (
+        isinstance(percent, (int, float))
+        and not isinstance(percent, bool)
+        and math.isfinite(percent)
+    )
+    if mode == "bernoulli":
+        if not number or not 0 < percent <= 100:
+            raise ValueError(
+                f"Invalid percent: {percent!r}. In mode bernoulli, percent is a number "
+                "above 0 and at most 100."
+            )
+        return float(percent)
+    if not number or percent != 0:
+        raise ValueError(f"Invalid percent: {percent!r}. percent is only for mode bernoulli.")
+    return 0.0
+
+
+# The most unknown column names a refusal of profile_table quotes, and the characters of
+# each it quotes.
+_QUOTED_NAMES = 10
+_QUOTED_NAME_CHARS = 100
+
+
+def _quoted_name(name: Any) -> Any:
+    """An unknown column name as a refusal quotes it: cut at ``_QUOTED_NAME_CHARS``, "…" said."""
+    if isinstance(name, str) and len(name) > _QUOTED_NAME_CHARS:
+        return name[:_QUOTED_NAME_CHARS] + "\u2026"
+    return name
+
+
+def _profiled_columns(
+    columns: Optional[list[str]], described: dict[str, str], bound: int
+) -> list[str]:
+    """The columns to profile: ``columns``, each named exactly as DESCRIBE listed it,
+    once, at most ``bound`` of them; by default the first ``bound`` DESCRIBE listed.
+    Raises ValueError."""
+    if not described:
+        raise ValueError("Invalid table: DESCRIBE lists no column for you to profile.")
+    if columns is None:
+        return list(described)[:bound]
+    if not isinstance(columns, list) or not columns:
+        raise ValueError("Invalid columns: name one column at least, or leave it out.")
+    # Counted before any name is read: a list of any length costs one comparison.
+    if len(columns) > bound:
+        raise ValueError(f"Invalid columns: {len(columns)} columns, at most {bound} a call.")
+    unknown = [c for c in columns if not isinstance(c, str) or c not in described]
+    if unknown:
+        quoted = [_quoted_name(c) for c in unknown[:_QUOTED_NAMES]]
+        raise ValueError(
+            f"Invalid columns: {len(unknown)} are not columns listed for you, among them "
+            f"{quoted!r}; find a column's exact name with describe_table, page by page "
+            "with its column_offset."
+        )
+    if len(set(columns)) != len(columns):
+        raise ValueError("Invalid columns: a column is named twice.")
+    return list(columns)
+
+
+# What each mode of profile_table reads, said in its description when the server allows it.
+_PROFILE_MODE_DOCS = {
+    "sample": '"sample" reads the first rows, up to the server\'s limit, in no chosen order',
+    "bernoulli": (
+        '"bernoulli" reads every row to draw it, a random sample of percent of the rows, '
+        "percent above 0 and at most 100"
+    ),
+    "full": '"full" reads every row you may read, within the time budget',
+}
+
+
+def _profile_doc(modes: Sequence[str]) -> str:
+    """The description of profile_table, written for a model, for the ``modes`` this
+    server allows: a mode it does not allow is never named."""
+    quoted = ", ".join(f'"{m}"' for m in modes)
+    scopes = ", ".join(f'"{_PROFILE_SCOPES[m]}"' for m in modes)
+    sentences = [
+        "Profile a table from the rows you may read: an aggregate query runs as you, so "
+        "masks and row filters apply as in execute_query.",
+        "",
+        "Args: catalog, schema, table as bare names; columns, optional, the columns to "
+        "profile, named exactly as describe_table lists them, by default the first ones it "
+        "lists, up to the server's limit;",
+        "columns past MCP_PROFILE_DESCRIBE_ROWS for DESCRIBE cannot be named.",
+        f"mode, one of {quoted}"
+        + ('; "sample" is the default' if "sample" in modes else ", always given")
+        + ": "
+        + "; ".join(_PROFILE_MODE_DOCS[m] for m in modes)
+        + ".",
+        'percent, only with "bernoulli".' if "bernoulli" in modes else "Leave percent out.",
+        'Returns JSON {"table", "scope", "rows": n, "columns_cut": bool, "columns": '
+        '[{"column", "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}:',
+        f"scope is {scopes}, after the mode; rows is the count of the rows read;",
+        "null_fraction is null when rows is 0; columns_cut is true when DESCRIBE listed more "
+        "columns than the server reads.",
+        "A text or binary min or max longer than the server's limit is cut, and the column "
+        'says which in "cut": ["min"], ["max"] or both.',
+        "A column whose type has no order (array, map, row, json and the like) has its "
+        'count only and "skipped": ["distinct", "min", "max"].',
+        'On failure returns {"error": "...", "kind": "..."}; "time_budget" means the query '
+        "ran past its budget and was cancelled: profile fewer columns"
+        + (', or use "sample".' if "sample" in modes else "."),
+        '"busy" means as many profiles as the server allows already run: call again in a few '
+        "seconds.",
+    ]
+    return "\n        ".join(sentences).replace("\n        \n", "\n\n") + "\n        "
+
+
 # A describer adds to what describe_table answers, from what Trino described:
 # ``(catalog, schema, table, rows) -> dict``, merged into the answer.
 Describer = Callable[[str, str, str, list], dict]
@@ -450,16 +653,27 @@ class ToolContext:
         ``describer_errors``."""
         self.describers.append(describer)
 
-    def run(self, sql: str, *, max_rows: int = 0, row_limit: int = 0, timeout: float = 0.0) -> dict:
+    def run(
+        self,
+        sql: str,
+        *,
+        max_rows: int = 0,
+        row_limit: int = 0,
+        timeout: float = 0.0,
+        cancel: Any = None,
+    ) -> dict:
         """Run ``sql`` in Trino for the verified caller; ``max_rows`` lowers the row cap,
         ``row_limit`` replaces it (for a statement the tool builds, never the agent's SQL),
-        ``timeout`` lowers the query's time budget (see ``TrinoClient.query``)."""
+        ``timeout`` lowers the query's time budget, ``cancel`` (a `Cancellation`) stops it
+        when the tool no longer needs it (see ``TrinoClient.query``)."""
         # The caller comes from the VERIFIED principal, never from a parameter the
         # agent supplies, which would be forgeable; the identity mode decides what
         # Trino sees of it. A client that knows only ``query(sql, user, params)`` is
         # asked only for what it knows: a keyword left at 0 is not passed.
         given = {"max_rows": max_rows, "row_limit": row_limit, "timeout": timeout}
-        keywords = {name: value for name, value in given.items() if value > 0}
+        keywords: dict[str, Any] = {name: value for name, value in given.items() if value > 0}
+        if cancel is not None:
+            keywords["cancel"] = cancel
         return self._client.query(sql, user=current_subject(), **keywords)
 
     def run_whole(self, sql: str, *, bound: int, what: str) -> list:
@@ -549,8 +763,20 @@ def register_query_tools(
     search_max_words: int = DEFAULT_SEARCH_MAX_WORDS,
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH,
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS,
+    search_concurrency: int = DEFAULT_SEARCH_CONCURRENCY,
+    search_max_threads: int = DEFAULT_SEARCH_MAX_THREADS,
+    describe_max_columns: int = DEFAULT_DESCRIBE_MAX_COLUMNS,
     extra_reads: frozenset[str] = frozenset(),
     context: ContextSetup | None = None,
+    profile_max_columns: int = DEFAULT_PROFILE_MAX_COLUMNS,
+    profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS,
+    profile_modes: Sequence[str] = PROFILE_MODES,
+    profile_value_chars: int = DEFAULT_PROFILE_VALUE_CHARS,
+    profile_type_chars: int = DEFAULT_PROFILE_TYPE_CHARS,
+    profile_describe_rows: int = DEFAULT_PROFILE_DESCRIBE_ROWS,
+    profile_client_tag: str = DEFAULT_PROFILE_CLIENT_TAG,
+    profile_timeout_seconds: float = 0.0,
+    profile_max_concurrent: int = DEFAULT_PROFILE_MAX_CONCURRENT,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -573,9 +799,24 @@ def register_query_tools(
     `search_max_words` words or a word longer than `search_max_word_length`, and keeps
     `search_reserve_seconds` of the call's budget so that it ends with an answer
     (`MCP_SEARCH_MIN_LENGTH`, `MCP_SEARCH_MAX_WORDS`, `MCP_SEARCH_MAX_WORD_LENGTH`,
-    `MCP_SEARCH_RESERVE_SECONDS`). `extra_reads` are the read commands the allow-list
+    `MCP_SEARCH_RESERVE_SECONDS`), and reads `search_concurrency` catalogs at once
+    (`MCP_SEARCH_CONCURRENCY`), `search_max_threads` reads at most in flight in all its
+    calls at once (`MCP_SEARCH_MAX_THREADS`). `describe_table` reads a table's columns a page of
+    `max_rows` at a time, up to `describe_max_columns` (`MCP_DESCRIBE_MAX_COLUMNS`).
+    `extra_reads` are the read commands the allow-list
     refuses by default and the administrator opened (`MCP_EXTRA_READ_COMMANDS`): with
-    EXPLAIN among them, explain_query prints the plan; without it, it only checks."""
+    EXPLAIN among them, explain_query prints the plan; without it, it only checks.
+    `profile_table` profiles `profile_max_columns` columns at most, and its sample reads
+    the first `profile_sample_rows` rows (`MCP_PROFILE_MAX_COLUMNS`,
+    `MCP_PROFILE_SAMPLE_ROWS`); it serves the modes of `profile_modes` only, cuts a text or
+    binary min or max at `profile_value_chars` characters and a type at
+    `profile_type_chars` (`MCP_PROFILE_TYPE_CHARS`), reads `DESCRIBE` up to
+    `profile_describe_rows` rows, and runs its aggregate query with the client tag
+    `profile_client_tag`, within `profile_timeout_seconds` when above 0, and always within
+    the query's and the call's budgets; it runs `profile_max_concurrent` calls at once at
+    most, and answers ``busy`` past them (`MCP_PROFILE_MODES`, `MCP_PROFILE_VALUE_CHARS`,
+    `MCP_PROFILE_DESCRIBE_ROWS`, `MCP_PROFILE_CLIENT_TAG`, `MCP_PROFILE_TIMEOUT_SECONDS`,
+    `MCP_PROFILE_MAX_CONCURRENT`)."""
     tools = ToolContext(
         mcp,
         client,
@@ -619,6 +860,8 @@ def register_query_tools(
         tools.context = ContextReader(service, max_tables=describe_schema_tables)
 
     schema_visible = tools.schema_visible
+    # The reads of search_columns in flight in its threads, all calls together.
+    search_slots = threading.BoundedSemaphore(search_max_threads)
 
     def advice_visible(parts: tuple[str, ...]) -> bool:
         """Whether the caller sees the table of their own statement named by ``parts``, as
@@ -719,6 +962,8 @@ def register_query_tools(
                     max_word_length=search_max_word_length,
                     reserve_seconds=search_reserve_seconds,
                     max_catalogs=max_catalogs,
+                    concurrency=search_concurrency,
+                    slots=search_slots,
                 )
             )
         except Exception as e:  # noqa: BLE001
@@ -939,40 +1184,75 @@ def register_query_tools(
         )
     tool("Describe schema")(describe_schema)
 
-    def describe_table(catalog: str, schema: str, table: str, sample_rows: int = 0) -> str:
+    def describe_table(
+        catalog: str, schema: str, table: str, sample_rows: int = 0, column_offset: int = 0
+    ) -> str:
         """Describe a table: its columns, their types and comments, and optionally
         a few sample rows.
 
         Args: catalog, schema, table as bare names; sample_rows (0 to 20) adds
-        that many rows of data. Returns JSON {"columns": [...], "rows": [...],
-        "truncated": bool} where each row is [name, type, extra, comment] and
-        truncated says the server's row cap cut the columns; plus {"sample": {...}}
+        that many rows of data, on the first page only; column_offset, optional, the
+        first column of the page (0, the default, is the first page). Returns JSON
+        {"columns": [...], "rows": [...], "truncated": bool, "next_column_offset": n or
+        null, "columns_cut": bool} where each row is [name, type, extra, comment]: one
+        page of the columns, the server's row cap of them. truncated says the page does
+        not hold every column. When next_column_offset is not null, more columns follow:
+        call again with column_offset=next_column_offset for the next page. columns_cut
+        says the table has more columns than the server reads; plus {"sample": {...}}
         when sample_rows > 0.
         """
         try:
             cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
             tbl = validate_identifier(table, "table")
+            try:
+                start = check_offset(column_offset)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid column_offset: {column_offset!r}. A column_offset is a whole "
+                    "number from 0."
+                ) from None
+            if start >= describe_max_columns:
+                raise ValueError(
+                    f"Invalid column_offset: {start}. This server reads the first "
+                    f"{describe_max_columns} columns of a table (MCP_DESCRIBE_MAX_COLUMNS)."
+                )
+            n = max(0, min(int(sample_rows), MAX_SAMPLE_ROWS))
+            if n and start:
+                raise ValueError(
+                    "Invalid sample_rows: sample rows come with the first page, column_offset 0."
+                )
             fqn = f"{cat}.{sch}.{tbl}"
             note(tables=[fqn])
-            described_rows = run(f"DESCRIBE {fqn}")
+            # DESCRIBE has no offset: it is read from the first column to the end of the
+            # page, one row more telling whether more follow, never past the server's bound.
+            end = min(start + tools.page_size, describe_max_columns)
+            described = run(f"DESCRIBE {fqn}", row_limit=end)
+            listed = described["rows"][:end]
+            more = was_cut(described) or len(described["rows"]) > end
+            rows = listed[start:end]
+            columns_cut = more and end == describe_max_columns
+            next_column = start + len(rows) if more and not columns_cut else None
             out: dict[str, Any] = {
-                "columns": described_rows["columns"],
-                "rows": described_rows["rows"],
-                "truncated": was_cut(described_rows),
+                "columns": described["columns"],
+                "rows": rows,
+                # A page past the last column is empty, and the last one.
+                "truncated": (start > 0 and start < len(listed)) or more,
+                "next_column_offset": next_column,
+                "columns_cut": columns_cut,
             }
-            # Read before a describer can change the answer.
-            complete = not out["truncated"]
-            note(rows=len(described_rows["rows"]), truncated=out["truncated"])
+            # Only a first page that holds every column describes all of the table; a page
+            # past the last column is not truncated, and describes none of it.
+            complete = start == 0 and not more
+            note(rows=len(rows), truncated=out["truncated"])
             failed = 0
             for describer in tools.describers:
                 try:
-                    out.update(describer(cat, sch, tbl, described_rows["rows"]) or {})
+                    out.update(describer(cat, sch, tbl, rows) or {})
                 except Exception:  # noqa: BLE001 - a catalogue down must not hide the columns
                     failed += 1
             if failed:
                 out["describer_errors"] = failed
-            n = max(0, min(int(sample_rows), MAX_SAMPLE_ROWS))
             if n:
                 # Rows of data are read: the audit line names that statement and its rows.
                 statement = f"SELECT * FROM {fqn} LIMIT {n}"
@@ -980,8 +1260,10 @@ def register_query_tools(
                 out["sample"] = run(statement)
                 note(rows=len(out["sample"]["rows"]))
             # The context comes last: it takes only what the call has left past its reserve.
+            # It is of the columns of this page, the ones Trino has just listed; a page that
+            # does not hold them all is partial, and serves no grain.
             if service is not None:
-                visible = [str(r[0]) for r in described_rows["rows"]]
+                visible = [str(r[0]) for r in rows]
                 ref = TableRef.of(cat, sch, tbl)
                 out.update(service.for_table(ref, visible, complete=complete))
             return dumps(out)
@@ -994,6 +1276,134 @@ def register_query_tools(
         if extra:
             describe_table.__doc__ = (describe_table.__doc__ or "").rstrip() + "\n" + extra + "\n"
     tool("Describe table", governed=True)(describe_table)
+
+    # The calls of profile_table running in this process: a call waiting in Trino holds one
+    # of the threads every tool shares, so past the bound a call answers busy at once.
+    profile_slots = threading.BoundedSemaphore(profile_max_concurrent)
+
+    def profile_of(fqn: str, columns: Optional[list[str]], mode: str, share: float) -> str:
+        """The profile of the table ``fqn``, a name already checked: DESCRIBE, then one
+        aggregate query, both as the caller."""
+        try:
+            # One row more than the bound, past the server's row cap, tells whether DESCRIBE
+            # listed more columns than are read.
+            listing = run(f"DESCRIBE {fqn}", row_limit=profile_describe_rows + 1)
+            listed = listing["rows"]
+            columns_cut = was_cut(listing) or len(listed) > profile_describe_rows
+            described = {str(r[0]): str(r[1]) for r in listed[:profile_describe_rows]}
+            chosen = _profiled_columns(columns, described, profile_max_columns)
+            ordered = {c: bool(_ORDERED_TYPE.fullmatch(described[c])) for c in chosen}
+            prefix = profile_value_chars + 1
+            aggregates = ["count(*)"]
+            for c in chosen:
+                name = _quoted(c)
+                aggregates.append(f"count({name})")
+                if not ordered[c]:
+                    continue
+                aggregates.append(f"approx_distinct({name})")
+                # Read one character, or byte, past the limit: Trino never sends more.
+                end = f"substr({name}, 1, {prefix})" if _CUT_TYPE.fullmatch(described[c]) else name
+                aggregates += [f"min({end})", f"max({end})"]
+            if mode == "sample":
+                source = (
+                    f"(SELECT {', '.join(_quoted(c) for c in chosen)} FROM {fqn} "
+                    f"LIMIT {profile_sample_rows})"
+                )
+            elif mode == "bernoulli":
+                source = f"{fqn} TABLESAMPLE BERNOULLI ({share!r})"
+            else:
+                source = fqn
+            statement = f"SELECT {', '.join(aggregates)} FROM {source}"
+            # The same refusal as execute_query: a statement it would refuse is refused here.
+            if not is_read_only_sql(statement, session_catalog, extra_reads):
+                return refusal_reply(
+                    "read_only",
+                    f"Read-only mode: only {_allowed_reads(extra_reads)} are allowed",
+                    kind=READ_ONLY,
+                )
+            note(sql=statement)
+            # The tag lets Trino put the query in a resource group, besides the extensions' tags.
+            with query_tags(profile_client_tag):
+                answer = run(statement, timeout=profile_timeout_seconds)
+            row = iter(answer["rows"][0])
+            note(rows=1)
+            rows = next(row)
+            profiled = []
+            for c in chosen:
+                non_null = next(row)
+                # A type has its own bound: a bound of values never cuts it.
+                kind, kind_cut = _cut(described[c], profile_type_chars)
+                entry: dict[str, Any] = {
+                    "column": c,
+                    "type": kind,
+                    "non_null": non_null,
+                    "null_fraction": None if rows == 0 else 1 - non_null / rows,
+                    "approx_distinct": None,
+                    "min": None,
+                    "max": None,
+                }
+                cut = ["type"] if kind_cut else []
+                if ordered[c]:
+                    entry.update(approx_distinct=next(row), min=next(row), max=next(row))
+                    for end in ("min", "max") if _CUT_TYPE.fullmatch(described[c]) else ():
+                        entry[end], shortened = _cut(entry[end], profile_value_chars)
+                        if shortened:
+                            cut.append(end)
+                else:
+                    entry["skipped"] = list(_SKIPPED)
+                if cut:
+                    entry["cut"] = cut
+                profiled.append(entry)
+            # Rendered as the cells of execute_query are; nothing else of the query.
+            return dumps(
+                {
+                    "table": fqn,
+                    "scope": _PROFILE_SCOPES[mode],
+                    "rows": rows,
+                    "columns_cut": columns_cut,
+                    "columns": profiled,
+                }
+            )
+        except Exception as e:  # noqa: BLE001
+            return error_reply(e)
+
+    def profile_table(
+        catalog: str,
+        schema: str,
+        table: str,
+        columns: list[str] | None = None,
+        mode: str = "sample",
+        percent: float = 0.0,
+    ) -> str:
+        try:
+            if not isinstance(mode, str) or mode not in profile_modes:
+                raise ValueError(
+                    f"Invalid mode: {mode!r}. This server allows {', '.join(profile_modes)}."
+                )
+            share = _sample_percent(mode, percent)
+            cat = governed_catalog(catalog)
+            sch = validate_identifier(schema, "schema")
+            tbl = validate_identifier(table, "table")
+        except Exception as e:  # noqa: BLE001
+            return error_reply(e)
+        fqn = f"{cat}.{sch}.{tbl}"
+        note(tables=[fqn])
+        if not profile_slots.acquire(blocking=False):
+            note(error=BUSY)
+            return dumps(
+                {
+                    "error": f"{profile_max_concurrent} profiles already run on this server",
+                    "kind": BUSY,
+                    "hint": "Call profile_table again in a few seconds.",
+                }
+            )
+        try:
+            return profile_of(fqn, columns, mode, share)
+        finally:
+            profile_slots.release()
+
+    profile_table.__doc__ = _profile_doc(profile_modes)
+    tool("Profile table", governed=True)(profile_table)
 
     show_plan = "EXPLAIN" in extra_reads
 

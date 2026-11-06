@@ -128,7 +128,22 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         f"{config.describe_schema_columns} columns in all, a wider table whole",
         f"search_columns: words of {config.search_min_length} to "
         f"{config.search_max_word_length} characters, {config.search_max_words} words at "
-        f"most, {config.search_reserve_seconds:g} s of the call's budget kept in reserve",
+        f"most, {config.search_reserve_seconds:g} s of the call's budget kept in reserve, "
+        f"{config.search_concurrency} catalogs at once, {config.search_max_threads} reads at "
+        "once in all",
+        f"describe_table: pages of {config.max_rows} columns, {config.describe_max_columns} "
+        "columns at most",
+        f"profile_table: modes {', '.join(config.allowed_profile_modes())}; up to "
+        f"{config.profile_max_columns} columns, sample of {config.profile_sample_rows} first "
+        f"rows, values cut at {config.profile_value_chars} characters, types at "
+        f"{config.profile_type_chars}, DESCRIBE read up to "
+        f"{config.profile_describe_rows} rows, client tag {config.profile_client_tag}, "
+        f"{config.profile_max_concurrent} at once, time budget "
+        + (
+            f"{config.profile_budget_seconds():g} s"
+            if config.profile_budget_seconds() > 0
+            else "none"
+        ),
         f"tool plugins: {config.tool_plugins or 'none'}",
         f"extensions: {', '.join(extension_names(config.extensions)) or 'none'}",
         *[line for ext in extensions for line in ext.check_lines()],

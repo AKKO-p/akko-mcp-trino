@@ -24,6 +24,21 @@ render time with a message that names the value to change.
 {{- fail (printf "trino.identityMode=%s requires trino.httpScheme=https: a token or a credential never travels over http." $mode) }}
 {{- end }}
 
+{{- /* The budget of profile_table's aggregate query, against the budgets set beside it. */}}
+{{- $profile := $v.limits.profileTimeoutSeconds }}
+{{- if and $profile (gt (float64 $profile) 0.0) }}
+{{- with $v.trino.queryTimeoutSeconds }}
+{{- if and (gt (float64 .) 0.0) (gt (float64 $profile) (float64 .)) }}
+{{- fail (printf "limits.profileTimeoutSeconds=%v is past trino.queryTimeoutSeconds=%v: the server refuses it at start; set it lower, or raise trino.queryTimeoutSeconds." $profile .) }}
+{{- end }}
+{{- end }}
+{{- with $v.limits.callTimeoutSeconds }}
+{{- if and (gt (float64 .) 0.0) (gt (float64 $profile) (float64 .)) }}
+{{- fail (printf "limits.profileTimeoutSeconds=%v is past limits.callTimeoutSeconds=%v: the server refuses it at start; set it lower, or raise limits.callTimeoutSeconds." $profile .) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{- /* The door. */}}
 {{- if and $v.auth.required (not $v.auth.enabled) }}
 {{- fail "auth.required=true with auth.enabled=false: a door that requires a token it cannot verify. Enable auth, or turn both off with auth.acknowledgeNoAuth=true (service mode only)." }}

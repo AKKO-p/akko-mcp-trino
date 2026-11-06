@@ -8,6 +8,7 @@ An extension reads its own settings from the environment it is given (see
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -54,6 +55,42 @@ DEFAULT_SEARCH_MIN_LENGTH = 3
 DEFAULT_SEARCH_MAX_WORDS = 8
 DEFAULT_SEARCH_MAX_WORD_LENGTH = 64
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
+# The catalogs one call of `search_columns` reads at once, and the most it may be set to:
+# each is one metadata statement in flight in Trino, for that one call.
+DEFAULT_SEARCH_CONCURRENCY = 8
+MAX_SEARCH_CONCURRENCY = 32
+# The reads of `search_columns` in flight in its threads in one process, all calls together,
+# and the most it may be set to; a call that finds none free reads its catalogs itself.
+DEFAULT_SEARCH_MAX_THREADS = 32
+MAX_SEARCH_MAX_THREADS = 256
+# The most columns of a table `describe_table` reads, page by page, and the most it may be
+# set to: a page past the first reads DESCRIBE from the first column to the end of the page.
+DEFAULT_DESCRIBE_MAX_COLUMNS = 5000
+MAX_DESCRIBE_MAX_COLUMNS = 100000
+# The most columns `profile_table` profiles in one call, and the rows its sample reads.
+DEFAULT_PROFILE_MAX_COLUMNS = 50
+# The most columns a server may let it profile in one call: each adds five references to the
+# statement, which Trino and the read-only guard read whole.
+MAX_PROFILE_MAX_COLUMNS = 500
+DEFAULT_PROFILE_SAMPLE_ROWS = 100000
+# The modes of `profile_table` there are, and those a server allows by default.
+PROFILE_MODES = ("sample", "bernoulli", "full")
+DEFAULT_PROFILE_MODES = ",".join(PROFILE_MODES)
+# The characters of a text or binary min or max it serves, the rows of its DESCRIBE it reads,
+# and the client tag of its aggregate query, by which Trino may put it in a resource group.
+DEFAULT_PROFILE_VALUE_CHARS = 200
+# The characters of a column's type it serves, and the most it may be set to: a nested row
+# type can be written in thousands of characters.
+DEFAULT_PROFILE_TYPE_CHARS = 500
+MAX_PROFILE_TYPE_CHARS = 100000
+DEFAULT_PROFILE_DESCRIBE_ROWS = 5000
+DEFAULT_PROFILE_CLIENT_TAG = "mcp-profile"
+# The calls of `profile_table` one process runs at once, and the most it may be set to: a
+# call waiting in Trino holds one of the threads every tool shares.
+DEFAULT_PROFILE_MAX_CONCURRENT = 4
+MAX_PROFILE_MAX_CONCURRENT = 64
+# What a client tag may hold: Trino splits the tags on commas.
+_CLIENT_TAG_RE = re.compile(r"[A-Za-z0-9_.:=/-]{1,100}")
 # The least MCP_CONTEXT_RESERVE_SECONDS a server with a context provider accepts. Past its
 # deadline, the chain waits up to 0.25 s for a provider to hand back control (its
 # ``_GRACE_SECONDS``, which includes the 0.1 s a cancelled read is given to end): a shorter
@@ -65,6 +102,13 @@ MIN_CONTEXT_RESERVE_SECONDS = 0.3
 def provider_names(value: str) -> list[str]:
     """The names a ``MCP_CONTEXT_PROVIDERS`` value lists, in order."""
     return [n.strip() for n in value.split(",") if n.strip()]
+
+
+def profile_mode_names(value: str) -> tuple[str, ...]:
+    """The modes a ``MCP_PROFILE_MODES`` value lists, folded to lower case, once each, in
+    order; known or not."""
+    names = [n.strip().lower() for n in value.split(",") if n.strip()]
+    return tuple(dict.fromkeys(names))
 
 
 def _is_table_name(text: str) -> bool:
@@ -184,6 +228,7 @@ class Config:
     # however wide, and the answer says when a page was shortened.
     describe_schema_tables: int = DEFAULT_DESCRIBE_SCHEMA_TABLES
     describe_schema_columns: int = DEFAULT_DESCRIBE_SCHEMA_COLUMNS
+    describe_max_columns: int = DEFAULT_DESCRIBE_MAX_COLUMNS
     # `search_columns`: the shortest word it searches (shorter words are ignored), so that
     # a letter or two does not read every column, and the seconds of the call's budget it
     # keeps in reserve, so that it stops early enough to answer what it searched rather
@@ -194,6 +239,8 @@ class Config:
     search_max_words: int = DEFAULT_SEARCH_MAX_WORDS
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
+    search_concurrency: int = DEFAULT_SEARCH_CONCURRENCY
+    search_max_threads: int = DEFAULT_SEARCH_MAX_THREADS
     # Read commands the allow-list refuses by default, named one by one by the
     # administrator (comma-separated: EXPLAIN, SHOW STATS, SHOW CREATE, SHOW GRANTS,
     # SHOW ROLES, SHOW SESSION). They can show facts beyond a row filter or a column
@@ -229,11 +276,34 @@ class Config:
     context_text_chars: int = 500
     context_response_chars: int = 60000
     context_max_columns: int = 500
-    profile_max_columns: int = 50
-    profile_sample_rows: int = 100000
+    profile_max_columns: int = DEFAULT_PROFILE_MAX_COLUMNS
+    profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS
+    profile_modes: str = DEFAULT_PROFILE_MODES
+    profile_value_chars: int = DEFAULT_PROFILE_VALUE_CHARS
+    profile_type_chars: int = DEFAULT_PROFILE_TYPE_CHARS
+    profile_describe_rows: int = DEFAULT_PROFILE_DESCRIBE_ROWS
+    profile_client_tag: str = DEFAULT_PROFILE_CLIENT_TAG
+    # The time budget of the aggregate query of `profile_table`; 0: the smallest of the others.
+    profile_timeout_seconds: float = 0.0
+    profile_max_concurrent: int = DEFAULT_PROFILE_MAX_CONCURRENT
     # The raw `MCP_VISIBILITY_ENABLED`, kept only to refuse `false`: the filter by Trino's
     # rights cannot be turned off.
     visibility_switch: str = ""
+
+    def allowed_profile_modes(self) -> tuple[str, ...]:
+        """The modes of ``profile_table`` this server allows (``MCP_PROFILE_MODES``)."""
+        return profile_mode_names(self.profile_modes)
+
+    def profile_budget_seconds(self) -> float:
+        """The time budget of the aggregate query of ``profile_table``: the smallest of
+        ``MCP_PROFILE_TIMEOUT_SECONDS``, ``TRINO_QUERY_TIMEOUT_SECONDS`` and
+        ``MCP_CALL_TIMEOUT_SECONDS`` above 0; 0 when none is."""
+        budgets = (
+            self.profile_timeout_seconds,
+            self.query_timeout_seconds,
+            self.call_timeout_seconds,
+        )
+        return min((b for b in budgets if b > 0), default=0.0)
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -265,6 +335,21 @@ class Config:
             found.append(
                 f"MCP_DESCRIBE_SCHEMA_COLUMNS={self.describe_schema_columns}: "
                 "describe_schema must be allowed 1 column or more"
+            )
+        if not 1 <= self.describe_max_columns <= MAX_DESCRIBE_MAX_COLUMNS:
+            found.append(
+                f"MCP_DESCRIBE_MAX_COLUMNS={self.describe_max_columns}: describe_table reads "
+                f"1 to {MAX_DESCRIBE_MAX_COLUMNS} columns of a table"
+            )
+        if not 1 <= self.search_concurrency <= MAX_SEARCH_CONCURRENCY:
+            found.append(
+                f"MCP_SEARCH_CONCURRENCY={self.search_concurrency}: search_columns reads 1 to "
+                f"{MAX_SEARCH_CONCURRENCY} catalogs at once"
+            )
+        if not 1 <= self.search_max_threads <= MAX_SEARCH_MAX_THREADS:
+            found.append(
+                f"MCP_SEARCH_MAX_THREADS={self.search_max_threads}: search_columns runs 1 to "
+                f"{MAX_SEARCH_MAX_THREADS} reads at once in a process"
             )
         if self.search_min_length < 1:
             found.append(
@@ -365,9 +450,57 @@ class Config:
             ("MCP_CONTEXT_MAX_COLUMNS", self.context_max_columns),
             ("MCP_PROFILE_MAX_COLUMNS", self.profile_max_columns),
             ("MCP_PROFILE_SAMPLE_ROWS", self.profile_sample_rows),
+            ("MCP_PROFILE_VALUE_CHARS", self.profile_value_chars),
+            ("MCP_PROFILE_DESCRIBE_ROWS", self.profile_describe_rows),
         ):
             if count < 1:
                 found.append(f"{name}={count}: a bound is 1 or more")
+        if self.profile_max_columns > MAX_PROFILE_MAX_COLUMNS:
+            found.append(
+                f"MCP_PROFILE_MAX_COLUMNS={self.profile_max_columns}: profile_table profiles "
+                f"{MAX_PROFILE_MAX_COLUMNS} columns at most"
+            )
+        if not 1 <= self.profile_type_chars <= MAX_PROFILE_TYPE_CHARS:
+            found.append(
+                f"MCP_PROFILE_TYPE_CHARS={self.profile_type_chars}: profile_table serves 1 to "
+                f"{MAX_PROFILE_TYPE_CHARS} characters of a type"
+            )
+        if not 1 <= self.profile_max_concurrent <= MAX_PROFILE_MAX_CONCURRENT:
+            found.append(
+                f"MCP_PROFILE_MAX_CONCURRENT={self.profile_max_concurrent}: profile_table runs "
+                f"1 to {MAX_PROFILE_MAX_CONCURRENT} calls at once"
+            )
+        modes = self.allowed_profile_modes()
+        if not modes or not set(modes) <= set(PROFILE_MODES):
+            found.append(
+                f"MCP_PROFILE_MODES={self.profile_modes!r}: name one mode at least, "
+                "comma-separated, among sample, bernoulli and full"
+            )
+        if not _CLIENT_TAG_RE.fullmatch(self.profile_client_tag):
+            found.append(
+                f"MCP_PROFILE_CLIENT_TAG={self.profile_client_tag!r}: a client tag is 1 to "
+                "100 letters, digits and _ . : = / -, without a comma"
+            )
+        budget = self.profile_timeout_seconds
+        if not math.isfinite(budget) or budget < 0:
+            found.append(
+                f"MCP_PROFILE_TIMEOUT_SECONDS={budget:g}: a time budget is 0 (the call's) "
+                "or a number of seconds above 0"
+            )
+        elif 0 < self.call_timeout_seconds < budget:
+            found.append(
+                f"MCP_PROFILE_TIMEOUT_SECONDS={budget:g} is past "
+                f"MCP_CALL_TIMEOUT_SECONDS={self.call_timeout_seconds:g}: the aggregate query "
+                f"runs within its call; set it to {self.call_timeout_seconds:g} or less, or 0 "
+                "for the call's budget"
+            )
+        elif 0 < self.query_timeout_seconds < budget:
+            found.append(
+                f"MCP_PROFILE_TIMEOUT_SECONDS={budget:g} is past "
+                f"TRINO_QUERY_TIMEOUT_SECONDS={self.query_timeout_seconds:g}: the aggregate "
+                f"query is a Trino query; set it to {self.query_timeout_seconds:g} or less, or "
+                "raise TRINO_QUERY_TIMEOUT_SECONDS"
+            )
         if self.context_canary and not _is_table_name(self.context_canary):
             found.append(
                 f"MCP_CONTEXT_CANARY={self.context_canary!r}: name one table as "
@@ -412,6 +545,18 @@ class Config:
                 f"MCP_EXTRA_READ_COMMANDS={', '.join(extra)}: these reads can show facts "
                 "beyond a row filter or a column mask"
             )
+        if self.describe_max_columns > self.profile_describe_rows:
+            found.append(
+                f"MCP_DESCRIBE_MAX_COLUMNS={self.describe_max_columns} is above "
+                f"MCP_PROFILE_DESCRIBE_ROWS={self.profile_describe_rows}: describe_table shows "
+                "columns profile_table cannot name"
+            )
+        if "full" in self.allowed_profile_modes() and self.profile_budget_seconds() == 0:
+            found.append(
+                "MCP_PROFILE_MODES allows full while MCP_PROFILE_TIMEOUT_SECONDS, "
+                "TRINO_QUERY_TIMEOUT_SECONDS and MCP_CALL_TIMEOUT_SECONDS are 0: a full profile "
+                "reads every row it may read with no time limit"
+            )
         if provider_names(self.context_providers):
             if not self.context_canary:
                 found.append(
@@ -425,6 +570,7 @@ class Config:
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
         """Read every setting from the environment."""
+        tag = os.environ.get("MCP_PROFILE_CLIENT_TAG", DEFAULT_PROFILE_CLIENT_TAG)
         return Config(
             trino_host=os.environ.get("TRINO_HOST", "localhost"),
             trino_port=int(os.environ.get("TRINO_PORT", "8080")),
@@ -473,6 +619,9 @@ class Config:
             describe_schema_columns=int(
                 os.environ.get("MCP_DESCRIBE_SCHEMA_COLUMNS", str(DEFAULT_DESCRIBE_SCHEMA_COLUMNS))
             ),
+            describe_max_columns=int(
+                os.environ.get("MCP_DESCRIBE_MAX_COLUMNS", str(DEFAULT_DESCRIBE_MAX_COLUMNS))
+            ),
             search_min_length=int(
                 os.environ.get("MCP_SEARCH_MIN_LENGTH", str(DEFAULT_SEARCH_MIN_LENGTH))
             ),
@@ -484,6 +633,12 @@ class Config:
             ),
             search_reserve_seconds=float(
                 os.environ.get("MCP_SEARCH_RESERVE_SECONDS", str(DEFAULT_SEARCH_RESERVE_SECONDS))
+            ),
+            search_concurrency=int(
+                os.environ.get("MCP_SEARCH_CONCURRENCY", str(DEFAULT_SEARCH_CONCURRENCY))
+            ),
+            search_max_threads=int(
+                os.environ.get("MCP_SEARCH_MAX_THREADS", str(DEFAULT_SEARCH_MAX_THREADS))
             ),
             context_providers=os.environ.get("MCP_CONTEXT_PROVIDERS", ""),
             context_timeout_seconds=float(os.environ.get("MCP_CONTEXT_TIMEOUT_SECONDS", "5")),
@@ -510,7 +665,26 @@ class Config:
             context_text_chars=int(os.environ.get("MCP_CONTEXT_TEXT_CHARS", "500")),
             context_response_chars=int(os.environ.get("MCP_CONTEXT_RESPONSE_CHARS", "60000")),
             context_max_columns=int(os.environ.get("MCP_CONTEXT_MAX_COLUMNS", "500")),
-            profile_max_columns=int(os.environ.get("MCP_PROFILE_MAX_COLUMNS", "50")),
-            profile_sample_rows=int(os.environ.get("MCP_PROFILE_SAMPLE_ROWS", "100000")),
+            profile_max_columns=int(
+                os.environ.get("MCP_PROFILE_MAX_COLUMNS", str(DEFAULT_PROFILE_MAX_COLUMNS))
+            ),
+            profile_sample_rows=int(
+                os.environ.get("MCP_PROFILE_SAMPLE_ROWS", str(DEFAULT_PROFILE_SAMPLE_ROWS))
+            ),
+            profile_modes=os.environ.get("MCP_PROFILE_MODES", DEFAULT_PROFILE_MODES),
+            profile_value_chars=int(
+                os.environ.get("MCP_PROFILE_VALUE_CHARS", str(DEFAULT_PROFILE_VALUE_CHARS))
+            ),
+            profile_type_chars=int(
+                os.environ.get("MCP_PROFILE_TYPE_CHARS", str(DEFAULT_PROFILE_TYPE_CHARS))
+            ),
+            profile_describe_rows=int(
+                os.environ.get("MCP_PROFILE_DESCRIBE_ROWS", str(DEFAULT_PROFILE_DESCRIBE_ROWS))
+            ),
+            profile_client_tag=tag.strip(),
+            profile_timeout_seconds=float(os.environ.get("MCP_PROFILE_TIMEOUT_SECONDS", "0")),
+            profile_max_concurrent=int(
+                os.environ.get("MCP_PROFILE_MAX_CONCURRENT", str(DEFAULT_PROFILE_MAX_CONCURRENT))
+            ),
             visibility_switch=os.environ.get("MCP_VISIBILITY_ENABLED", ""),
         )

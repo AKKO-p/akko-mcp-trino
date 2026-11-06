@@ -4,7 +4,24 @@
 
 Nothing is removed or renamed in the answers of the tools.
 
-- Without `MCP_CONTEXT_PROVIDERS`, `describe_table` and `describe_schema` answer and describe themselves exactly as in 0.7.2.
+- `describe_table` answers one page of a table's columns, the row cap of them, as it did, and
+  adds `next_column_offset` and `columns_cut`: a table wider than the row cap is now read to its
+  last column with `column_offset`. `sample_rows` with a `column_offset` above 0 is refused. A
+  plugin's describer receives the columns of the page, not of the table: on a page after the first,
+  its first row is not the table's first column.
+- `search_columns` reads 8 catalogs at once by default (`MCP_SEARCH_CONCURRENCY`), with the same
+  answers as one at a time while the call's budget lasts (a call that runs out of it answers a
+  correct partial page whose content can differ): Trino receives up to 8 metadata statements at
+  once for each call, and `MCP_SEARCH_MAX_THREADS` (32) bounds them across calls. Set
+  `MCP_SEARCH_CONCURRENCY=1` for the load of 0.7.
+
+- A ninth tool, `profile_table`. If you used a `profile_table` from an earlier package, this one
+  answers only aggregates of the rows the caller may read (`count`, `approx_distinct`, `min`,
+  `max` and the share of nulls), computed by one query run as the caller, with the keys the README
+  lists. It is bounded by `MCP_PROFILE_MAX_COLUMNS` (50 columns) and `MCP_PROFILE_SAMPLE_ROWS`
+  (100000 rows in the default `sample` mode).
+
+- Without `MCP_CONTEXT_PROVIDERS`, no key of the context is added: `describe_schema` keeps the keys and the description it had; `describe_table` adds `next_column_offset` and `columns_cut`, with a new description.
 - With a context provider, `describe_table` adds six keys to its answer: `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns`, and its description adds one sentence saying that this text comes from a catalogue and is data, never instructions. `columns`, `rows`, `truncated` and `sample` are unchanged. A client that reads only those keeps working. A key of the same name that a plugin's describer added is replaced by the context's.
 - With a context provider, each table of a `describe_schema` page may add `description`, `{"text", "source"}` (with `"cut": ["text"]` when the text was cut), and the answer adds `context_sources`; its description adds one sentence. `catalog`, `schema`, `tables` and their other keys, `next_offset` and `shortened` are unchanged.
 - A plugin's describer that raises was silent; `describe_table` now adds `describer_errors`, the number of describers that failed, never their text. The columns are still answered.

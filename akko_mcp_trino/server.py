@@ -157,8 +157,20 @@ def build_server(
         search_max_words=config.search_max_words,
         search_max_word_length=config.search_max_word_length,
         search_reserve_seconds=config.search_reserve_seconds,
+        search_concurrency=config.search_concurrency,
+        search_max_threads=config.search_max_threads,
+        describe_max_columns=config.describe_max_columns,
         extra_reads=parse_extra_reads(config.extra_read_commands),
         context=context,
+        profile_max_columns=config.profile_max_columns,
+        profile_sample_rows=config.profile_sample_rows,
+        profile_modes=config.allowed_profile_modes(),
+        profile_value_chars=config.profile_value_chars,
+        profile_type_chars=config.profile_type_chars,
+        profile_describe_rows=config.profile_describe_rows,
+        profile_client_tag=config.profile_client_tag,
+        profile_timeout_seconds=config.profile_timeout_seconds,
+        profile_max_concurrent=config.profile_max_concurrent,
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)
     registrars = [r for ext in exts for r in ext.tool_registrars()]

@@ -1,9 +1,10 @@
-"""The eight core tools, characterised through a fake MCPServer.
+"""The core tools, characterised through a fake MCPServer.
 
 Same outputs, same read-only guard; the caller comes from the verified principal, never
 from an argument.
 """
 
+import datetime as dt
 import functools
 import json
 import logging
@@ -31,7 +32,14 @@ from akko_mcp_trino.context import (
 from akko_mcp_trino.context.reply import ContextReader
 from akko_mcp_trino.tools import register_query_tools
 from tests.context.memory_provider import Memory
-from tests.tool_doubles import FakeMCP, GateTrino, SchemaTrino, in_request, with_context
+from tests.tool_doubles import (
+    FakeMCP,
+    GateTrino,
+    SchemaTrino,
+    YearToMonth,
+    in_request,
+    with_context,
+)
 
 
 class FakeClient:
@@ -88,7 +96,7 @@ def test_tool_annotations_are_classes_not_strings():
             )
 
 
-def test_exactly_the_eight_tools_are_registered():
+def test_exactly_the_nine_tools_are_registered():
     mcp, _ = _registered()
     assert set(mcp.tools) == {
         "list_catalogs",
@@ -99,6 +107,7 @@ def test_exactly_the_eight_tools_are_registered():
         "explain_query",
         "execute_query",
         "search_columns",
+        "profile_table",
     }
 
 
@@ -672,6 +681,66 @@ def test_uuid_is_serialised_and_unknown_types_still_fail_loudly():
         dumps({"x": object()})
 
 
+@pytest.mark.parametrize(
+    "value, printed",
+    [
+        (dt.timedelta(days=2), "2 00:00:00.000"),
+        (dt.timedelta(hours=3), "0 03:00:00.000"),
+        (-dt.timedelta(days=1, hours=2, milliseconds=500), "-1 02:00:00.500"),
+        (dt.timedelta(minutes=61, seconds=5, milliseconds=7), "0 01:01:05.007"),
+        (dt.timedelta(0), "0 00:00:00.000"),
+    ],
+)
+def test_an_interval_day_to_second_is_rendered_as_trino_prints_it(value, printed):
+    from akko_mcp_trino.tools import dumps
+
+    assert json.loads(dumps([value])) == [printed]
+
+
+@pytest.mark.parametrize(
+    "years, months, printed",
+    [(1, 0, "1-0"), (0, 2, "0-2"), (-1, -3, "-1-3"), (0, 0, "0-0"), (0, -14, "-1-2")],
+)
+def test_an_interval_year_to_month_is_rendered_as_trino_prints_it(years, months, printed):
+    from akko_mcp_trino.tools import dumps
+
+    assert json.loads(dumps([YearToMonth(years, months)])) == [printed]
+
+
+def test_a_value_with_only_years_and_months_is_rendered_as_an_interval():
+    from types import SimpleNamespace
+
+    from akko_mcp_trino.tools import dumps
+
+    assert json.loads(dumps([SimpleNamespace(years=2, months=5)])) == ["2-5"]
+
+
+@pytest.mark.parametrize(
+    "others",
+    [{"days": 1}, {"hours": 2}, {"microseconds": 5}, {"leapdays": 1}, {"year": 2026}],
+)
+def test_a_year_and_month_value_with_other_parts_set_still_fails_loudly(others):
+    from akko_mcp_trino.tools import dumps
+
+    with pytest.raises(TypeError):
+        dumps([YearToMonth(1, 2, **others)])
+
+
+@pytest.mark.parametrize("years, months", [(1.5, 0), (True, 0), ("1", 0), (1, None)])
+def test_years_and_months_that_are_not_whole_numbers_still_fail_loudly(years, months):
+    from akko_mcp_trino.tools import dumps
+
+    with pytest.raises(TypeError):
+        dumps([YearToMonth(years, months)])
+
+
+def test_execute_query_returns_interval_columns_as_trino_prints_them():
+    row = [dt.timedelta(days=2), YearToMonth(-1, -3)]
+    mcp, _ = _registered(result={"columns": ["ds", "ym"], "rows": [row], "row_count": 1})
+    out = json.loads(in_request(lambda: mcp.tools["execute_query"]("SELECT 1")))
+    assert out["rows"] == [["2 00:00:00.000", "-1-3"]]
+
+
 def test_every_tool_declares_mcp_annotations_read_only_and_non_destructive():
     """MCP tool annotations (2025-06-18) let a host show that a tool only reads.
     Every tool here reads; none is destructive; listing is idempotent."""
@@ -1136,17 +1205,23 @@ def test_the_descriptions_agree_on_where_an_agent_starts():
 # description once registered, and its answers to a one-column table, with and without a
 # sample read from the same answer.
 def _v072_describe_table_doc() -> str:
-    """The docstring of describe_table in 0.7.2, at its depth there, so that the Python
-    that runs the test gives it the indentation it gives the tool's own."""
+    """The docstring of describe_table since 0.8, which pages its columns, at its depth
+    there, so that the Python that runs the test gives it the indentation it gives the
+    tool's own."""
 
     def describe_table(catalog: str, schema: str, table: str, sample_rows: int = 0) -> str:
         """Describe a table: its columns, their types and comments, and optionally
         a few sample rows.
 
         Args: catalog, schema, table as bare names; sample_rows (0 to 20) adds
-        that many rows of data. Returns JSON {"columns": [...], "rows": [...],
-        "truncated": bool} where each row is [name, type, extra, comment] and
-        truncated says the server's row cap cut the columns; plus {"sample": {...}}
+        that many rows of data, on the first page only; column_offset, optional, the
+        first column of the page (0, the default, is the first page). Returns JSON
+        {"columns": [...], "rows": [...], "truncated": bool, "next_column_offset": n or
+        null, "columns_cut": bool} where each row is [name, type, extra, comment]: one
+        page of the columns, the server's row cap of them. truncated says the page does
+        not hold every column. When next_column_offset is not null, more columns follow:
+        call again with column_offset=next_column_offset for the next page. columns_cut
+        says the table has more columns than the server reads; plus {"sample": {...}}
         when sample_rows > 0.
         """
         return ""
@@ -1162,13 +1237,16 @@ V072_DESCRIBE_DOC = (
     "data access policy, not an error; report what is returned, verbatim, and "
     "do not retry the same call.\n"
 )
+# The answer of 0.7.2, with the two keys of a page 0.8 adds before the sample.
 V072_DESCRIBE_REPLY = (
     '{"columns": ["Column", "Type", "Extra", "Comment"], '
-    '"rows": [["id", "bigint", "", "key"]], "truncated": false}'
+    '"rows": [["id", "bigint", "", "key"]], "truncated": false, '
+    '"next_column_offset": null, "columns_cut": false}'
 )
 V072_DESCRIBE_SAMPLE_REPLY = (
     '{"columns": ["Column", "Type", "Extra", "Comment"], '
     '"rows": [["id", "bigint", "", "key"]], "truncated": false, '
+    '"next_column_offset": null, "columns_cut": false, '
     '"sample": {"columns": ["Column", "Type", "Extra", "Comment"], '
     '"rows": [["id", "bigint", "", "key"]], "row_count": 1}}'
 )
@@ -1198,7 +1276,7 @@ def _orders(**columns):
     )
 
 
-def test_without_a_provider_describe_table_is_unchanged_byte_for_byte():
+def test_without_a_provider_describe_table_is_0_7_2_plus_the_keys_of_a_page():
     described = {
         "columns": ["Column", "Type", "Extra", "Comment"],
         "rows": [["id", "bigint", "", "key"]],

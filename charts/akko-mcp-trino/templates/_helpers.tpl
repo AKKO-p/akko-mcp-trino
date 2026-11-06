@@ -96,6 +96,12 @@ they would silently override the render-time checks.
   "MCP_DESCRIBE_SCHEMA_TABLES" "limits.describeSchemaTables" "MCP_DESCRIBE_SCHEMA_COLUMNS" "limits.describeSchemaColumns"
   "MCP_SEARCH_MIN_LENGTH" "limits.searchMinLength" "MCP_SEARCH_MAX_WORDS" "limits.searchMaxWords"
   "MCP_SEARCH_MAX_WORD_LENGTH" "limits.searchMaxWordLength" "MCP_SEARCH_RESERVE_SECONDS" "limits.searchReserveSeconds"
+  "MCP_SEARCH_CONCURRENCY" "limits.searchConcurrency" "MCP_SEARCH_MAX_THREADS" "limits.searchMaxThreads"
+  "MCP_DESCRIBE_MAX_COLUMNS" "limits.describeMaxColumns" "MCP_PROFILE_MODES" "limits.profileModes"
+  "MCP_PROFILE_MAX_COLUMNS" "limits.profileMaxColumns" "MCP_PROFILE_SAMPLE_ROWS" "limits.profileSampleRows"
+  "MCP_PROFILE_VALUE_CHARS" "limits.profileValueChars" "MCP_PROFILE_TYPE_CHARS" "limits.profileTypeChars"
+  "MCP_PROFILE_DESCRIBE_ROWS" "limits.profileDescribeRows" "MCP_PROFILE_CLIENT_TAG" "limits.profileClientTag"
+  "MCP_PROFILE_TIMEOUT_SECONDS" "limits.profileTimeoutSeconds" "MCP_PROFILE_MAX_CONCURRENT" "limits.profileMaxConcurrent"
   "MCP_USER_TOKEN" "nothing: stdio only" "SSL_CERT_FILE" "ca and ca.setSslCertFile" "PYTHONDONTWRITEBYTECODE" "nothing: always set"
 ) }}
 {{- end }}

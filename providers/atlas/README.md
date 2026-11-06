@@ -186,6 +186,17 @@ What the container needs:
    (3600 by default, a setting of the server), or until its secret file changes, or `SIGHUP`,
    so that the provider never locks it in a directory that counts failed logins.
 
+**Rights.** The context follows Trino's rights: a caller gets it only for the tables and columns
+Trino lists to them. The provider reads Atlas with this read-only technical account. Descriptions
+follow what Trino lists to the caller. With `MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table`
+also requires that Trino validates a select by the caller of the columns it lists, while
+`describe_schema` keeps serving the descriptions of the tables Trino lists. It serves glossary
+terms, classifications and business metadata only when their glossary, classification or set is
+named in `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` or `ATLAS_BUSINESS_METADATA`, closed by
+default (empty means none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set. So a glossary
+or a classification restricted in Atlas is never served unless the operator names it. Reading Atlas
+as the caller is not in this version.
+
 ## Checking the configuration
 
 `akko-mcp-trino --check` prints one line per setting: the addresses (never with credentials),

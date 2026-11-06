@@ -472,6 +472,44 @@ def test_cli_check_says_the_token_algorithms_and_the_user_claim(monkeypatch, cap
     assert "token signatures: RS256,RS512; user from: preferred_username" in out  # as applied
 
 
+def test_cli_check_says_the_bounds_of_profile_table(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    _clean_identity_env(monkeypatch)
+    for name, value in _JWT_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("MCP_PROFILE_MAX_COLUMNS", "12")
+    monkeypatch.setenv("MCP_PROFILE_SAMPLE_ROWS", "3456")
+    monkeypatch.setenv("MCP_PROFILE_MODES", "sample,full")
+    monkeypatch.setenv("MCP_PROFILE_VALUE_CHARS", "78")
+    monkeypatch.setenv("MCP_PROFILE_DESCRIBE_ROWS", "901")
+    monkeypatch.setenv("MCP_PROFILE_CLIENT_TAG", "agents-profile")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "4.5")
+    monkeypatch.setenv("MCP_PROFILE_MAX_CONCURRENT", "7")
+    monkeypatch.setenv("MCP_PROFILE_TYPE_CHARS", "321")
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "60")
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "120")
+    assert check_config(Config.from_env()) == 0
+    assert (
+        "profile_table: modes sample, full; up to 12 columns, sample of 3456 first rows, "
+        "values cut at 78 characters, types at 321, DESCRIBE read up to 901 rows, "
+        "client tag agents-profile, "
+        "7 at once, time budget 4.5 s"
+    ) in capsys.readouterr().out
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "0")
+    assert check_config(Config.from_env()) == 0
+    assert "7 at once, time budget 60 s\n" in capsys.readouterr().out, "the one that applies"
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
+    assert check_config(Config.from_env()) == 0
+    assert "7 at once, time budget 120 s\n" in capsys.readouterr().out
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    assert check_config(Config.from_env()) == 0
+    out = capsys.readouterr().out
+    assert "7 at once, time budget none\n" in out
+    assert "WARNING: MCP_PROFILE_MODES allows full" in out
+
+
 def test_cli_check_shows_a_malformed_algorithm_setting_as_written(monkeypatch, capsys):
     from akko_mcp_trino.__main__ import check_config
     from akko_mcp_trino.config import Config
@@ -740,3 +778,17 @@ def test_a_transport_that_fails_to_stop_still_runs_the_close():
     with pytest.raises(RuntimeError), TestClient(app):
         pass
     assert seen == [1]
+
+
+def test_cli_check_reports_the_discovery_settings(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("TRINO_MAX_ROWS", "40")
+    monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", "1234")
+    monkeypatch.setenv("MCP_SEARCH_CONCURRENCY", "3")
+    monkeypatch.setenv("MCP_SEARCH_MAX_THREADS", "17")
+    check_config(Config.from_env())
+    out = capsys.readouterr().out
+    assert "describe_table: pages of 40 columns, 1234 columns at most" in out
+    assert "budget kept in reserve, 3 catalogs at once, 17 reads at once in all" in out

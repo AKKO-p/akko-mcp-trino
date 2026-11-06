@@ -37,7 +37,8 @@ the cap is read to say whether the answer was cut (``truncated``), and a query
 that outlives ``TRINO_QUERY_TIMEOUT_SECONDS`` is cancelled in Trino. Within a
 tool call that has a time budget (``MCP_CALL_TIMEOUT_SECONDS``), a query also
 gets no more than what is left of it: past the call's deadline none starts,
-and the one running is cancelled.
+and the one running is cancelled. A query given a `Cancellation` is cancelled in
+Trino too, at once, when its caller no longer needs it.
 
 The statements of the filter by Trino's rights carry the client tag ``mcp-gate``
 (`GATE_TAG`, by `gate_runner`), on top of an extension's tags, so that Trino's
@@ -69,6 +70,66 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # Until Trino answers the POST of a statement, the query has no name and a cancel stops
 # nothing; past its budget, the cancel is tried again this often until the query has one.
 _RECANCEL_SECONDS = 0.05
+
+
+class QueryCancelled(Exception):
+    """A query stopped by its `Cancellation`: its caller no longer needs the answer."""
+
+
+class Cancellation:
+    """A signal that stops the queries given it, each cancelled in Trino at once.
+
+    A query registers how to stop itself while it runs (``watch``); ``cancel`` stops every
+    one registered, each in a short thread of its own, side by side, and returns at once;
+    any query asked afterwards never starts. A query that ended before is not touched.
+    ``wait`` returns once every stop has ended, which it does when its query ends."""
+
+    def __init__(self) -> None:
+        """A signal not yet given, with no query registered."""
+        self._lock = threading.Lock()
+        self._stops: list[Callable[[], None]] = []
+        self._threads: list[threading.Thread] = []
+        self._cancelled = False
+
+    def is_set(self) -> bool:
+        """Whether ``cancel`` was called."""
+        return self._cancelled
+
+    def watch(self, stop: Callable[[], None]) -> Callable[[], None]:
+        """Call ``stop`` on ``cancel``, or now if it was called; returns what unregisters it."""
+        with self._lock:
+            if not self._cancelled:
+                self._stops.append(stop)
+                return lambda: self._forget(stop)
+        stop()
+        return lambda: None
+
+    def _forget(self, stop: Callable[[], None]) -> None:
+        with self._lock:
+            if stop in self._stops:
+                self._stops.remove(stop)
+
+    def cancel(self) -> None:
+        """Stop every query registered, and every one asked from now on, without waiting:
+        a query Trino has not named yet is tried again until it is, and that wait is paid
+        once for all of them, not one after another."""
+        with self._lock:
+            self._cancelled = True
+            stops, self._stops = self._stops, []
+        for stop in stops:
+            thread = threading.Thread(target=stop, name="mcp-cancel", daemon=True)
+            try:
+                thread.start()
+            except Exception:  # noqa: BLE001 - no thread to spare: stopped here, at once
+                stop()
+                continue
+            self._threads.append(thread)
+
+    def wait(self) -> None:
+        """Return once every stop ``cancel`` started has ended."""
+        for thread in self._threads:
+            thread.join()
+
 
 # The client tag of the statements the filter by Trino's rights runs for a caller.
 GATE_TAG = "mcp-gate"
@@ -440,6 +501,7 @@ class TrinoClient:
         limit: int,
         budget: float,
         call: Optional[ToolCall],
+        cancel: Optional[Cancellation] = None,
     ) -> list:
         """Execute and read up to ``limit`` rows, within ``budget`` seconds when above 0;
         ``call`` is the tool call whose deadline sets that budget, if it does.
@@ -448,16 +510,19 @@ class TrinoClient:
         (the fetch fails), or not yet named by Trino when the budget ran out (a cancel then
         has nothing to stop, so it is tried again until Trino names the query, which the
         Trino client's ``execute`` waits on until the first rows), or its last page read
-        just as the budget ran out."""
-        if budget <= 0:
+        just as the budget ran out. ``cancel``, when given, stops it the same way, at once,
+        and it then raises `QueryCancelled`, never the call's error."""
+        if budget <= 0 and cancel is None:
             cursor.execute(sql, params)
             return cursor.fetchmany(limit)
-        expired, done = threading.Event(), threading.Event()
+        expired, done, cancelled = threading.Event(), threading.Event(), threading.Event()
+        executing = threading.Event()
 
         def expire() -> None:
             expired.set()
             # DELETE on the query: Trino stops it, the fetch below fails. A query not yet
-            # named cannot be stopped: try again until it is, or until the statement is over.
+            # named cannot be stopped: try again until it is, or until the statement is over,
+            # which its POST and the client's retries bound.
             while not done.is_set():
                 named = cursor.query_id is not None
                 cursor.cancel()
@@ -472,23 +537,46 @@ class TrinoClient:
                 f"the query exceeded its time budget of {budget:g} s and was cancelled"
             )
 
-        timer = threading.Timer(budget, expire)
-        timer.daemon = True
-        timer.start()
+        def stop() -> None:
+            # Before its statement starts, a query only learns it is cancelled: it then
+            # stops itself, and no cancel is sent for a statement Trino was never asked.
+            cancelled.set()
+            if executing.is_set():
+                expire()
+
+        def stopped() -> Exception:
+            return QueryCancelled("the query was cancelled") if cancelled.is_set() else over()
+
+        timer = threading.Timer(budget, expire) if budget > 0 else None
+        if timer is not None:
+            timer.daemon = True
+            timer.start()
+        forget = cancel.watch(stop) if cancel is not None else (lambda: None)
+        executing.set()
+        if cancelled.is_set():
+            # Cancelled before its statement: by the time the signal was watched, or as it
+            # starts. Whichever of the two sees the other, the statement is never sent.
+            done.set()
+            forget()
+            if timer is not None:
+                timer.cancel()
+            raise QueryCancelled("the query was cancelled before it started")
         try:
             cursor.execute(sql, params)
             rows = [] if expired.is_set() else cursor.fetchmany(limit)
         except Exception as exc:
             if expired.is_set():
-                raise over() from exc
+                raise stopped() from exc
             raise
         finally:
             done.set()
-            timer.cancel()
+            forget()
+            if timer is not None:
+                timer.cancel()
         if expired.is_set():
             with contextlib.suppress(Exception):
                 cursor.cancel()  # Trino has named the query by now: stop what is left of it
-            raise over()
+            raise stopped()
         return rows
 
     def _run(
@@ -499,11 +587,14 @@ class TrinoClient:
         limit: int,
         timeout: float,
         connection: Optional[tuple] = None,
+        cancel: Optional[Cancellation] = None,
     ) -> dict:
+        if cancel is not None and cancel.is_set():
+            raise QueryCancelled("the query was cancelled before it started")
         budget, call = self._time_budget(timeout)
         conn = self._connect(user, connection)
         cursor = conn.cursor()
-        rows = self._fetch(cursor, sql, params, limit + 1, budget, call)
+        rows = self._fetch(cursor, sql, params, limit + 1, budget, call, cancel)
         truncated = len(rows) > limit
         if truncated:
             # The caller gets `limit` rows; the rest of the query is not left running.
@@ -527,6 +618,7 @@ class TrinoClient:
         max_rows: int = 0,
         row_limit: int = 0,
         timeout: float = 0.0,
+        cancel: Optional[Cancellation] = None,
     ) -> dict:
         """Run ``sql`` for ``user`` through the identity mode: columns, rows, row_count,
         and truncated when more rows existed. ``max_rows`` lowers the server's cap, never raises it.
@@ -536,16 +628,17 @@ class TrinoClient:
         above 0, lowers this query's time budget: the shortest of it,
         ``TRINO_QUERY_TIMEOUT_SECONDS`` and what is left of the call wins. A query stopped
         by its own ``timeout`` raises a plain ``TimeoutError`` and leaves the call alive; one
-        stopped by the call's deadline raises the call's ``CallTimeout``.
+        stopped by the call's deadline raises the call's ``CallTimeout``. ``cancel`` stops it at
+        once, in Trino too, when its caller no longer needs it (`QueryCancelled`).
         """
         cap = row_limit if row_limit > 0 else self._config.max_rows
         limit = min(max_rows, cap) if max_rows > 0 else cap
         if self._metrics is None:
-            return self._run(sql, user, params, limit, timeout)
+            return self._run(sql, user, params, limit, timeout, cancel=cancel)
         self._metrics.queries.inc()
         start = time.perf_counter()
         try:
-            return self._run(sql, user, params, limit, timeout)
+            return self._run(sql, user, params, limit, timeout, cancel=cancel)
         except Exception:
             self._metrics.errors.inc()
             raise

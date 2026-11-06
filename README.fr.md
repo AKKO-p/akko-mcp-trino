@@ -141,7 +141,7 @@ donnez.
 - **Une ligne d'audit par appel.** Elle est indexée par `X-Request-Id` et ne contient jamais le
   token ni le texte SQL. Elle dit qui a appelé quel tool, avec quel résultat, pendant combien de
   temps.
-- **Huit tools**, annotés selon ce qu'ils peuvent vraiment faire : `execute_query` n'est annoté en
+- **Neuf tools**, annotés selon ce qu'ils peuvent vraiment faire : `execute_query` n'est annoté en
   lecture seule que tant que `TRINO_READ_ONLY` est vrai.
 - **Une porte gardée.** Les tokens bearer sont vérifiés avec le JWKS de n'importe quel IdP OIDC (émetteur, audience liée à ce serveur, expiration, tolérance d'horloge), un token émis pour
   Trino est refusé, les métadonnées de ressource protégée (RFC 9728) sont publiées, l'en-tête Host
@@ -357,9 +357,44 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 | `list_schemas` | `catalog`, `offset` (facultatif) | une page des schémas de ce catalog, `next_offset`, `truncated` |
 | `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
 | `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` ; avec un fournisseur de contexte, une `description` par table et `context_sources` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
-| `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, `truncated` ; un échantillon gouverné sur demande ; ce qu'ajoutent les descripteurs d'une extension, et `describer_errors` quand l'un a échoué ; avec un fournisseur de contexte, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` et `undescribed_columns` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
+| `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20, première page seulement), `column_offset` (facultatif, 0 par défaut) | une page des colonnes, le plafond de lignes à partir de `column_offset`, avec types et commentaires ; `truncated` quand la page ne les contient pas toutes, `next_column_offset` où commence la page suivante (null sur la dernière), `columns_cut` quand la table a plus de `MCP_DESCRIBE_MAX_COLUMNS` colonnes ; un échantillon gouverné sur demande ; ce qu'ajoutent les descripteurs d'une extension, et `describer_errors` quand l'un a échoué ; avec un fournisseur de contexte, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` et `undescribed_columns` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
+| `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (tous facultatifs sauf la table) | `{"table", "scope", "rows": n, "columns_cut": bool, "columns": [{"column", "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}` : des agrégats des lignes que l'appelant peut lire, calculés par une seule requête sous son identité, donc masques et filtres de lignes s'appliquent comme dans `execute_query`. Les `columns` sont nommées comme `DESCRIBE` les liste, par défaut les `MCP_PROFILE_MAX_COLUMNS` premières ; `DESCRIBE` est lu jusqu'à `MCP_PROFILE_DESCRIBE_ROWS` lignes, et `"columns_cut": true` dit qu'il en listait plus, qu'on ne peut pas nommer. `mode` est l'un de `MCP_PROFILE_MODES` : `sample` (par défaut : les `MCP_PROFILE_SAMPLE_ROWS` premières lignes, `"scope": "first_rows"`, pas un tirage aléatoire), `bernoulli` (`TABLESAMPLE BERNOULLI (percent)`, `0 < percent <= 100`, `"scope": "random_sample"`, parcourt toutes les lignes pour tirer l'échantillon) ou `full` (toutes les lignes que l'appelant peut lire, `"scope": "visible_rows"`) ; un mode que le serveur ne permet pas est refusé avant toute requête, et la description ne nomme que les modes permis. La requête d'agrégats porte l'étiquette client `MCP_PROFILE_CLIENT_TAG` et tourne dans le plus petit de `MCP_PROFILE_TIMEOUT_SECONDS`, de `TRINO_QUERY_TIMEOUT_SECONDS` et du budget de l'appel posés au-dessus de 0 ; au-delà, elle est annulée dans Trino et la réponse est `"kind": "time_budget"`. Au plus `MCP_PROFILE_MAX_CONCURRENT` appels tournent à la fois ; au-delà, `"kind": "busy"`. `null_fraction` vaut null quand `rows` vaut 0. Un type sans ordre (`array`, `map`, `row`, `json`, tout type qu'on ne sait pas ordonné) n'a que son compte et `"skipped": ["distinct", "min", "max"]` ; `min` et `max` sont rendus comme les cellules d'`execute_query`, et un texte ou un binaire plus long que `MCP_PROFILE_VALUE_CHARS` (caractères, ou octets) est coupé dans la requête même, préfixe exact de la vraie valeur, avec `"cut": ["min"]`, `["max"]` ou les deux ; un type plus long que `MCP_PROFILE_TYPE_CHARS` est coupé, avec `"type"` dans `cut` |
 | `explain_query` | `sql` | `{"valid": true}` : Trino a analysé la requête en lecture sous l'identité de l'appelant, sans l'exécuter ; le plan seulement si `EXPLAIN` figure dans `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | colonnes, lignes, nombre de lignes, `truncated` |
+
+La requête d'agrégats de `profile_table` porte l'étiquette client `MCP_PROFILE_CLIENT_TAG`
+(`mcp-profile` par défaut) : les groupes de ressources de Trino peuvent ainsi borner leur nombre
+simultané et leur mémoire, par exemple avec le gestionnaire de groupes de ressources par fichier (les
+chiffres sont un exemple à adapter, pas une mesure). Chaque sélecteur nomme un groupe feuille : les
+requêtes sans l'étiquette ont donc besoin de leur propre groupe (ici `global.other`), sinon Trino les
+refuse :
+
+```json
+{
+  "rootGroups": [
+    {
+      "name": "global",
+      "softMemoryLimit": "80%",
+      "hardConcurrencyLimit": 100,
+      "maxQueued": 1000,
+      "subGroups": [
+        {"name": "profile", "softMemoryLimit": "10%", "hardConcurrencyLimit": 2, "maxQueued": 20},
+        {"name": "other", "softMemoryLimit": "70%", "hardConcurrencyLimit": 98, "maxQueued": 980}
+      ]
+    }
+  ],
+  "selectors": [
+    {"clientTags": ["mcp-profile"], "group": "global.profile"},
+    {"group": "global.other"}
+  ]
+}
+```
+
+Le groupe de ressources borne Trino ; `MCP_PROFILE_MAX_CONCURRENT` (4) borne chaque réplica de ce
+serveur : un profil en file dans Trino tient quand même l'un des fils que partagent tous les tools du
+réplica, donc au-delà de ce nombre de profils simultanés un appel répond aussitôt `"kind": "busy"` et
+n'envoie aucune requête. Le garder au plus égal à `hardConcurrencyLimit` plus `maxQueued` du groupe,
+divisé par le nombre de réplicas.
 
 Chaque tool passe par Trino sous l'identité du mode choisi, les tools de liste compris : Trino ne
 liste que ce que cette identité peut voir. Une valeur masquée ou une ligne absente est la policy
@@ -511,7 +546,22 @@ pour un catalog que l'appelant ne voit pas, ou s'il a été modifié ; tout cu
 serveur reprend, même pour un schéma Hive comme `2024_sales`, car le schéma d'un curseur n'entre que
 dans un littéral. Sans budget d'appel (`MCP_CALL_TIMEOUT_SECONDS=0`), une recherche sur tous les
 catalogs n'aurait pas de borne : elle est refusée, un catalog nommé est fouillé, et `--check` le
-signale. `--check` signale aussi `MCP_SEARCH_RESERVE_SECONDS=0` avec un budget d'appel : une
+signale. Elle lit `MCP_SEARCH_CONCURRENCY` catalogs à la fois (8 par défaut), chacun sous
+l'identité de l'appelant et dans ce qui reste de l'appel, jamais plus de ce nombre au-delà du
+catalog dont elle répond. Tant que le budget de l'appel n'est pas épuisé, elle rend ce que rendrait
+une recherche d'un catalog à la fois : les mêmes lignes dans le même ordre, le même `not_searched`
+et le même `next_cursor`. Quand le budget s'épuise, la page est une page partielle juste dont le
+contenu peut différer, puisqu'elle a lu plus loin : rien n'est servi au-delà du premier catalog
+qu'elle n'a pas fini, et `next_cursor` y reprend. Une fois la page pleine, les lectures encore en
+cours sont aussitôt annulées dans Trino et aucune ne part. Un catalog qui bloque en tête est
+attendu comme le ferait une recherche d'un catalog à la fois, jusqu'au budget de la requête ou de
+l'appel. `MCP_SEARCH_MAX_THREADS` (32) borne les lectures en cours dans les fils de tout le
+processus, tous appels confondus : un appel qui n'en trouve aucun de libre lit lui-même son
+catalog suivant, et avance donc toujours. Pour Trino, chaque appel de `search_columns` lance
+jusqu'à `MCP_SEARCH_CONCURRENCY` requêtes de métadonnées à la fois : les borner par un groupe de
+ressources sur le `TRINO_SOURCE` du serveur, comme pour l'étiquette client de `profile_table`, ou
+poser `MCP_SEARCH_CONCURRENCY=1` pour lire un catalog à la fois, comme en 0.7. `--check`
+signale aussi `MCP_SEARCH_RESERVE_SECONDS=0` avec un budget d'appel : une
 recherche peut alors aller jusqu'au bout de l'appel, qui rend sa propre erreur `time_budget`. La
 ligne d'audit dit combien de tables et de colonnes sont venues et si la recherche a été coupée,
 jamais le texte, qui peut être une donnée. Les commentaires sont des données, jamais des
@@ -547,11 +597,39 @@ nommer.
 | `permission` | Trino ou l'IdP a refusé le droit : le rapporter, ne pas réessayer |
 | `invalid_argument` | le serveur a refusé un argument (un identifiant, un `offset`, un curseur, un texte de recherche hors bornes) avant d'atteindre Trino |
 | `read_only` | l'instruction écrit et le serveur est en lecture seule |
-| `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
+| `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
+| `busy` | `profile_table` exécute déjà autant d'appels que ce serveur le permet (`MCP_PROFILE_MAX_CONCURRENT`) : rappeler dans quelques secondes, comme le dit son `hint` |
 | `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue) : l'instruction n'est ni valide ni invalide, réessayer plus tard |
 | `other` | toute autre erreur |
 
 La ligne d'audit garde seulement le code de l'erreur, inchangé.
+
+## Déploiement avec un catalogue
+
+Le serveur fonctionne avec un catalogue de données selon l'un de deux modes.
+
+**Mode 1, Trino seul.** Le serveur tourne sans fournisseur de contexte. Une équipe qui fait
+déjà tourner le serveur MCP de son catalogue le garde, à côté : rien dans ce serveur ne le bloque
+ni ne le remplace. Ce mode convient quand les métadonnées du catalogue ne sont pas sensibles.
+
+**Mode 2, avec un fournisseur de contexte.** Le sens métier (descriptions, termes de glossaire,
+classifications, propriétaire) n'est montré que pour les tables et les colonnes que Trino liste à
+l'appelant. Ce mode convient quand les métadonnées doivent suivre les droits sur les
+données.
+
+**Droits.** Le contexte suit les droits de Trino. Le fournisseur lit le catalogue avec un compte
+technique en lecture seule. Les descriptions suivent ce que Trino liste à l'appelant. Avec
+`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` exige en plus que Trino valide un SELECT par
+l'appelant des colonnes qu'il liste, tandis que `describe_schema` continue de servir les
+descriptions des tables que Trino liste. Il ne sert les termes de glossaire, les classifications
+et les métadonnées métier que si leur glossaire, leur classification ou leur ensemble est nommé
+dans les listes blanches, fermées par défaut, et le propriétaire seulement s'il est configuré
+(pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, vide veut
+dire aucun, et `ATLAS_OWNER_ATTRIBUTE`). Un glossaire ou une classification restreints dans le
+catalogue ne sont donc jamais servis, sauf si l'administrateur les nomme. La lecture du
+catalogue sous l'identité de l'appelant n'est pas dans cette version.
+
+Sans fournisseur, aucun code de catalogue n'est chargé et aucun catalogue n'est appelé.
 
 ## Contexte d'un catalogue
 
@@ -588,7 +666,17 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true` : contexte servi seulement pour les tables que l'appelant peut lire | `false` |
 | `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'aucun appelant de ce serveur ne doit voir : le contexte n'est servi à un appelant que tant que Trino la lui cache | aucune |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, 1 au moins | `500`, `60000`, `500` |
-| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bornes du profil d'une table, 1 au moins | `50`, `100000` |
+| `MCP_SEARCH_CONCURRENCY` | catalogs qu'un appel de `search_columns` lit à la fois, de 1 à 32 : autant de requêtes de métadonnées en cours dans Trino pour cet appel. Le monter au-delà de 8 ajoute surtout de la charge de métadonnées sur Trino, pour peu de gain. | `8` |
+| `MCP_SEARCH_MAX_THREADS` | lectures de `search_columns` en cours dans les fils d'un processus, tous appels confondus, de 1 à 256 ; un appel qui n'en trouve aucune de libre lit lui-même son catalog suivant | `32` |
+| `MCP_DESCRIBE_MAX_COLUMNS` | colonnes d'une table que `describe_table` lit au plus, page par page, de 1 à 100000 ; au-delà, la réponse dit `columns_cut` | `5000` |
+| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | colonnes que `profile_table` profile au plus en un appel (de 1 à 500), et lignes que lit son mode `sample`, 1 au moins | `50`, `100000` |
+| `MCP_PROFILE_MODES` | modes que `profile_table` permet, séparés par des virgules, parmi `sample`, `bernoulli` et `full` ; vide ou nom inconnu : refus de démarrer | `sample,bernoulli,full` |
+| `MCP_PROFILE_VALUE_CHARS` | caractères d'un `min` ou d'un `max` texte qu'il sert, ou octets d'un binaire ; Trino en lit un de plus et pas davantage, et au-delà la valeur est coupée ; 1 au moins | `200` |
+| `MCP_PROFILE_TYPE_CHARS` | caractères du type d'une colonne qu'il sert, de 1 à 100000 ; un type plus long est coupé, avec `"type"` dans `cut` ; `MCP_PROFILE_VALUE_CHARS` ne coupe jamais un type | `500` |
+| `MCP_PROFILE_DESCRIBE_ROWS` | lignes de son `DESCRIBE` qu'il lit, au-delà du plafond de lignes, 1 au moins ; une colonne au-delà ne peut pas être nommée | `5000` |
+| `MCP_PROFILE_CLIENT_TAG` | étiquette client de sa requête d'agrégats (pas de son `DESCRIBE`), pour un groupe de ressources de Trino : 1 à 100 lettres, chiffres et `_ . : = / -` | `mcp-profile` |
+| `MCP_PROFILE_TIMEOUT_SECONDS` | budget de temps de sa requête d'agrégats, au-delà duquel elle est annulée dans Trino ; le budget qui s'applique est le plus petit de celui-ci, de `TRINO_QUERY_TIMEOUT_SECONDS` et du budget de l'appel, chacun compté seulement au-dessus de 0, et `--check` l'affiche ; 0 laisse le plus petit des deux autres ; au-dessus de 0, au plus `TRINO_QUERY_TIMEOUT_SECONDS` et `MCP_CALL_TIMEOUT_SECONDS` quand ils sont au-dessus de 0 | `0` |
+| `MCP_PROFILE_MAX_CONCURRENT` | appels de `profile_table` qu'un processus du serveur exécute à la fois, de 1 à 64 ; au-delà, un appel répond aussitôt `"kind": "busy"` et n'envoie aucune requête | `4` |
 | `MCP_VISIBILITY_ENABLED` | supprimé en 0.8 : le filtre par les droits de Trino ne se désactive pas, et `false` refuse de démarrer | aucune |
 
 `--check` imprime une ligne `context:` (les fournisseurs et chaque réglage du tableau, de
@@ -640,8 +728,9 @@ comme avant. La réponse ajoute alors :
   `MCP_CONTEXT_RESPONSE_CHARS` ; les colonnes laissées sont listées. Un texte coupé à
   `MCP_CONTEXT_TEXT_CHARS` est nommé dans `cut`.
 
-Sans fournisseur, `describe_table` répond et se décrit comme en 0.7.2, sauf `describer_errors` :
-un descripteur de greffon qui lève y est désormais compté. Avec un fournisseur, sa description dit
+Sans fournisseur, `describe_table` répond comme en 0.7.2 plus `next_column_offset` et
+`columns_cut`, avec une nouvelle description qui dit comment lire la page suivante, et
+`describer_errors` : un descripteur de greffon qui lève y est désormais compté. Avec un fournisseur, sa description dit
 que ce texte vient d'un catalogue et que ce sont des données, jamais des instructions. Le contexte
 est lu en dernier, après l'échantillon, et ne cache jamais les colonnes ni ne fait échouer l'appel.
 Un fournisseur en panne, lent ou qui refuse le compte est lu en `MCP_CONTEXT_TIMEOUT_SECONDS` au plus
@@ -663,7 +752,8 @@ coûterait une requête par table : `describe_table` sert le reste. Les mêmes g
 s'il reste moins de `MCP_CONTEXT_RESERVE_SECONDS`, aucun fournisseur n'est appelé et les sources
 disent `unavailable`, une requête lente du filtre ne prouve rien, tout autre échec sert la page sans
 contexte et dit `error` pour chaque source, et l'appel ne répond jamais `time_budget` à cause du
-contexte. Sans fournisseur, `describe_schema` répond et se décrit exactement comme en 0.7.2.
+contexte. Sans fournisseur, `describe_schema` n'ajoute aucune clé de contexte à sa réponse ni
+aucune phrase à sa description.
 
 Les greffons lisent les catalogues par `tools.context.tables(refs)`, une liste de `TableRef`
 construits par `TableRef.of`. La réponse a la forme de celle de `describe_schema`, `descriptions`
