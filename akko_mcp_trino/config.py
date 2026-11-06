@@ -54,6 +54,12 @@ DEFAULT_SEARCH_MIN_LENGTH = 3
 DEFAULT_SEARCH_MAX_WORDS = 8
 DEFAULT_SEARCH_MAX_WORD_LENGTH = 64
 DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
+# The least MCP_CONTEXT_RESERVE_SECONDS a server with a context provider accepts. Past its
+# deadline, the chain waits up to 0.25 s for a provider to hand back control (its
+# ``_GRACE_SECONDS``, which includes the 0.1 s a cancelled read is given to end): a shorter
+# reserve lets the context end past the call's own deadline, and the call then answers its
+# time_budget error instead of the columns.
+MIN_CONTEXT_RESERVE_SECONDS = 0.3
 
 
 def provider_names(value: str) -> list[str]:
@@ -325,6 +331,15 @@ class Config:
             found.append(
                 f"MCP_CONTEXT_RESERVE_SECONDS={self.context_reserve_seconds:g}: "
                 "a reserve is 0 seconds or more"
+            )
+        elif (
+            provider_names(self.context_providers)
+            and self.context_reserve_seconds < MIN_CONTEXT_RESERVE_SECONDS
+        ):
+            found.append(
+                f"MCP_CONTEXT_RESERVE_SECONDS={self.context_reserve_seconds:g}: with a context "
+                "provider, part of each call's budget must be kept back so that the context "
+                f"ends before the call does; set {MIN_CONTEXT_RESERVE_SECONDS:g} or more"
             )
         for name, value in (
             ("MCP_CONTEXT_RETRY_AFTER_SECONDS", self.context_retry_after_seconds),

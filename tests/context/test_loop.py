@@ -1,11 +1,13 @@
 """The dedicated loop: one thread, submitted coroutines, cancellation past the timeout."""
 
 import asyncio
+import logging
 import threading
 import time
 
 import pytest
 
+from akko_mcp_trino.context import loop as loop_module
 from akko_mcp_trino.context.loop import ContextLoop
 
 
@@ -79,3 +81,55 @@ def test_closing_cancels_what_is_left_and_stops_the_thread():
     assert "mcp-context" not in {t.name for t in threading.enumerate()}
     started.close()
     ContextLoop().close()
+
+
+def test_closing_does_not_hang_on_a_task_that_ignores_cancellation():
+    started = ContextLoop()
+    started.start()
+    asked = threading.Event()
+
+    async def stubborn():
+        while True:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                asked.set()
+
+    async def fails_when_cancelled():
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise ValueError("cleanup failed") from None
+
+    async def spawn():
+        asyncio.get_running_loop().create_task(stubborn())
+        asyncio.get_running_loop().create_task(fails_when_cancelled())
+
+    started.submit(spawn(), timeout=2)
+    start = time.monotonic()
+    started.close()
+    assert time.monotonic() - start < 5
+    assert asked.is_set()
+    assert "mcp-context" not in {t.name for t in threading.enumerate()}
+
+
+def test_a_loop_thread_that_does_not_end_in_time_logs_one_warning(monkeypatch, caplog):
+    monkeypatch.setattr(loop_module, "_CLOSE_WAIT_SECONDS", 0.05)
+    started = ContextLoop()
+    started.start()
+    busy = threading.Event()
+
+    async def blocks_the_thread():
+        busy.set()
+        time.sleep(0.5)
+
+    asyncio.run_coroutine_threadsafe(blocks_the_thread(), started._loop)
+    assert busy.wait(2)
+    with caplog.at_level(logging.WARNING, logger="akko_mcp_trino.context.loop"):
+        started.close()
+    mine = [r.getMessage() for r in caplog.records if r.name == "akko_mcp_trino.context.loop"]
+    assert mine == ["the context loop did not stop within 0.1 s; its thread is left behind"]
+    _until_gone = time.monotonic() + 5
+    while "mcp-context" in {t.name for t in threading.enumerate()}:
+        assert time.monotonic() < _until_gone
+        time.sleep(0.01)

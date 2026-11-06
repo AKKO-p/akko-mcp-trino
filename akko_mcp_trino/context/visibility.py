@@ -4,13 +4,14 @@ A name a catalogue cites (the target of a join) is kept only once Trino has list
 it to the caller. The proof never puts that name in a statement: the schemas of a
 listed catalog are read without a name filter, then the tables of a listed schema
 by ``WHERE table_schema = '<schema>'``, and the name is looked up in memory. A
-catalog or a schema enters a statement only after Trino has listed it.
+catalog, a schema or a table enters a statement only after Trino has listed it.
 
 Every statement goes through the ``run`` this cache is given, which the caller's
 wiring tags (``mcp-gate``) and binds to the verified caller. An entry is kept per
 caller, under everything that changes what Trino allows: the identity mode, the
-subject, the active roles and the catalog. A failed statement is never kept and
-proves nothing. Nothing logged names a caller or an object.
+subject, the active roles and the catalog. A failed statement proves nothing and is
+never kept, except a read Trino refuses, kept as refused. Nothing logged names a caller
+or an object.
 """
 
 import logging
@@ -26,6 +27,9 @@ from .caches import ByteCache, serialized_size
 from .types import TableRef
 
 _log = logging.getLogger(__name__)
+
+# The name Trino gives the error of a statement its access control refuses.
+_REFUSED = "PERMISSION_DENIED"
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,28 @@ class Visibility:
             return False
         return names is not None and ref.table in names
 
+    def columns(self, key: VisibilityKey, ref: TableRef) -> frozenset[str] | None:
+        """Return the columns Trino lists to the caller for a proven ``ref``.
+
+        A table not proven is never named and has ``None``; so has a table of more than
+        ``max_names`` columns, and a failed ``DESCRIBE``, which is not kept.
+        """
+        if not self.proven(key, ref):
+            return None
+        entry = ("columns", replace(key, catalog=""), ref)
+        hit, value = self._get(entry)
+        if hit:
+            return value
+        table = ".".join(_ident(n) for n in (ref.catalog, ref.schema, ref.table))
+        try:
+            names, cut = self._names(f"DESCRIBE {table}")
+        except Exception as exc:
+            _log.warning("a column read failed (%s): nothing is proven", type(exc).__name__)
+            return None
+        found = None if cut else names
+        self._put(entry, found)
+        return found
+
     def canary_clear(self, key: VisibilityKey) -> bool:
         """Return whether the configured canary is hidden from the caller.
 
@@ -211,26 +237,32 @@ class Visibility:
         columns: Sequence[str],
         *,
         listed: Collection[str],
+        described: bool = False,
     ) -> bool:
         """Return whether Trino validates a read of ``columns`` of ``ref`` by the caller.
 
         ``listed`` are the columns Trino has just listed for ``ref`` (``DESCRIBE``):
         only the columns of ``columns`` also in ``listed`` are named, and none left
-        means not selectable, without a statement. Only a proven table is named.
-        ``EXPLAIN (TYPE VALIDATE)`` returns no plan; a refusal or a failure is not kept.
+        means not selectable, without a statement. Only a proven table is named;
+        ``described`` says the caller's own ``DESCRIBE`` of ``ref`` listed them, which
+        proves it whatever the cache holds. ``EXPLAIN (TYPE VALIDATE)`` returns no plan.
+        A read Trino refuses is kept as refused for the TTL; any other failure is not kept.
         """
         validated = tuple(c for c in columns if c in listed)
-        if not validated or not self.proven(key, ref):
+        if not validated or not (described or self.proven(key, ref)):
             return False
         entry = ("select", replace(key, catalog=""), ref, validated)
-        if self._get(entry)[0]:
-            return True
+        hit, value = self._get(entry)
+        if hit:
+            return value
         names = ", ".join(_ident(c) for c in validated)
         table = ".".join(_ident(n) for n in (ref.catalog, ref.schema, ref.table))
         try:
             self._run(f"EXPLAIN (TYPE VALIDATE) SELECT {names} FROM {table}")
         except Exception as exc:
             _log.warning("a select check failed (%s): context is not served", type(exc).__name__)
+            if getattr(exc, "error_name", None) == _REFUSED:
+                self._put(entry, False)
             return False
         self._put(entry, True)
         return True

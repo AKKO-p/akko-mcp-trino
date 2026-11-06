@@ -1,20 +1,25 @@
 """The chain: cache first, batches, deadlines, concurrency, breakers, statuses, metrics."""
 
 import asyncio
+import inspect
 import logging
+import pathlib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from akko_mcp_trino import config as config_module
 from akko_mcp_trino.context import (
     ContextChain,
     ContextSettings,
     Gathered,
     ProviderRefused,
     ProviderUnavailable,
+    TermsResult,
 )
+from akko_mcp_trino.context import chain as chain_module
 from akko_mcp_trino.context.types import TableContext, TableRef, Term
 from akko_mcp_trino.metrics import Metrics
 
@@ -72,6 +77,7 @@ class Fake:
         self.maps_error = None
         self.stamp_error = None
         self.closed = False
+        self.sets = {}
 
     def maps(self, catalog):
         if self.maps_error is not None:
@@ -79,7 +85,9 @@ class Fake:
         return catalog in self.catalogs
 
     def served_sets(self):
-        return {}
+        if isinstance(self.sets, Exception):
+            raise self.sets
+        return self.sets
 
     async def describe(self, refs, *, deadline, on_behalf_of=None):
         self.calls.append(tuple(refs))
@@ -236,11 +244,12 @@ def test_the_deadline_reached_on_a_large_page_opens_no_breaker(loop):
 
 
 def test_a_deadline_already_passed_still_serves_the_cache(loop):
+    """Within the grace past the deadline: past it, nothing is waited for."""
     fake = Fake("one", known={ORDERS: TableContext()})
     clock = Clock()
     chain = _chain(loop, fake, clock=clock)
     chain.gather([ORDERS], deadline=clock.now + 5)
-    got = chain.gather([ORDERS, CLIENTS], deadline=clock.now - 1)
+    got = chain.gather([ORDERS, CLIENTS], deadline=clock.now - 0.1)
     assert got.statuses["one"] == "partial" and got.tables[ORDERS]
     assert len(fake.calls) == 1
 
@@ -512,8 +521,8 @@ def test_terms_are_read_once_by_source_and_key(loop):
     chain = _chain(loop, first, second, batch=1)
     wanted = {"first": ["k1", "k2", "k1"], "second": [], "elsewhere": ["k1"]}
     got = chain.terms(wanted, deadline=chain._clock() + 5)
-    assert dict(got) == {("first", "k1"): term}
-    assert chain.terms(wanted, deadline=chain._clock() + 5) == got
+    assert dict(got.terms) == {("first", "k1"): term}
+    assert chain.terms(wanted, deadline=chain._clock() + 5).terms == got.terms
     assert first.term_calls == [("k1",), ("k2",)] and second.term_calls == []
 
 
@@ -521,8 +530,8 @@ def test_terms_of_a_refused_source_are_not_asked_again(loop):
     fake = Fake("one")
     fake.fail = ProviderRefused("401")
     chain = _chain(loop, fake)
-    assert chain.terms({"one": ["k"]}, deadline=chain._clock() + 5) == {}
-    assert chain.terms({"one": ["k"]}, deadline=chain._clock() + 5) == {}
+    assert chain.terms({"one": ["k"]}, deadline=chain._clock() + 5).terms == {}
+    assert chain.terms({"one": ["k"]}, deadline=chain._clock() + 5).terms == {}
     assert len(fake.term_calls) == 1
 
 
@@ -578,3 +587,124 @@ def test_a_chain_in_use_runs_on_exactly_one_context_thread(loop):
     chain = _chain(loop, Fake("up", known={ORDERS: TableContext()}))
     chain.gather([ORDERS], deadline=chain._clock() + 5)
     assert [t.name for t in threading.enumerate()].count("mcp-context") == 1
+
+
+def test_terms_returns_the_statuses_it_computed(loop):
+    term = Term(key="k1", name="Customer", glossary="g")
+    first = Fake("first", terms={"k1": term})
+    empty = Fake("empty")
+    refused = Fake("refused")
+    refused.fail = ProviderRefused("401")
+    unasked = Fake("unasked")
+    chain = _chain(loop, first, empty, refused, unasked)
+    wanted = {"first": ["k1"], "empty": ["k9"], "refused": ["k1"]}
+    got = chain.terms(wanted, deadline=chain._clock() + 5)
+    assert isinstance(got, TermsResult)
+    assert dict(got.terms) == {("first", "k1"): term}
+    assert dict(got.statuses) == {"first": "ok", "empty": "not_found", "refused": "refused"}
+    with pytest.raises(TypeError):
+        got.statuses["first"] = "error"  # type: ignore[index]
+
+
+def test_served_sets_of_a_failing_provider_is_an_error_not_a_crash(loop, caplog):
+    metrics = Metrics()
+    good = Fake("good")
+    good.sets = {"glossary": frozenset({"Finance"})}
+    broken = Fake("broken")
+    broken.sets = RuntimeError("token s3cr3t rejected")
+    chain = _chain(loop, good, broken, metrics=metrics)
+    with caplog.at_level(logging.DEBUG, logger="akko_mcp_trino.context.chain"):
+        assert dict(chain.served_sets("good")) == {"glossary": frozenset({"Finance"})}
+        assert chain.served_sets("broken") is None, "an error is not an empty declaration"
+        assert dict(chain.served_sets("elsewhere")) == {}
+        good.sets = {}
+        assert dict(chain.served_sets("good")) == {}
+    assert "RuntimeError" in caplog.text and "s3cr3t" not in caplog.text
+    errors = {"provider": "broken", "status": "error"}
+    assert metrics.registry.get_sample_value("mcp_trino_context_errors_total", errors) == 1
+    good.sets = {"glossary": frozenset({"Finance"})}
+    with pytest.raises(TypeError):
+        chain.served_sets("good")["glossary"] = frozenset()  # type: ignore[index]
+
+
+def test_an_outage_logs_one_warning_per_opening(loop, caplog):
+    down = Fake("down")
+    down.fail = ProviderUnavailable("connection refused by 10.0.0.1")
+    clock = Clock()
+    chain = _chain(loop, down, clock=clock)
+    with caplog.at_level(logging.WARNING, logger="akko_mcp_trino.context.chain"):
+        assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["down"] == "unavailable"
+        assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["down"] == "unavailable"
+        clock.now += 31
+        assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["down"] == "unavailable"
+    assert len(down.calls) == 2
+    assert [r.getMessage() for r in caplog.records] == ["down is unavailable"] * 2
+
+
+def test_sighup_resets_the_breaker_gauge(loop):
+    metrics = Metrics()
+    refused = Fake("refused")
+    refused.fail = ProviderRefused("401")
+    down = Fake("down")
+    down.fail = ProviderUnavailable("down")
+    chain = _chain(loop, refused, down, metrics=metrics)
+    chain.gather([ORDERS], deadline=chain._clock() + 5)
+    value = metrics.registry.get_sample_value
+    assert value("mcp_trino_context_breaker_open", {"provider": "refused"}) == 1
+    assert value("mcp_trino_context_breaker_open", {"provider": "down"}) == 1
+    chain.reset_refused()
+    assert value("mcp_trino_context_breaker_open", {"provider": "refused"}) == 0
+    assert value("mcp_trino_context_breaker_open", {"provider": "down"}) == 1, "an outage stays"
+
+
+def test_a_close_past_the_timeout_is_logged_by_type_and_not_raised(loop, caplog):
+    class Slow(Fake):
+        async def aclose(self):
+            await asyncio.sleep(10)
+
+    chain = _chain(loop, Slow("slow"), timeout_seconds=0.05)
+    with caplog.at_level(logging.WARNING, logger="akko_mcp_trino.context.chain"):
+        chain.close()
+    assert [r.getMessage() for r in caplog.records] == [
+        "the context sources were not all closed (TimeoutError)"
+    ]
+
+
+class _SpendingLoop:
+    """A loop that never runs its coroutine: each read takes its whole wait, on the clock."""
+
+    running = True
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.waits = []
+
+    def submit(self, coro, timeout):
+        coro.close()
+        self.waits.append(timeout)
+        self.clock.now += timeout
+        raise TimeoutError
+
+
+def test_gather_then_terms_end_by_the_deadline_and_one_grace():
+    clock = Clock()
+    spending = _SpendingLoop(clock)
+    chain = ContextChain([Fake("a")], _settings(), loop=spending, clock=clock)
+    start, deadline = clock.now, clock.now + 1.0
+    with pytest.raises(TimeoutError):
+        chain.gather([ORDERS], deadline=deadline)
+    with pytest.raises(TimeoutError):
+        chain.terms({"a": ["k"]}, deadline=deadline)
+    assert clock.now <= deadline + chain_module._GRACE_SECONDS
+    assert spending.waits == [deadline - start + chain_module._GRACE_SECONDS, 0.0]
+
+
+def test_the_grace_written_in_the_docs_is_the_chains():
+    """The 0.25 s the CHANGELOG and the code's own words give is the chain's grace."""
+    written = f"{chain_module._GRACE_SECONDS:g} s"
+    root = pathlib.Path(__file__).resolve().parents[2]
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"may wait up to {written} past its deadline" in changelog
+    assert f"waits up to {written} for a provider" in inspect.getsource(config_module)
+    assert f"a grace of {written}" in " ".join(ContextChain.gather.__doc__.split())
+    assert config_module.MIN_CONTEXT_RESERVE_SECONDS > chain_module._GRACE_SECONDS

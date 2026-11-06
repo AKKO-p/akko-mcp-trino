@@ -4,6 +4,8 @@ from types import MappingProxyType
 
 from akko_mcp_trino.context import ColumnContext, Join, Labelled, TableContext, TableRef
 from akko_mcp_trino.context.merge import merge_column, merge_table
+from akko_mcp_trino.context.text import NAME_CHARS
+from tests.context.test_text import _Reads
 
 BIG = 1000
 
@@ -112,12 +114,12 @@ def test_descriptions_are_cleaned_and_cut_fields_are_listed():
         text_chars=4,
     )
     assert merged["description"] == "abcd"
-    assert merged["owner"] == "oooo"
+    assert merged["owner"] == "o" * 10, "a name, never cut by the text limit"
     assert merged["other_descriptions"] == [
         {"text": "xxxx", "source": "b"},
         {"text": "yyy", "source": "c"},
     ]
-    assert merged["cut"] == ["description", "owner", "other_descriptions"]
+    assert merged["cut"] == ["description", "other_descriptions"]
 
 
 def test_a_description_empty_after_cleaning_is_ignored():
@@ -266,3 +268,79 @@ def test_a_join_with_an_empty_column_or_unequal_sides_is_dropped_whole():
     assert merged["joins"] == [
         {"columns": ["a", "x"], "table": "c.s.t", "target_columns": ["b", "y"], "source": "a"}
     ]
+
+
+def _huge() -> str:
+    """A name of a million characters that may be read within its window only."""
+    return _Reads("n" * 1_000_000, allowed=4 * NAME_CHARS + 1)
+
+
+def test_every_name_past_its_bound_is_dropped_whole_and_read_within_its_window():
+    target = TableRef("c", "s", "t")
+    huge = TableContext(
+        owner=_huge(),
+        tier=_huge(),
+        tags=(Labelled(_huge(), "cat"), Labelled("hr", _huge()), Labelled("ok", "cat")),
+        properties=MappingProxyType(
+            {
+                _huge(): Labelled("v", "set"),
+                "j": Labelled("v", _huge()),
+                "good": Labelled("v", "set"),
+            }
+        ),
+        grain=("id", _huge()),
+        joins=(
+            Join((_huge(),), target, ("b",)),
+            Join(("a",), target, (_huge(),)),
+            Join(("a",), TableRef("c", "s", _huge()), ("b",)),
+            Join(("a",), target, ("b",)),
+        ),
+        columns=MappingProxyType(
+            {
+                "id": ColumnContext(
+                    classifications=(Labelled(_huge(), "cls"), Labelled("pii", _huge())),
+                    properties=MappingProxyType({_huge(): Labelled("v", "set")}),
+                )
+            }
+        ),
+    )
+    merged = merge_table([("a", huge)], text_chars=BIG)
+    assert "owner" not in merged and "tier" not in merged and "cut" not in merged
+    assert merged["tags"] == [{"name": "ok", "set": "cat", "source": "a"}]
+    assert merged["properties"] == {"set.good": {"value": "v", "source": "a"}}
+    assert "grain" not in merged
+    assert merged["joins"] == [
+        {"columns": ["a"], "table": "c.s.t", "target_columns": ["b"], "source": "a"}
+    ]
+    assert merge_column([("a", huge.columns["id"])], text_chars=BIG) == {}
+
+
+def test_a_name_of_exactly_its_bound_is_served_whole():
+    name = "n" * NAME_CHARS
+    merged = merge_table(
+        [("a", TableContext(owner=name, tags=(Labelled(name, name),)))], text_chars=3
+    )
+    assert merged["owner"] == name
+    assert merged["tags"] == [{"name": name, "set": name, "source": "a"}]
+
+
+def test_a_property_value_is_a_text_cut_at_the_text_limit_and_says_so():
+    def props(value):
+        return ColumnContext(properties=MappingProxyType({"k": Labelled(value, "set")}))
+
+    huge = _Reads("v" * 1_000_000, allowed=4 * 10 + 1)
+    merged = merge_column(
+        [("a", props(huge)), ("b", props("w" * 12)), ("c", props("short"))], text_chars=10
+    )
+    assert merged["properties"] == {
+        "set.k": {
+            "value": "v" * 10,
+            "source": "a",
+            "cut": ["value"],
+            "other_values": [
+                {"value": "w" * 10, "source": "b", "cut": ["value"]},
+                {"value": "short", "source": "c"},
+            ],
+        }
+    }
+    assert "cut" not in merged, "the cut is named on the value itself"

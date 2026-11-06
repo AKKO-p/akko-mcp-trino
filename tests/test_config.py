@@ -532,6 +532,29 @@ def test_a_negative_reserve_or_ttl_is_refused(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("reserve", ["0", "0.29"])
+def test_a_provider_needs_a_reserve_of_the_call_kept_back(monkeypatch, reserve):
+    """The chain waits a little past its deadline for a provider to hand back control: a
+    reserve shorter than that lets the context end past the call's own deadline."""
+    monkeypatch.setenv("MCP_CONTEXT_RESERVE_SECONDS", reserve)
+    assert Config.from_env().problems() == [], "without a provider the reserve is unused"
+    monkeypatch.setenv("MCP_CONTEXT_PROVIDERS", "file")
+    assert Config.from_env().problems() == [
+        f"MCP_CONTEXT_RESERVE_SECONDS={float(reserve):g}: with a context provider, part of "
+        "each call's budget must be kept back so that the context ends before the call "
+        "does; set 0.3 or more"
+    ]
+    monkeypatch.setenv("MCP_CONTEXT_RESERVE_SECONDS", "0.3")
+    assert Config.from_env().problems() == []
+
+
+def test_the_least_reserve_covers_the_wait_of_the_chain_past_its_deadline():
+    from akko_mcp_trino.config import MIN_CONTEXT_RESERVE_SECONDS
+    from akko_mcp_trino.context import chain
+
+    assert MIN_CONTEXT_RESERVE_SECONDS > chain._GRACE_SECONDS
+
+
 @pytest.mark.parametrize(
     "name",
     [

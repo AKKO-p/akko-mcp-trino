@@ -1,4 +1,5 @@
-# The live proof of the identity modes, against a disposable Keycloak and Trino.
+# The live proof of the identity modes and of the catalogue context under Trino's rights,
+# against a disposable Keycloak and Trino.
 # Nothing is published on the host: every check runs inside the compose network.
 #
 #   integration/run.sh        starts everything, runs integration/check.py, removes everything
@@ -87,7 +88,10 @@ services:
       timeout: 5s
       retries: 60
       start_period: 20s
-    mem_limit: 1280m
+    # Heap 768 MB (jvm.config), plus native memory: run.sh (step 4) measured its anonymous
+    # memory at 1689 to 1777 MiB at most during the checks (three runs); 2304m leaves about
+    # 30 % more. Its page cache is reclaimed, never the cause of an OOM kill.
+    mem_limit: 2304m
 
   # The default identity mode (jwt), not named: each query runs as the caller, with
   # a token for Trino obtained by token exchange.
@@ -124,7 +128,7 @@ services:
   # account (a client certificate) and Trino's impersonation, limited to that account.
   mcp-impersonation:
     <<: *mcp
-    environment:
+    environment: &impersonation-environment
       TRINO_IDENTITY_MODE: impersonation
       TRINO_HOST: trino
       TRINO_PORT: "8443"
@@ -138,6 +142,53 @@ services:
       MCP_OIDC_ISSUER: https://keycloak:8443/realms/integration
       MCP_OIDC_AUDIENCE: akko-mcp
       MCP_JWT_USER_CLAIM: preferred_username  # Keycloak's sub is a UUID
+
+  # The jwt server with catalogue context from a file (integration/context.json, fictitious
+  # texts on tpch.tiny), served under each caller's rights in Trino. The canary is a table
+  # no caller of the server may see.
+  mcp-context-jwt:
+    <<: *mcp
+    volumes:
+      - certs:/certs:ro
+      - ./context.json:/integration/context.json:ro
+    environment:
+      <<: *jwt-environment
+      MCP_RESOURCE_URL: http://mcp-context-jwt:3000/mcp
+      MCP_CONTEXT_PROVIDERS: file
+      MCP_CONTEXT_FILE: /integration/context.json
+      MCP_CONTEXT_FILE_GLOSSARIES: geography
+      MCP_CONTEXT_FILE_SERVE_OWNER: "true"
+      MCP_CONTEXT_CANARY: tpch.sf1.region
+
+  # The same context through impersonation, each read of the context validated first.
+  mcp-context-impersonation:
+    <<: *mcp
+    volumes:
+      - certs:/certs:ro
+      - ./context.json:/integration/context.json:ro
+    environment:
+      <<: *impersonation-environment
+      MCP_CONTEXT_PROVIDERS: file
+      MCP_CONTEXT_FILE: /integration/context.json
+      MCP_CONTEXT_FILE_GLOSSARIES: geography
+      MCP_CONTEXT_FILE_SERVE_OWNER: "true"
+      MCP_CONTEXT_CANARY: tpch.sf1.region
+      MCP_CONTEXT_REQUIRE_SELECT: "true"
+
+  # The jwt context server with a canary alice sees (tpch.sf1.nation): Trino lists it to
+  # her, so the server serves her no context (not_checked) and logs a WARNING.
+  mcp-context-canary:
+    <<: *mcp
+    volumes:
+      - certs:/certs:ro
+      - ./context.json:/integration/context.json:ro
+    environment:
+      <<: *jwt-environment
+      MCP_RESOURCE_URL: http://mcp-context-canary:3000/mcp
+      MCP_CONTEXT_PROVIDERS: file
+      MCP_CONTEXT_FILE: /integration/context.json
+      MCP_CONTEXT_FILE_GLOSSARIES: geography
+      MCP_CONTEXT_CANARY: tpch.sf1.nation
 
   # Service mode with an open door, chosen explicitly: it must say so to every host.
   mcp-service:
@@ -165,6 +216,7 @@ services:
       INTEGRATION_PASSWORD: ${INTEGRATION_PASSWORD}
     volumes:
       - ./check.py:/integration/check.py:ro
+      - ./replies-0.7.2.json:/integration/replies-0.7.2.json:ro
       - certs:/certs:ro
     mem_limit: 128m
 

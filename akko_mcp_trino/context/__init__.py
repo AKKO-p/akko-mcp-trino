@@ -9,7 +9,7 @@ it must pass is ``akko_mcp_trino.testing``.
 from dataclasses import dataclass
 
 from ..config import Config
-from .chain import ContextChain, ContextSettings, Gathered
+from .chain import ContextChain, ContextSettings, Gathered, TermsResult
 from .errors import ProviderError, ProviderRefused, ProviderUnavailable
 from .loop import ContextLoop
 from .provider import ContextProvider
@@ -44,11 +44,17 @@ CONTEXT_API = 1
 
 @dataclass(frozen=True)
 class ContextSetup:
-    """What the tools receive when context providers are loaded: the chain and the
-    configuration whose bounds they apply."""
+    """What the tools receive when context providers are loaded: the chain, the
+    configuration whose bounds they apply, and the loop the chain runs on."""
 
     chain: ContextChain
     config: Config
+    loop: ContextLoop
+
+    def close(self) -> None:
+        """Close every provider, then the loop; nothing is raised and a second call is harmless."""
+        self.chain.close()
+        self.loop.close()
 
 
 __all__ = [
@@ -82,6 +88,7 @@ __all__ = [
     "TableRef",
     "Term",
     "TermRef",
+    "TermsResult",
     "secret_setting",
     "status_of",
 ]

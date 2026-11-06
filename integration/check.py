@@ -1,8 +1,14 @@
-"""The live checks, inside the compose network: Keycloak, Trino and three servers.
+"""The live checks, inside the compose network: Keycloak, Trino and the servers.
 
 Each check prints OK or FAIL; the exit code is 1 when one fails. Run by run.sh.
 
     python check.py
+    python check.py --record FILE   # writes alice's replies of the server without a provider
+
+The replies of 0.7.2 in replies-0.7.2.json were recorded that way from the v0.7.2 image:
+MCP_IMAGE=<the v0.7.2 image> KEEP=1 run.sh, then
+docker compose --profile check run --rm --no-deps -v "$PWD:/out" check \
+  --record /out/replies-0.7.2.json
 """
 
 import json
@@ -24,10 +30,28 @@ JWT, IMPERSONATION, SERVICE = (
     "http://mcp-service:3000/mcp",
 )
 PAGED = "http://mcp-paged:3000/mcp"  # the jwt server with pages of three rows
+# The servers with the catalogue context of integration/context.json.
+CONTEXT_JWT, CONTEXT_IMPERSONATION, CONTEXT_CANARY = (
+    "http://mcp-context-jwt:3000/mcp",
+    "http://mcp-context-impersonation:3000/mcp",
+    "http://mcp-context-canary:3000/mcp",  # its canary is a table alice sees
+)
+# Texts the file gives only to what bob may not see: the table orders, the column
+# comment of nation, and the table region a join of nation names.
+ORDERS_TEXTS = (
+    "Purchase orders of the sample customers",
+    "Number given to the purchase order",
+    "Amount due for the purchase order",
+)
+HIDDEN_COLUMN_TEXT = "Remark kept by the reference data stewards"
+REGION = "tpch.tiny.region"
 TPCH_TINY_TABLES = {
     "customer", "lineitem", "nation", "orders", "part", "partsupp", "region", "supplier",
 }  # fmt: skip
 NATIONS = "SELECT name FROM tpch.tiny.nation ORDER BY nationkey"
+# alice's describe_table of tpch.tiny.nation and describe_schema of tpch.tiny, as 0.7.2
+# answered them, byte for byte.
+REPLIES_072 = "/integration/replies-0.7.2.json"
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -86,9 +110,11 @@ async def tool_calls(url: str, bearer: str, fn) -> object:
         async with ClientSession(read, write) as s:
             await s.initialize()
 
-            async def call(tool: str, **args: object) -> dict:
+            async def call(tool: str, raw: bool = False, **args: object) -> dict | str:
                 res = await s.call_tool(tool, args)
                 text = res.content[0].text if res.content else ""
+                if raw:  # the reply's own bytes
+                    return text
                 try:
                     return json.loads(text)
                 except ValueError:  # a tool this server does not have answers in prose
@@ -139,6 +165,100 @@ async def discovery(call) -> dict:
         "system": await call("execute_query", sql="SELECT * FROM system.jdbc.columns"),
         "tables": await walk(call, "list_tables", "table"),
         "described": await walk(call, "describe_schema", "table"),
+    }
+
+
+async def context(call) -> dict:
+    """The tools that serve catalogue context, as one caller."""
+
+    async def describe(table: str) -> dict:
+        return await call("describe_table", catalog="tpch", schema="tiny", table=table)
+
+    async def search(text: str) -> dict:
+        return await call("search_columns", text=text, catalog="tpch", schema="tiny")
+
+    return {
+        "nation": await describe("nation"),
+        "orders": await describe("orders"),
+        "schema": await call("describe_schema", catalog="tpch", schema="tiny"),
+        "tables": await call("list_tables", catalog="tpch", schema="tiny"),
+        "search": [await search("purchase order"), await search("totalprice")],
+    }
+
+
+def context_checks(label: str, url: str, alice: str, bob: str) -> None:
+    """alice sees tpch.tiny whole and gets its context; bob sees nation only, without its
+    column comment, and gets nothing of what he may not see."""
+    a, b = use(url, alice, context), use(url, bob, context)
+    nation, columns = a["nation"], a["nation"].get("column_context", {})
+    check(
+        f"{label}: alice gets the column context of tpch.tiny.nation from the file",
+        nation.get("context_sources") == {"file": "ok"}
+        and columns.get("name", {}).get("description") == "Name of the nation, in capitals"
+        and columns.get("comment", {}).get("description") == HIDDEN_COLUMN_TEXT
+        and [t["name"] for t in nation.get("terms", {}).values()] == ["Nation"],
+        nation,
+    )
+    check(
+        f"{label}: alice gets the join of nation to region, which she sees",
+        [j["table"] for j in nation.get("table", {}).get("joins", [])] == [REGION],
+        nation.get("table"),
+    )
+    check(
+        f"{label}: alice gets the description of orders and of each table of tiny it holds",
+        a["orders"].get("table", {}).get("description") == ORDERS_TEXTS[0]
+        and {t["table"] for t in a["schema"].get("tables", []) if "description" in t}
+        == {"nation", "orders", "region"},
+        (a["orders"], a["schema"]),
+    )
+    check(
+        f"{label}: alice finds orders through list_tables and search_columns",
+        "orders" in a["tables"].get("tables", [])
+        and "orders" in {m["table"] for m in a["search"][1].get("matches", [])},
+        (a["tables"], a["search"]),
+    )
+    seen = b["nation"].get("column_context", {})
+    check(
+        f"{label}: bob gets the context of nation without the column Trino hides from him",
+        b["nation"].get("context_sources") == {"file": "ok"}
+        and "name" in seen
+        and "comment" not in seen
+        and HIDDEN_COLUMN_TEXT not in json.dumps(b),
+        b["nation"],
+    )
+    check(
+        f"{label}: bob gets no join to region, which he does not see",
+        "joins" not in b["nation"].get("table", {}) and REGION not in json.dumps(b["nation"]),
+        b["nation"].get("table"),
+    )
+    # Trino answers bob's DESCRIBE of orders as its access control does: a refusal under
+    # rules (permission), or a table that does not exist under filtered metadata (table).
+    kind = b["orders"].get("kind")
+    check(
+        f"{label}: bob gets nothing of orders from describe_table, describe_schema, "
+        f"list_tables or search_columns (Trino answers him kind {kind})",
+        kind in ("permission", "table")
+        and set(b["orders"]) <= {"error", "kind", "identifier"}
+        and not any(text in json.dumps(b) for text in ORDERS_TEXTS)
+        and "orders" not in json.dumps([b["nation"], b["schema"], b["tables"], b["search"]]),
+        b,
+    )
+    check(
+        f"{label}: bob's listing describes nation only",
+        [(t["table"], t.get("description", {}).get("text")) for t in b["schema"].get("tables", [])]
+        == [("nation", "The nations of the sample data, one row each")],
+        b["schema"],
+    )
+
+
+async def without_context(call) -> dict:
+    """The replies, as text, of the tools that would serve catalogue context, on a server
+    without a provider."""
+    return {
+        "describe_table": await call(
+            "describe_table", raw=True, catalog="tpch", schema="tiny", table="nation"
+        ),
+        "describe_schema": await call("describe_schema", raw=True, catalog="tpch", schema="tiny"),
     }
 
 
@@ -307,6 +427,29 @@ def main() -> int:
         paged["described"],
     )
 
+    # 1c. Without MCP_CONTEXT_PROVIDERS, the replies of 0.7.2, byte for byte.
+    plain = use(JWT, alice, without_context)
+    with open(REPLIES_072, encoding="utf-8") as recorded:
+        replies_072 = json.load(recorded)
+    for tool in ("describe_table", "describe_schema"):
+        check(
+            f"context: without a provider, {tool} answers as 0.7.2 did, byte for byte",
+            plain[tool] == replies_072[tool],
+            plain[tool],
+        )
+
+    # 1d. Catalogue context from a file, under each caller's rights in Trino.
+    context_checks("context (jwt)", CONTEXT_JWT, alice, bob)
+    context_checks("context (impersonation)", CONTEXT_IMPERSONATION, alice, bob)
+    seen = use(CONTEXT_CANARY, alice, context)["nation"]
+    check(
+        "context (canary): alice, who sees the canary, gets the columns and no context",
+        seen.get("context_sources") == {"file": "not_checked"}
+        and bool(seen.get("rows"))
+        and not (seen.get("table") or seen.get("column_context") or seen.get("terms")),
+        seen,
+    )
+
     # 2. The door: no token, a forged one, one issued for Trino.
     no_token = httpx.post(JWT, json={}, timeout=10)
     check("door: no token, 401", no_token.status_code == 401, no_token.status_code)
@@ -398,5 +541,14 @@ def main() -> int:
     return 1 if failed else 0
 
 
+def record(path: str) -> int:
+    """Write alice's replies of the server without a provider to ``path``, as JSON."""
+    replies = use(JWT, token("alice", "mcp-host"), without_context)
+    with open(path, "w", encoding="utf-8") as out:
+        json.dump(replies, out, indent=1)
+        out.write("\n")
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(record(sys.argv[2]) if sys.argv[1:2] == ["--record"] else main())

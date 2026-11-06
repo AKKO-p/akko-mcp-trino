@@ -1,6 +1,7 @@
 """Provider loading, the check lines and the start of the context machinery."""
 
 import dataclasses
+import logging
 import threading
 from dataclasses import replace
 from types import SimpleNamespace
@@ -270,9 +271,13 @@ def test_check_prints_the_context_lines_and_never_a_secret(monkeypatch, capsys, 
     assert check_config(Config.from_env()) == 0
     out = capsys.readouterr().out
     assert (
-        "context: catalog (timeout 5 s, reserve 0.5 s, batch 50, caches 134217728 + 16777216 bytes)"
+        "context: catalog (timeout 5 s, reserve 0.5 s, 32 reads in flight, retry after 30 s, "
+        "after a refusal 3600 s, batch 50, ttl 900 s, caches 134217728 + 16777216 bytes, "
+        "text 500 characters, response 60000 characters, 500 columns)"
     ) in out
-    assert "visibility: ttl 60 s, canary set, require select true" in out
+    assert (
+        "visibility: ttl 60 s, cache 33554432 bytes, 10000 names, canary set, require select true"
+    ) in out
     assert "catalog: token set" in out
     assert marker not in out
     assert out.index("context: catalog") < out.index("visibility:") < out.index("catalog: token")
@@ -284,7 +289,8 @@ def test_check_of_the_defaults_says_no_provider(monkeypatch, capsys):
     assert check_config(Config.from_env()) == 0
     out = capsys.readouterr().out
     assert "context: none (" in out
-    assert "visibility: ttl 60 s, canary -, require select false" in out
+    assert "visibility: ttl 60 s, cache 33554432 bytes, 10000 names, canary -, " in out
+    assert "require select false" in out
 
 
 def test_check_refuses_what_loading_refuses(monkeypatch, capsys):
@@ -341,9 +347,9 @@ def test_the_visibility_switch_is_a_problem_in_check(monkeypatch, capsys):
     assert "MCP_VISIBILITY_ENABLED was removed in 0.8" in capsys.readouterr().out
 
 
-def test_the_setup_is_a_frozen_pair():
-    setup = ContextSetup(chain=SimpleNamespace(), config=_config())
-    assert [f.name for f in dataclasses.fields(setup)] == ["chain", "config"]
+def test_the_setup_is_frozen():
+    setup = ContextSetup(chain=SimpleNamespace(), config=_config(), loop=ContextLoop())
+    assert [f.name for f in dataclasses.fields(setup)] == ["chain", "config", "loop"]
     with pytest.raises(dataclasses.FrozenInstanceError):
         setup.chain = None  # type: ignore[misc]
 
@@ -422,3 +428,74 @@ def test_check_names_a_provider_that_fails_to_load_and_closes_the_others(monkeyp
     out = capsys.readouterr().out
     assert "PROBLEM: context provider 'broken' failed to load (TypeError)" in out
     assert "hunter2" not in out and first.closed
+
+
+def test_closing_the_setup_closes_every_provider_then_the_loop(loops, caplog):
+    order: list[str] = []
+
+    class Closing(_Provider):
+        async def aclose(self):
+            order.append(f"{self.name} on {threading.current_thread().name}")
+            raise RuntimeError("already closed")
+
+    seen: list[ContextSetup] = []
+    build_server(
+        _config(),
+        mcp_factory=lambda name, **_: FakeMCP(),
+        context_providers=[Closing("first"), Closing("second")],
+        context_started=seen.append,
+    )
+    (setup,) = seen
+    setup.close()
+    assert sorted(order) == ["first on mcp-context", "second on mcp-context"]
+    assert "mcp-context" not in {t.name for t in threading.enumerate()}
+    with caplog.at_level(logging.DEBUG):
+        setup.close()
+    assert len(order) == 2, "a second close reaches nothing"
+    assert caplog.records == [], "and says nothing"
+
+
+def test_check_prints_every_context_setting_and_never_a_secret(monkeypatch, capsys, tmp_path):
+    marker = "s3cr3t-T0KEN-value"
+    secret_file = tmp_path / "token"
+    secret_file.write_text(marker, encoding="utf-8")
+    monkeypatch.setenv("CATALOG_TOKEN_FILE", str(secret_file))
+
+    def make(env):
+        token = secret_setting(env, "CATALOG_TOKEN")
+        return _Provider(lines=[f"catalog: token {'set' if token else '-'}"])
+
+    _install(monkeypatch, catalog=make)
+    _check_env(
+        monkeypatch,
+        MCP_CONTEXT_PROVIDERS="catalog",
+        MCP_CONTEXT_TIMEOUT_SECONDS="7",
+        MCP_CONTEXT_RESERVE_SECONDS="0.75",
+        MCP_CONTEXT_MAX_CONCURRENCY="11",
+        MCP_CONTEXT_RETRY_AFTER_SECONDS="13",
+        MCP_CONTEXT_REFUSED_RETRY_SECONDS="1700",
+        MCP_CONTEXT_BATCH="17",
+        MCP_CONTEXT_TTL_SECONDS="190",
+        MCP_CONTEXT_CACHE_BYTES="2300",
+        MCP_CONTEXT_TERMS_CACHE_BYTES="2900",
+        MCP_CONTEXT_TEXT_CHARS="310",
+        MCP_CONTEXT_RESPONSE_CHARS="3700",
+        MCP_CONTEXT_MAX_COLUMNS="410",
+        MCP_VISIBILITY_TTL_SECONDS="43",
+        MCP_VISIBILITY_CACHE_BYTES="4700",
+        MCP_VISIBILITY_MAX_NAMES="530",
+        MCP_CONTEXT_CANARY="sales.crm.accounts",
+        MCP_CONTEXT_REQUIRE_SELECT="true",
+    )
+    assert check_config(Config.from_env()) == 0
+    out = capsys.readouterr().out
+    assert (
+        "context: catalog (timeout 7 s, reserve 0.75 s, 11 reads in flight, retry after "
+        "13 s, after a refusal 1700 s, batch 17, ttl 190 s, caches 2300 + 2900 bytes, "
+        "text 310 characters, response 3700 characters, 410 columns)"
+    ) in out
+    assert (
+        "visibility: ttl 43 s, cache 4700 bytes, 530 names, canary set, require select true"
+    ) in out
+    assert "catalog: token set" in out
+    assert marker not in out and "accounts" not in out

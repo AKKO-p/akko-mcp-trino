@@ -21,6 +21,8 @@ import os
 import signal
 import sys
 import threading
+from collections.abc import Callable
+from typing import Any
 
 import uvicorn
 
@@ -132,9 +134,15 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         *[line for ext in extensions for line in ext.check_lines()],
         f"context: {', '.join(provider_names(config.context_providers)) or 'none'} "
         f"(timeout {config.context_timeout_seconds:g} s, reserve "
-        f"{config.context_reserve_seconds:g} s, batch {config.context_batch}, caches "
-        f"{config.context_cache_bytes} + {config.context_terms_cache_bytes} bytes)",
-        f"visibility: ttl {config.visibility_ttl_seconds:g} s, "
+        f"{config.context_reserve_seconds:g} s, {config.context_max_concurrency} reads in "
+        f"flight, retry after {config.context_retry_after_seconds:g} s, after a refusal "
+        f"{config.context_refused_retry_seconds:g} s, batch {config.context_batch}, "
+        f"ttl {config.context_ttl_seconds:g} s, caches {config.context_cache_bytes} + "
+        f"{config.context_terms_cache_bytes} bytes, text {config.context_text_chars} "
+        f"characters, response {config.context_response_chars} characters, "
+        f"{config.context_max_columns} columns)",
+        f"visibility: ttl {config.visibility_ttl_seconds:g} s, cache "
+        f"{config.visibility_cache_bytes} bytes, {config.visibility_max_names} names, "
         f"canary {'set' if config.context_canary else '-'}, "
         f"require select {str(config.context_require_select).lower()}",
         *provider_lines,
@@ -178,9 +186,21 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
     providers = load_providers(config, os.environ)
     metrics = Metrics()
 
+    started: list[ContextSetup] = []
+    closing: list[bool] = []
+
     def on_context(setup: ContextSetup) -> None:
+        started.append(setup)
         if hasattr(signal, "SIGHUP"):
             signal.signal(signal.SIGHUP, lambda *_: setup.chain.reset_refused())
+
+    def close_context() -> None:
+        # One close only: a stop may come by several of these paths, even during a close.
+        if closing:
+            return
+        closing.append(True)
+        for setup in started:
+            setup.close()
 
     mcp, client = build_server(
         config,
@@ -191,10 +211,40 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         context_providers=providers,
         context_started=on_context,
     )
-    auth_provider = build_auth(config, _audiences(extensions))
-    for warning in config.warnings():
-        log.warning(warning)
+    # The providers are closed, then the context loop, once the server stops. Over
+    # HTTP, uvicorn shuts the app down on SIGTERM, then lets the signal end the
+    # process: the close is in the app's shutdown. Over stdio with a provider, SIGTERM
+    # closes and exits 0, or lets a close under way end the process; without one, the
+    # signal ends the process as in 0.7.2.
+    if config.transport == "stdio" and started:
 
+        def on_term(*_: object) -> None:
+            if closing:
+                return
+            close_context()
+            sys.exit(0)
+
+        signal.signal(signal.SIGTERM, on_term)
+    try:
+        auth_provider = build_auth(config, _audiences(extensions))
+        for warning in config.warnings():
+            log.warning(warning)
+        _serve(config, mcp, client, auth_provider, extensions, metrics, close_context)
+    finally:
+        close_context()
+
+
+def _serve(  # pragma: no cover - process glue, proven by running it
+    config: Config,
+    mcp: Any,
+    client: Any,
+    auth_provider: Any,
+    extensions: list[Extension],
+    metrics: Metrics,
+    on_shutdown: Callable[[], None],
+) -> None:
+    """Serve on the configured transport until the server stops."""
+    log = logging.getLogger(__name__)
     if config.transport == "stdio":
         log.info(
             "serving transport=stdio auth=%s strict=%s identity=%s",
@@ -215,7 +265,9 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         daemon=True,
     ).start()
 
-    app = build_asgi_app(config, mcp, auth_provider=auth_provider, extensions=extensions)
+    app = build_asgi_app(
+        config, mcp, auth_provider=auth_provider, extensions=extensions, on_shutdown=on_shutdown
+    )
     log.info(
         "serving transport=%s port=%d auth=%s strict=%s identity=%s extensions=%s",
         config.transport,

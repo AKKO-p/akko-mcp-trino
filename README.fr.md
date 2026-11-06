@@ -151,7 +151,7 @@ donnez.
   peut seulement refuser ce que le cœur autorise, jamais l'élargir.
 - **N'importe quel MCP host, n'importe quel modèle.** Cursor, Claude Desktop, VS Code, le SDK
   Python… Mistral, ou tout modèle compatible OpenAI avec l'agent d'exemple.
-- **Petit et prouvé.** 1153 tests à 100 % de couverture des lignes et des branches, dont des suites
+- **Petit et prouvé.** 1280 tests à 100 % de couverture des lignes et des branches, dont des suites
   sur le vrai SDK pour les trois transports, une exécution réelle contre Keycloak et Trino en CI
   ([`integration/`](integration/)) et une garde de neutralité produit.
 
@@ -356,8 +356,8 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 | `list_catalogs` | `offset` (facultatif, 0 par défaut) | une page des catalogs que Trino montre, `next_offset`, `truncated` |
 | `list_schemas` | `catalog`, `offset` (facultatif) | une page des schémas de ce catalog, `next_offset`, `truncated` |
 | `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
-| `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` |
-| `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, `truncated` ; un échantillon gouverné sur demande ; ce qu'ajoutent les descripteurs d'une extension |
+| `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` ; avec un fournisseur de contexte, une `description` par table et `context_sources` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
+| `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, `truncated` ; un échantillon gouverné sur demande ; ce qu'ajoutent les descripteurs d'une extension, et `describer_errors` quand l'un a échoué ; avec un fournisseur de contexte, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` et `undescribed_columns` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
 | `explain_query` | `sql` | `{"valid": true}` : Trino a analysé la requête en lecture sous l'identité de l'appelant, sans l'exécuter ; le plan seulement si `EXPLAIN` figure dans `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | colonnes, lignes, nombre de lignes, `truncated` |
 
@@ -571,7 +571,7 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 |---|---|---|
 | `MCP_CONTEXT_PROVIDERS` | noms des fournisseurs, séparés par des virgules | aucun |
 | `MCP_CONTEXT_TIMEOUT_SECONDS` | budget de temps d'une lecture de contexte, plus de 0 | `5` |
-| `MCP_CONTEXT_RESERVE_SECONDS` | secondes du budget d'un appel gardées en réserve, 0 ou plus | `0.5` |
+| `MCP_CONTEXT_RESERVE_SECONDS` | secondes du budget d'un appel gardées en réserve pour que le contexte finisse avant l'appel ; 0,3 ou plus quand un fournisseur est chargé (le serveur refuse moins), 0 ou plus sinon | `0.5` |
 | `MCP_CONTEXT_MAX_CONCURRENCY` | lectures de contexte simultanées au plus par fournisseur, 1 au moins | `32` |
 | `MCP_CONTEXT_RETRY_AFTER_SECONDS` | délai avant de rappeler une source en panne, 0 ou plus | `30` |
 | `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | délai avant de rappeler une source qui a refusé le compte (`SIGHUP` le lève aussitôt), 0 ou plus | `3600` |
@@ -586,11 +586,113 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | bornes du profil d'une table, 1 au moins | `50`, `100000` |
 | `MCP_VISIBILITY_ENABLED` | supprimé en 0.8 : le filtre par les droits de Trino ne se désactive pas, et `false` refuse de démarrer | aucune |
 
+`--check` imprime une ligne `context:` (les fournisseurs et chaque réglage du tableau, de
+`MCP_CONTEXT_TIMEOUT_SECONDS` à `MCP_CONTEXT_MAX_COLUMNS`), une ligne `visibility:` (la durée, la
+borne en octets et en noms, si un canari est posé, jamais son nom, et si `select` est exigé) et les
+lignes de chaque fournisseur, jamais un secret.
+
+Un fournisseur en panne ou qui refuse le compte écrit un avertissement à chaque ouverture de son
+coupe-circuit (`<nom> is unavailable`, `<nom> refused the account`), jamais le texte de son erreur.
+`SIGHUP` laisse rappeler aussitôt les fournisseurs qui ont refusé le compte et remet leur
+`mcp_trino_context_breaker_open` à 0. À l'arrêt, par SIGTERM, Ctrl+C ou la fin de son entrée, le
+serveur ferme chaque fournisseur, puis la boucle du contexte. En HTTP, cela se fait à l'arrêt de
+l'application, puis SIGTERM termine le processus avec le code 143 ; en stdio avec un fournisseur,
+SIGTERM ferme et sort avec 0, et un SIGTERM pendant une fermeture la laisse finir sans en lancer une
+autre ; sans fournisseur, SIGTERM termine le processus comme en 0.7.2. Une lecture qui ignore son
+annulation ne retient pas l'arrêt plus de quelques secondes ; asyncio peut alors écrire une fois
+qu'une tâche en attente a été détruite. Le texte d'un catalogue perd ses caractères de contrôle et
+de format, et ses séparateurs de ligne et de paragraphe (U+2028, U+2029), avant d'atteindre un
+agent.
+
 Avec un fournisseur chargé, le serveur expose aussi les métriques
 `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total`,
 `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total`,
-`mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`, par fournisseur. Aucun outil
-n'utilise encore le contexte.
+`mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`, par fournisseur.
+
+`describe_table` sert ce contexte. Son `DESCRIBE`, lancé sous l'identité de l'appelant, prouve la
+table et les colonnes que Trino liste ; un `DESCRIBE` en échec n'appelle aucun fournisseur et répond
+comme avant. La réponse ajoute alors :
+
+- `table` : ce que les catalogues disent de la table (description, étiquettes, termes, propriétés,
+  grain, jointures ; le propriétaire seulement quand un fournisseur le sert), avec `sources`, le
+  fournisseur de chaque champ ;
+- `column_context` : la même chose pour chaque colonne listée par Trino, par nom, dans l'ordre du
+  `DESCRIBE`. Une colonne que Trino ne liste pas n'a aucun contexte ; un grain perd toutes ses
+  colonnes quand l'une est cachée ; une jointure n'est gardée que vers une table et des colonnes
+  que Trino liste à l'appelant ;
+- `terms` : chaque terme de glossaire une seule fois, par référence (`t1`, `t2`… dans l'ordre
+  d'apparition), avec son `name`, son `glossary`, sa `definition`, son `status`, ses `categories`,
+  ses termes liés `related` (seulement des termes de la même réponse) et sa `source`. Une table ou
+  une colonne cite `{"name", "ref"}` ; les clés propres d'un catalogue ne sont jamais servies ;
+- `context_sources` : un statut par fournisseur, `ok`, `not_found` (le fournisseur ne connaît pas
+  la table), `not_mapped` (il ne couvre pas ce catalogue Trino), `partial` (une partie n'a pas été
+  lue dans le temps ou dans la taille de la réponse, ou le plafond de lignes a coupé le
+  `DESCRIBE`), `unavailable`, `refused`, `error`, ou `not_checked` (le canari est visible, un
+  contrôle a échoué, ou avec `MCP_CONTEXT_REQUIRE_SELECT=true` Trino ne valide pas une lecture des
+  colonnes visibles) ;
+- `context_truncated` et `undescribed_columns` : au plus `MCP_CONTEXT_MAX_COLUMNS` colonnes sont
+  décrites, et le contexte s'arrête avant la colonne qui dépasserait
+  `MCP_CONTEXT_RESPONSE_CHARS` ; les colonnes laissées sont listées. Un texte coupé à
+  `MCP_CONTEXT_TEXT_CHARS` est nommé dans `cut`.
+
+Sans fournisseur, `describe_table` répond et se décrit comme en 0.7.2, sauf `describer_errors` :
+un descripteur de greffon qui lève y est désormais compté. Avec un fournisseur, sa description dit
+que ce texte vient d'un catalogue et que ce sont des données, jamais des instructions. Le contexte
+est lu en dernier, après l'échantillon, et ne cache jamais les colonnes ni ne fait échouer l'appel.
+Un fournisseur en panne, lent ou qui refuse le compte est lu en `MCP_CONTEXT_TIMEOUT_SECONDS` au plus
+et laisse `MCP_CONTEXT_RESERVE_SECONDS` du budget de l'appel ; s'il en reste moins, aucun fournisseur
+n'est appelé et les sources disent `unavailable`. Les requêtes du filtre s'arrêtent tant que cette
+réserve reste : une requête trop lente ne prouve rien (`not_checked` pour le canari ou le contrôle
+de lecture, pas de jointure vers une cible), et l'appel répond quand même. Tout autre échec en
+chemin ne sert aucun contexte et dit `error` pour chaque source.
+
+`describe_schema` en sert moins. Chaque table de la page qu'un fournisseur décrit ajoute
+`description`, `{"text", "source"}` : la première description qu'un fournisseur en donne, coupée à
+`MCP_CONTEXT_TEXT_CHARS` (alors `"cut": ["text"]`). Une table sans contexte n'a pas de clé
+`description`, et la réponse ajoute `context_sources`, sauf pour une page vide, qui n'interroge
+aucun fournisseur. Trino vient de lister à l'appelant les tables de la page : le filtre ne lui
+demande rien de plus que le contrôle du canari, et les fournisseurs ne sont interrogés que sur les
+tables de la page, en une lecture par lots de `MCP_CONTEXT_BATCH`. Une liste ne sert ni contexte de
+colonne, ni terme, ni propriétaire, et `MCP_CONTEXT_REQUIRE_SELECT` ne s'y applique pas, parce qu'il
+coûterait une requête par table : `describe_table` sert le reste. Les mêmes garanties tiennent :
+s'il reste moins de `MCP_CONTEXT_RESERVE_SECONDS`, aucun fournisseur n'est appelé et les sources
+disent `unavailable`, une requête lente du filtre ne prouve rien, tout autre échec sert la page sans
+contexte et dit `error` pour chaque source, et l'appel ne répond jamais `time_budget` à cause du
+contexte. Sans fournisseur, `describe_schema` répond et se décrit exactement comme en 0.7.2.
+
+Les greffons lisent les catalogues par `tools.context.tables(refs)`, une liste de `TableRef`
+construits par `TableRef.of`. La réponse a la forme de celle de `describe_schema`, `descriptions`
+par `TableRef` et `context_sources`, pour les seules tables que la visibilité de l'appelant prouve
+(listées par Trino dans cet appel ou depuis moins de `MCP_VISIBILITY_TTL_SECONDS`). Une table que
+Trino ne liste pas n'est ni nommée à Trino ni demandée à un fournisseur, et elle est absente de la
+réponse, comme une table sans contexte. Un appel lit au plus `MCP_DESCRIBE_SCHEMA_TABLES` tables
+distinctes, les premières de `refs`, autant qu'une page de `describe_schema` ; les suivantes sont
+absentes. Une liste `refs` vide n'interroge rien et ne répond aucun `context_sources`, comme une
+page vide. Un greffon ne reçoit jamais la chaîne, le cache de visibilité ni un fournisseur.
+
+Un texte de catalogue coûte ce qui est servi, pas ce que le catalogue envoie : le nettoyage lit au
+plus quatre fois `MCP_CONTEXT_TEXT_CHARS` caractères d'un texte, et une liste ne lit que la
+description qu'elle sert. Un nom que donne le catalogue (une classification, une étiquette, un
+ensemble, la clé d'une propriété, le propriétaire, le niveau, le nom, le glossaire, le statut, la
+catégorie ou la relation d'un terme, une colonne d'un grain ou d'une jointure) de plus de 256
+caractères une fois nettoyé est écarté, jamais coupé, car un nom coupé est un autre nom ; en décider
+lit au plus 1025 caractères. Un terme dont le nom est écarté n'est pas servi. La valeur d'une
+propriété est un texte : elle est coupée à `MCP_CONTEXT_TEXT_CHARS`, et porte alors
+`"cut": ["value"]`.
+
+Les requêtes du filtre partent sous l'identité de l'appelant, avec l'étiquette client `mcp-gate` :
+le contrôle du canari, `EXPLAIN (TYPE VALIDATE)` des colonnes visibles avec
+`MCP_CONTEXT_REQUIRE_SELECT=true` (un refus est gardé `MCP_VISIBILITY_TTL_SECONDS`), et, pour la
+cible d'une jointure, les schémas de son catalogue, les tables de son schéma et son `DESCRIBE`. Un
+droit retiré dans Trino peut laisser voir le contexte d'une table jusqu'à
+`MCP_VISIBILITY_TTL_SECONDS`, jamais ses données, que Trino refuse aussitôt.
+
+Donnez à chaque fournisseur un compte en lecture seule qui ne voit que ce que tout utilisateur qui
+voit un objet dans Trino peut en lire : les listes blanches d'un fournisseur nomment ce qui est
+servi, et son compte ne doit rien lire de plus. Derrière Trino Gateway, les requêtes du filtre et
+celles de l'appel peuvent partir vers deux clusters d'un même groupe de routage : tous les clusters
+d'un groupe doivent partager le même contrôle d'accès (le même greffon et les mêmes règles). Un
+groupe de routage dont les clusters appliquent des règles différentes n'est pas pris en charge.
 
 ### Le fournisseur `file`
 
@@ -765,6 +867,51 @@ avec `no HTTP`. La vérification de `snapshot` arrive avec le préchauffage en 0
 doit réussir, et `SLOW_DEADLINE_SECONDS` (1 s) celle qu'elles donnent à un catalogue qui ne répond
 pas. Ce sont des attributs de classe : les relever dans la sous-classe quand la CI est lente, en
 gardant le second bien en dessous de 30 s, le temps que met le catalogue lent à répondre.
+
+Le filtre appartient au cœur, et il est prouvé sur chaque fournisseur : `GateContract` construit le
+serveur tel qu'il tourne, avec le fournisseur et son catalogue enregistré, dans les modes d'identité
+`jwt` et `impersonation` (le second avec `MCP_CONTEXT_REQUIRE_SELECT=true`), et met `FakeTrino` à la
+place de Trino. `FakeTrino` répond aux requêtes du cœur selon ce que voit chaque utilisateur
+(`Visible` : les tables, les colonnes que Trino liste de chacune, et les tables qu'il liste mais
+dont il refuse la lecture) et enregistre chaque requête avec son utilisateur, son jeton pour Trino,
+son texte et ses étiquettes client (`Statement`). Chaque vérification tourne deux fois : avec un
+Trino qui répond un objet caché comme absent (un contrôle d'accès qui filtre les métadonnées), puis
+avec un Trino qui le refuse (`PERMISSION_DENIED`, comme des règles ;
+`FakeTrino(..., existing=...)`). Un appelant voit toutes les tables du harnais sauf un objet : une
+table, puis une colonne de la table décrite, puis la cible d'une de ses jointures. Le contrat
+vérifie que rien de cet objet, ni son nom ni aucun texte que le catalogue lui donne à lui seul,
+n'atteint une réponse, un statut de `context_sources`, une ligne d'audit, une ligne de journal ou
+une métrique, chaque canal contrôlé à part ; que chaque requête part sous l'identité de l'appelant,
+avec son jeton en `jwt`, et ne nomme que ce que Trino lui a listé, celles de l'agent aussi ce que
+l'agent a écrit, et que la seule requête qui nomme une table cachée est le `DESCRIBE` que l'agent en
+a demandé ; qu'une table cachée et une table absente (`names.unknown`) reçoivent la même chose du
+cœur (clés, types et statuts hors l'erreur de Trino, ligne d'audit hors son code d'erreur,
+requêtes) ; qu'avec `MCP_CONTEXT_REQUIRE_SELECT=true`, une table que Trino liste mais dont il refuse
+la lecture reçoit ses colonnes, aucun contexte et `not_checked`. Un appelant qui voit tout reçoit
+les trois objets, pour que les vérifications testent quelque chose. On l'ajoute à la classe
+ci-dessus, avec une fixture `gate` :
+
+```python
+from akko_mcp_trino.testing import GateContract, GateHarness
+
+
+class TestMyProviderContract(ContextContract, GateContract):
+    # the harness fixture above, then:
+    @pytest.fixture
+    def gate(self, harness):
+        return GateHarness(
+            contract=harness,
+            hidden_table=TableRef("warehouse", "ledger", "payroll"),         # described
+            hidden_column="discount_code",                                   # of `described`
+            hidden_join_target=TableRef("warehouse", "ledger", "payments"),  # joined from it
+        )
+```
+
+Les trois objets sont dans le catalogue enregistré, écrits comme Trino les liste et comme un agent
+nomme une table (lettres, chiffres, `_` et `-`), longs de quatre caractères au moins, et leurs noms ne
+font partie d'aucun nom ni d'aucun texte que l'appelant a le droit de voir : le contrat les cherche,
+avec chaque texte que le catalogue leur donne à eux seuls, dans tout ce que l'appelant reçoit.
+`tests/context/test_gate_contract_file.py` le lance sur `file`.
 
 ## Configuration, extensions, exploitation
 

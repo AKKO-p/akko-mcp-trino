@@ -30,7 +30,9 @@ def _name(quoted):
 class FakeTrino:
     """A ``run`` that records each statement and answers from what the caller sees."""
 
-    def __init__(self, catalogs=("demo", "system"), schemas=None, tables=None, canary=False):
+    def __init__(
+        self, catalogs=("demo", "system"), schemas=None, tables=None, canary=False, columns=None
+    ):
         self.catalogs = list(catalogs)
         self.schemas = schemas if schemas is not None else {"demo": ["crm", "sales"]}
         self.tables = (
@@ -39,6 +41,7 @@ class FakeTrino:
             else {("demo", "crm"): ["customers", "secret_target"], ("demo", "sales"): ["orders"]}
         )
         self.canary = canary
+        self.columns = columns if columns is not None else {}
         self.statements = []
         self.limits = []
         self.fail = 0
@@ -70,6 +73,10 @@ class FakeTrino:
         if found:
             catalog, schema = _name(found[1]), _name(found[2])
             return self._rows(self.tables.get((catalog, schema), []), row_limit)
+        found = re.fullmatch(f"DESCRIBE {_IDENT}\\.{_IDENT}\\.{_IDENT}", sql)
+        if found:
+            ref = tuple(_name(found[n]) for n in (1, 2, 3))
+            return self._rows(self.columns.get(ref, []), row_limit)
         if sql.startswith("EXPLAIN (TYPE VALIDATE) SELECT "):
             return self._rows(["true"], row_limit)
         raise AssertionError(f"unexpected statement: {sql}")
@@ -424,3 +431,106 @@ def test_a_refused_select_is_not_selectable_and_not_cached():
     assert not vis.selectable(KEY, ref, ["id"], listed=["id"])
     assert vis.selectable(KEY, ref, ["id"], listed=["id"])
     assert len(fake.statements) == 2
+
+
+def test_columns_runs_describe_only_for_a_proven_table(caplog):
+    odd = TableRef("demo", 'c"rm', 'cu"st')
+    fake = FakeTrino(
+        schemas={"demo": ['c"rm']},
+        tables={("demo", 'c"rm'): ['cu"st']},
+        columns={("demo", 'c"rm', 'cu"st'): ["id", "Name"], ("demo", 'c"rm', "absent"): ["x"]},
+    )
+    vis = _visibility(fake)
+    assert vis.columns(KEY, TableRef("demo", 'c"rm', "absent")) is None
+    assert vis.columns(KEY, TableRef("hidden", "crm", "customers")) is None
+    assert not any(sql.startswith("DESCRIBE") for sql in fake.statements)
+    assert vis.columns(KEY, odd) == frozenset({"id", "Name"})
+    assert fake.statements[-1] == 'DESCRIBE "demo"."c""rm"."cu""st"'
+    asked = len(fake.statements)
+    assert vis.columns(replace(KEY, catalog="other"), odd) == frozenset({"id", "Name"})
+    assert len(fake.statements) == asked, "kept per caller"
+    assert vis.columns(replace(KEY, subject="bob"), odd) == frozenset({"id", "Name"})
+    assert fake.statements.count('DESCRIBE "demo"."c""rm"."cu""st"') == 2, "not across callers"
+
+
+def test_columns_of_a_table_wider_than_the_bound_prove_nothing():
+    ref = TableRef("demo", "crm", "customers")
+    fake = FakeTrino(columns={("demo", "crm", "customers"): ["a", "b", "c"]})
+    vis = _visibility(fake, max_names=2)
+    vis.listed(KEY, [ref])
+    assert vis.columns(KEY, ref) is None
+    assert fake.limits[-1] == 3
+
+
+def test_columns_never_caches_an_error(caplog):
+    ref = TableRef("demo", "crm", "customers")
+    fake = FakeTrino(columns={("demo", "crm", "customers"): ["id"]})
+    vis = _visibility(fake)
+    vis.listed(KEY, [ref])
+    fake.fail = 1
+    with caplog.at_level(logging.DEBUG, logger="akko_mcp_trino.context.visibility"):
+        assert vis.columns(KEY, ref) is None
+    assert "RuntimeError" in caplog.text
+    assert "alice" not in caplog.text and "unreachable" not in caplog.text
+    assert "customers" not in caplog.text
+    assert vis.columns(KEY, ref) == frozenset({"id"}), "the failed read was not kept"
+
+
+def test_columns_counts_its_key_in_the_bound():
+    counted = {}
+    for width in (1, 300):
+        ref = TableRef("demo", "crm", "t" * width)
+        vis = _visibility(FakeTrino(columns={("demo", "crm", "t" * width): ["id"]}))
+        vis.listed(KEY, [ref])
+        before = vis.bytes
+        assert vis.columns(KEY, ref) == frozenset({"id"})
+        counted[width] = vis.bytes - before
+    assert counted[300] - counted[1] >= 299, "the key of the entry is counted"
+    ref = TableRef("demo", "crm", "customers")
+    vis = _visibility(FakeTrino(columns={("demo", "crm", "customers"): ["id"]}), max_bytes=BOUND)
+    assert vis.columns(KEY, ref) == frozenset({"id"})
+    assert vis.bytes <= BOUND
+
+
+class _Denied(Exception):
+    """A Trino user error that refuses access, as the Trino client raises it."""
+
+    error_name = "PERMISSION_DENIED"
+    error_type = "USER_ERROR"
+
+
+def test_a_select_trino_denies_is_kept_as_refused_for_one_ttl():
+    clock = Clock()
+    fake = FakeTrino()
+    vis = _visibility(fake, clock=clock, ttl=60.0)
+    ref = TableRef("demo", "crm", "customers")
+    vis.listed(KEY, [ref])
+    denied = fake.__call__
+
+    def refuse(sql, **kw):
+        if sql.startswith("EXPLAIN"):
+            fake.statements.append(sql)
+            raise _Denied("Access Denied: Cannot select from columns [id]")
+        return denied(sql, **kw)
+
+    vis._run = refuse
+    assert not vis.selectable(KEY, ref, ["id"], listed=["id"])
+    assert not vis.selectable(KEY, ref, ["id"], listed=["id"])
+    assert sum(sql.startswith("EXPLAIN") for sql in fake.statements) == 1, "kept as refused"
+    assert vis.selectable(replace(KEY, subject="bob"), ref, ["id"], listed=["id"]) is False
+    vis._run = fake
+    clock.now = 100.0
+    vis.listed(KEY, [ref])
+    assert vis.selectable(KEY, ref, ["id"], listed=["id"]), "asked again after the TTL"
+
+
+def test_a_select_on_the_table_just_described_needs_no_other_proof():
+    fake = FakeTrino()
+    vis = _visibility(fake, ttl=0.0)
+    ref = TableRef("demo", "hr", "salaries")
+    assert vis.selectable(KEY, ref, ["amount"], listed=["amount"], described=True)
+    assert fake.statements == [
+        'EXPLAIN (TYPE VALIDATE) SELECT "amount" FROM "demo"."hr"."salaries"'
+    ]
+    assert not vis.selectable(KEY, ref, ["other"], listed=["amount"], described=True)
+    assert len(fake.statements) == 1

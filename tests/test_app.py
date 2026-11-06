@@ -9,6 +9,7 @@ must say so for each.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import dataclasses
 from dataclasses import replace
@@ -691,3 +692,51 @@ def test_a_server_that_names_its_resource_publishes_its_metadata_on_every_transp
 class _Nobody:
     def verify(self, headers):
         return None
+
+
+def test_the_shutdown_of_the_app_runs_the_given_close_once_after_the_transport():
+    from starlette.testclient import TestClient
+
+    seen = []
+
+    @contextlib.asynccontextmanager
+    async def transport(app):
+        seen.append("transport up")
+        yield
+        seen.append("transport down")
+
+    class _Lived(_FakeMCP):
+        def streamable_http_app(self, *, transport_security=None):
+            return Starlette(lifespan=transport)
+
+    app = build_asgi_app(
+        _config("streamable-http"),
+        _Lived(),
+        auth_provider=None,
+        on_shutdown=lambda: seen.append("closed"),
+    )
+    with TestClient(app):
+        assert seen == ["transport up"]
+    assert seen == ["transport up", "transport down", "closed"]
+
+
+def test_a_transport_that_fails_to_stop_still_runs_the_close():
+    from starlette.testclient import TestClient
+
+    seen = []
+
+    @contextlib.asynccontextmanager
+    async def transport(app):
+        yield
+        raise RuntimeError("transport stop failed")
+
+    class _Lived(_FakeMCP):
+        def sse_app(self, *, transport_security=None):
+            return Starlette(lifespan=transport)
+
+    app = build_asgi_app(
+        _config("sse"), _Lived(), auth_provider=None, on_shutdown=lambda: seen.append(1)
+    )
+    with pytest.raises(RuntimeError), TestClient(app):
+        pass
+    assert seen == [1]

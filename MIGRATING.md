@@ -1,5 +1,51 @@
 # Migrating
 
+## From 0.7 to 0.8 (unreleased)
+
+Nothing is removed or renamed in the answers of the tools.
+
+- Without `MCP_CONTEXT_PROVIDERS`, `describe_table` and `describe_schema` answer and describe themselves exactly as in 0.7.2.
+- With a context provider, `describe_table` adds six keys to its answer: `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns`, and its description adds one sentence saying that this text comes from a catalogue and is data, never instructions. `columns`, `rows`, `truncated` and `sample` are unchanged. A client that reads only those keeps working. A key of the same name that a plugin's describer added is replaced by the context's.
+- With a context provider, each table of a `describe_schema` page may add `description`, `{"text", "source"}` (with `"cut": ["text"]` when the text was cut), and the answer adds `context_sources`; its description adds one sentence. `catalog`, `schema`, `tables` and their other keys, `next_offset` and `shortened` are unchanged.
+- A plugin's describer that raises was silent; `describe_table` now adds `describer_errors`, the number of describers that failed, never their text. The columns are still answered.
+- With a context provider, `MCP_CONTEXT_RESERVE_SECONDS` below 0.3 refuses to start: the context needs part of each call's budget kept back to end before the call does. The default, 0.5, needs no change.
+- Over stdio with a context provider, SIGTERM closes the providers and exits 0, where 0.7.2 died by the signal (143). Without a provider, nothing changes.
+- With `MCP_CONTEXT_REQUIRE_SELECT=true`, a read of the visible columns that Trino refuses is kept as refused for `MCP_VISIBILITY_TTL_SECONDS`: a right granted in Trino serves the context of that table at most that long after. A right withdrawn can leave the context visible as long, never the data.
+
+### From the context tools `visible_tables` and `explain_table`
+
+A server that offered the context of a catalogue through tools of its own now finds it in the core
+tools, under the caller's rights in Trino:
+
+- `visible_tables` becomes `describe_schema`: one page of the tables Trino lists, each with its
+  columns and, with a provider, its `description`. `list_tables` still gives the names alone.
+- `explain_table` becomes `describe_table`, and the shape of what it served changes. A client that
+  read `explain_table` must be adapted:
+
+  | `explain_table` | `describe_table` |
+  |---|---|
+  | the table's fields at the top: `description`, `owner`, `tier`, `grain`, and `tags`, `joins`, `terms`, `properties` in the shapes below | the same, under `table` |
+  | `tags`: `["pii"]` | `table.tags`: `[{"name": "pii", "set", "source"}]` |
+  | `joins`: `[{"columns", "target", "target_columns"}]` | `table.joins`: `[{"columns", "table", "target_columns", "source"}]` |
+  | `columns`, the context of each visible column, by name | `column_context`, by name, in the order of `DESCRIBE` |
+  | a column's `classification`: `["PII"]` | `classifications`: `[{"name": "PII", "set", "source"}]` |
+  | `properties`: `{"<set>.<key>": "value"}` | `properties`: `{"<set>.<key>": {"value", "source"}}`, with `other_values` when providers differ; a value is cut at `MCP_CONTEXT_TEXT_CHARS` with `"cut": ["value"]` |
+  | `terms`: `[{"name", "definition", "status"}]` | `terms`: `[{"name", "ref"}]` (`t1`, `t2`…); the term itself, with its `definition` and `status`, once in the answer's `terms` dictionary under its reference |
+  | a column's `values` | removed: the context serves no data value |
+  | nothing | `sources` (the provider of each field), `other_descriptions`, `other_grains`, `cut` |
+  | nothing | `context_sources`, `context_truncated`, `undescribed_columns` at the top |
+
+  A name (a set, a property's key, a tag, a classification, a term's name, the owner, the tier, a
+  column of a grain or a join) longer than 256 characters once cleaned is dropped, never cut.
+- `{"known": false}` becomes the error of `DESCRIBE`: a table Trino does not show to the caller
+  answers Trino's own error, with its `kind`, and no provider is called. Nothing says whether a
+  catalogue knows such a table. A hidden table and a missing one no longer answer the same bytes:
+  under an access control that filters the metadata, both answer kind `table` ("does not exist");
+  under one that decides by rules, a hidden table answers kind `permission` and a missing one kind
+  `table`. What the server adds is the same for both; the error is Trino's. A table Trino shows
+  but no catalogue knows answers its columns, an empty `table` and `column_context`, and
+  `not_found` in `context_sources`, where `explain_table` answered `{"known": false}`.
+
 ## From 0.7.0 to 0.7.1
 
 A security release: reads that Trino answers past a row filter or a column mask are refused by default. It also reads the user from `sub`: **with Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading**, including when you follow the `0.7` image tag.
