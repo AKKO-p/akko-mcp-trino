@@ -8,7 +8,8 @@ message is Trino's, whole; the kind is what an agent can act on:
   ``schema``, ``catalog``, ``permission``, ``function``, ``type``) or ``other``;
 * a right refused by the identity provider or the server (``PermissionError``) is
   ``permission`` too;
-* the server's own refusals are ``invalid_argument``, ``read_only`` and ``time_budget``;
+* the server's own refusals are ``invalid_argument``, ``read_only`` and ``time_budget``,
+  and ``busy`` when a tool already runs as many calls as it may: try again later;
 * an engine that could not answer (internal error, connection lost) is ``unavailable``,
   which says nothing about the statement: it is neither valid nor invalid.
 
@@ -26,6 +27,7 @@ from trino.exceptions import HttpError, TrinoConnectionError
 INVALID_ARGUMENT = "invalid_argument"
 READ_ONLY = "read_only"
 TIME_BUDGET = "time_budget"
+BUSY = "busy"
 UNAVAILABLE = "unavailable"
 OTHER = "other"
 PERMISSION = "permission"

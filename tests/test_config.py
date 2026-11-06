@@ -67,6 +67,7 @@ _ENV_KEYS = [
     "MCP_PROFILE_DESCRIBE_ROWS",
     "MCP_PROFILE_CLIENT_TAG",
     "MCP_PROFILE_TIMEOUT_SECONDS",
+    "MCP_PROFILE_MAX_CONCURRENT",
     "MCP_VISIBILITY_ENABLED",
 ]
 
@@ -686,5 +687,81 @@ def test_a_profile_timeout_past_the_call_budget_refuses_to_start(monkeypatch):
     monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "5")
     assert Config.from_env().problems() == []
     monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
     monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "600")
-    assert Config.from_env().problems() == [], "without a call budget, any budget of its own"
+    assert Config.from_env().problems() == [], "without any other budget, any budget of its own"
+
+
+def test_profile_calls_at_once_are_four_by_default_and_read_from_their_variable(monkeypatch):
+    assert Config.from_env().profile_max_concurrent == 4
+    monkeypatch.setenv("MCP_PROFILE_MAX_CONCURRENT", "64")
+    assert Config.from_env().profile_max_concurrent == 64
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "65"])
+def test_profile_calls_at_once_outside_1_to_64_refuse_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_PROFILE_MAX_CONCURRENT", count)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_MAX_CONCURRENT={count}: profile_table runs 1 to 64 calls at once"
+    ]
+
+
+def test_profile_columns_past_the_hard_cap_refuse_to_start(monkeypatch):
+    from akko_mcp_trino.config import MAX_PROFILE_MAX_COLUMNS
+
+    assert MAX_PROFILE_MAX_COLUMNS == 500
+    monkeypatch.setenv("MCP_PROFILE_MAX_COLUMNS", "500")
+    assert Config.from_env().problems() == []
+    monkeypatch.setenv("MCP_PROFILE_MAX_COLUMNS", "501")
+    assert Config.from_env().problems() == [
+        "MCP_PROFILE_MAX_COLUMNS=501: profile_table profiles 500 columns at most"
+    ]
+
+
+def test_a_profile_timeout_past_the_query_budget_refuses_to_start(monkeypatch):
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "900")
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "60")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "600")
+    assert Config.from_env().problems() == [
+        "MCP_PROFILE_TIMEOUT_SECONDS=600 is past TRINO_QUERY_TIMEOUT_SECONDS=60: the "
+        "aggregate query is a Trino query; set it to 60 or less, or raise "
+        "TRINO_QUERY_TIMEOUT_SECONDS"
+    ]
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize(
+    "own, query, call, effective",
+    [
+        ("0", "60", "120", 60.0),
+        ("0", "0", "120", 120.0),
+        ("0", "200", "120", 120.0),
+        ("30", "60", "120", 30.0),
+        ("30", "0", "0", 30.0),
+        ("0", "45", "0", 45.0),
+        ("0", "0", "0", 0.0),
+    ],
+)
+def test_the_budget_of_the_aggregate_is_the_smallest_set(monkeypatch, own, query, call, effective):
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", own)
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", query)
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", call)
+    assert Config.from_env().profile_budget_seconds() == effective
+
+
+def test_full_profiles_without_any_budget_are_warned_of(monkeypatch):
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    warning = (
+        "MCP_PROFILE_MODES allows full while MCP_PROFILE_TIMEOUT_SECONDS, "
+        "TRINO_QUERY_TIMEOUT_SECONDS and MCP_CALL_TIMEOUT_SECONDS are 0: a full profile reads "
+        "every row it may read with no time limit"
+    )
+    assert warning in Config.from_env().warnings()
+    monkeypatch.setenv("MCP_PROFILE_MODES", "sample,bernoulli")
+    assert warning not in Config.from_env().warnings()
+    monkeypatch.setenv("MCP_PROFILE_MODES", "full")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "30")
+    assert warning not in Config.from_env().warnings()

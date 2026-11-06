@@ -188,3 +188,18 @@ def test_the_resource_group_example_selects_only_leaf_groups(readme):
     assert selected and all(g in every for g in selected), "a selector names no group"
     assert [g for g in selected if g not in leaves] == [], "a selector names a non-leaf group"
     assert not example["selectors"][-1].get("clientTags"), "a last selector catches the rest"
+
+
+@pytest.mark.parametrize(
+    "path, word",
+    [
+        ("README.md", "Nine tools"),
+        ("README.fr.md", "Neuf tools"),
+        ("DOCKERHUB.md", "Nine tools"),
+        ("akko_mcp_trino/__init__.py", "Nine tools"),
+    ],
+)
+def test_the_public_texts_count_the_nine_tools(path, word):
+    text = (pathlib.Path(__file__).resolve().parents[1] / path).read_text(encoding="utf-8")
+    assert word in text
+    assert not re.search(r"\b(eight|huit) tools\b", text, re.I), "a count from 0.7"

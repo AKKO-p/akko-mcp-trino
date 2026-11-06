@@ -81,7 +81,8 @@ def test_profile_table_sends_one_aggregate_query_and_never_show_stats():
     assert trino.calls == [
         f"DESCRIBE {ORDERS}",
         'SELECT count(*), count("id"), approx_distinct("id"), min("id"), max("id"), '
-        'count("name"), approx_distinct("name"), min("name"), max("name") '
+        'count("name"), approx_distinct("name"), min(substr("name", 1, 201)), '
+        'max(substr("name", 1, 201)) '
         f'FROM (SELECT "id", "name" FROM {ORDERS} LIMIT 100000)',
     ]
     assert not [s for s in trino.calls if s.lstrip().upper().startswith(("SHOW", "EXPLAIN"))]
@@ -129,7 +130,8 @@ def test_the_named_columns_are_profiled_in_the_order_given():
     tool, trino = _profile(DESCRIBED, _aggregates(1, 1, 1, "a", "a"))
     out = _call(tool, "tpch", "tiny", "orders", columns=["name"])
     assert trino.calls[1] == (
-        'SELECT count(*), count("name"), approx_distinct("name"), min("name"), max("name") '
+        'SELECT count(*), count("name"), approx_distinct("name"), '
+        'min(substr("name", 1, 201)), max(substr("name", 1, 201)) '
         f'FROM (SELECT "name" FROM {ORDERS} LIMIT 100000)'
     )
     assert [c["column"] for c in out["columns"]] == ["name"]
@@ -205,7 +207,7 @@ def test_a_name_the_tools_refuse_reaches_no_query(catalog, schema, table):
 def test_full_mode_reads_every_visible_row_and_says_so():
     tool, trino = _profile(DESCRIBED, _aggregates(2, 2, 2, 1, 2, 2, 2, "a", "b"))
     out = _call(tool, "tpch", "tiny", "orders", mode="full")
-    assert trino.calls[1].endswith(f'max("name") FROM {ORDERS}')
+    assert trino.calls[1].endswith(f'max(substr("name", 1, 201)) FROM {ORDERS}')
     assert out["scope"] == "visible_rows"
 
 
@@ -272,7 +274,8 @@ def test_non_comparable_types_get_count_only_and_say_so(kind):
 def test_ordered_types_get_distinct_min_and_max(kind):
     tool, trino = _profile(_described(("x", kind)), _aggregates(1, 1, 1, None, None))
     out = _call(tool, "tpch", "tiny", "orders")
-    assert 'approx_distinct("x"), min("x"), max("x")' in trino.calls[1]
+    end = 'substr("x", 1, 201)' if kind.startswith(("varchar", "char", "varbinary")) else '"x"'
+    assert f'approx_distinct("x"), min({end}), max({end})' in trino.calls[1]
     assert "skipped" not in out["columns"][0]
 
 
@@ -451,19 +454,40 @@ def test_the_description_names_only_the_modes_this_server_allows():
     assert all(f'"{m}"' in tool.__doc__ for m in ("sample", "bernoulli", "full"))
 
 
+def test_text_and_binary_min_and_max_are_cut_in_the_query():
+    """Trino reads at most one character, or byte, more than the server serves: a prefix
+    keeps the order, so the cut min and max are exact prefixes of the true ones."""
+    columns = _described(
+        ("name", "varchar(40)"), ("code", "char(3)"), ("raw", "varbinary"), ("n", "bigint")
+    )
+    row = _aggregates(1, 1, 1, "a", "a", 1, 1, "x", "y", 1, 1, b"\x00", b"\x00", 1, 1, 1, 1)
+    tool, trino = _profile(columns, row, profile_value_chars=5)
+    _call(tool, "tpch", "tiny", "orders")
+    for c in ("name", "code", "raw"):
+        assert f'min(substr("{c}", 1, 6)), max(substr("{c}", 1, 6))' in trino.calls[1]
+    assert 'min("n"), max("n")' in trino.calls[1], "a number is never wrapped"
+    assert 'approx_distinct("name")' in trino.calls[1], "distinct counts the whole value"
+
+
 def test_a_long_text_value_is_cut_and_says_so():
+    """A value of N + 1 characters, or bytes, is longer than the server serves: cut to N.
+    A binary value is cut by whole bytes, never in the middle of one."""
     columns = _described(("name", "varchar(40)"), ("raw", "varbinary"), ("code", "char(3)"))
-    row = _aggregates(2, 2, 2, "abcdefgh", "abc", 2, 2, b"\x00\x01\x02", b"\xff", 2, 1, "x", "y")
-    tool, _ = _profile(columns, row, profile_value_chars=5)
+    seven = bytes(range(7))
+    row = _aggregates(2, 2, 2, "abcdefghijklm", "abc", 2, 2, seven * 2, b"\xff", 2, 1, "x", "y")
+    tool, _ = _profile(columns, row, profile_value_chars=12)
     by_name = {c["column"]: c for c in _call(tool, "tpch", "tiny", "orders")["columns"]}
-    assert (by_name["name"]["min"], by_name["name"]["max"]) == ("abcde", "abc")
+    assert (by_name["name"]["min"], by_name["name"]["max"]) == ("abcdefghijkl", "abc")
     assert by_name["name"]["cut"] == ["min"]
-    assert (by_name["raw"]["min"], by_name["raw"]["max"]) == ("00010", "ff")
+    assert (by_name["raw"]["min"], by_name["raw"]["max"]) == ((seven * 2)[:12].hex(), "ff")
     assert by_name["raw"]["cut"] == ["min"]
     assert "cut" not in by_name["code"]
-    row = _aggregates(1, 1, 1, "abcdefgh", "abcdefgh")
-    tool, _ = _profile(_described(("name", "varchar")), row, profile_value_chars=2)
+    row = _aggregates(1, 1, 1, "abcdefghi", "abcdefghi")
+    tool, _ = _profile(_described(("name", "varchar")), row, profile_value_chars=8)
     assert _call(tool, "tpch", "tiny", "orders")["columns"][0]["cut"] == ["min", "max"]
+    row = _aggregates(1, 1, 1, "abcdefgh", "abcdefgh")
+    tool, _ = _profile(_described(("name", "varchar")), row, profile_value_chars=8)
+    assert "cut" not in _call(tool, "tpch", "tiny", "orders")["columns"][0]
 
 
 def test_numbers_dates_and_booleans_are_never_cut():
@@ -502,7 +526,7 @@ def test_numbers_dates_and_booleans_are_never_cut():
         "1234567.89",
         "00000000-0000-0000-0000-000000000001",
     ]
-    assert not [c for c in out["columns"] if "cut" in c]
+    assert not [c for c in out["columns"] if {"min", "max"} & set(c.get("cut", []))]
 
 
 def test_describe_is_read_up_to_its_own_bound_and_says_when_it_was_cut():
@@ -613,3 +637,83 @@ def test_its_own_budget_past_says_time_budget_and_cancels_the_query(monkeypatch)
     out = _call(tool, "tpch", "tiny", "orders", mode="full")
     assert out["kind"] == "time_budget" and "columns" not in out
     assert cursors[1].cancelled >= 1, "the query is cancelled in Trino"
+
+
+# ---- the fix wave: calls at once, edges of the arguments, the description
+
+
+def test_past_the_calls_at_once_a_profile_is_busy_at_once_and_sends_no_query():
+    started, release = threading.Event(), threading.Event()
+
+    def held():
+        started.set()
+        assert release.wait(5)
+        return _aggregates(1, 1, 1, 1, 1, 1, 1, "a", "a")
+
+    tool, trino = _profile(DESCRIBED, held, DESCRIBED, profile_max_concurrent=1)
+    first = {}
+    worker = threading.Thread(target=lambda: first.update(_call(tool, "tpch", "tiny", "orders")))
+    worker.start()
+    try:
+        assert started.wait(5)
+        out = _call(tool, "tpch", "tiny", "orders")
+        assert out["kind"] == "busy" and "again" in out["hint"]
+        assert len(trino.calls) == 2, "the busy call sent no query"
+    finally:
+        release.set()
+        worker.join(5)
+    assert first["rows"] == 1
+    trino.answers.append(_aggregates(1, 1, 1, 1, 1, 1, 1, "a", "a"))
+    assert _call(tool, "tpch", "tiny", "orders")["rows"] == 1, "the slot is given back"
+
+
+def test_a_failed_profile_gives_its_slot_back():
+    tool, trino = _profile(
+        PermissionError("Access Denied"),
+        DESCRIBED,
+        _aggregates(1, 1, 1, 1, 1, 1, 1, "a", "a"),
+        profile_max_concurrent=1,
+    )
+    assert _call(tool, "tpch", "tiny", "orders")["kind"] == "permission"
+    assert _call(tool, "tpch", "tiny", "orders")["rows"] == 1
+
+
+def test_a_table_with_no_column_listed_is_refused_without_an_aggregate():
+    tool, trino = _profile(_described())
+    out = _call(tool, "tpch", "tiny", "orders")
+    assert out["kind"] == "invalid_argument" and "no column" in out["error"]
+    assert trino.calls == [f"DESCRIBE {ORDERS}"]
+
+
+def test_too_many_columns_are_refused_before_their_names_are_read():
+    tool, _ = _profile(DESCRIBED, max_columns=2)
+    out = _call(tool, "tpch", "tiny", "orders", columns=[f"n{i}" for i in range(100000)])
+    assert out["kind"] == "invalid_argument"
+    assert "100000" in out["error"] and "n0" not in out["error"]
+
+
+def test_a_refusal_quotes_ten_unknown_names_at_most_and_their_count():
+    tool, _ = _profile(DESCRIBED)
+    out = _call(tool, "tpch", "tiny", "orders", columns=[f"n{i:02d}" for i in range(12)])
+    assert out["kind"] == "invalid_argument" and "12" in out["error"]
+    assert "n09" in out["error"] and "n10" not in out["error"]
+
+
+def test_a_long_type_is_cut_and_says_so():
+    kind = "row(" + ", ".join(f"f{i} integer" for i in range(50)) + ")"
+    tool, _ = _profile(_described(("r", kind)), _aggregates(1, 1), profile_value_chars=10)
+    (column,) = _call(tool, "tpch", "tiny", "orders")["columns"]
+    assert column["type"] == kind[:10] and column["cut"] == ["type"]
+    assert column["skipped"] == ["distinct", "min", "max"], "the whole type decides"
+
+
+def test_the_description_says_bernoulli_reads_every_row():
+    tool, _ = _profile()
+    assert "reads every row to draw it" in tool.__doc__
+
+
+def test_the_description_says_a_masked_value_is_the_policy():
+    from akko_mcp_trino.tools import _GOVERNANCE_NOTE
+
+    tool, _ = _profile()
+    assert tool.__doc__.rstrip().endswith(_GOVERNANCE_NOTE)

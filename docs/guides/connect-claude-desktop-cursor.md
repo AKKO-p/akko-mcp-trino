@@ -13,7 +13,7 @@ It covers three paths:
 > apart from the placeholders, by a real MCP client: the official MCP Python SDK started the
 > `command`, `args` and `env` of each stdio entry, or sent the `url` and `headers` of each
 > HTTP entry, against the sandbox with akko-mcp-trino 0.7.0 from PyPI and Docker Hub. It
-> listed the eight tools and called `search_columns`. The keys of each block are the ones
+> listed the 8 tools of 0.7 and called `search_columns`. The keys of each block are the ones
 > the hosts' documentation names, and the repository's tests check them. We did not drive
 > the Claude Desktop or Cursor user interfaces themselves: the menus named here come from
 > their documentation. [The details are at the end](#what-was-verified).
@@ -108,9 +108,9 @@ Claude Desktop on Windows and Cursor mangle spaces inside `args`.
 1. **The tools appear.** In Cursor, the server is listed under **Customize**, with its
    tools under *Available Tools*. In Claude Desktop, open the **+** menu of the message box
    (*Add files, connectors, and more*), then **Connectors**, **Manage connectors**, and
-   select `trino`. You should see eight tools: `search_columns`, `list_catalogs`,
-   `list_schemas`, `list_tables`, `describe_schema`, `describe_table`, `explain_query`,
-   `execute_query`.
+   select `trino`. You should see nine tools: `search_columns`, `list_catalogs`,
+   `list_schemas`, `list_tables`, `describe_schema`, `describe_table`, `profile_table`,
+   `explain_query`, `execute_query` (8 tools in 0.7, without `profile_table`).
 2. **Ask where the data is.** *"Which column holds the customers' e-mail address?"* The
    model calls `search_columns` with a word such as `email`, and the server answers, for
    carol:
@@ -219,7 +219,7 @@ In a container, the server cannot open your browser: read the login URL in the h
 
 ### What happens at the first question
 
-Starting the server and listing its tools never logs in, so the host shows the eight tools
+Starting the server and listing its tools never logs in, so the host shows the tools
 at once. The first tool call does: the server opens Trino's login page in your browser and
 writes its URL to stderr, which the hosts keep in their logs (Claude Desktop:
 `mcp-server-trino.log` in `~/Library/Logs/Claude`, `%APPDATA%\Claude\logs` or
@@ -338,6 +338,8 @@ search_columns('email'):
 {"tables": [...], "matches": [...], "complete": true, "next_cursor": null}
 ```
 
+This is the output of 0.7.2, which served 8 tools; from 0.8 the list adds `profile_table`.
+
 It resolves Cursor's `${env:NAME}` from your environment, as Cursor does, and stops if
 one is not set. For a file that holds several servers, name the entry with `--server trino`.
 
@@ -367,12 +369,12 @@ the official MCP Python SDK 2.3.0, Node.js 22 and 20.18.1, and `mcp-remote` 0.15
 
 | Configuration | Run as | Result |
 |---|---|---|
-| Cursor, path 1 (`url`, `headers`) | streamable HTTP, carol's token | 8 tools; `search_columns("email")` finds `demo.crm.customers.email` |
+| Cursor, path 1 (`url`, `headers`) | streamable HTTP, carol's token | 8 tools in 0.7; `search_columns("email")` finds `demo.crm.customers.email` |
 | Claude Desktop, path 1 (`npx mcp-remote`) | stdio, the bridge started by the client, on Node.js 22 and on Node.js 20.18.1 | the same |
-| Cursor and Claude Desktop, path 2 (`uvx`, `oauth2`) | stdio, Trino 482 with its OAuth2 authenticator, a scripted browser signing in at Keycloak | the warning quoted above at start; 8 tools before any login; the first call opens the login, then answers; `SELECT current_user` returns `carol_analyst` |
+| Cursor and Claude Desktop, path 2 (`uvx`, `oauth2`) | stdio, Trino 482 with its OAuth2 authenticator, a scripted browser signing in at Keycloak | the warning quoted above at start; 8 tools in 0.7 before any login; the first call opens the login, then answers; `SELECT current_user` returns `carol_analyst` |
 | path 2, the host giving up | a first call with a 5 second timeout during the login, then a second call | the first times out, the second answers as `carol_analyst` |
-| path 2 with Docker | stdio, `docker run -i` | 8 tools, the search answers |
-| Cursor and Claude Desktop, path 3 | https behind a TLS proxy, a private authority (`NODE_EXTRA_CA_CERTS` for the bridge) | 8 tools, the search answers |
+| path 2 with Docker | stdio, `docker run -i` | 8 tools in 0.7, the search answers |
+| Cursor and Claude Desktop, path 3 | https behind a TLS proxy, a private authority (`NODE_EXTRA_CA_CERTS` for the bridge) | 8 tools in 0.7, the search answers |
 | the errors in the table | `curl` and the same clients | the messages quoted above |
 
 For the sandbox runs, only the placeholders changed: the token, Trino's name inside the

@@ -131,7 +131,7 @@ access: Trino decides for each user with the rules it already has, or, in
 - **One identity, only when named.** In `service` mode every query runs as `TRINO_USER`. It is never chosen by default, and the server says so at start and to every host in its initialization instructions.
 - **Bounded by default.** A row cap with a `truncated` flag (100), a time budget per query cancelled in Trino (60 s), a time budget per tool call (120 s).
 - **One audit line per call.** Keyed by `X-Request-Id`, never the token, never the SQL text: who called which tool, with which outcome, for how long.
-- **Eight tools,** annotated with what they can really do: `execute_query` is annotated read-only only while `TRINO_READ_ONLY` is true.
+- **Nine tools,** annotated with what they can really do: `execute_query` is annotated read-only only while `TRINO_READ_ONLY` is true.
 - **A guarded door.** Bearer tokens verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino refused, protected resource metadata (RFC 9728), a Host header filter.
 - **Built to be extended without being forked.** Tool plugins and extensions are Python packages named at start: identity modes, guards at the door, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code, the Python SDK… Mistral, or any OpenAI-compatible model through the example agent.
@@ -537,7 +537,7 @@ The [examples](examples/README.md) folder has the details.
 | `list_tables` | `catalog`, `schema`, `offset` (optional) | `{"tables": [...], "next_offset": n or null, "truncated": bool}`: one page of the tables and views in that schema |
 | `describe_schema` | `catalog`, `schema`, `offset` (optional) | `{"catalog", "schema", "tables": [{"table", "type", "comment", "columns": [{"column", "type", "comment"}]}], "next_offset": n or null, "shortened": bool}`: one page of tables, each complete, with their comments and columns; with a context provider, a `description` per table and `context_sources` (see [Context from a catalogue](#context-from-a-catalogue)) |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20) | columns, types, comments, `truncated`; a governed sample when asked; what an extension's describers add, and `describer_errors` when one failed; with a context provider, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` and `undescribed_columns` (see [Context from a catalogue](#context-from-a-catalogue)) |
-| `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (all but the table optional) | `{"table", "scope", "rows": n, "columns_cut": bool, "columns": [{"column", "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}`: aggregates of the rows the caller may read, computed by one query run as the caller, so masks and row filters apply as in `execute_query`. `columns` are named as `DESCRIBE` lists them, the first `MCP_PROFILE_MAX_COLUMNS` by default; `DESCRIBE` is read up to `MCP_PROFILE_DESCRIBE_ROWS` rows, and `"columns_cut": true` says it listed more, which cannot be named. `mode` is one of `MCP_PROFILE_MODES`: `sample` (the default: the first `MCP_PROFILE_SAMPLE_ROWS` rows, `"scope": "first_rows"`, not a random sample), `bernoulli` (`TABLESAMPLE BERNOULLI (percent)`, `0 < percent <= 100`, `"scope": "random_sample"`, scans every row to draw the sample) or `full` (every row the caller may read, `"scope": "visible_rows"`); a mode the server does not allow is refused before any query, and the description names only the modes allowed. The aggregate query carries the client tag `MCP_PROFILE_CLIENT_TAG` and runs within `MCP_PROFILE_TIMEOUT_SECONDS` (0: the call's budget); past it, it is cancelled in Trino and the answer is `"kind": "time_budget"`. `null_fraction` is null when `rows` is 0. A type with no order (`array`, `map`, `row`, `json`, any type not known to be ordered) gets its count only and `"skipped": ["distinct", "min", "max"]`; `min` and `max` are rendered as the cells of `execute_query`, and a text or binary one longer than `MCP_PROFILE_VALUE_CHARS` is cut, with `"cut": ["min"]`, `["max"]` or both |
+| `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (all but the table optional) | `{"table", "scope", "rows": n, "columns_cut": bool, "columns": [{"column", "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}`: aggregates of the rows the caller may read, computed by one query run as the caller, so masks and row filters apply as in `execute_query`. `columns` are named as `DESCRIBE` lists them, the first `MCP_PROFILE_MAX_COLUMNS` by default; `DESCRIBE` is read up to `MCP_PROFILE_DESCRIBE_ROWS` rows, and `"columns_cut": true` says it listed more, which cannot be named. `mode` is one of `MCP_PROFILE_MODES`: `sample` (the default: the first `MCP_PROFILE_SAMPLE_ROWS` rows, `"scope": "first_rows"`, not a random sample), `bernoulli` (`TABLESAMPLE BERNOULLI (percent)`, `0 < percent <= 100`, `"scope": "random_sample"`, scans every row to draw the sample) or `full` (every row the caller may read, `"scope": "visible_rows"`); a mode the server does not allow is refused before any query, and the description names only the modes allowed. The aggregate query carries the client tag `MCP_PROFILE_CLIENT_TAG` and runs within the smallest of `MCP_PROFILE_TIMEOUT_SECONDS`, `TRINO_QUERY_TIMEOUT_SECONDS` and the call's budget set above 0; past it, it is cancelled in Trino and the answer is `"kind": "time_budget"`. At most `MCP_PROFILE_MAX_CONCURRENT` calls run at once; past them, `"kind": "busy"`. `null_fraction` is null when `rows` is 0. A type with no order (`array`, `map`, `row`, `json`, any type not known to be ordered) gets its count only and `"skipped": ["distinct", "min", "max"]`; `min` and `max` are rendered as the cells of `execute_query`, and a text or binary one longer than `MCP_PROFILE_VALUE_CHARS` (characters, or bytes) is cut in the query itself, an exact prefix of the true value, with `"cut": ["min"]`, `["max"]` or both; a type longer than that is cut too, with `"type"` in `cut` |
 | `explain_query` | `sql` | `{"valid": true}`: Trino analyzed a read-only statement as the caller, without running it; `{"plan": "..."}` only once `EXPLAIN` is in `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (optional, lower than the server cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
 
@@ -567,6 +567,12 @@ without the tag need their own group (`global.other` here), or Trino refuses the
   ]
 }
 ```
+
+The resource group bounds Trino; `MCP_PROFILE_MAX_CONCURRENT` (4) bounds each replica of
+this server: a profile waiting in a Trino queue still holds one of the threads every tool of
+the replica shares, so past that many profiles at once a call answers `"kind": "busy"` at once
+and sends no query. Keep it at or below the group's `hardConcurrencyLimit` plus `maxQueued`,
+divided by the replicas.
 
 Every tool runs in Trino through the identity mode, the listing tools
 included: metadata is data, and Trino lists only what that identity may see.
@@ -785,6 +791,7 @@ could not already name:
 | `invalid_argument` | the server refused an argument (an identifier, an `offset`, a cursor, a search text out of bounds) before reaching Trino |
 | `read_only` | the statement writes and the server is read-only |
 | `time_budget` | the call ran out of its time budget; narrow the request |
+| `busy` | `profile_table` already runs as many calls as this server allows (`MCP_PROFILE_MAX_CONCURRENT`); call again in a few seconds, as its `hint` says |
 | `unavailable` | Trino could not answer (internal error, connection lost): the statement is neither valid nor invalid, try again later |
 | `other` | any other error |
 
@@ -1177,12 +1184,13 @@ supported.
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true`: context is served only for tables the caller may read | `false` |
 | `MCP_CONTEXT_CANARY` | one table, `catalog.schema.table`, that no caller of this server may see: context is served to a caller only while Trino hides it from them; unset is warned of when a provider is loaded | none |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | the longest text of one context field, the longest context in one response, and the most columns described in one table, 1 at least | `500`, `60000`, `500` |
-| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | the most columns `profile_table` profiles in one call, and the rows its `sample` mode reads, 1 at least | `50`, `100000` |
+| `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | the most columns `profile_table` profiles in one call (1 to 500), and the rows its `sample` mode reads, 1 at least | `50`, `100000` |
 | `MCP_PROFILE_MODES` | the modes `profile_table` allows, comma-separated, among `sample`, `bernoulli` and `full`; empty or an unknown name refuses to start | `sample,bernoulli,full` |
-| `MCP_PROFILE_VALUE_CHARS` | the characters of a text or binary `min` or `max` it serves, past which it is cut, 1 at least | `200` |
+| `MCP_PROFILE_VALUE_CHARS` | the characters of a text `min` or `max` it serves, or the bytes of a binary one, and of a column's type; Trino reads one more and no further, and past it the value is cut; 1 at least | `200` |
 | `MCP_PROFILE_DESCRIBE_ROWS` | the rows of its `DESCRIBE` it reads, past the row cap, 1 at least; a column past them cannot be named | `5000` |
 | `MCP_PROFILE_CLIENT_TAG` | the client tag of its aggregate query (not of its `DESCRIBE`), for a Trino resource group: 1 to 100 letters, digits and `_ . : = / -` | `mcp-profile` |
-| `MCP_PROFILE_TIMEOUT_SECONDS` | the time budget of its aggregate query, past which it is cancelled in Trino; 0 is the call's budget, otherwise at most `MCP_CALL_TIMEOUT_SECONDS` when that is above 0 | `0` |
+| `MCP_PROFILE_TIMEOUT_SECONDS` | the time budget of its aggregate query, past which it is cancelled in Trino; the budget that applies is the smallest of this one, `TRINO_QUERY_TIMEOUT_SECONDS` and the call's budget, each counted only above 0, and `--check` prints it; 0 leaves the smaller of the other two; above 0, at most `TRINO_QUERY_TIMEOUT_SECONDS` and `MCP_CALL_TIMEOUT_SECONDS` when they are above 0 | `0` |
+| `MCP_PROFILE_MAX_CONCURRENT` | the calls of `profile_table` one server process runs at once, 1 to 64; past them a call answers `"kind": "busy"` at once and sends no query | `4` |
 | `MCP_VISIBILITY_ENABLED` | removed in 0.8: the filter by Trino's rights cannot be turned off, and `false` refuses to start | none |
 
 `--check` prints a `context:` line (the providers and every setting above from

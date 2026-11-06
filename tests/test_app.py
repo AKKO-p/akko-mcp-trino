@@ -486,15 +486,26 @@ def test_cli_check_says_the_bounds_of_profile_table(monkeypatch, capsys):
     monkeypatch.setenv("MCP_PROFILE_DESCRIBE_ROWS", "901")
     monkeypatch.setenv("MCP_PROFILE_CLIENT_TAG", "agents-profile")
     monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "4.5")
+    monkeypatch.setenv("MCP_PROFILE_MAX_CONCURRENT", "7")
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "60")
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "120")
     assert check_config(Config.from_env()) == 0
     assert (
         "profile_table: modes sample, full; up to 12 columns, sample of 3456 first rows, "
         "values cut at 78 characters, DESCRIBE read up to 901 rows, client tag agents-profile, "
-        "time budget 4.5 s"
+        "7 at once, time budget 4.5 s"
     ) in capsys.readouterr().out
     monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "0")
     assert check_config(Config.from_env()) == 0
-    assert "client tag agents-profile, time budget the call's\n" in capsys.readouterr().out
+    assert "7 at once, time budget 60 s\n" in capsys.readouterr().out, "the one that applies"
+    monkeypatch.setenv("TRINO_QUERY_TIMEOUT_SECONDS", "0")
+    assert check_config(Config.from_env()) == 0
+    assert "7 at once, time budget 120 s\n" in capsys.readouterr().out
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    assert check_config(Config.from_env()) == 0
+    out = capsys.readouterr().out
+    assert "7 at once, time budget none\n" in out
+    assert "WARNING: MCP_PROFILE_MODES allows full" in out
 
 
 def test_cli_check_shows_a_malformed_algorithm_setting_as_written(monkeypatch, capsys):

@@ -18,9 +18,9 @@ and a write anywhere in it is refused before Trino.
   to every host.
 - **Bounded and audited.** 100 rows, 60 s per query, 120 s per tool call by default, one audit
   line per call, and no token ever written to the logs.
-- **Eight tools**, for any MCP host and any model: `search_columns` (where the data lives),
+- **Nine tools**, for any MCP host and any model: `search_columns` (where the data lives),
   `describe_schema`, `describe_table`, `list_catalogs`, `list_schemas` and `list_tables` (paged),
-  `explain_query` and `execute_query`. Every error carries a `kind` that says what to do about it.
+  `profile_table` (aggregates of the rows you may read), `explain_query` and `execute_query`. Every error carries a `kind` that says what to do about it.
 
 Source, documentation and issues: **[github.com/AKKO-p/akko-mcp-trino](https://github.com/AKKO-p/akko-mcp-trino)**
 
