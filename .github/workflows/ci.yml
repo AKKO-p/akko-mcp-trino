@@ -25,7 +25,9 @@ jobs:
         # core of this commit; its other dependency, httpx, comes with the core.
         run: pip install --no-deps -e providers/atlas
       - name: lint and format (ruff)
-        run: ruff check akko_mcp_trino tests examples && ruff format --check akko_mcp_trino tests examples
+        run: |
+          ruff check akko_mcp_trino tests examples integration
+          ruff format --check akko_mcp_trino tests examples integration
       - name: every public name is documented (ruff D)
         run: ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107
       - name: types (mypy)
