@@ -394,7 +394,10 @@
           "maximum": 256
         },
         "profileModes": {
-          "type": "array",
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
             "type": "string",
             "enum": [

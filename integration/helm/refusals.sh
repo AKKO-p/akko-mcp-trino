@@ -36,6 +36,8 @@ refuses "extraEnv overriding the door" "set auth.enabled instead" -f values.yaml
 refuses "a resource URL without a path" "the published resource must be the URL hosts call" -f values.yaml --set auth.resourceUrl=https://mcp.example.com
 refuses "an Ingress the NetworkPolicy admits no one to" "requires networkPolicy.ingress.from" -f values.yaml --set 'networkPolicy.ingress.from=null,ingress.enabled=true,ingress.hosts[0].host=mcp.example.com'
 refuses "an inline Route key" "additional properties 'key' not allowed" -f values.yaml --set route.tls.key=x
+refuses "a profile budget past the query budget" "is past trino.queryTimeoutSeconds" -f values.yaml --set limits.profileTimeoutSeconds=90,trino.queryTimeoutSeconds=60
+refuses "a profile budget past the call budget" "is past limits.callTimeoutSeconds" -f values.yaml --set limits.profileTimeoutSeconds=90,limits.callTimeoutSeconds=60
 refuses "a value the schema does not know" "additional properties" -f values.yaml --set trino.hots=x
 renders() {  # renders <what> <template> <expected text...> -- <helm template arguments...>
   local what="$1" template="$2"; shift 2

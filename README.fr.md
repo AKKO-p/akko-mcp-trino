@@ -618,11 +618,14 @@ lire à l'appelant. Ce mode convient quand les métadonnées doivent suivre les 
 données.
 
 **Droits.** Le contexte suit les droits de Trino. Le fournisseur lit le catalogue avec un compte
-technique en lecture seule, et ne sert que ce que nomment ses listes blanches, fermées par défaut
-(pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA` ; vide veut
-dire aucun). Un glossaire ou une classification restreints dans le catalogue ne sont donc jamais
-servis, sauf si l'administrateur les nomme. La lecture du catalogue sous l'identité de l'appelant
-n'est pas dans cette version.
+technique en lecture seule. Il sert les descriptions des tables et des colonnes que Trino laisse
+lire à l'appelant. Il ne sert les termes de glossaire, les classifications et les métadonnées
+métier que si leur glossaire, leur classification ou leur ensemble est nommé dans les listes
+blanches, fermées par défaut (pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`,
+`ATLAS_BUSINESS_METADATA` ; vide veut dire aucun), et le propriétaire seulement si
+`ATLAS_OWNER_ATTRIBUTE` est posé. Un glossaire ou une classification restreints dans le catalogue
+ne sont donc jamais servis, sauf si l'administrateur les nomme. La lecture du catalogue sous
+l'identité de l'appelant n'est pas dans cette version.
 
 Sans fournisseur, aucun code de catalogue n'est chargé et aucun catalogue n'est appelé.
 
@@ -661,7 +664,7 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_CONTEXT_REQUIRE_SELECT` | `true` : contexte servi seulement pour les tables que l'appelant peut lire | `false` |
 | `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'aucun appelant de ce serveur ne doit voir : le contexte n'est servi à un appelant que tant que Trino la lui cache | aucune |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, 1 au moins | `500`, `60000`, `500` |
-| `MCP_SEARCH_CONCURRENCY` | catalogs qu'un appel de `search_columns` lit à la fois, de 1 à 32 : autant de requêtes de métadonnées en cours dans Trino pour cet appel ; la réponse est la même quelle que soit la valeur | `8` |
+| `MCP_SEARCH_CONCURRENCY` | catalogs qu'un appel de `search_columns` lit à la fois, de 1 à 32 : autant de requêtes de métadonnées en cours dans Trino pour cet appel | `8` |
 | `MCP_SEARCH_MAX_THREADS` | lectures de `search_columns` en cours dans les fils d'un processus, tous appels confondus, de 1 à 256 ; un appel qui n'en trouve aucune de libre lit lui-même son catalog suivant | `32` |
 | `MCP_DESCRIBE_MAX_COLUMNS` | colonnes d'une table que `describe_table` lit au plus, page par page, de 1 à 100000 ; au-delà, la réponse dit `columns_cut` | `5000` |
 | `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | colonnes que `profile_table` profile au plus en un appel (de 1 à 500), et lignes que lit son mode `sample`, 1 au moins | `50`, `100000` |

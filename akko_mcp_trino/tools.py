@@ -1241,8 +1241,9 @@ def register_query_tools(
                 "next_column_offset": next_column,
                 "columns_cut": columns_cut,
             }
-            # Read before a describer can change the answer.
-            complete = not out["truncated"]
+            # Only a first page that holds every column describes all of the table; a page
+            # past the last column is not truncated, and describes none of it.
+            complete = start == 0 and not more
             note(rows=len(rows), truncated=out["truncated"])
             failed = 0
             for describer in tools.describers:

@@ -1140,3 +1140,84 @@ def test_a_query_registered_after_the_cancellation_is_stopped_at_once():
     forget = stop.watch(lambda: seen.append("stopped"))
     forget()
     assert seen == ["stopped"] and stop.is_set()
+
+
+class _Unnamed:
+    """A cursor Trino never names (no query id): a cancel stops nothing, and its statement
+    runs until ``release`` is set."""
+
+    description = [("a",)]
+    query_id = None
+
+    def __init__(self):
+        import threading
+
+        self.release = threading.Event()
+        self.executed = 0
+        self.cancels = 0
+
+    def execute(self, sql, params=None):
+        self.executed += 1
+        assert self.release.wait(10), "the statement was never released"
+
+    def fetchmany(self, n):
+        return []
+
+    def cancel(self):
+        self.cancels += 1
+
+
+@pytest.mark.parametrize("budget", [0.0, 30.0])
+def test_a_cancellation_given_between_its_check_and_its_watch_never_hangs(monkeypatch, budget):
+    """The signal arrives after the query checked it and before it registered: the query
+    stops before its statement, at once, and never loops on a cursor Trino did not name."""
+    import threading
+
+    class _Racing(tc.Cancellation):
+        def watch(self, stop):
+            self.cancel()  # given just now, as by another thread
+            return super().watch(stop)
+
+    cur = _Unnamed()
+    _patch_cursor(monkeypatch, cur)
+    out = {}
+
+    def ask():
+        try:
+            _client(_cfg(query_timeout_seconds=budget)).query("SELECT 1", cancel=_Racing())
+        except Exception as e:  # noqa: BLE001 - what the query raised, read below
+            out["error"] = e
+
+    worker = threading.Thread(target=ask, daemon=True)
+    worker.start()
+    worker.join(3)
+    cur.release.set()
+    assert not worker.is_alive(), "the query hung on its own cancellation"
+    assert isinstance(out["error"], tc.QueryCancelled) and cur.executed == 0
+
+
+def test_the_cancel_of_a_query_trino_never_names_is_tried_a_bounded_number_of_times(monkeypatch):
+    import threading
+    import time
+
+    monkeypatch.setattr(tc, "_RECANCEL_SECONDS", 0.01)
+    monkeypatch.setattr(tc, "_RECANCEL_TRIES", 5, raising=False)
+    cur = _Unnamed()
+    _patch_cursor(monkeypatch, cur)
+    out = {}
+
+    def ask():
+        try:
+            _client(_cfg(query_timeout_seconds=0.05)).query("SELECT 1")
+        except Exception as e:  # noqa: BLE001 - what the query raised, read below
+            out["error"] = e
+
+    worker = threading.Thread(target=ask, daemon=True)
+    worker.start()
+    time.sleep(0.6)
+    tried = cur.cancels
+    time.sleep(0.2)
+    assert tried == cur.cancels == 5, "the tries stopped at their bound"
+    cur.release.set()
+    worker.join(5)
+    assert isinstance(out["error"], TimeoutError), "past its budget, the query says so"

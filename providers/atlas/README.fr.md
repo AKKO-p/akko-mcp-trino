@@ -194,8 +194,11 @@ Ce qu'il faut au conteneur :
 
 **Droits.** Le contexte suit les droits de Trino : un appelant ne le reçoit que pour les tables et
 les colonnes que Trino le laisse lire. Le fournisseur lit Atlas avec ce compte technique en lecture
-seule, et ne sert que ce que nomment `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` et
-`ATLAS_BUSINESS_METADATA`, fermées par défaut (vide veut dire aucun). Un glossaire ou une
+seule. Il sert les descriptions des tables et des colonnes que Trino laisse lire à l'appelant. Il
+ne sert les termes de glossaire, les classifications et les métadonnées métier que si leur
+glossaire, leur classification ou leur ensemble est nommé dans `ATLAS_GLOSSARIES`,
+`ATLAS_CLASSIFICATIONS` ou `ATLAS_BUSINESS_METADATA`, fermées par défaut (vide veut dire aucun),
+et le propriétaire seulement si `ATLAS_OWNER_ATTRIBUTE` est posé. Un glossaire ou une
 classification restreints dans Atlas ne sont donc jamais servis, sauf si l'administrateur les
 nomme. La lecture d'Atlas sous l'identité de l'appelant n'est pas dans cette version.
 

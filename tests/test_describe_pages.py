@@ -229,3 +229,15 @@ def test_a_grain_whole_on_a_page_after_the_first_is_not_served(setups):
     )
     assert "grain" not in out.get("table", {}), "a page does not prove the table's grain"
     assert out["context_sources"] == {"catalog": "partial"}
+
+
+def test_a_page_past_the_last_column_does_not_claim_the_context_of_a_whole_table(setups):
+    mcp, _, _ = with_context(setups, WideGate(250), _orders_context())
+    out = json.loads(
+        in_request(
+            lambda: mcp.tools["describe_table"]("demo", "sales", "orders", column_offset=300)
+        )
+    )
+    assert out["rows"] == [] and out["truncated"] is False
+    assert out["context_sources"] == {"catalog": "partial"}
+    assert "grain" not in out.get("table", {})

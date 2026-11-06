@@ -70,6 +70,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # Until Trino answers the POST of a statement, the query has no name and a cancel stops
 # nothing; past its budget, the cancel is tried again this often until the query has one.
 _RECANCEL_SECONDS = 0.05
+# How many times at most: a query Trino never names is not tried for ever.
+_RECANCEL_TRIES = 200
 
 
 class QueryCancelled(Exception):
@@ -501,12 +503,16 @@ class TrinoClient:
             cursor.execute(sql, params)
             return cursor.fetchmany(limit)
         expired, done, cancelled = threading.Event(), threading.Event(), threading.Event()
+        executing = threading.Event()
 
         def expire() -> None:
             expired.set()
             # DELETE on the query: Trino stops it, the fetch below fails. A query not yet
-            # named cannot be stopped: try again until it is, or until the statement is over.
-            while not done.is_set():
+            # named cannot be stopped: try again until it is, or until the statement is over,
+            # _RECANCEL_TRIES times at most.
+            for _ in range(_RECANCEL_TRIES):
+                if done.is_set():
+                    return
                 named = cursor.query_id is not None
                 cursor.cancel()
                 if named:
@@ -521,8 +527,11 @@ class TrinoClient:
             )
 
         def stop() -> None:
+            # Before its statement starts, a query only learns it is cancelled: it then
+            # stops itself, and no cancel is sent for a statement Trino was never asked.
             cancelled.set()
-            expire()
+            if executing.is_set():
+                expire()
 
         def stopped() -> Exception:
             return QueryCancelled("the query was cancelled") if cancelled.is_set() else over()
@@ -532,6 +541,15 @@ class TrinoClient:
             timer.daemon = True
             timer.start()
         forget = cancel.watch(stop) if cancel is not None else (lambda: None)
+        executing.set()
+        if cancelled.is_set():
+            # Cancelled before its statement: by the time the signal was watched, or as it
+            # starts. Whichever of the two sees the other, the statement is never sent.
+            done.set()
+            forget()
+            if timer is not None:
+                timer.cancel()
+            raise QueryCancelled("the query was cancelled before it started")
         try:
             cursor.execute(sql, params)
             rows = [] if expired.is_set() else cursor.fetchmany(limit)

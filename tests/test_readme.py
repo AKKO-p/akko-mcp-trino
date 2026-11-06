@@ -205,29 +205,51 @@ def test_the_public_texts_count_the_nine_tools(path, word):
     assert not re.search(r"\b(eight|huit) tools\b", text, re.I), "a count from 0.7"
 
 
-@pytest.mark.parametrize(
-    "readme, heading, allow_lists",
-    [
-        (
-            "README.md",
-            "### Deployment with a catalogue",
-            "serves only what its allow lists name, closed by default (for Atlas: "
-            "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`; empty means "
-            "none)",
-        ),
-        (
-            "README.fr.md",
-            "## Déploiement avec un catalogue",
-            "ne sert que ce que nomment ses listes blanches, fermées par défaut (pour Atlas : "
-            "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA` ; vide veut "
-            "dire aucun)",
-        ),
+_RIGHTS = {
+    "README.md": [
+        "### Deployment with a catalogue",
+        "It serves the descriptions of the tables and columns Trino lets the caller read.",
+        "It serves glossary terms, classifications and business metadata only when their "
+        "glossary, classification or set is named in the allow lists, closed by default (for "
+        "Atlas: `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`; empty "
+        "means none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set.",
     ],
-)
-def test_the_readme_says_how_to_deploy_with_a_catalogue_and_what_its_rights_are(
-    readme, heading, allow_lists
-):
+    "README.fr.md": [
+        "## Déploiement avec un catalogue",
+        "Il sert les descriptions des tables et des colonnes que Trino laisse lire à l'appelant.",
+        "Il ne sert les termes de glossaire, les classifications et les métadonnées métier "
+        "que si "
+        "leur glossaire, leur classification ou leur ensemble est nommé dans les listes "
+        "blanches, fermées par défaut (pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, "
+        "`ATLAS_BUSINESS_METADATA` ; vide veut dire aucun), et le propriétaire seulement si "
+        "`ATLAS_OWNER_ATTRIBUTE` est posé.",
+    ],
+    "providers/atlas/README.md": [
+        "It serves the descriptions of the tables and columns Trino lets the caller read.",
+        "It serves glossary terms, classifications and business metadata only when their "
+        "glossary, classification or set is named in `ATLAS_GLOSSARIES`, "
+        "`ATLAS_CLASSIFICATIONS` or `ATLAS_BUSINESS_METADATA`, closed by default (empty means "
+        "none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set.",
+    ],
+    "providers/atlas/README.fr.md": [
+        "Il sert les descriptions des tables et des colonnes que Trino laisse lire à l'appelant.",
+        "Il ne sert les termes de glossaire, les classifications et les métadonnées métier "
+        "que si "
+        "leur glossaire, leur classification ou leur ensemble est nommé dans "
+        "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` ou `ATLAS_BUSINESS_METADATA`, fermées par "
+        "défaut (vide veut dire aucun), et le propriétaire seulement si "
+        "`ATLAS_OWNER_ATTRIBUTE` est posé.",
+    ],
+}
+
+
+@pytest.mark.parametrize("readme", list(_RIGHTS))
+def test_the_readme_says_what_the_context_of_a_catalogue_serves_and_under_which_rights(readme):
+    """What the context serves, sentence by sentence as the Atlas provider serves it: the
+    descriptions of what Trino lets the caller read; terms, classifications and business
+    metadata of the sets named only; the owner only when its attribute is set."""
     text = (pathlib.Path(__file__).resolve().parents[1] / readme).read_text(encoding="utf-8")
     flat = " ".join(text.replace("\u202f", " ").replace("\u00a0", " ").split())
-    assert heading in text
-    assert allow_lists in flat
+    for sentence in _RIGHTS[readme]:
+        assert sentence in flat, sentence
+    assert "what its allow lists name" not in flat and "nomment ses listes blanches" not in flat
