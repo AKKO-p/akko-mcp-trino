@@ -196,9 +196,11 @@ Les tests rejouent des réponses enregistrées, dans `tests/recordings/` :
 - `atlas-2.1` : un vrai catalogue de la même version, rendu neutre ;
 - `atlas-2.4` : Apache Atlas 2.4.0, construit depuis les sources officielles.
 
-Le contrat de contexte du serveur (`ContextContract`) tourne sur `atlas-2.1-seed` et sur
-`atlas-2.1` ; une vérification qui demande un rôle absent du vrai catalogue est sautée et dit
-pourquoi. Chaque nom et chaque texte d'un vrai catalogue a été remplacé par un nom neutre,
+Le contrat de contexte du serveur (`ContextContract`) et son contrat du filtre (`GateContract`, le
+filtre du serveur par les droits de Trino prouvé de bout en bout sur le fournisseur) tournent sur
+`atlas-2.1-seed` et sur `atlas-2.1` ; une vérification qui demande un rôle absent du vrai catalogue
+est sautée et dit pourquoi. Atlas n'a pas de notion de jointure : le scénario de la jointure est
+sauté, et le contrat échouerait si le fournisseur en rendait une. Chaque nom et chaque texte d'un vrai catalogue a été remplacé par un nom neutre,
 structure gardée, par `tests/recordings/anonymize.py` ; sa docstring dit comment enregistrer et
 anonymiser une nouvelle version.
 

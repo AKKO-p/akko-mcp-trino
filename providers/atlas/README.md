@@ -192,8 +192,11 @@ The tests replay recorded answers, in `tests/recordings/`:
 - `atlas-2.1`: a real catalogue of the same version, made neutral;
 - `atlas-2.4`: Apache Atlas 2.4.0, built from the official sources.
 
-The server's context contract (`ContextContract`) runs on `atlas-2.1-seed` and on `atlas-2.1`;
-a check that needs a role the real catalogue lacks is skipped and says why. Every name and text
+The server's context contract (`ContextContract`) and its gate contract (`GateContract`, the
+server's filter by Trino's rights proven end to end over the provider) run on `atlas-2.1-seed`
+and on `atlas-2.1`; a check that needs a role the real catalogue lacks is skipped and says why.
+Atlas has no notion of a join: the gate's join scenario is skipped, and the contract would fail
+if the provider gave one. Every name and text
 of a real catalogue was replaced by a neutral one, structure kept, by
 `tests/recordings/anonymize.py`; its docstring says how to record and anonymize a new version.
 
