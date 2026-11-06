@@ -129,14 +129,15 @@ def _positive(env: Mapping[str, str], name: str, default: float, kind: type) -> 
 
 
 def _concurrency(env: Mapping[str, str]) -> int:
-    value = int(
-        _positive(env, "ATLAS_MAX_CONCURRENT_REQUESTS", DEFAULT_MAX_CONCURRENT_REQUESTS, int)
-    )
-    if value > MAX_CONCURRENT_REQUESTS:
+    text = env.get("ATLAS_MAX_CONCURRENT_REQUESTS", "").strip()
+    if not text:
+        return DEFAULT_MAX_CONCURRENT_REQUESTS
+    if not text.isdecimal() or not 1 <= int(text) <= MAX_CONCURRENT_REQUESTS:
         raise ValueError(
-            f"ATLAS_MAX_CONCURRENT_REQUESTS must be between 1 and {MAX_CONCURRENT_REQUESTS}"
+            "ATLAS_MAX_CONCURRENT_REQUESTS must be an integer between 1 and "
+            f"{MAX_CONCURRENT_REQUESTS}"
         )
-    return value
+    return int(text)
 
 
 def _owner(env: Mapping[str, str]) -> str:

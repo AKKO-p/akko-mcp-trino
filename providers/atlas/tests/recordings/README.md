@@ -18,6 +18,10 @@ These are not raw answers. `anonymize.py` made them neutral, keeping their struc
 - table parameters (DDL times, row counts, sizes) are emptied, and the statistics a vendor's
   types add (file and snapshot counts, snapshot ids) are set to null.
 
+`atlas-2.1/glossary-term-not-found.json` is the answer of the target Atlas 2.1 to a glossary
+term read by a GUID it does not hold (`ATLAS-404-00-005`), recorded as it came, the GUID being
+neutral already. Atlas 2.4 is not recorded for this code.
+
 The 2.1 answers were changed further, by hand:
 
 - business attributes were removed: tables keep `stewardship.approvalStatus` and

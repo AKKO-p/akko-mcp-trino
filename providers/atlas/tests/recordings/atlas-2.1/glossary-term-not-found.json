@@ -1,0 +1,16 @@
+{
+ "request": {
+  "body": null,
+  "method": "GET",
+  "path": "/api/atlas/v2/glossary/term/00000000-0000-4000-8000-0000000000ff",
+  "query": []
+ },
+ "response": {
+  "body": {
+   "errorCode": "ATLAS-404-00-005",
+   "errorMessage": "Given instance guid 00000000-0000-4000-8000-0000000000ff is invalid/not found"
+  },
+  "content_type": "application/json",
+  "status": 404
+ }
+}

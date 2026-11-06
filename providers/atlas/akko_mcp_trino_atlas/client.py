@@ -15,12 +15,13 @@ What an answer means:
   ``ProviderUnavailable``;
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
-- Atlas's own "does not exist" answers, by their error code: a 404 with
-  ``ATLAS-404-00-009`` (no instance has that unique attribute) or ``ATLAS-404-00-005``
-  (no instance has that GUID, a glossary term read by GUID) is ``Missing.INSTANCE``,
-  and a 400 with ``ATLAS-400-00-014`` (the type does not exist; Atlas 2.4 without the
-  Iceberg model) is ``Missing.TYPE``. Any other 400 or 404 (a page, another code, a wrong
-  path behind Knox) is ``ProviderUnavailable``.
+- Atlas's own "does not exist" answers, by status and error code, only those the read
+  names as its own (``missing``): ``INSTANCE_BY_ATTRIBUTE``, a 404 with
+  ``ATLAS-404-00-009`` (no instance has that unique attribute); ``INSTANCE_BY_GUID``, a
+  404 with ``ATLAS-404-00-005`` (no instance has that GUID); ``UNKNOWN_TYPE``, a 400 with
+  ``ATLAS-400-00-014`` (the type does not exist; Atlas 2.4 without the Iceberg model).
+  Any other 400 or 404 (a page, another code, a code another read expects, a wrong path
+  behind Knox) is ``ProviderUnavailable``.
 
 Each ``ProviderUnavailable`` logs one line, ``atlas unreachable``, word for word, with no
 address, user or object name; a refusal is logged by the server, as
@@ -32,6 +33,7 @@ import logging
 from collections.abc import Generator, Mapping
 from enum import Enum
 from importlib.metadata import version
+from types import MappingProxyType
 from typing import Any
 
 import httpx
@@ -55,12 +57,15 @@ class Missing(Enum):
     TYPE = "type"
 
 
-# Atlas's error codes for "does not exist", by status: by unique attribute and by GUID
-# (Atlas's INSTANCE_GUID_NOT_FOUND), and an entity type.
-_MISSING = {
-    404: {"ATLAS-404-00-009": Missing.INSTANCE, "ATLAS-404-00-005": Missing.INSTANCE},
-    400: {"ATLAS-400-00-014": Missing.TYPE},
-}
+MissingCodes = Mapping[tuple[int, str], Missing]
+# Atlas's "does not exist" answers, by status and error code; each read names those that
+# mean "nothing" for it, and every other one is an outage.
+INSTANCE_BY_ATTRIBUTE: MissingCodes = MappingProxyType(
+    {(404, "ATLAS-404-00-009"): Missing.INSTANCE}
+)
+INSTANCE_BY_GUID: MissingCodes = MappingProxyType({(404, "ATLAS-404-00-005"): Missing.INSTANCE})
+UNKNOWN_TYPE: MissingCodes = MappingProxyType({(400, "ATLAS-400-00-014"): Missing.TYPE})
+_NONE: MissingCodes = MappingProxyType({})
 
 
 class _Outage(Exception):
@@ -130,10 +135,16 @@ class AtlasClient:
             options.pop("proxy")
         self._http = httpx.AsyncClient(transport=transport, **options)
 
-    async def get(self, path: str, params: Mapping[str, str] | None = None) -> Any:
-        """Return the JSON Atlas answers for ``path`` (under ``/api/atlas``), or ``Missing``
-        when Atlas says it does not exist; raises ``ProviderRefused`` or
-        ``ProviderUnavailable``."""
+    async def get(
+        self,
+        path: str,
+        params: Mapping[str, str] | None = None,
+        *,
+        missing: MissingCodes = _NONE,
+    ) -> Any:
+        """Return the JSON Atlas answers for ``path`` (under ``/api/atlas``), or the
+        ``Missing`` that ``missing`` gives the answer's status and error code; raises
+        ``ProviderRefused`` or ``ProviderUnavailable``."""
         count = len(self._urls)
         for step in range(count):
             index = (self._first + step) % count
@@ -142,7 +153,7 @@ class AtlasClient:
             except _Outage:
                 continue
             self._first = index
-            return self._read(response)
+            return self._read(response, missing)
         raise self._unavailable("no address of ATLAS_URL answered")
 
     async def _send(self, url: str, params: Mapping[str, str] | None) -> httpx.Response:
@@ -176,14 +187,14 @@ class AtlasClient:
                 return True
         return False
 
-    def _read(self, response: httpx.Response) -> Any:
+    def _read(self, response: httpx.Response, missing: MissingCodes) -> Any:
         status = response.status_code
         if status in _REFUSED:
             # A new session is opened on the next call, under the secret read then.
             self._http.cookies.clear()
             raise ProviderRefused(f"atlas answered {status}")
-        if missing := _MISSING.get(status, {}).get(_error_code(response)):
-            return missing
+        if status != 200 and (found := missing.get((status, _error_code(response)))):
+            return found
         if status != 200:
             raise self._unavailable(f"atlas answered {status}")
         if not _is_json(response):

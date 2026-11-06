@@ -115,9 +115,10 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
 | 401 or 403 | is refused at once; the session cookie is dropped |
 | a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
-| 404 with `ATLAS-404-00-009` or `ATLAS-404-00-005` (no such instance) | knows nothing of these tables or this term |
+| 404 with `ATLAS-404-00-009` to a table read (no such instance) | knows nothing of these tables |
+| 404 with `ATLAS-404-00-005` to a term read (no such GUID) | leaves that term out |
 | 400 with `ATLAS-400-00-014` (no such type) | knows nothing under that type, and remembers it until `SIGHUP` |
-| any other 400 or 404 (a page, another code, a wrong path behind Knox) | is unavailable |
+| any other 400 or 404 (a page, another code, a code of the other read, a wrong path behind Knox) | is unavailable |
 
 When unavailable, it logs `atlas unreachable`, with no address, user or object name; a refusal
 is logged by the server as `atlas refused the account`. Neither the logs nor an error carry an

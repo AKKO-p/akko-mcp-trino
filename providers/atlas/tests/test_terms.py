@@ -7,9 +7,10 @@ import time
 import httpx
 import pytest
 from akko_mcp_trino.context import ProviderRefused, ProviderUnavailable, TableRef, Term, TermRef
-from atlas_replay import ATLAS, TERM, FakeAtlas, term_not_found, transport
+from atlas_replay import ATLAS, TERM, FakeAtlas, recording, transport
 
 from akko_mcp_trino_atlas import AtlasProvider
+from akko_mcp_trino_atlas.provider import _first_of
 from akko_mcp_trino_atlas.settings import read_settings
 
 BASE = {
@@ -166,7 +167,11 @@ def test_a_term_read_outside_the_allow_list_is_never_served():
 def test_a_term_atlas_does_not_hold_is_left_out(caplog):
     caplog.set_level(logging.INFO)
     caplog.set_level(logging.WARNING, logger="httpx")
-    unknown = "00000000-0000-4000-8000-0000000000aa"
+    # Atlas 2.1's answer to a GUID it does not hold, recorded.
+    recorded = recording("atlas-2.1", "glossary-term-not-found")
+    assert recorded["response"]["status"] == 404
+    assert recorded["response"]["body"]["errorCode"] == "ATLAS-404-00-005"
+    unknown = recorded["request"]["path"].removeprefix(TERM)
     assert read(build(FakeAtlas("atlas-2.4")), [unknown, INVOICE]).keys() == {INVOICE}
     assert not caplog.records
 
@@ -174,9 +179,21 @@ def test_a_term_atlas_does_not_hold_is_left_out(caplog):
     def other(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"errorCode": "ATLAS-404-00-001"})
 
-    assert term_not_found(unknown).status_code == 404
     error = failure(build(other), [INVOICE])
     assert isinstance(error, ProviderUnavailable)
+    assert [r.getMessage() for r in caplog.records] == ["atlas unreachable"]
+
+
+def test_an_instance_not_found_by_unique_attribute_is_an_outage_for_a_term(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    answer = recording("atlas-2.4", "entity-deleted-table")["response"]
+    assert answer["body"]["errorCode"] == "ATLAS-404-00-009"
+
+    def by_attribute(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(answer["status"], json=answer["body"])
+
+    assert isinstance(failure(build(by_attribute), [INVOICE]), ProviderUnavailable)
     assert [r.getMessage() for r in caplog.records] == ["atlas unreachable"]
 
 
@@ -192,15 +209,36 @@ def test_term_reads_run_in_parallel_within_the_bound():
         now["in_flight"] -= 1
         return atlas(request)
 
-    started = time.monotonic()
     found = read(
         build(slow, ATLAS_MAX_CONCURRENT_REQUESTS="3", ATLAS_GLOSSARIES="finance,hr"), keys
     )
     assert set(found) == {INVOICE, STAFF, PAYMENT, BILL}
-    assert now["most"] == 3
-    # The first read goes alone, then three at a time: well under ten reads in a row.
-    assert time.monotonic() - started < 10 * 0.05
+    assert now["most"] == 3  # never more than the bound in flight, and the bound is used
     assert term_paths(atlas)[0] == INVOICE
+
+
+def test_the_first_term_read_goes_alone():
+    atlas = FakeAtlas("atlas-2.4")
+    started: list[str] = []
+    others_started = asyncio.Event()
+    seen = {}
+
+    async def hold_the_first(request: httpx.Request) -> httpx.Response:
+        started.append(request.url.path)
+        if len(started) == 1:
+            # Held open: if another read started now, it would release the first at once.
+            try:
+                await asyncio.wait_for(others_started.wait(), 0.2)
+            except TimeoutError:
+                pass
+            seen["started_while_held"] = len(started)
+        else:
+            others_started.set()
+        return atlas(request)
+
+    found = read(build(hold_the_first), [INVOICE, BILL, PAYMENT])
+    assert set(found) == {INVOICE, BILL, PAYMENT}
+    assert seen["started_while_held"] == 1
 
 
 def test_a_refused_account_costs_one_request():
@@ -232,6 +270,13 @@ def test_a_failure_among_parallel_reads_is_the_error_of_the_call(caplog):
     error = failure(build(broken), [INVOICE, PAYMENT])
     assert isinstance(error, ProviderUnavailable)
     assert error.__cause__ is None and error.__suppress_context__
+
+
+def test_a_refusal_among_outages_is_the_error_of_the_call():
+    refused, down, bug = ProviderRefused("401"), ProviderUnavailable("502"), RuntimeError("bug")
+    assert _first_of(ExceptionGroup("reads", [down, bug, refused, down])) is refused
+    assert _first_of(ExceptionGroup("reads", [bug, down])) is down
+    assert _first_of(ExceptionGroup("reads", [bug])) is bug
 
 
 def test_an_unexpected_failure_among_parallel_reads_is_raised_as_it_is():
@@ -309,7 +354,8 @@ def test_a_malformed_term_serves_what_it_can():
 
 @pytest.mark.parametrize("value", ["0", "33", "four", "1.5"])
 def test_the_concurrency_bound_is_checked_at_start(value):
-    with pytest.raises(ValueError, match="ATLAS_MAX_CONCURRENT_REQUESTS"):
+    says = "ATLAS_MAX_CONCURRENT_REQUESTS must be an integer between 1 and 32"
+    with pytest.raises(ValueError, match=f"^{says}$"):
         read_settings({**BASE, "ATLAS_MAX_CONCURRENT_REQUESTS": value})
 
 

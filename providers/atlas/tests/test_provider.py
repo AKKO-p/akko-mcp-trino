@@ -2,8 +2,10 @@
 
 import asyncio
 import inspect
+import logging
 import time
 
+import httpx
 import pytest
 from akko_mcp_trino.context import (
     CLASSIFICATION,
@@ -13,9 +15,10 @@ from akko_mcp_trino.context import (
     PROPERTY,
     ContextProvider,
     Labelled,
+    ProviderUnavailable,
     TableRef,
 )
-from atlas_replay import ATLAS, TRAP, VERSIONS, FakeAtlas, asked, transport
+from atlas_replay import ATLAS, TRAP, VERSIONS, FakeAtlas, asked, recording, transport
 
 from akko_mcp_trino_atlas import AtlasProvider, from_env
 from akko_mcp_trino_atlas.provider import batches
@@ -395,3 +398,18 @@ def test_a_reset_during_the_read_that_finds_a_type_absent_is_not_lost():
     sent = [r.url.path.rsplit("/", 1)[1] for r in atlas.requests]
     # The 400 learnt before the reset is forgotten: the second call asks the type again.
     assert sent == ["hive_table", "iceberg_table", "hive_table", "iceberg_table"]
+
+
+def test_a_guid_not_found_answer_to_a_bulk_read_is_an_outage(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    # Only a glossary term read by GUID takes ATLAS-404-00-005 as "nothing".
+    answer = recording("atlas-2.1", "glossary-term-not-found")["response"]
+
+    def guid_not_found(request):
+        return httpx.Response(answer["status"], json=answer["body"])
+
+    p = AtlasProvider(read_settings(BASE), transport=transport(guid_not_found))
+    with pytest.raises(ProviderUnavailable):
+        describe(p, [INVOICES])
+    assert [r.getMessage() for r in caplog.records] == ["atlas unreachable"]

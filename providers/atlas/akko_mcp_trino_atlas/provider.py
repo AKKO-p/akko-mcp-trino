@@ -63,11 +63,13 @@ from akko_mcp_trino.context import (
     TermRef,
 )
 
-from .client import AtlasClient, Missing
+from .client import INSTANCE_BY_ATTRIBUTE, INSTANCE_BY_GUID, UNKNOWN_TYPE, AtlasClient, Missing
 from .settings import AtlasSettings
 
 BULK = "/api/atlas/v2/entity/bulk/uniqueAttribute/type/"
 TERM = "/api/atlas/v2/glossary/term/"
+# A bulk read says nothing of a table Atlas does not hold, or of a type it does not know.
+_BULK_MISSING = MappingProxyType({**INSTANCE_BY_ATTRIBUTE, **UNKNOWN_TYPE})
 # The relations of a term that are read, and the name the core gives each.
 RELATIONS = (
     ("synonyms", "synonym"),
@@ -289,7 +291,7 @@ class AtlasProvider:
 
     async def _term(self, key: str) -> Term | None:
         """One term, or ``None`` when Atlas does not hold it or it may not be served."""
-        doc = await self._client.get(TERM + quote(key, safe=""))
+        doc = await self._client.get(TERM + quote(key, safe=""), missing=INSTANCE_BY_GUID)
         if isinstance(doc, Missing):
             return None
         body = _object(doc)
@@ -340,6 +342,7 @@ class AtlasProvider:
                 doc = await self._client.get(
                     BULK + quote(type_name, safe=""),
                     {f"attr_{i}:qualifiedName": name for i, name in enumerate(group)},
+                    missing=_BULK_MISSING,
                 )
                 if doc is Missing.TYPE:
                     self._absent = MappingProxyType({**self._absent, type_name: learnt})
