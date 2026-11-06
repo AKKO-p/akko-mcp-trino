@@ -846,7 +846,11 @@ class GateHarness:
 
     ``hidden_table`` is a table the catalogue describes; ``hidden_join_target`` the target
     of a join the catalogue gives ``names.described``; ``hidden_column`` a column of
-    ``names.described`` the catalogue describes. ``names.unknown`` plays the missing
+    ``names.described`` the catalogue describes. A catalogue with no notion of a join leaves
+    ``hidden_join_target`` to ``None``: the join scenario is then left out of every check,
+    its own check is skipped with the reason, and the contract fails if the provider gives a
+    join for any table it describes, so that a provider with joins cannot leave them
+    unchecked. ``names.unknown`` plays the missing
     table. Each is written as Trino lists it, at least 4 characters long, and as an agent
     names a table (letters, digits, ``_`` and ``-``); none of them is ``names.described``.
     Its name must be part of no name or text the caller is allowed to see: the contract
@@ -857,7 +861,7 @@ class GateHarness:
     contract: ContractHarness
     hidden_table: TableRef
     hidden_column: str
-    hidden_join_target: TableRef
+    hidden_join_target: TableRef | None = None
 
 
 @dataclass
@@ -949,11 +953,22 @@ def _table_args(ref: TableRef) -> dict[str, str]:
     return {"catalog": ref.catalog, "schema": ref.schema, "table": ref.table}
 
 
+def _tables(gate: GateHarness) -> list[TableRef]:
+    """The tables of the harness: the described one, the hidden one, the join target if any."""
+    target = [] if gate.hidden_join_target is None else [gate.hidden_join_target]
+    return list(dict.fromkeys([gate.contract.names.described, gate.hidden_table, *target]))
+
+
+def _scenarios(gate: GateHarness) -> tuple[str, ...]:
+    """The scenarios a harness can play: the join only when the catalogue gives one."""
+    if gate.hidden_join_target is None:
+        return (_HIDDEN_TABLE, _HIDDEN_COLUMN)
+    return _SCENARIOS
+
+
 def _calls(gate: GateHarness) -> list[tuple[str, dict[str, str]]]:
     """What the caller of a gate run asks: each table, then each schema, of the harness."""
-    tables = list(
-        dict.fromkeys([gate.contract.names.described, gate.hidden_table, gate.hidden_join_target])
-    )
+    tables = _tables(gate)
     schemas = dict.fromkeys((ref.catalog, ref.schema) for ref in tables)
     return [("describe_table", _table_args(ref)) for ref in tables] + [
         ("describe_schema", {"catalog": catalog, "schema": schema}) for catalog, schema in schemas
@@ -962,7 +977,9 @@ def _calls(gate: GateHarness) -> list[tuple[str, dict[str, str]]]:
 
 def _check_gate(gate: GateHarness, found: Mapping[TableRef, TableContext]) -> None:
     names = gate.contract.names
-    refs = [gate.hidden_table, gate.hidden_join_target, names.described, names.unknown]
+    target = gate.hidden_join_target
+    hidden = [gate.hidden_table] + ([] if target is None else [target])
+    refs = [*hidden, names.described, names.unknown]
     _require(
         all(ref == TableRef.of(ref.catalog, ref.schema, ref.table) for ref in refs)
         and gate.hidden_column == gate.hidden_column.lower(),
@@ -970,14 +987,13 @@ def _check_gate(gate: GateHarness, found: Mapping[TableRef, TableContext]) -> No
     )
     _require(
         all(
-            len(name) >= _MIN_TEXT
-            for name in (gate.hidden_table.table, gate.hidden_join_target.table, gate.hidden_column)
+            len(name) >= _MIN_TEXT for name in (*(ref.table for ref in hidden), gate.hidden_column)
         ),
         "GateHarness: each hidden name must be 4 characters at least",
     )
     _require(
         all(_AGENT_NAME.fullmatch(part) for ref in refs for part in _table_args(ref).values())
-        and names.described not in (gate.hidden_table, gate.hidden_join_target)
+        and names.described not in hidden
         and names.unknown != gate.hidden_table,
         "GateHarness: the tables are named as an agent names them (letters, digits, _ and -), "
         "and neither hidden table is the described one nor the unknown one",
@@ -993,9 +1009,15 @@ def _check_gate(gate: GateHarness, found: Mapping[TableRef, TableContext]) -> No
         "GateHarness: the hidden column must be a column the catalogue describes "
         "for the described table",
     )
+    if target is None:
+        _require(
+            not any(ctx.joins for ctx in found.values()),
+            "the provider gives joins: set hidden_join_target, so that the join scenario "
+            "is checked",
+        )
+        return
     _require(
-        gate.hidden_join_target in found
-        and any(join.target == gate.hidden_join_target for join in described.joins),
+        target in found and any(join.target == target for join in described.joins),
         "GateHarness: the hidden join target must be the target of a join the catalogue "
         "gives the described table, and a table it describes",
     )
@@ -1023,6 +1045,7 @@ def _rights(
     if scenario == _HIDDEN_TABLE:
         seen.pop(gate.hidden_table)
     elif scenario == _HIDDEN_JOIN:
+        assert gate.hidden_join_target is not None  # the scenario needs a join target
         seen.pop(gate.hidden_join_target)
     else:
         described = gate.contract.names.described
@@ -1103,6 +1126,7 @@ def _hidden_texts(
         name, texts = table.table, _table_texts(table, found[table], terms)
     elif scenario == _HIDDEN_JOIN:
         target = gate.hidden_join_target
+        assert target is not None  # the scenario needs a join target
         name, texts = target.table, _table_texts(target, found[target], terms)
     else:
         described = found[gate.contract.names.described]
@@ -1152,11 +1176,18 @@ class GateContract:
 
     def _catalogue(self, gate: GateHarness) -> tuple[Mapping, Mapping]:
         names = gate.contract.names
-        wanted = list(dict.fromkeys([names.described, gate.hidden_table, gate.hidden_join_target]))
+        wanted = _tables(gate)
         with _running(gate.contract) as run:
             found = run.describe(wanted, self.DEADLINE_SECONDS)
             terms = run.terms(_term_keys(found.values()), self.DEADLINE_SECONDS)
-        _check_gate(gate, found)
+            # Without a join target, every table the contract names is asked too: a join
+            # given for any of them means the provider has joins to check.
+            others = (
+                run.describe(_refs(names), self.DEADLINE_SECONDS)
+                if gate.hidden_join_target is None
+                else {}
+            )
+        _check_gate(gate, {**others, **found})
         return found, terms
 
     @contextmanager
@@ -1271,17 +1302,21 @@ class GateContract:
             hidden = server.call(_SEES_ALL, "describe_table", _table_args(gate.hidden_table))
         reply, other = described.reply, hidden.reply
         joins = reply.get("table", {}).get("joins", [])
+        target = gate.hidden_join_target
         _require(
             gate.hidden_column in reply.get("column_context", {})
-            and any(join.get("table") == _dotted(gate.hidden_join_target) for join in joins)
+            and (target is None or any(join.get("table") == _dotted(target) for join in joins))
             and bool(other.get("table") or other.get("column_context")),
             f"a caller who sees everything ({mode}) is not served the hidden column, the "
             "join to the hidden target and the hidden table's context: the gate run cannot "
             "test anything",
         )
 
-    def _each_run(self, gate: GateHarness, monkeypatch: Any) -> Iterator[tuple]:
-        """For each mode, each way Trino hides and each hidden object: the scenario, where it
+    def _each_run(
+        self, gate: GateHarness, monkeypatch: Any, scenarios: tuple[str, ...] | None = None
+    ) -> Iterator[tuple]:
+        """For each mode, each way Trino hides and each hidden object (those of
+        ``scenarios``, by default every one the harness can play): the scenario, where it
         runs, the caller's answers, the logs, the metrics, what the caller sees and the texts
         of the hidden object."""
         found, terms = self._catalogue(gate)
@@ -1290,7 +1325,7 @@ class GateContract:
             self._sees_all_is_served(gate, mode, monkeypatch, everything)
             for behaviour in _BEHAVIOURS:
                 existing = everything if behaviour == _REFUSES else None
-                for scenario in _SCENARIOS:
+                for scenario in scenarios or _scenarios(gate):
                     seen = _rights(scenario, gate, everything)
                     name, hidden = _hidden_texts(scenario, gate, found, terms, seen)
                     with (
@@ -1320,9 +1355,22 @@ class GateContract:
     ) -> None:
         """No reply, ``context_sources`` status, audit line, log line or metric holds the
         name of a hidden table, column or join target, nor a text the catalogue gives it."""
-        for _, scenario, where, answers, lines, metrics, seen, hidden, provider in self._each_run(
-            gate, monkeypatch
-        ):
+        self._nothing_reaches_the_caller(self._each_run(gate, monkeypatch))
+
+    def test_a_hidden_join_target_is_checked_when_the_catalogue_gives_joins(
+        self, gate: GateHarness, monkeypatch: Any
+    ) -> None:
+        """The join scenario alone: nothing of a join target the caller does not see reaches
+        them. A catalogue with no notion of a join (``hidden_join_target`` is ``None``) skips
+        it, and the other checks fail if its provider gives a join all the same."""
+        if gate.hidden_join_target is None:
+            pytest.skip("the provider gives no join: its catalogue has no notion of one")
+        self._nothing_reaches_the_caller(
+            self._each_run(gate, monkeypatch, scenarios=(_HIDDEN_JOIN,))
+        )
+
+    def _nothing_reaches_the_caller(self, runs: Iterator[tuple]) -> None:
+        for _, scenario, where, answers, lines, metrics, seen, hidden, provider in runs:
             _, texts = hidden
             visible = {_dotted(ref) for ref in seen}
             for answer in answers:

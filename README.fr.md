@@ -918,6 +918,13 @@ font partie d'aucun nom ni d'aucun texte que l'appelant a le droit de voir : le 
 avec chaque texte que le catalogue leur donne à eux seuls, dans tout ce que l'appelant reçoit.
 `tests/context/test_gate_contract_file.py` le lance sur `file`.
 
+Un catalogue qui n'a pas de notion de jointure laisse `hidden_join_target` de côté (`None`) : le
+scénario de la jointure sort de chaque vérification,
+`test_a_hidden_join_target_is_checked_when_the_catalogue_gives_joins` est sautée et dit pourquoi, et
+le contrat échoue si le fournisseur rend quand même une jointure pour une table qu'il décrit (« the
+provider gives joins: set hidden_join_target ») : un fournisseur qui a des jointures ne peut pas les
+laisser sans contrôle. Avec une cible, cette vérification joue le scénario de la jointure seul.
+
 ## Configuration, extensions, exploitation
 
 Toutes les variables, leurs valeurs par défaut, les points d'extension (identités, gardes, audit,

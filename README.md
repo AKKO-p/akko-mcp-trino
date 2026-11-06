@@ -1379,6 +1379,12 @@ no name or text the caller may see: the contract looks for them, and for each te
 gives them alone, in everything the caller receives. `tests/context/test_gate_contract_file.py`
 runs it on `file`.
 
+A catalogue with no notion of a join leaves `hidden_join_target` out (`None`): the join scenario
+leaves every check, `test_a_hidden_join_target_is_checked_when_the_catalogue_gives_joins` is skipped
+and says why, and the contract fails if the provider gives a join for any table it describes all
+the same ("the provider gives joins: set hidden_join_target"), so that a provider with joins cannot
+leave them unchecked. With a target, that test plays the join scenario alone.
+
 ### Serving
 
 | Variable | Meaning | Default |
