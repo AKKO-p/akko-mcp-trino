@@ -201,3 +201,17 @@ def with_context(setups, client, *providers, describers=(), call_timeout_seconds
     for describer in describers:
         tools.add_describer(describer)
     return mcp, audit, tools
+
+
+class YearToMonth:
+    """A stand-in for the value the Trino client gives an INTERVAL YEAR TO MONTH (dateutil's
+    relativedelta, not a dependency of the core): years and months, nothing else set."""
+
+    def __init__(self, years, months, **others):
+        self.years, self.months = years, months
+        self.days = self.hours = self.minutes = self.seconds = self.microseconds = 0
+        self.leapdays = 0
+        self.year = self.month = self.day = self.weekday = None
+        self.hour = self.minute = self.second = self.microsecond = None
+        for name, value in others.items():
+            setattr(self, name, value)

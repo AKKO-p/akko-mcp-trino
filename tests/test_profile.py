@@ -15,7 +15,7 @@ from akko_mcp_trino.audit import InMemoryAudit
 from akko_mcp_trino.audit import time as audit_time
 from akko_mcp_trino.server import build_server
 from akko_mcp_trino.tools import register_query_tools
-from tests.tool_doubles import FakeMCP, core_config, in_request
+from tests.tool_doubles import FakeMCP, YearToMonth, core_config, in_request
 
 ORDERS = "tpch.tiny.orders"
 DESCRIBED = {
@@ -303,6 +303,28 @@ def test_min_and_max_are_rendered_like_the_cells_of_execute_query():
     assert cells == json.loads(tools_module.dumps([raw[3:5], raw[7:9], raw[11:13]]))
 
 
+def test_interval_columns_are_profiled_and_rendered_as_trino_prints_them():
+    columns = _described(("wait", "interval day to second"), ("term", "interval year to month"))
+    row = _aggregates(
+        2,
+        2,
+        2,
+        dt.timedelta(hours=3),
+        dt.timedelta(days=2),
+        2,
+        1,
+        YearToMonth(0, 2),
+        YearToMonth(1, 0),
+    )
+    tool, trino = _profile(columns, row)
+    out = _call(tool, "tpch", "tiny", "orders")
+    assert 'approx_distinct("wait"), min("wait"), max("wait")' in trino.calls[1]
+    assert [[c["min"], c["max"]] for c in out["columns"]] == [
+        ["0 03:00:00.000", "2 00:00:00.000"],
+        ["0-2", "1-0"],
+    ]
+
+
 def test_a_column_name_with_a_double_quote_is_quoted_by_doubling():
     tool, trino = _profile(_described(('we"ird', "json")), _aggregates(1, 1))
     _call(tool, "tpch", "tiny", "orders")
@@ -371,6 +393,7 @@ def test_the_audit_line_names_the_aggregate_the_table_and_one_row():
 def test_the_description_says_the_aggregates_run_as_the_caller():
     tool, _ = _profile()
     doc = tool.__doc__
+    assert "columns past the server's row limit for DESCRIBE cannot be named" in doc
     assert doc.startswith(
         "Profile a table from the rows you may read: an aggregate query runs as you, so "
         "masks and row filters apply as in execute_query."

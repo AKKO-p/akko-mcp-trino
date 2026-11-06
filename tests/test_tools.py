@@ -4,6 +4,7 @@ Same outputs, same read-only guard; the caller comes from the verified principal
 from an argument.
 """
 
+import datetime as dt
 import functools
 import json
 import logging
@@ -31,7 +32,14 @@ from akko_mcp_trino.context import (
 from akko_mcp_trino.context.reply import ContextReader
 from akko_mcp_trino.tools import register_query_tools
 from tests.context.memory_provider import Memory
-from tests.tool_doubles import FakeMCP, GateTrino, SchemaTrino, in_request, with_context
+from tests.tool_doubles import (
+    FakeMCP,
+    GateTrino,
+    SchemaTrino,
+    YearToMonth,
+    in_request,
+    with_context,
+)
 
 
 class FakeClient:
@@ -671,6 +679,66 @@ def test_uuid_is_serialised_and_unknown_types_still_fail_loudly():
     assert json.loads(dumps({"u": uuid.UUID(int=1)}))["u"] == "00000000-0000-0000-0000-000000000001"
     with pytest.raises(TypeError):
         dumps({"x": object()})
+
+
+@pytest.mark.parametrize(
+    "value, printed",
+    [
+        (dt.timedelta(days=2), "2 00:00:00.000"),
+        (dt.timedelta(hours=3), "0 03:00:00.000"),
+        (-dt.timedelta(days=1, hours=2, milliseconds=500), "-1 02:00:00.500"),
+        (dt.timedelta(minutes=61, seconds=5, milliseconds=7), "0 01:01:05.007"),
+        (dt.timedelta(0), "0 00:00:00.000"),
+    ],
+)
+def test_an_interval_day_to_second_is_rendered_as_trino_prints_it(value, printed):
+    from akko_mcp_trino.tools import dumps
+
+    assert json.loads(dumps([value])) == [printed]
+
+
+@pytest.mark.parametrize(
+    "years, months, printed",
+    [(1, 0, "1-0"), (0, 2, "0-2"), (-1, -3, "-1-3"), (0, 0, "0-0"), (0, -14, "-1-2")],
+)
+def test_an_interval_year_to_month_is_rendered_as_trino_prints_it(years, months, printed):
+    from akko_mcp_trino.tools import dumps
+
+    assert json.loads(dumps([YearToMonth(years, months)])) == [printed]
+
+
+def test_a_value_with_only_years_and_months_is_rendered_as_an_interval():
+    from types import SimpleNamespace
+
+    from akko_mcp_trino.tools import dumps
+
+    assert json.loads(dumps([SimpleNamespace(years=2, months=5)])) == ["2-5"]
+
+
+@pytest.mark.parametrize(
+    "others",
+    [{"days": 1}, {"hours": 2}, {"microseconds": 5}, {"leapdays": 1}, {"year": 2026}],
+)
+def test_a_year_and_month_value_with_other_parts_set_still_fails_loudly(others):
+    from akko_mcp_trino.tools import dumps
+
+    with pytest.raises(TypeError):
+        dumps([YearToMonth(1, 2, **others)])
+
+
+@pytest.mark.parametrize("years, months", [(1.5, 0), (True, 0), ("1", 0), (1, None)])
+def test_years_and_months_that_are_not_whole_numbers_still_fail_loudly(years, months):
+    from akko_mcp_trino.tools import dumps
+
+    with pytest.raises(TypeError):
+        dumps([YearToMonth(years, months)])
+
+
+def test_execute_query_returns_interval_columns_as_trino_prints_them():
+    row = [dt.timedelta(days=2), YearToMonth(-1, -3)]
+    mcp, _ = _registered(result={"columns": ["ds", "ym"], "rows": [row], "row_count": 1})
+    out = json.loads(in_request(lambda: mcp.tools["execute_query"]("SELECT 1")))
+    assert out["rows"] == [["2 00:00:00.000", "-1-3"]]
 
 
 def test_every_tool_declares_mcp_annotations_read_only_and_non_destructive():

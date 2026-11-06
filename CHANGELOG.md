@@ -42,6 +42,9 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - A plugin's describer that raises is no longer silent: `describe_table` still answers its columns and adds `describer_errors`, the number of describers that failed, never their text.
 
+### Fixed
+- `execute_query` and `profile_table` return interval values as Trino prints them (`2 00:00:00.000` for an interval day to second, `-1-3` for an interval year to month), where they failed before. Any other value JSON cannot carry still fails loudly.
+
 ## [0.7.2] - 2026-11-04
 
 The code of 0.7.1, with a shorter description of the reads the allow-list refuses. 0.7.1 is not published on PyPI.

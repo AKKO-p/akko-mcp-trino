@@ -222,19 +222,60 @@ def audited(
     return wrapped
 
 
+# What an interval year to month may carry besides its years and months: the relative parts
+# must be 0 and the absolute ones None (dateutil's relativedelta has both kinds), or absent.
+_RELATIVE_PARTS = ("days", "hours", "minutes", "seconds", "microseconds", "leapdays")
+_ABSOLUTE_PARTS = ("year", "month", "day", "weekday", "hour", "minute", "second", "microsecond")
+
+
+def _day_to_second(value: dt.timedelta) -> str:
+    """An interval day to second as Trino prints it: ``D HH:MM:SS.mmm``, ``-`` in front."""
+    micros = (value.days * 86400 + value.seconds) * 1_000_000 + value.microseconds
+    sign = "-" if micros < 0 else ""
+    millis = abs(micros) // 1000
+    days, millis = divmod(millis, 86_400_000)
+    hours, millis = divmod(millis, 3_600_000)
+    minutes, millis = divmod(millis, 60_000)
+    seconds, millis = divmod(millis, 1000)
+    return f"{sign}{days} {hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+
+def _year_to_month(value: Any) -> Optional[str]:
+    """An interval year to month as Trino prints it, ``Y-M`` with ``-`` in front, for a
+    value with whole ``years`` and ``months`` and nothing else set (the Trino client gives
+    dateutil's relativedelta, which the core does not import); None for any other value."""
+    years, months = getattr(value, "years", None), getattr(value, "months", None)
+    if not isinstance(years, int) or not isinstance(months, int):
+        return None
+    if isinstance(years, bool) or isinstance(months, bool):
+        return None
+    if any(getattr(value, name, 0) for name in _RELATIVE_PARTS):
+        return None
+    if any(getattr(value, name, None) is not None for name in _ABSOLUTE_PARTS):
+        return None
+    total = years * 12 + months
+    sign = "-" if total < 0 else ""
+    return f"{sign}{abs(total) // 12}-{abs(total) % 12}"
+
+
 def _plain(value: Any) -> Any:
     """What JSON cannot carry, rendered the way SQL would print it.
 
-    Trino returns dates, timestamps, decimals, varbinary and UUIDs as Python
-    objects. A date column must not make a whole result unserialisable."""
+    Trino returns dates, timestamps, intervals, decimals, varbinary and UUIDs as
+    Python objects. A date column must not make a whole result unserialisable."""
     if isinstance(value, (dt.datetime, dt.date, dt.time)):
         return value.isoformat()
+    if isinstance(value, dt.timedelta):
+        return _day_to_second(value)
     if isinstance(value, decimal.Decimal):
         return str(value)  # exact digits; a float would silently round money
     if isinstance(value, (bytes, bytearray, memoryview)):
         return bytes(value).hex()
     if isinstance(value, uuid.UUID):
         return str(value)
+    interval = _year_to_month(value)
+    if interval is not None:
+        return interval
     raise TypeError(f"unserialisable value of type {type(value).__name__}")
 
 
@@ -470,19 +511,20 @@ _PROFILE_DOC = (
     """
 
         Args: catalog, schema, table as bare names; columns, optional, the columns to
-        profile, named exactly as describe_table lists them (by default the first ones it
-        lists, up to the server's limit); mode, optional: "sample" (the default) reads the
-        first rows, up to the server's limit, in no chosen order; "bernoulli" reads a
-        random sample of percent of the rows, percent above 0 and at most 100; "full"
-        reads every row you may read, within the call's time budget; percent, only with
-        "bernoulli". Returns JSON {"table", "scope", "rows": n, "columns": [{"column",
-        "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}: scope is
-        "first_rows", "random_sample" or "visible_rows", after the mode; rows is the count
-        of the rows read; null_fraction is null when rows is 0. A column whose type has no
-        order (array, map, row, json and the like) has its count only and "skipped":
-        ["distinct", "min", "max"]. On failure returns {"error": "...", "kind": "..."};
-        "time_budget" means the query ran past the call's budget: profile fewer columns,
-        or use "sample".
+        profile, named exactly as describe_table lists them, by default the first ones it
+        lists, up to the server's limit;
+        columns past the server's row limit for DESCRIBE cannot be named. mode, optional:
+        "sample" (the default) reads the first rows, up to the server's limit, in no
+        chosen order; "bernoulli" reads a random sample of percent of the rows, percent
+        above 0 and at most 100; "full" reads every row you may read, within the call's
+        time budget. percent, only with "bernoulli". Returns JSON {"table", "scope",
+        "rows": n, "columns": [{"column", "type", "non_null", "null_fraction",
+        "approx_distinct", "min", "max"}]}: scope is "first_rows", "random_sample" or
+        "visible_rows", after the mode; rows is the count of the rows read; null_fraction
+        is null when rows is 0. A column whose type has no order (array, map, row, json
+        and the like) has its count only and "skipped": ["distinct", "min", "max"]. On
+        failure returns {"error": "...", "kind": "..."}; "time_budget" means the query ran
+        past the call's budget: profile fewer columns, or use "sample".
         """
 )
 
