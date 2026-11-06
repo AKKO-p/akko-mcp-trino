@@ -12,14 +12,16 @@ jobs:
       python: ${{ steps.lock.outputs.python }}
       pythons: ${{ steps.lock.outputs.pythons }}
       platforms: ${{ steps.lock.outputs.platforms }}
+      glibc: ${{ steps.lock.outputs.glibc }}
     steps:
       - uses: actions/checkout@v7
       - id: lock
         run: bash scripts/lock.sh outputs >> "$GITHUB_OUTPUT"
   locks:
-    # The locks of requirements/ match their sources (compiled again, nothing may change), the
+    # The locks match their sources (compiled again, hashes included, nothing may change), the
     # image lock resolves to wheels for every platform of the image, and the Dependabot file is
-    # valid.
+    # valid. The kerberos lock of the Atlas provider builds gssapi's metadata against the
+    # system's MIT Kerberos.
     name: locks
     runs-on: ubuntu-latest
     needs: versions
@@ -28,7 +30,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ needs.versions.outputs.python }}
-      - run: pip install --require-hashes -r requirements/dev.txt
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libkrb5-dev
+      - run: pip install --require-hashes -r requirements/build.txt -r requirements/dev.txt
       - name: the locks are fresh
         run: bash scripts/lock.sh check
       - name: the image lock resolves for every platform
@@ -50,16 +55,16 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      # The tools and every dependency from the lock, with their hashes; the package itself from
-      # this commit, without dependencies.
+      # The tools and every dependency from the locks, with their hashes; the package itself from
+      # this commit, without dependencies, built by the locked backend.
       - run: |
-          pip install --require-hashes -r requirements/dev.txt
-          pip install --no-deps -e .
+          pip install --require-hashes -r requirements/build.txt -r requirements/dev.txt
+          pip install --no-deps --no-build-isolation -e .
       - name: install the Atlas provider
         if: matrix.packages == 'core+atlas'
         # --no-deps until 0.8.0: the provider requires akko-mcp-trino>=0.8.0, newer than the
         # core of this commit; its other dependency, httpx, comes with the core.
-        run: pip install --no-deps -e providers/atlas
+        run: pip install --no-deps --no-build-isolation -e providers/atlas
       - name: lint and format (ruff)
         run: |
           ruff check akko_mcp_trino tests examples integration
@@ -69,7 +74,9 @@ jobs:
       - name: types (mypy)
         run: mypy akko_mcp_trino
       - name: known vulnerabilities in the locked dependencies (pip-audit)
-        run: pip-audit --disable-pip --require-hashes -r requirements/image.txt -r requirements/dev.txt
+        run: |
+          pip-audit --disable-pip --require-hashes -r requirements/image.txt -r requirements/build.txt \
+            -r requirements/release.txt -r requirements/dev.txt -r providers/atlas/requirements-kerberos.txt
       - name: product-neutral guard
         run: bash lint-vendor-neutral.sh
       - name: tests (100 % line and branch coverage)
@@ -82,6 +89,16 @@ jobs:
           ruff check akko_mcp_trino_atlas --select D100,D101,D102,D103,D105,D107
           mypy akko_mcp_trino_atlas
           python -m pytest -q
+      - name: sdist and wheel build and are valid
+        run: python -m build --no-isolation && twine check dist/*
+      - name: the Atlas provider's sdist and wheel build and are valid
+        if: matrix.packages == 'core+atlas'
+        run: python -m build --no-isolation --outdir dist-atlas providers/atlas && twine check dist-atlas/*
+      - name: the tests pass from the sdist
+        if: matrix.packages == 'core'
+        run: |
+          mkdir /tmp/sdist && tar -xzf dist/*.tar.gz -C /tmp/sdist
+          cd /tmp/sdist/akko_mcp_trino-* && python -m pytest -q -p no:cacheprovider
       - name: licenses of what the packages install (no GPL, AGPL or Collate Community License)
         # In an environment of their own, holding what the image installs (its lock and the
         # packages), so that the test and release tools do not count. The
@@ -91,23 +108,19 @@ jobs:
         run: |
           python -m venv /tmp/licenses
           /tmp/licenses/bin/pip install --require-hashes -r requirements/image.txt
-          /tmp/licenses/bin/pip install --no-deps .
+          /tmp/licenses/bin/pip install --no-deps ./dist/*.whl
           if [ "${{ matrix.packages }}" = "core+atlas" ]; then
-            /tmp/licenses/bin/pip install --no-deps ./providers/atlas
-            # The kerberos extra of the provider (pyspnego, gssapi, krb5), built against the
-            # system's MIT Kerberos; its requirement is written as in providers/atlas/pyproject.toml.
+            /tmp/licenses/bin/pip install --no-deps ./dist-atlas/*.whl
+            # The kerberos extra of the provider (pyspnego, gssapi, krb5), from its lock; gssapi
+            # and krb5 publish no Linux wheel and are built from their sdists, against the
+            # system's MIT Kerberos.
             sudo apt-get update -qq
             sudo apt-get install -y --no-install-recommends libkrb5-dev
-            /tmp/licenses/bin/pip install "pyspnego[kerberos]>=0.11,<1"
+            /tmp/licenses/bin/pip install --require-hashes -r providers/atlas/requirements-kerberos.txt
             pip-licenses --python /tmp/licenses/bin/python --packages pyspnego gssapi krb5
           fi
           pip-licenses --python /tmp/licenses/bin/python --partial-match --fail-on "GNU General Public License;GNU Affero General Public License;AGPL;Collate Community License"
           pip-licenses --python /tmp/licenses/bin/python --fail-on "GPL;GPLv2;GPLv2+;GPLv3;GPLv3+;GPL-2.0;GPL-2.0+;GPL-3.0;GPL-3.0+;GPL-2.0-only;GPL-2.0-or-later;GPL-3.0-only;GPL-3.0-or-later"
-      - name: sdist and wheel build and are valid
-        run: python -m build && twine check dist/*
-      - name: the Atlas provider's sdist and wheel build and are valid
-        if: matrix.packages == 'core+atlas'
-        run: python -m build --outdir dist-atlas providers/atlas && twine check dist-atlas/*
   ranges:
     name: dependency ranges (${{ matrix.resolution }})
     runs-on: ubuntu-latest
@@ -120,8 +133,10 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ needs.versions.outputs.python }}
-      - run: pip install uv
-      - run: uv venv && uv pip install --resolution ${{ matrix.resolution }} -e . "pytest==9.1.1" "pytest-cov==7.1.0"
+      # uv and the test tools at the versions of requirements/dev.txt; the package's dependencies
+      # at the versions its ranges allow.
+      - run: pip install --require-hashes -r requirements/build.txt -r requirements/dev.txt
+      - run: uv venv && uv pip install --resolution ${{ matrix.resolution }} -e . $(bash scripts/lock.sh pins pytest pytest-cov)
       - name: tests at the ${{ matrix.resolution }} versions of every dependency
         run: .venv/bin/python -m pytest -q
   integration:
@@ -139,7 +154,7 @@ jobs:
   image:
     name: container image builds
     runs-on: ubuntu-latest
-    needs: test
+    needs: [versions, test]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
@@ -147,4 +162,10 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: akko-mcp-trino:ci
+      - name: the image's glibc is the one the lock's wheels are verified for
+        run: |
+          glibc=$(docker run --rm akko-mcp-trino:ci ldd --version | head -1 | awk '{print $NF}')
+          echo "image glibc $glibc, scripts/lock.sh ${{ needs.versions.outputs.glibc }}"
+          test "$glibc" = "${{ needs.versions.outputs.glibc }}"

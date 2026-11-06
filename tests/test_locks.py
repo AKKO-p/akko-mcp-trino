@@ -61,7 +61,7 @@ def test_the_checks_run_on_every_python_the_package_declares() -> None:
 
 def test_the_image_installs_the_lock_with_its_hashes_and_nothing_else() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text()
-    lock = dockerfile.index("--require-hashes -r /tmp/requirements/image.txt")
+    lock = dockerfile.index("--only-binary=:all: --require-hashes -r /tmp/requirements/image.txt")
     core = dockerfile.index("--no-deps /tmp/akko_mcp_trino-*.whl")
     check = dockerfile.index("&& pip check")
     atlas = dockerfile.index("--no-deps /tmp/akko_mcp_trino_atlas-*.whl")
@@ -103,3 +103,185 @@ def test_the_release_refuses_a_tag_with_neither(tmp_path: Path) -> None:
     assert done.returncode == 1
     assert done.stdout == ""
     assert "neither" in done.stderr
+
+
+def _run(*args: str, cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(list(args), capture_output=True, text=True, cwd=cwd)
+
+
+def _requirement_names(path: Path) -> set[str]:
+    return {
+        m.group(1).lower() for m in re.finditer(r"^([A-Za-z0-9_.-]+)==", path.read_text(), re.M)
+    }
+
+
+def test_the_wheels_of_the_image_are_built_by_locked_tools_without_isolation() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    first = dockerfile.index("\nFROM ")
+    build = dockerfile[first : dockerfile.index("\nFROM ", first + 1)]
+    assert "--only-binary=:all: --require-hashes -r requirements/build.txt" in build
+    assert build.count("python -m build --wheel --no-isolation") == 2
+    assert build.count("pip install") == 1
+
+
+def test_build_txt_satisfies_the_build_system_of_each_package() -> None:
+    from packaging.requirements import Requirement
+
+    pins = {
+        m.group(1).lower(): m.group(2)
+        for m in re.finditer(
+            r"^([A-Za-z0-9_.-]+)==(\S+)", (ROOT / "requirements/build.txt").read_text(), re.M
+        )
+    }
+    for pyproject in (ROOT / "pyproject.toml", ROOT / "providers/atlas/pyproject.toml"):
+        for line in tomllib.loads(pyproject.read_text())["build-system"]["requires"]:
+            requirement = Requirement(line)
+            assert requirement.specifier.contains(pins[requirement.name.lower()]), line
+    assert "build" in pins
+
+
+def test_every_pip_install_of_ci_the_release_and_the_image_is_locked() -> None:
+    """A third-party package comes from a lock with its hashes; only local code goes --no-deps."""
+    texts = {
+        path.name: path.read_text()
+        for path in [ROOT / "Dockerfile", *sorted((ROOT / ".github/workflows").glob("*.yml"))]
+    }
+    seen = 0
+    for name, text in texts.items():
+        for line in text.splitlines():
+            if "pip install" not in line or line.lstrip().startswith("#"):
+                continue
+            seen += 1
+            if "uv pip install --resolution" in line:
+                continue  # the ranges job resolves the declared ranges, on purpose
+            locked = "--require-hashes -r " in line
+            local = "--no-deps" in line and re.search(r"(-e |\./|/tmp/akko|\s\.$)", line)
+            assert locked or local, f"{name}: {line.strip()}"
+    assert seen >= 10
+
+
+def test_the_job_that_runs_the_code_of_a_tag_cannot_sign() -> None:
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    jobs = re.split(r"^  (?=[a-z-]+:$)", workflow.split("\njobs:\n", 1)[1], flags=re.M)
+    tag_jobs = [job for job in jobs if "path: tag" in job]
+    assert tag_jobs
+    for job in tag_jobs:
+        assert "id-token: write" not in job
+        assert "needs: ref" in job and "needs.ref.outputs.sha" in job
+    assert "release-tag.sh" in workflow
+    assert not re.search(r"run:.*\$\{\{\s*inputs\.", workflow)
+
+
+def test_a_lock_that_installs_the_package_leaves_pip_and_setuptools_out() -> None:
+    """Dependabot adds --allow-unsafe to a lock that pins pip or setuptools; on a lock that
+    installs the package from its directory, pip-compile then fails."""
+    sources = _lock_default("LOCKS").split()
+    assert sources
+    for source in sources:
+        text = (ROOT / source).read_text()
+        lock = (ROOT / source.removesuffix(".in")).with_suffix(".txt").read_text()
+        header = "".join(line for line in lock.splitlines(True) if line.startswith("#"))
+        if re.search(r"^-e ", text, re.M):
+            assert not re.search(r"^(pip|setuptools|distribute)==|^-e ", lock, re.M), source
+            assert "--unsafe-package=pip --unsafe-package=setuptools" in header, source
+        else:
+            assert "--allow-unsafe" in header, source
+
+
+def test_the_dev_lock_installs_with_build_txt_and_keeps_its_versions() -> None:
+    dev = _requirement_names(ROOT / "requirements/dev.txt")
+    build = _requirement_names(ROOT / "requirements/build.txt")
+    assert "setuptools" in build and "setuptools" not in dev
+    pins = re.compile(r"^([A-Za-z0-9_.-]+==\S+)", re.M)
+    dev_pins = set(pins.findall((ROOT / "requirements/dev.txt").read_text()))
+    for other in ("image", "release"):
+        for pin in pins.findall((ROOT / f"requirements/{other}.txt").read_text()):
+            if pin.split("==")[0] not in ("pip", "setuptools"):
+                assert pin in dev_pins, (other, pin)
+
+
+def test_the_atlas_provider_declares_the_pythons_of_the_checks() -> None:
+    project = tomllib.loads((ROOT / "providers/atlas/pyproject.toml").read_text())["project"]
+    declared = [
+        c.rsplit(" :: ", 1)[1]
+        for c in project["classifiers"]
+        if re.fullmatch(r"Programming Language :: Python :: 3\.\d+", c)
+    ]
+    pythons = _lock_default("CHECK_PYTHONS").split()
+    assert declared == pythons
+    assert project["requires-python"] == f">={pythons[0]}"
+
+
+def test_the_kerberos_lock_reads_the_requirement_of_the_atlas_extra() -> None:
+    project = tomllib.loads((ROOT / "providers/atlas/pyproject.toml").read_text())["project"]
+    source = (ROOT / "providers/atlas/requirements-kerberos.in").read_text()
+    lines = [line for line in source.splitlines() if line and not line.startswith(("#", "-"))]
+    assert lines == project["optional-dependencies"]["kerberos"]
+
+
+def test_lock_sh_reads_the_pins_of_the_dev_lock() -> None:
+    done = _run("bash", "scripts/lock.sh", "pins", "pytest", "pytest-cov")
+    assert done.returncode == 0, done.stderr
+    lock = (ROOT / "requirements/dev.txt").read_text()
+    for pin in done.stdout.split():
+        assert re.search(rf"^{re.escape(pin)} ", lock, re.M), pin
+    assert [p.split("==")[0] for p in done.stdout.split()] == ["pytest", "pytest-cov"]
+    missing = _run("bash", "scripts/lock.sh", "pins", "no-such-package")
+    assert missing.returncode == 1 and "no-such-package" in missing.stderr
+
+
+def test_lock_sh_maps_each_platform_to_its_wheel_tags() -> None:
+    glibc = _lock_outputs()["glibc"]
+    newest = int(glibc.split(".")[1])
+    for platform, arch in (("linux/amd64", "x86_64"), ("linux/arm64", "aarch64")):
+        done = _run("bash", "scripts/lock.sh", "tags", platform)
+        assert done.returncode == 0, done.stderr
+        tags = done.stdout.split()[1::2]
+        assert f"manylinux_2_17_{arch}" in tags and f"manylinux2014_{arch}" in tags
+        assert f"manylinux_2_{newest}_{arch}" in tags
+        assert f"manylinux_2_{newest + 1}_{arch}" not in tags
+        assert all(t.endswith(arch) for t in tags)
+    for platform in _lock_outputs()["platforms"].split(","):
+        assert _run("bash", "scripts/lock.sh", "tags", platform).returncode == 0
+    unknown = _run("bash", "scripts/lock.sh", "tags", "linux/s390x")
+    assert unknown.returncode == 1 and "linux/s390x" in unknown.stderr
+
+
+def _repository(path: Path) -> Path:
+    names = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
+    environ = os.environ | dict.fromkeys(names, "t@example.invalid")
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, env=environ)
+
+    git("init", "-q", "-b", "main")
+    git("commit", "-q", "--allow-empty", "-m", "a")
+    for tag in ("v1.2.3", "v1.3.0-rc.1", "latest"):
+        git("tag", tag)
+    git("checkout", "-q", "-b", "side")
+    git("commit", "-q", "--allow-empty", "-m", "b")
+    git("tag", "v9.9.9")
+    git("checkout", "-q", "main")
+    return path
+
+
+def test_the_release_builds_only_a_version_tag_reachable_from_main(tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    script = str(ROOT / "scripts/release-tag.sh")
+    sha = _run("git", "rev-parse", "main", cwd=repo).stdout.strip()
+    for tag in ("v1.2.3", "v1.3.0-rc.1"):
+        done = _run("bash", script, tag, "main", cwd=repo)
+        assert done.returncode == 0, done.stderr
+        assert done.stdout == f"tag={tag}\nsha={sha}\n"
+    for tag, reason in (
+        ("latest", "not a version tag"),
+        ("main", "not a version tag"),
+        ("v1.2", "not a version tag"),
+        ("v1.2.3;id", "not a version tag"),
+        ("refs/pull/1/head", "not a version tag"),
+        ("v2.0.0", "no tag v2.0.0"),
+        ("v9.9.9", "not reachable from main"),
+    ):
+        done = _run("bash", script, tag, "main", cwd=repo)
+        assert done.returncode == 1 and done.stdout == "", tag
+        assert reason in done.stderr, (tag, done.stderr)

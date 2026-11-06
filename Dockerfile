@@ -6,8 +6,12 @@ WORKDIR /src
 COPY pyproject.toml README.md LICENSE NOTICE ./
 COPY akko_mcp_trino ./akko_mcp_trino
 COPY providers/atlas ./providers/atlas
-RUN pip install --no-cache-dir build && python -m build --wheel \
- && python -m build --wheel --outdir dist providers/atlas
+COPY requirements/build.txt ./requirements/
+# The build tools come from their lock, wheels only, with their hashes, and build without
+# isolation, so that no build backend is fetched unlocked.
+RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r requirements/build.txt \
+ && python -m build --wheel --no-isolation \
+ && python -m build --wheel --no-isolation --outdir dist providers/atlas
 
 FROM python:3.12.16-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
 LABEL org.opencontainers.image.title="akko-mcp-trino" \
@@ -17,13 +21,15 @@ LABEL org.opencontainers.image.title="akko-mcp-trino" \
 RUN useradd --create-home --uid 10001 mcp
 COPY requirements/image.txt /tmp/requirements/
 COPY --from=build /src/dist/*.whl /tmp/
-# Every dependency comes from the lock, at its exact version and with its hashes; the package is
-# installed without dependencies, and pip check fails the build if one is missing from the lock.
+# Every dependency comes from the lock, wheels only, at its exact version and with its hashes; the
+# package is installed without dependencies, and pip check fails the build if the lock misses a
+# dependency the package or a locked package declares (not one an extra brings, such as the CLI
+# of mcp[cli]).
 # The Atlas provider is installed after the check, without dependencies, and is inactive: nothing
 # is loaded unless MCP_CONTEXT_PROVIDERS names it. It enters the lock with the release that
 # publishes both, as it requires that release of the core; its only other dependency, httpx,
 # comes with the core.
-RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements/image.txt \
+RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/requirements/image.txt \
  && pip install --no-cache-dir --no-deps /tmp/akko_mcp_trino-*.whl \
  && pip check \
  && pip install --no-cache-dir --no-deps /tmp/akko_mcp_trino_atlas-*.whl \

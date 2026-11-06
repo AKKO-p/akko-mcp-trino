@@ -1,0 +1,7 @@
+# The tools that build the wheels and the sdist (the image's build stage, the release, the
+# checks): the frontend and the backend of [build-system] in pyproject.toml, which the builds use
+# without isolation (python -m build --no-isolation), so that no backend is fetched unlocked.
+# tests/test_locks.py checks that build.txt satisfies [build-system] of each package.
+build
+setuptools
+wheel

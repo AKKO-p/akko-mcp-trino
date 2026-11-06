@@ -1189,41 +1189,59 @@ cherchons.
 
 `pyproject.toml` déclare des plages, pour que le serveur s'installe à côté d'autres outils ; la CI
 lance les tests aux versions les plus basses et les plus hautes qu'elles permettent. Tout le reste
-s'installe depuis un verrou de `requirements/`, en versions exactes et avec leurs empreintes, écrit
-par [pip-compile](https://pip-tools.readthedocs.io/) depuis sa source :
+s'installe depuis un verrou, en versions exactes et avec leurs empreintes, écrit par
+[pip-compile](https://pip-tools.readthedocs.io/) depuis sa source :
 
 | Verrou | Source | Installé par |
 |---|---|---|
 | `requirements/image.txt` | `requirements/image.in` : les dépendances que le paquet déclare | l'image de conteneur, les contrôles de licences et de vulnérabilités |
-| `requirements/dev.txt` | `requirements/dev.in` : l'extra `dev` et les outils des contrôles, aux versions de l'image | la CI et l'installation de développement, sur chaque version de Python |
+| `requirements/build.txt` | `requirements/build.in` : l'outil de construction et le backend de `[build-system]` | l'étape de construction de l'image, et les contrôles, avec `dev.txt` |
+| `requirements/release.txt` | `requirements/release.in` : les outils de construction et twine | la publication (sdist, wheel, envoi) |
+| `requirements/dev.txt` | `requirements/dev.in` : l'extra `dev` et les outils des contrôles, aux versions de l'image et de la publication | la CI et l'installation de développement, sur chaque version de Python |
+| `providers/atlas/requirements-kerberos.txt` | son `.in` : l'extra `kerberos` de l'adaptateur Atlas | le contrôle des licences seulement |
 
-L'image installe son verrou par `pip install --require-hashes`, puis le paquet sans ses
-dépendances ; `pip check` fait échouer la construction s'il manque une dépendance au verrou.
-L'adaptateur Atlas entre dans le verrou avec la version qui publie les deux ; d'ici là, l'image
-l'installe sans ses dépendances.
+Les wheels et le sdist sont construits par le backend verrouillé, sans isolation
+(`python -m build --no-isolation`), pour qu'aucun outil de construction ne soit téléchargé hors
+verrou. L'image installe son verrou par `pip install --only-binary=:all: --require-hashes`, puis le
+paquet sans ses dépendances ; `pip check` fait échouer la construction s'il manque au verrou une
+dépendance que le paquet ou un paquet verrouillé déclare. Il ne voit pas une dépendance qu'apporte
+seulement un extra, comme la CLI de `mcp[cli]`. L'adaptateur Atlas entre dans le verrou avec la
+version qui publie les deux ; d'ici là, l'image l'installe sans ses dépendances.
 
-Le Dockerfile nomme son image de base une seule fois, épinglée par digest
-(`FROM python:3.12.16-slim@sha256:…`) dans ses deux étapes, pour que l'image soit reproductible ;
-Dependabot en apporte les mises à jour de sécurité, une version corrective de Python ou de nouveaux
-paquets système, sous forme d'une nouvelle étiquette et d'un nouveau digest. Le Python de l'image
-est celui des verrous : `scripts/lock.sh` le lit sur cette ligne (`LOCK_PYTHON`, ici `3.12`), et
-`tests/test_locks.py` vérifie que les verrous ont été compilés avec lui. Une nouvelle version
-mineure de Python se fait à la main : la ligne `FROM`, puis `bash scripts/lock.sh compile` sur ce
-Python.
+`dev.txt` et `image.txt` installent le paquet depuis son dossier ; ils laissent donc hors du verrou
+le paquet lui-même, pip et setuptools (`--unsafe-package`) : les contrôles installent `build.txt`,
+qui épingle setuptools, avec `dev.txt`. Un verrou qui épingle pip ou setuptools est compilé par
+Dependabot avec `--allow-unsafe`, qui échoue sur un paquet installé depuis son dossier. Les autres
+verrous les épinglent (`--allow-unsafe`). Le verrou `kerberos` construit gssapi et krb5 depuis
+leurs sdists (empreintes vérifiées) contre le MIT Kerberos du système (`libkrb5-dev`) ; les outils
+de construction que pip télécharge pour ces deux-là ne sont pas verrouillés, et rien n'en entre
+dans l'image.
 
-`scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions :
-`LOCK_PYTHON`, les versions de Python des contrôles (`CHECK_PYTHONS`) et les plateformes de l'image
-(`IMAGE_PLATFORMS`). Dans un environnement installé depuis `requirements/dev.txt`, sur ce Python :
+Le Dockerfile nomme son image de base une seule fois, épinglée par digest, dans ses deux étapes,
+pour que l'image soit reproductible ; Dependabot en apporte les mises à jour de sécurité, une
+version corrective de Python ou de nouveaux paquets système, sous forme d'une nouvelle étiquette et
+d'un nouveau digest. Le Python de l'image est celui des verrous : `scripts/lock.sh` le lit dans la
+version de la ligne `FROM` du Dockerfile (`LOCK_PYTHON`), et `tests/test_locks.py` vérifie que les
+verrous ont été compilés avec lui. Une nouvelle version mineure de Python se fait à la main : la
+ligne `FROM`, puis `bash scripts/lock.sh compile` sur ce Python.
+
+`scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions : `LOCK_PYTHON`,
+les versions de Python des contrôles et de l'adaptateur Atlas (`CHECK_PYTHONS`), les plateformes de
+l'image (`IMAGE_PLATFORMS`) et la glibc de l'image de base (`IMAGE_GLIBC`, que la CI vérifie sur
+l'image qu'elle construit), d'où il tire les étiquettes de wheels de chaque plateforme. Dans un
+environnement installé depuis `requirements/build.txt` et `requirements/dev.txt`, sur ce Python :
 
 ```bash
-pip install --require-hashes -r requirements/dev.txt && pip install --no-deps -e .
+pip install --require-hashes -r requirements/build.txt -r requirements/dev.txt && pip install --no-deps --no-build-isolation -e .
 bash scripts/lock.sh compile    # après un changement d'un fichier .in ou des dépendances de pyproject.toml
-bash scripts/lock.sh check      # ce que lance la CI : compiler à nouveau, échouer si un verrou change
+bash scripts/lock.sh check      # ce que lance la CI : compiler à nouveau, empreintes comprises, échouer si un verrou change
 bash scripts/lock.sh verify     # chaque version du verrou de l'image a une wheel pour chaque plateforme
+bash scripts/lock.sh pins pytest pytest-cov   # les versions de dev.txt, pour un job qui les installe seules
 PIP_COMPILE_ARGS="--upgrade-package sqlglot" bash scripts/lock.sh compile   # un paquet à sa dernière version
 ```
 
-Une exécution réelle de `check`, après l'ajout de `pyyaml` à `image.in` sans nouvelle compilation :
+Le verrou `kerberos` demande `libkrb5-dev` pour être compilé. Une exécution réelle de `check`, après
+l'ajout de `pyyaml` à `image.in` sans nouvelle compilation :
 
 ```text
 +    --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
@@ -1242,12 +1260,13 @@ lock.sh: requirements/image.txt resolves for linux/arm64 (52 wheels)
 ```
 
 pip-compile prévient que « The generated requirements file may be rejected by pip install » : le
-paquet lui-même reste hors des verrous à dessein (`--unsafe-package`), car il s'installe depuis sa
-source.
+paquet lui-même reste hors des verrous à dessein, car il s'installe depuis sa source.
 
 Dependabot met les verrous à jour une fois par mois, en une seule pull request, et ne déplace une
 plage de `pyproject.toml` que lorsqu'une nouvelle version en sort
-(`versioning-strategy: increase-if-necessary`).
+(`versioning-strategy: increase-if-necessary`). Les lignes `-r` de `dev.in` et de `release.in` lui
+font compiler d'abord les verrous qu'ils lisent. Il ne voit pas le verrou `kerberos`, deux dossiers
+plus bas : `PIP_COMPILE_ARGS=--upgrade bash scripts/lock.sh compile` le met à jour.
 
 ## À propos
 

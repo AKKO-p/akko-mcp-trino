@@ -1,10 +1,17 @@
 # The checks, for the core and the Atlas provider alike (tests, lint, types, audit, licenses,
 # build, the locks and the Dependabot file): the package's development extra and the tools the
-# checks run, each locked with its hashes in dev.txt, at the versions of the image wherever
-# both install a dependency. Compiled on the Python of the image, installed on each Python of
-# the checks (scripts/lock.sh).
+# checks run, each locked with its hashes in dev.txt, at the versions of the image and of the
+# release wherever they install the same package. Compiled on the Python of the image, installed
+# on each Python of the checks with build.txt (scripts/lock.sh), as pip and setuptools are left
+# out of this lock.
+# The -r lines order the compilation of the locks (image.in and release.in first), the -c lines
+# keep their versions.
+-r image.in
+-r release.in
 -c image.txt
+-c release.txt
 -e file:.[dev]
 check-jsonschema
 pip-licenses
 pip-tools
+uv

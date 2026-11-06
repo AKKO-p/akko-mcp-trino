@@ -22,8 +22,8 @@ keeping it small is a feature.
 git clone https://github.com/AKKO-p/akko-mcp-trino.git
 cd akko-mcp-trino
 python -m venv .venv && source .venv/bin/activate
-pip install --require-hashes -r requirements/dev.txt   # the tools, at the versions CI runs
-pip install --no-deps -e .
+pip install --require-hashes -r requirements/build.txt -r requirements/dev.txt   # the tools CI runs
+pip install --no-deps --no-build-isolation -e .
 ```
 
 ## Before you push
@@ -38,43 +38,62 @@ pytest
 
 `pyproject.toml` declares ranges, so that the server installs next to other
 tools; CI runs the tests at the lowest and at the highest versions they allow.
-Everything else installs from a lock of `requirements/`, at exact versions and
-with their hashes, written by [pip-compile](https://pip-tools.readthedocs.io/)
-from its source:
+Everything else installs from a lock, at exact versions and with their hashes,
+written by [pip-compile](https://pip-tools.readthedocs.io/) from its source:
 
 | Lock | Source | Installed by |
 |---|---|---|
 | `requirements/image.txt` | `requirements/image.in`: the dependencies the package declares | the container image, the license and vulnerability checks |
-| `requirements/dev.txt` | `requirements/dev.in`: the `dev` extra and the tools of the checks, at the image's versions | CI and the set-up above, on every Python version |
+| `requirements/build.txt` | `requirements/build.in`: the build frontend and the backend of `[build-system]` | the image's build stage, and the checks, with `dev.txt` |
+| `requirements/release.txt` | `requirements/release.in`: the build tools and twine | the release (sdist, wheel, upload) |
+| `requirements/dev.txt` | `requirements/dev.in`: the `dev` extra and the tools of the checks, at the versions of the image and the release | CI and the set-up above, on every Python version |
+| `providers/atlas/requirements-kerberos.txt` | its `.in`: the `kerberos` extra of the Atlas provider | the license check only |
 
-The image installs its lock with `pip install --require-hashes`, then the
-package without dependencies; `pip check` fails the build if the lock misses a
-dependency. The Atlas provider enters the lock with the release that publishes
-both; until then the image installs it without dependencies.
+The wheels and the sdist are built by the locked backend, without isolation
+(`python -m build --no-isolation`), so that no build tool is fetched unlocked.
+The image installs its lock with `pip install --only-binary=:all:
+--require-hashes`, then the package without dependencies; `pip check` fails
+the build if the lock misses a dependency that the package or a locked package
+declares. It does not see a dependency that only an extra brings, such as the
+CLI of `mcp[cli]`. The Atlas provider enters the lock with the release that
+publishes both; until then the image installs it without dependencies.
 
-The Dockerfile names its base image once, pinned by digest
-(`FROM python:3.12.16-slim@sha256:…`) in both stages, so that the image is
-reproducible; Dependabot brings its security updates, a Python patch release
-or new system packages, as a new tag and digest. The image's Python is the one
-of the locks: `scripts/lock.sh` reads it from that line (`LOCK_PYTHON`, `3.12`
-here), and `tests/test_locks.py` checks that the locks were compiled on it. A
-new Python minor version is made by hand: the `FROM` line, then
+`dev.txt` and `image.txt` install the package from its directory, so they
+leave out the package itself, pip and setuptools (`--unsafe-package`): the
+checks install `build.txt`, which pins setuptools, with `dev.txt`. A lock that
+pins pip or setuptools is compiled by Dependabot with `--allow-unsafe`, which
+fails on a package installed from its directory. The other locks pin them
+(`--allow-unsafe`). The `kerberos` lock builds gssapi and krb5 from their
+sdists (hashes checked) against the system's MIT Kerberos (`libkrb5-dev`); the
+build tools pip fetches for those two are not locked, and nothing of it enters
+the image.
+
+The Dockerfile names its base image once, pinned by digest, in both stages, so
+that the image is reproducible; Dependabot brings its security updates, a
+Python patch release or new system packages, as a new tag and digest. The
+image's Python is the one of the locks: `scripts/lock.sh` reads it from the
+version on the Dockerfile's `FROM` line (`LOCK_PYTHON`), and
+`tests/test_locks.py` checks that the locks were compiled on it. A new Python
+minor version is made by hand: the `FROM` line, then
 `bash scripts/lock.sh compile` on that Python.
 
 `scripts/lock.sh` is the one place CI and the release read the versions from:
-`LOCK_PYTHON`, the Python versions of the checks (`CHECK_PYTHONS`) and the
-platforms of the image (`IMAGE_PLATFORMS`). In the environment set up above,
-on that Python:
+`LOCK_PYTHON`, the Python versions of the checks and of the Atlas provider
+(`CHECK_PYTHONS`), the platforms of the image (`IMAGE_PLATFORMS`) and the
+glibc of the base image (`IMAGE_GLIBC`, which CI checks on the image it
+builds), from which it derives the wheel tags of each platform. In the
+environment set up above, on that Python:
 
 ```bash
 bash scripts/lock.sh compile    # after a change to a .in file or to the dependencies of pyproject.toml
-bash scripts/lock.sh check      # what CI runs: compile again, fail if a lock changes
+bash scripts/lock.sh check      # what CI runs: compile again, hashes included, fail if a lock changes
 bash scripts/lock.sh verify     # every pin of the image lock has a wheel for each platform
+bash scripts/lock.sh pins pytest pytest-cov   # the versions of dev.txt, for a job that installs them alone
 PIP_COMPILE_ARGS="--upgrade-package sqlglot" bash scripts/lock.sh compile   # one package to its latest version
 ```
 
-A real run of `check`, after `pyyaml` was added to `image.in` without
-compiling again:
+The `kerberos` lock needs `libkrb5-dev` to compile. A real run of `check`,
+after `pyyaml` was added to `image.in` without compiling again:
 
 ```text
 +    --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
@@ -93,12 +112,15 @@ lock.sh: requirements/image.txt resolves for linux/arm64 (52 wheels)
 ```
 
 pip-compile says "The generated requirements file may be rejected by pip
-install": the package itself is left out of the locks on purpose
-(`--unsafe-package`), as it installs from its source.
+install": the package itself is left out of the locks on purpose, as it
+installs from its source.
 
 Dependabot updates the locks once a month, in one pull request, and moves a
 range of `pyproject.toml` only when a new version falls outside it
-(`versioning-strategy: increase-if-necessary`).
+(`versioning-strategy: increase-if-necessary`). The `-r` lines of `dev.in`
+and `release.in` make it compile the locks they read first. It does not see
+the `kerberos` lock, which is two directories down:
+`PIP_COMPILE_ARGS=--upgrade bash scripts/lock.sh compile` updates it.
 
 ## Pull requests
 

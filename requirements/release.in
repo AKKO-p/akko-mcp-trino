@@ -1,0 +1,4 @@
+# The release: the build tools, and the tool that checks and uploads what they build.
+-r build.in
+-c build.txt
+twine

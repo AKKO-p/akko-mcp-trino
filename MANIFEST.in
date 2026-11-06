@@ -3,7 +3,14 @@ prune dist
 # Each context provider of providers/ ships in its own sdist.
 prune providers
 prune .venv
-include requirements/*.in requirements/*.txt scripts/lock.sh Dockerfile
+# What the tests read besides the package (they run from the sdist in CI): the texts they
+# check, the locks, their scripts, the Dockerfile, the workflows, and the Atlas provider's
+# metadata and READMEs.
+include README.fr.md DOCKERHUB.md
+graft docs/guides
+include requirements/*.in requirements/*.txt scripts/*.sh Dockerfile .github/workflows/*.yml
+include providers/atlas/pyproject.toml providers/atlas/README.md providers/atlas/README.fr.md
+include providers/atlas/requirements-kerberos.in providers/atlas/requirements-kerberos.txt
 include CHANGELOG.md MIGRATING.md pytest.ini
 recursive-include tests *.py
 graft examples

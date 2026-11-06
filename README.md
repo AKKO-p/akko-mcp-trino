@@ -1705,16 +1705,16 @@ exposes `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total` (by st
 ## Development
 
 ```bash
-pip install --require-hashes -r requirements/dev.txt && pip install --no-deps -e .
+pip install --require-hashes -r requirements/build.txt -r requirements/dev.txt && pip install --no-deps --no-build-isolation -e .
 ruff check akko_mcp_trino tests examples && ruff format akko_mcp_trino tests examples
 ruff check akko_mcp_trino --select D100,D101,D102,D103,D105,D107   # every public name documented
 mypy akko_mcp_trino           # the package ships py.typed and type-checks clean
-pip-audit --disable-pip --require-hashes -r requirements/image.txt -r requirements/dev.txt   # no known vulnerability in the locks
+pip-audit --disable-pip --require-hashes -r requirements/image.txt -r requirements/dev.txt -r requirements/release.txt   # no known vulnerability in the locks
 bash scripts/lock.sh check    # the locks match their sources (CONTRIBUTING.md, "Dependencies and locks")
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
 pytest                        # line or branch coverage below 100 % fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
-python -m build && twine check dist/*
+python -m build --no-isolation && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start
 ```
 
