@@ -1196,12 +1196,13 @@ def test_a_cancellation_given_between_its_check_and_its_watch_never_hangs(monkey
     assert isinstance(out["error"], tc.QueryCancelled) and cur.executed == 0
 
 
-def test_the_cancel_of_a_query_trino_never_names_is_tried_a_bounded_number_of_times(monkeypatch):
+def test_the_cancel_of_a_query_not_yet_named_is_tried_until_its_statement_ends(monkeypatch):
+    """No fixed count: the cancel of a query Trino has not named is tried again for as long
+    as its statement runs, and stops once the statement ends."""
     import threading
     import time
 
-    monkeypatch.setattr(tc, "_RECANCEL_SECONDS", 0.01)
-    monkeypatch.setattr(tc, "_RECANCEL_TRIES", 5, raising=False)
+    monkeypatch.setattr(tc, "_RECANCEL_SECONDS", 0.001)
     cur = _Unnamed()
     _patch_cursor(monkeypatch, cur)
     out = {}
@@ -1215,9 +1216,87 @@ def test_the_cancel_of_a_query_trino_never_names_is_tried_a_bounded_number_of_ti
     worker = threading.Thread(target=ask, daemon=True)
     worker.start()
     time.sleep(0.6)
-    tried = cur.cancels
-    time.sleep(0.2)
-    assert tried == cur.cancels == 5, "the tries stopped at their bound"
+    early = cur.cancels
+    time.sleep(0.3)
+    assert cur.cancels > early, "still tried while the statement runs, past any fixed count"
     cur.release.set()
     worker.join(5)
+    time.sleep(0.1)
+    ended = cur.cancels
+    time.sleep(0.2)
+    assert cur.cancels == ended, "no try once the statement has ended"
     assert isinstance(out["error"], TimeoutError), "past its budget, the query says so"
+
+
+class _NamedLate:
+    """A cursor Trino names ``after`` seconds after the first cancel sent to it; its
+    statement ends once a cancel reaches it named."""
+
+    description = [("a",)]
+
+    def __init__(self, after):
+        import threading
+
+        self.after = after
+        self.first = None
+        self.stopped = threading.Event()
+
+    @property
+    def query_id(self):
+        import time
+
+        if self.first is not None and time.monotonic() - self.first >= self.after:
+            return "q1"
+        return None
+
+    def execute(self, sql, params=None):
+        assert self.stopped.wait(10), "the statement was never cancelled"
+        raise RuntimeError("Query was canceled")
+
+    def fetchmany(self, n):
+        return []
+
+    def cancel(self):
+        import time
+
+        if self.first is None:
+            self.first = time.monotonic()
+        if self.query_id is not None:
+            self.stopped.set()
+
+
+def test_a_cancellation_stops_its_queries_side_by_side_and_returns_at_once(monkeypatch):
+    """Three queries Trino names only 0.3 s after their first cancel: the cancellation
+    returns at once, and they all end after about 0.3 s, never 0.9 s one after another."""
+    import threading
+    import time
+
+    cursors = [_NamedLate(0.3) for _ in range(3)]
+    handed = iter(cursors)
+    monkeypatch.setattr(
+        tc.trino.dbapi,
+        "connect",
+        lambda **kw: (lambda c: type("C", (), {"cursor": lambda self: c})())(next(handed)),
+    )
+    stop = tc.Cancellation()
+    errors = []
+
+    def ask():
+        try:
+            _client(_CFG).query("SELECT 1", cancel=stop)
+        except Exception as e:  # noqa: BLE001 - what each query raised, read below
+            errors.append(e)
+
+    workers = [threading.Thread(target=ask, daemon=True) for _ in cursors]
+    for worker in workers:
+        worker.start()
+    time.sleep(0.1)
+    started = time.monotonic()
+    stop.cancel()
+    assert time.monotonic() - started < 0.1, "cancel returns at once"
+    for worker in workers:
+        worker.join(5)
+    assert time.monotonic() - started < 0.6, "the longest wait, not the sum"
+    assert len(errors) == 3 and all(isinstance(e, tc.QueryCancelled) for e in errors)
+    stop.wait()
+    assert not [t for t in threading.enumerate() if t.name.startswith("mcp-cancel")]

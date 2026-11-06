@@ -208,34 +208,42 @@ def test_the_public_texts_count_the_nine_tools(path, word):
 _RIGHTS = {
     "README.md": [
         "### Deployment with a catalogue",
-        "It serves the descriptions of the tables and columns Trino lets the caller read.",
+        "It serves the descriptions of the tables and columns Trino lists to the caller; with "
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, only of those the caller may also select.",
         "It serves glossary terms, classifications and business metadata only when their "
-        "glossary, classification or set is named in the allow lists, closed by default (for "
-        "Atlas: `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`; empty "
-        "means none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set.",
+        "glossary, classification or set is named in the allow lists, closed by default, and the "
+        "owner only when it is configured (for Atlas: `ATLAS_GLOSSARIES`, "
+        "`ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, empty means none, and "
+        "`ATLAS_OWNER_ATTRIBUTE`).",
+        "Raising it past 8 mostly adds metadata load on Trino, with little gain.",
     ],
     "README.fr.md": [
         "## Déploiement avec un catalogue",
-        "Il sert les descriptions des tables et des colonnes que Trino laisse lire à l'appelant.",
+        "Il sert les descriptions des tables et des colonnes que Trino liste à l'appelant ; "
+        "avec `MCP_CONTEXT_REQUIRE_SELECT=true`, seulement de celles que l'appelant peut aussi "
+        "interroger par un SELECT.",
         "Il ne sert les termes de glossaire, les classifications et les métadonnées métier "
-        "que si "
-        "leur glossaire, leur classification ou leur ensemble est nommé dans les listes "
-        "blanches, fermées par défaut (pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, "
-        "`ATLAS_BUSINESS_METADATA` ; vide veut dire aucun), et le propriétaire seulement si "
-        "`ATLAS_OWNER_ATTRIBUTE` est posé.",
+        "que si leur glossaire, leur classification ou leur ensemble est nommé dans les listes "
+        "blanches, fermées par défaut, et le propriétaire seulement s'il est configuré (pour "
+        "Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, vide "
+        "veut dire aucun, et `ATLAS_OWNER_ATTRIBUTE`).",
+        "Le monter au-delà de 8 ajoute surtout de la charge de métadonnées sur Trino, pour peu "
+        "de gain.",
     ],
     "providers/atlas/README.md": [
-        "It serves the descriptions of the tables and columns Trino lets the caller read.",
+        "It serves the descriptions of the tables and columns Trino lists to the caller; with "
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, only of those the caller may also select.",
         "It serves glossary terms, classifications and business metadata only when their "
         "glossary, classification or set is named in `ATLAS_GLOSSARIES`, "
         "`ATLAS_CLASSIFICATIONS` or `ATLAS_BUSINESS_METADATA`, closed by default (empty means "
         "none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set.",
     ],
     "providers/atlas/README.fr.md": [
-        "Il sert les descriptions des tables et des colonnes que Trino laisse lire à l'appelant.",
+        "Il sert les descriptions des tables et des colonnes que Trino liste à l'appelant ; "
+        "avec `MCP_CONTEXT_REQUIRE_SELECT=true`, seulement de celles que l'appelant peut aussi "
+        "interroger par un SELECT.",
         "Il ne sert les termes de glossaire, les classifications et les métadonnées métier "
-        "que si "
-        "leur glossaire, leur classification ou leur ensemble est nommé dans "
+        "que si leur glossaire, leur classification ou leur ensemble est nommé dans "
         "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS` ou `ATLAS_BUSINESS_METADATA`, fermées par "
         "défaut (vide veut dire aucun), et le propriétaire seulement si "
         "`ATLAS_OWNER_ATTRIBUTE` est posé.",
@@ -246,10 +254,11 @@ _RIGHTS = {
 @pytest.mark.parametrize("readme", list(_RIGHTS))
 def test_the_readme_says_what_the_context_of_a_catalogue_serves_and_under_which_rights(readme):
     """What the context serves, sentence by sentence as the Atlas provider serves it: the
-    descriptions of what Trino lets the caller read; terms, classifications and business
+    descriptions of what Trino lists to the caller; terms, classifications and business
     metadata of the sets named only; the owner only when its attribute is set."""
     text = (pathlib.Path(__file__).resolve().parents[1] / readme).read_text(encoding="utf-8")
     flat = " ".join(text.replace("\u202f", " ").replace("\u00a0", " ").split())
     for sentence in _RIGHTS[readme]:
         assert sentence in flat, sentence
     assert "what its allow lists name" not in flat and "nomment ses listes blanches" not in flat
+    assert "lets the caller read" not in flat and "laisse lire à l'appelant" not in flat

@@ -193,8 +193,10 @@ Ce qu'il faut au conteneur :
    verrouille jamais dans un annuaire qui compte les échecs de connexion.
 
 **Droits.** Le contexte suit les droits de Trino : un appelant ne le reçoit que pour les tables et
-les colonnes que Trino le laisse lire. Le fournisseur lit Atlas avec ce compte technique en lecture
-seule. Il sert les descriptions des tables et des colonnes que Trino laisse lire à l'appelant. Il
+les colonnes que Trino lui liste. Le fournisseur lit Atlas avec ce compte technique en lecture
+seule. Il sert les descriptions des tables et des colonnes que Trino liste à l'appelant ; avec
+`MCP_CONTEXT_REQUIRE_SELECT=true`, seulement de celles que l'appelant peut
+aussi interroger par un SELECT. Il
 ne sert les termes de glossaire, les classifications et les métadonnées métier que si leur
 glossaire, leur classification ou leur ensemble est nommé dans `ATLAS_GLOSSARIES`,
 `ATLAS_CLASSIFICATIONS` ou `ATLAS_BUSINESS_METADATA`, fermées par défaut (vide veut dire aucun),

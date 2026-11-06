@@ -70,8 +70,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # Until Trino answers the POST of a statement, the query has no name and a cancel stops
 # nothing; past its budget, the cancel is tried again this often until the query has one.
 _RECANCEL_SECONDS = 0.05
-# How many times at most: a query Trino never names is not tried for ever.
-_RECANCEL_TRIES = 200
 
 
 class QueryCancelled(Exception):
@@ -82,13 +80,15 @@ class Cancellation:
     """A signal that stops the queries given it, each cancelled in Trino at once.
 
     A query registers how to stop itself while it runs (``watch``); ``cancel`` stops every
-    one registered, and any query asked afterwards never starts. A query that ended before
-    is not touched."""
+    one registered, each in a short thread of its own, side by side, and returns at once;
+    any query asked afterwards never starts. A query that ended before is not touched.
+    ``wait`` returns once every stop has ended, which it does when its query ends."""
 
     def __init__(self) -> None:
         """A signal not yet given, with no query registered."""
         self._lock = threading.Lock()
         self._stops: list[Callable[[], None]] = []
+        self._threads: list[threading.Thread] = []
         self._cancelled = False
 
     def is_set(self) -> bool:
@@ -110,12 +110,21 @@ class Cancellation:
                 self._stops.remove(stop)
 
     def cancel(self) -> None:
-        """Stop every query registered, and every one asked from now on."""
+        """Stop every query registered, and every one asked from now on, without waiting:
+        a query Trino has not named yet is tried again until it is, and that wait is paid
+        once for all of them, not one after another."""
         with self._lock:
             self._cancelled = True
             stops, self._stops = self._stops, []
         for stop in stops:
-            stop()
+            thread = threading.Thread(target=stop, name="mcp-cancel", daemon=True)
+            self._threads.append(thread)
+            thread.start()
+
+    def wait(self) -> None:
+        """Return once every stop ``cancel`` started has ended."""
+        for thread in self._threads:
+            thread.join()
 
 
 # The client tag of the statements the filter by Trino's rights runs for a caller.
@@ -509,10 +518,8 @@ class TrinoClient:
             expired.set()
             # DELETE on the query: Trino stops it, the fetch below fails. A query not yet
             # named cannot be stopped: try again until it is, or until the statement is over,
-            # _RECANCEL_TRIES times at most.
-            for _ in range(_RECANCEL_TRIES):
-                if done.is_set():
-                    return
+            # which its POST and the client's retries bound.
+            while not done.is_set():
                 named = cursor.query_id is not None
                 cursor.cancel()
                 if named:

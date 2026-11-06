@@ -1040,7 +1040,7 @@ reads its own variables from the same environment.
 | `MCP_SEARCH_MIN_LENGTH` | the shortest word `search_columns` searches, 1 at least; shorter words are ignored, and a text with none left is refused | `3` |
 | `MCP_SEARCH_MAX_WORDS` | the most words a text of `search_columns` may hold, 1 at least; above it the search is refused before Trino | `8` |
 | `MCP_SEARCH_MAX_WORD_LENGTH` | the longest word `search_columns` takes, not below `MCP_SEARCH_MIN_LENGTH`; a longer word is refused before Trino | `64` |
-| `MCP_SEARCH_CONCURRENCY` | the catalogs one call of `search_columns` reads at once, 1 to 32: as many metadata statements in flight in Trino for that call | `8` |
+| `MCP_SEARCH_CONCURRENCY` | the catalogs one call of `search_columns` reads at once, 1 to 32: as many metadata statements in flight in Trino for that call. Raising it past 8 mostly adds metadata load on Trino, with little gain. | `8` |
 | `MCP_SEARCH_MAX_THREADS` | the reads of `search_columns` in flight in the threads of one process, all calls together, 1 to 256; a call that finds none free reads its next catalog itself | `32` |
 | `MCP_DESCRIBE_MAX_COLUMNS` | the most columns of a table `describe_table` reads, page by page, 1 to 100000; past them the answer says `columns_cut` | `5000` |
 | `MCP_SEARCH_RESERVE_SECONDS` | the seconds of the call's budget `search_columns` keeps in reserve, so that it answers what it searched before the call runs out; 0 or more, below `MCP_CALL_TIMEOUT_SECONDS` when that is set; 0 is warned of | `2` |
@@ -1093,15 +1093,16 @@ the MCP server of its catalogue keeps it, side by side: nothing in this server b
 replaces it. This mode fits when the metadata of the catalogue is not sensitive.
 
 **Mode 2, with a context provider.** Business meaning (descriptions, glossary terms,
-classifications, owner) is shown only for the tables and columns Trino lets the caller read.
+classifications, owner) is shown only for the tables and columns Trino lists to the caller.
 This mode fits when metadata must follow the rights on the data.
 
 **Rights.** The context follows Trino's rights. The provider reads the catalogue with a
-read-only technical account. It serves the descriptions of the tables and columns Trino lets
-the caller read. It serves glossary terms, classifications and business metadata only when
-their glossary, classification or set is named in the allow lists, closed by default (for
-Atlas: `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`; empty means
-none), and the owner only when `ATLAS_OWNER_ATTRIBUTE` is set. So a glossary or a
+read-only technical account. It serves the descriptions of the tables and columns Trino lists
+to the caller; with `MCP_CONTEXT_REQUIRE_SELECT=true`, only of those the caller may also select.
+It serves glossary terms, classifications and business metadata only when their glossary,
+classification or set is named in the allow lists, closed by default, and the owner only when
+it is configured (for Atlas: `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`,
+`ATLAS_BUSINESS_METADATA`, empty means none, and `ATLAS_OWNER_ATTRIBUTE`). So a glossary or a
 classification restricted in the catalogue is never served unless the operator names it.
 Reading the catalogue as the caller is not in this version.
 

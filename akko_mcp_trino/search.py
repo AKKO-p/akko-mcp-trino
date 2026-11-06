@@ -668,6 +668,8 @@ def search(
                 # once, none starts, and no thread outlives the call.
                 cancelled.cancel()
                 pool.shutdown(wait=True, cancel_futures=True)
+                # Each stop ends with its query, and every query has ended with its walk.
+                cancelled.wait()
         return {
             "tables": tables,
             "matches": matches,

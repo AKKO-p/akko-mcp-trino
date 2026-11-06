@@ -2056,7 +2056,8 @@ class _Slow(Trino):
 
 
 def _search_threads():
-    return [t for t in threading.enumerate() if t.name.startswith("mcp-search")]
+    """The threads of a search: its walks and the stops of its cancellation."""
+    return [t for t in threading.enumerate() if t.name.startswith(("mcp-search", "mcp-cancel"))]
 
 
 def test_no_thread_outlives_the_call_and_no_catalog_starts_after_the_stop(clock):
@@ -2132,6 +2133,7 @@ def test_a_read_in_flight_is_cancelled_at_once_when_the_page_is_full(clock):
     out = _ask(trino, clock, "email", max_rows=2, budget=100000, concurrency=2)
     assert time.monotonic() - started < 3, "the answer never waits for a read it discards"
     assert trino.cancelled == ["c01"] and out["next_cursor"] is not None
+    assert _search_threads() == [], "no walk and no stop of the cancellation outlives the call"
 
 
 def test_a_catalog_out_of_time_stops_the_pass_as_one_at_a_time(monkeypatch):
