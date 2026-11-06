@@ -71,6 +71,7 @@ _ENV_KEYS = [
     "MCP_DESCRIBE_MAX_COLUMNS",
     "MCP_SEARCH_CONCURRENCY",
     "MCP_PROFILE_TYPE_CHARS",
+    "MCP_SEARCH_MAX_THREADS",
     "MCP_VISIBILITY_ENABLED",
 ]
 
@@ -812,3 +813,28 @@ def test_a_bound_of_a_type_outside_1_to_100000_refuses_to_start(monkeypatch, cou
     assert Config.from_env().problems() == [
         f"MCP_PROFILE_TYPE_CHARS={count}: profile_table serves 1 to 100000 characters of a type"
     ]
+
+
+def test_search_threads_of_a_process_are_32_by_default_and_read_from_their_variable(monkeypatch):
+    assert Config.from_env().search_max_threads == 32
+    monkeypatch.setenv("MCP_SEARCH_MAX_THREADS", "256")
+    assert Config.from_env().search_max_threads == 256
+    assert Config.from_env().problems() == []
+
+
+@pytest.mark.parametrize("count", ["0", "257"])
+def test_search_threads_outside_1_to_256_refuse_to_start(monkeypatch, count):
+    monkeypatch.setenv("MCP_SEARCH_MAX_THREADS", count)
+    assert Config.from_env().problems() == [
+        f"MCP_SEARCH_MAX_THREADS={count}: search_columns runs 1 to 256 reads at once in a process"
+    ]
+
+
+def test_describe_reading_more_columns_than_profile_is_warned_of(monkeypatch):
+    warning = (
+        "MCP_DESCRIBE_MAX_COLUMNS=6000 is above MCP_PROFILE_DESCRIBE_ROWS=5000: describe_table "
+        "shows columns profile_table cannot name"
+    )
+    assert warning not in Config.from_env().warnings()
+    monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", "6000")
+    assert warning in Config.from_env().warnings()

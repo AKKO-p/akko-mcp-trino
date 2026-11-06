@@ -15,6 +15,16 @@
   "MCP_SEARCH_MAX_WORDS" $v.limits.searchMaxWords
   "MCP_SEARCH_MAX_WORD_LENGTH" $v.limits.searchMaxWordLength
   "MCP_SEARCH_RESERVE_SECONDS" $v.limits.searchReserveSeconds
+  "MCP_SEARCH_CONCURRENCY" $v.limits.searchConcurrency
+  "MCP_SEARCH_MAX_THREADS" $v.limits.searchMaxThreads
+  "MCP_DESCRIBE_MAX_COLUMNS" $v.limits.describeMaxColumns
+  "MCP_PROFILE_MAX_COLUMNS" $v.limits.profileMaxColumns
+  "MCP_PROFILE_SAMPLE_ROWS" $v.limits.profileSampleRows
+  "MCP_PROFILE_VALUE_CHARS" $v.limits.profileValueChars
+  "MCP_PROFILE_TYPE_CHARS" $v.limits.profileTypeChars
+  "MCP_PROFILE_DESCRIBE_ROWS" $v.limits.profileDescribeRows
+  "MCP_PROFILE_TIMEOUT_SECONDS" $v.limits.profileTimeoutSeconds
+  "MCP_PROFILE_MAX_CONCURRENT" $v.limits.profileMaxConcurrent
 }}
 # Settings only: the secrets are read by secretKeyRef, never written here.
 apiVersion: v1
@@ -88,6 +98,12 @@ data:
   {{- end }}
   {{- with $v.extraReadCommands }}
   MCP_EXTRA_READ_COMMANDS: {{ join "," . | quote }}
+  {{- end }}
+  {{- with $v.limits.profileModes }}
+  MCP_PROFILE_MODES: {{ join "," . | quote }}
+  {{- end }}
+  {{- with $v.limits.profileClientTag }}
+  MCP_PROFILE_CLIENT_TAG: {{ . | quote }}
   {{- end }}
   {{- range $name, $value := $optional }}
   {{- if not (kindIs "invalid" $value) }}

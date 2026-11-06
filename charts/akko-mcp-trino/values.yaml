@@ -168,6 +168,19 @@ limits:
   searchMaxWords: null           # MCP_SEARCH_MAX_WORDS (8)
   searchMaxWordLength: null      # MCP_SEARCH_MAX_WORD_LENGTH (64)
   searchReserveSeconds: null     # MCP_SEARCH_RESERVE_SECONDS (2)
+  searchConcurrency: null        # MCP_SEARCH_CONCURRENCY (8): catalogs one search reads at once
+  searchMaxThreads: null         # MCP_SEARCH_MAX_THREADS (32): search reads in flight in the pod
+  describeMaxColumns: null       # MCP_DESCRIBE_MAX_COLUMNS (5000)
+  # profile_table; an empty list or null keeps the server's default.
+  profileModes: []               # MCP_PROFILE_MODES (sample, bernoulli, full)
+  profileMaxColumns: null        # MCP_PROFILE_MAX_COLUMNS (50)
+  profileSampleRows: null        # MCP_PROFILE_SAMPLE_ROWS (100000)
+  profileValueChars: null        # MCP_PROFILE_VALUE_CHARS (200)
+  profileTypeChars: null         # MCP_PROFILE_TYPE_CHARS (500)
+  profileDescribeRows: null      # MCP_PROFILE_DESCRIBE_ROWS (5000)
+  profileClientTag: null         # MCP_PROFILE_CLIENT_TAG (mcp-profile)
+  profileTimeoutSeconds: null    # MCP_PROFILE_TIMEOUT_SECONDS (0: the query's or call's budget)
+  profileMaxConcurrent: null     # MCP_PROFILE_MAX_CONCURRENT (4)
 
 # Read commands the allow-list refuses, opened one by one (MCP_EXTRA_READ_COMMANDS).
 # Some reads, such as SHOW STATS or EXPLAIN, can show facts beyond a row filter or a

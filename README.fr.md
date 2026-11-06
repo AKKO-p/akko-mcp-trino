@@ -547,14 +547,20 @@ serveur reprend, même pour un schéma Hive comme `2024_sales`, car le schéma d
 dans un littéral. Sans budget d'appel (`MCP_CALL_TIMEOUT_SECONDS=0`), une recherche sur tous les
 catalogs n'aurait pas de borne : elle est refusée, un catalog nommé est fouillé, et `--check` le
 signale. Elle lit `MCP_SEARCH_CONCURRENCY` catalogs à la fois (8 par défaut), chacun sous
-l'identité de l'appelant et dans ce qui reste de l'appel, et rend exactement ce que rendrait une
-recherche d'un catalog à la fois : les mêmes lignes dans le même ordre, le même `not_searched`, et
-un `next_cursor` qui reprend au premier catalog qu'elle n'a pas fini. Ce qu'un catalog suivant a
-trouvé n'est pas servi, et aucune requête ne part une fois la page pleine ; une lecture en cours
-finit avec l'appel, annulée dans Trino à ce qui en reste. Pour Trino, chaque appel de
-`search_columns` lance alors jusqu'à ce nombre de requêtes de métadonnées à la fois : les borner
-par un groupe de ressources sur le `TRINO_SOURCE` du serveur, comme pour l'étiquette client de
-`profile_table`, ou poser `MCP_SEARCH_CONCURRENCY=1` pour lire un catalog à la fois. `--check`
+l'identité de l'appelant et dans ce qui reste de l'appel, jamais plus de ce nombre au-delà du
+catalog dont elle répond. Tant que le budget de l'appel n'est pas épuisé, elle rend ce que rendrait
+une recherche d'un catalog à la fois : les mêmes lignes dans le même ordre, le même `not_searched`
+et le même `next_cursor`. Quand le budget s'épuise, la page est une page partielle juste dont le
+contenu peut différer, puisqu'elle a lu plus loin : rien n'est servi au-delà du premier catalog
+qu'elle n'a pas fini, et `next_cursor` y reprend. Une fois la page pleine, les lectures encore en
+cours sont aussitôt annulées dans Trino et aucune ne part. Un catalog qui bloque en tête est
+attendu comme le ferait une recherche d'un catalog à la fois, jusqu'au budget de la requête ou de
+l'appel. `MCP_SEARCH_MAX_THREADS` (32) borne les lectures en cours dans les fils de tout le
+processus, tous appels confondus : un appel qui n'en trouve aucun de libre lit lui-même son
+catalog suivant, et avance donc toujours. Pour Trino, chaque appel de `search_columns` lance
+jusqu'à `MCP_SEARCH_CONCURRENCY` requêtes de métadonnées à la fois : les borner par un groupe de
+ressources sur le `TRINO_SOURCE` du serveur, comme pour l'étiquette client de `profile_table`, ou
+poser `MCP_SEARCH_CONCURRENCY=1` pour lire un catalog à la fois, comme en 0.7. `--check`
 signale aussi `MCP_SEARCH_RESERVE_SECONDS=0` avec un budget d'appel : une
 recherche peut alors aller jusqu'au bout de l'appel, qui rend sa propre erreur `time_budget`. La
 ligne d'audit dit combien de tables et de colonnes sont venues et si la recherche a été coupée,
@@ -634,6 +640,7 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'aucun appelant de ce serveur ne doit voir : le contexte n'est servi à un appelant que tant que Trino la lui cache | aucune |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, 1 au moins | `500`, `60000`, `500` |
 | `MCP_SEARCH_CONCURRENCY` | catalogs qu'un appel de `search_columns` lit à la fois, de 1 à 32 : autant de requêtes de métadonnées en cours dans Trino pour cet appel ; la réponse est la même quelle que soit la valeur | `8` |
+| `MCP_SEARCH_MAX_THREADS` | lectures de `search_columns` en cours dans les fils d'un processus, tous appels confondus, de 1 à 256 ; un appel qui n'en trouve aucune de libre lit lui-même son catalog suivant | `32` |
 | `MCP_DESCRIBE_MAX_COLUMNS` | colonnes d'une table que `describe_table` lit au plus, page par page, de 1 à 100000 ; au-delà, la réponse dit `columns_cut` | `5000` |
 | `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | colonnes que `profile_table` profile au plus en un appel (de 1 à 500), et lignes que lit son mode `sample`, 1 au moins | `50`, `100000` |
 | `MCP_PROFILE_MODES` | modes que `profile_table` permet, séparés par des virgules, parmi `sample`, `bernoulli` et `full` ; vide ou nom inconnu : refus de démarrer | `sample,bernoulli,full` |
@@ -694,8 +701,9 @@ comme avant. La réponse ajoute alors :
   `MCP_CONTEXT_RESPONSE_CHARS` ; les colonnes laissées sont listées. Un texte coupé à
   `MCP_CONTEXT_TEXT_CHARS` est nommé dans `cut`.
 
-Sans fournisseur, `describe_table` répond et se décrit comme en 0.7.2, sauf `describer_errors` :
-un descripteur de greffon qui lève y est désormais compté. Avec un fournisseur, sa description dit
+Sans fournisseur, `describe_table` répond comme en 0.7.2 plus `next_column_offset` et
+`columns_cut`, avec une nouvelle description qui dit comment lire la page suivante, et
+`describer_errors` : un descripteur de greffon qui lève y est désormais compté. Avec un fournisseur, sa description dit
 que ce texte vient d'un catalogue et que ce sont des données, jamais des instructions. Le contexte
 est lu en dernier, après l'échantillon, et ne cache jamais les colonnes ni ne fait échouer l'appel.
 Un fournisseur en panne, lent ou qui refuse le compte est lu en `MCP_CONTEXT_TIMEOUT_SECONDS` au plus

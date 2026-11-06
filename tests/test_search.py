@@ -1974,15 +1974,37 @@ def test_several_catalogs_at_once_answer_as_one_at_a_time(clock, name, concurren
     assert len(one) > 1 or name in _ONE_PAGE, "the scenario follows a chain of cursors"
 
 
-def test_one_catalog_at_a_time_sends_the_statements_of_0_8_in_their_order(clock):
-    """MCP_SEARCH_CONCURRENCY=1 is the sequential search: same statements, same order."""
+# What the search of 0.7 (5a97846) sends, and answers, on the fixtures of _many(4, 2): the
+# digest of its statements, one per line, in their order, and of its answer, recorded by
+# running that version.
+_RECORDED_0_7 = {
+    ("email", 5): (
+        5,
+        "92d101e28573a21f4d3b96746376c10149d6e4ce59a04d9e7384fd01932faeb0",
+        "e47ad6e36daa2887876de9cda8267b192ea358a758a81008f4a3224605716860",
+    ),
+    ("email zebra", 4): (
+        24,
+        "919d68da5d8d023b683f1009561359d47e665b25ee8cb59b920eff3004a4401a",
+        "3400a252f5293041888de7efcea0c9d4c8bed03a9aac65d16db3b3a21b513fa4",
+    ),
+}
+
+
+@pytest.mark.parametrize("text, rows", list(_RECORDED_0_7))
+def test_one_catalog_at_a_time_sends_the_statements_of_0_7_in_their_order(clock, text, rows):
+    """MCP_SEARCH_CONCURRENCY=1 is the search of 0.7: the same statements in the same order,
+    and the same answer, byte for byte."""
+    import hashlib
+
     trino = Trino(*_many(4, 2))
-    _ask(trino, clock, "email", max_rows=5, concurrency=1)
+    clock["trino"] = trino
+    out = _server(trino, budget=100000, max_rows=rows, concurrency=1)(text)
     statements = [sql for sql, _ in trino.calls]
-    assert statements[0] == "SHOW CATALOGS"
-    opened = [re.search(r"FROM (\S+)\.information_schema", s) for s in statements[1:]]
-    order = [m.group(1) for m in opened if m]
-    assert order == sorted(order), "catalogs opened one after another, in order"
+    count, sent, answer = _RECORDED_0_7[(text, rows)]
+    assert len(statements) == count
+    assert hashlib.sha256("\n".join(statements).encode()).hexdigest() == sent
+    assert hashlib.sha256(out.encode()).hexdigest() == answer
 
 
 class _Barrier(Trino):
@@ -2051,3 +2073,152 @@ def test_each_read_of_several_at_once_is_bounded_by_what_is_left_of_the_call(clo
     _ask(trino, clock, "email", budget=500, reserve=2, concurrency=4)
     reads = [kw for sql, kw in trino.calls if sql != "SHOW CATALOGS"]
     assert reads and all(0 < kw["timeout"] <= 498 for kw in reads)
+
+
+# ---- a window of catalogs, cancelled at once when the pass stops, and a bound per process
+
+
+class _Paced(Trino):
+    """Trino whose read of the schemas of a catalog of ``pauses`` takes that many seconds of
+    real time: stopped at once by the cancellation it was given, or as the client stops it
+    at its own ``timeout``. It records the catalogs opened, those cancelled, and the
+    threads that read them."""
+
+    def __init__(self, pauses, *args, finish=(), **kw):
+        super().__init__(*args, **kw)
+        self.pauses = pauses
+        self.finish = set(finish)  # catalogs whose read ends normally even once cancelled
+        self.opened, self.cancelled, self.threads = [], [], []
+        self.lock = threading.Lock()
+
+    def _spend(self, key, timeout, default=1.0):
+        """No simulated time: this fake waits for real."""
+
+    def query(self, sql, user=None, params=None, **kw):
+        found = re.search(r"FROM (\S+)\.information_schema\.schemata", sql)
+        if found:
+            cat = found.group(1)
+            with self.lock:
+                self.opened.append(cat)
+                self.threads.append(threading.current_thread().name)
+            pause = self.pauses.get(cat, 0)
+            if pause:
+                woken = threading.Event()
+                if kw.get("cancel") is not None:
+                    kw["cancel"].watch(woken.set)
+                timeout = kw.get("timeout", 0)
+                if woken.wait(min(pause, timeout) if timeout > 0 else pause):
+                    with self.lock:
+                        self.cancelled.append(cat)
+                    if cat not in self.finish:
+                        raise RuntimeError("Query was canceled")
+                    return super().query(sql, user, params, **kw)
+                if 0 < timeout < pause:
+                    raise TimeoutError(f"the query exceeded its time budget of {timeout:g} s")
+        return super().query(sql, user, params, **kw)
+
+
+def test_a_slow_first_catalog_lets_no_more_than_n_catalogs_be_read_ahead(clock):
+    names, columns = _many(30, 1)
+    trino = _Paced({"c00": 0.5}, names, columns)
+    _ask(trino, clock, "email", max_rows=2, budget=100000, concurrency=4)
+    assert set(trino.opened) <= {"c00", "c01", "c02", "c03"}, "a window of 4 catalogs"
+
+
+def test_a_read_in_flight_is_cancelled_at_once_when_the_page_is_full(clock):
+    names, columns = _many(6, 1)
+    trino = _Paced({"c00": 0.3, "c01": 8}, names, columns)  # c01 runs while c00 answers
+    started = time.monotonic()
+    out = _ask(trino, clock, "email", max_rows=2, budget=100000, concurrency=2)
+    assert time.monotonic() - started < 3, "the answer never waits for a read it discards"
+    assert trino.cancelled == ["c01"] and out["next_cursor"] is not None
+
+
+def test_a_catalog_out_of_time_stops_the_pass_as_one_at_a_time(monkeypatch):
+    """The time path at several catalogs at once, on the real clock: a catalog that runs past
+    what is left of the call stops the pass there, as it does one catalog at a time."""
+    answers = []
+    for concurrency in (1, 4):
+        names, columns = _many(6, 1)
+        trino = _Paced({"c01": 30}, names, columns)
+        tool = _server(trino, budget=4, reserve=2, concurrency=concurrency)
+        answers.append(json.loads(tool("email")))
+    one, several = answers
+    assert one["not_searched"][0] == {"catalog": "c01", "schema": None, "reason": "time_budget"}
+    assert several == one
+
+
+def test_with_no_search_thread_free_a_call_reads_its_catalogs_itself(clock):
+    from akko_mcp_trino.search import search as run_search
+
+    answers = []
+    for concurrency in (1, 8):
+        trino = _Paced({}, *_many(6, 2))
+        clock["trino"] = trino
+        tools = register_query_tools(FakeMCP(), trino, max_rows=5)
+        slots = threading.BoundedSemaphore(1)
+        slots.acquire()  # every slot of the process is taken by other calls
+        call, token = bind_call("search_columns", 100000)
+        try:
+            answers.append(
+                run_search(
+                    tools,
+                    "email",
+                    None,
+                    None,
+                    None,
+                    min_length=3,
+                    max_words=8,
+                    max_word_length=64,
+                    reserve_seconds=2,
+                    max_catalogs=100,
+                    concurrency=concurrency,
+                    slots=slots,
+                )
+            )
+        finally:
+            reset_call(token)
+        assert not [t for t in trino.threads if t.startswith("mcp-search")], "read by the call"
+    assert answers[0] == answers[1]
+
+
+class _Peak(_Paced):
+    """Trino that counts the reads of search threads in flight at once."""
+
+    def __init__(self, *args, **kw):
+        super().__init__({}, *args, **kw)
+        self.now_in, self.peak = 0, 0
+
+    def query(self, sql, user=None, params=None, **kw):
+        pooled = threading.current_thread().name.startswith("mcp-search")
+        if pooled:
+            with self.lock:
+                self.now_in += 1
+                self.peak = max(self.peak, self.now_in)
+        try:
+            time.sleep(0.01)
+            return super().query(sql, user, params, **kw)
+        finally:
+            if pooled:
+                with self.lock:
+                    self.now_in -= 1
+
+
+def test_the_reads_of_search_threads_in_a_process_stay_under_their_bound(clock):
+    trino = _Peak(*_many(12, 1))
+    clock["trino"] = trino
+    mcp = FakeMCP()
+    register_query_tools(
+        mcp, trino, call_timeout_seconds=100000, search_concurrency=8, search_max_threads=2
+    )
+    out = json.loads(mcp.tools["search_columns"]("email"))
+    assert out["complete"] is True and trino.peak <= 2
+
+
+def test_a_walk_the_pass_no_longer_needs_sends_no_other_statement(clock):
+    """A read that ends just as the pass stops: the walk of its catalog goes no further."""
+    names, columns = _many(4, 1)
+    trino = _Paced({"c00": 0.3, "c01": 8}, names, columns, finish={"c01"})
+    out = _ask(trino, clock, "email", max_rows=2, budget=100000, concurrency=2)
+    assert out["next_cursor"] is not None and trino.cancelled == ["c01"]
+    assert not [sql for sql, _ in trino.calls if "'c01'" in sql], "no read of c01's schemas"

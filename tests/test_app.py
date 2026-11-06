@@ -787,7 +787,8 @@ def test_cli_check_reports_the_discovery_settings(monkeypatch, capsys):
     monkeypatch.setenv("TRINO_MAX_ROWS", "40")
     monkeypatch.setenv("MCP_DESCRIBE_MAX_COLUMNS", "1234")
     monkeypatch.setenv("MCP_SEARCH_CONCURRENCY", "3")
+    monkeypatch.setenv("MCP_SEARCH_MAX_THREADS", "17")
     check_config(Config.from_env())
     out = capsys.readouterr().out
     assert "describe_table: pages of 40 columns, 1234 columns at most" in out
-    assert "budget kept in reserve, 3 catalogs at once" in out
+    assert "budget kept in reserve, 3 catalogs at once, 17 reads at once in all" in out

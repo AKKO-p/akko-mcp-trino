@@ -65,6 +65,7 @@ from .config import (
     DEFAULT_PROFILE_TYPE_CHARS,
     DEFAULT_PROFILE_VALUE_CHARS,
     DEFAULT_SEARCH_CONCURRENCY,
+    DEFAULT_SEARCH_MAX_THREADS,
     DEFAULT_SEARCH_MAX_WORD_LENGTH,
     DEFAULT_SEARCH_MAX_WORDS,
     DEFAULT_SEARCH_MIN_LENGTH,
@@ -652,16 +653,27 @@ class ToolContext:
         ``describer_errors``."""
         self.describers.append(describer)
 
-    def run(self, sql: str, *, max_rows: int = 0, row_limit: int = 0, timeout: float = 0.0) -> dict:
+    def run(
+        self,
+        sql: str,
+        *,
+        max_rows: int = 0,
+        row_limit: int = 0,
+        timeout: float = 0.0,
+        cancel: Any = None,
+    ) -> dict:
         """Run ``sql`` in Trino for the verified caller; ``max_rows`` lowers the row cap,
         ``row_limit`` replaces it (for a statement the tool builds, never the agent's SQL),
-        ``timeout`` lowers the query's time budget (see ``TrinoClient.query``)."""
+        ``timeout`` lowers the query's time budget, ``cancel`` (a `Cancellation`) stops it
+        when the tool no longer needs it (see ``TrinoClient.query``)."""
         # The caller comes from the VERIFIED principal, never from a parameter the
         # agent supplies, which would be forgeable; the identity mode decides what
         # Trino sees of it. A client that knows only ``query(sql, user, params)`` is
         # asked only for what it knows: a keyword left at 0 is not passed.
         given = {"max_rows": max_rows, "row_limit": row_limit, "timeout": timeout}
-        keywords = {name: value for name, value in given.items() if value > 0}
+        keywords: dict[str, Any] = {name: value for name, value in given.items() if value > 0}
+        if cancel is not None:
+            keywords["cancel"] = cancel
         return self._client.query(sql, user=current_subject(), **keywords)
 
     def run_whole(self, sql: str, *, bound: int, what: str) -> list:
@@ -752,6 +764,7 @@ def register_query_tools(
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH,
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS,
     search_concurrency: int = DEFAULT_SEARCH_CONCURRENCY,
+    search_max_threads: int = DEFAULT_SEARCH_MAX_THREADS,
     describe_max_columns: int = DEFAULT_DESCRIBE_MAX_COLUMNS,
     extra_reads: frozenset[str] = frozenset(),
     context: ContextSetup | None = None,
@@ -787,7 +800,8 @@ def register_query_tools(
     `search_reserve_seconds` of the call's budget so that it ends with an answer
     (`MCP_SEARCH_MIN_LENGTH`, `MCP_SEARCH_MAX_WORDS`, `MCP_SEARCH_MAX_WORD_LENGTH`,
     `MCP_SEARCH_RESERVE_SECONDS`), and reads `search_concurrency` catalogs at once
-    (`MCP_SEARCH_CONCURRENCY`). `describe_table` reads a table's columns a page of
+    (`MCP_SEARCH_CONCURRENCY`), `search_max_threads` reads at most in flight in all its
+    calls at once (`MCP_SEARCH_MAX_THREADS`). `describe_table` reads a table's columns a page of
     `max_rows` at a time, up to `describe_max_columns` (`MCP_DESCRIBE_MAX_COLUMNS`).
     `extra_reads` are the read commands the allow-list
     refuses by default and the administrator opened (`MCP_EXTRA_READ_COMMANDS`): with
@@ -846,6 +860,8 @@ def register_query_tools(
         tools.context = ContextReader(service, max_tables=describe_schema_tables)
 
     schema_visible = tools.schema_visible
+    # The reads of search_columns in flight in its threads, all calls together.
+    search_slots = threading.BoundedSemaphore(search_max_threads)
 
     def advice_visible(parts: tuple[str, ...]) -> bool:
         """Whether the caller sees the table of their own statement named by ``parts``, as
@@ -947,6 +963,7 @@ def register_query_tools(
                     reserve_seconds=search_reserve_seconds,
                     max_catalogs=max_catalogs,
                     concurrency=search_concurrency,
+                    slots=search_slots,
                 )
             )
         except Exception as e:  # noqa: BLE001
@@ -1188,7 +1205,13 @@ def register_query_tools(
             cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
             tbl = validate_identifier(table, "table")
-            start = check_offset(column_offset)
+            try:
+                start = check_offset(column_offset)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid column_offset: {column_offset!r}. A column_offset is a whole "
+                    "number from 0."
+                ) from None
             if start >= describe_max_columns:
                 raise ValueError(
                     f"Invalid column_offset: {start}. This server reads the first "
@@ -1213,7 +1236,8 @@ def register_query_tools(
             out: dict[str, Any] = {
                 "columns": described["columns"],
                 "rows": rows,
-                "truncated": start > 0 or more,
+                # A page past the last column is empty, and the last one.
+                "truncated": (start > 0 and start < len(listed)) or more,
                 "next_column_offset": next_column,
                 "columns_cut": columns_cut,
             }

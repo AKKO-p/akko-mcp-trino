@@ -1083,3 +1083,60 @@ def test_every_row_stops_on_a_cut_page_that_brings_nothing():
     from akko_mcp_trino.trino_client import every_row
 
     assert every_row(lambda sql: {"rows": [], "truncated": True}, "SELECT 1") == []
+
+
+# ---- a cancellation: a statement in flight stopped at once, when its caller no longer needs it
+
+
+def test_a_cancellation_stops_a_running_query_at_once_in_trino(monkeypatch):
+    import threading
+    import time
+
+    cur = _Slow()
+    _patch_cursor(monkeypatch, cur)
+    stop = tc.Cancellation()
+    out = {}
+
+    def ask():
+        try:
+            _client(_CFG).query("SELECT 1", cancel=stop)
+        except Exception as e:  # noqa: BLE001 - what the query raised, read below
+            out["error"] = e
+
+    worker = threading.Thread(target=ask)
+    worker.start()
+    time.sleep(0.1)
+    started = time.monotonic()
+    stop.cancel()
+    worker.join(5)
+    assert not worker.is_alive() and time.monotonic() - started < 2
+    assert isinstance(out["error"], tc.QueryCancelled) and cur.cancelled >= 1
+    assert not isinstance(out["error"], TimeoutError), "never a time budget of the call"
+
+
+def test_a_query_asked_after_its_cancellation_never_starts(monkeypatch):
+    seen = []
+    monkeypatch.setattr(tc.trino.dbapi, "connect", lambda **kw: seen.append(kw))
+    stop = tc.Cancellation()
+    stop.cancel()
+    with pytest.raises(tc.QueryCancelled):
+        _client(_CFG).query("SELECT 1", cancel=stop)
+    assert seen == [], "no connection, no statement"
+
+
+def test_a_query_that_ends_before_the_cancellation_is_not_touched(monkeypatch):
+    cur = _Cancellable([(1, 2)])
+    _patch_cursor(monkeypatch, cur)
+    stop = tc.Cancellation()
+    assert _client(_CFG).query("SELECT 1", cancel=stop)["rows"] == [[1, 2]]
+    stop.cancel()
+    assert cur.cancelled == 0, "a query that ended is not cancelled afterwards"
+
+
+def test_a_query_registered_after_the_cancellation_is_stopped_at_once():
+    stop = tc.Cancellation()
+    stop.cancel()
+    seen = []
+    forget = stop.watch(lambda: seen.append("stopped"))
+    forget()
+    assert seen == ["stopped"] and stop.is_set()

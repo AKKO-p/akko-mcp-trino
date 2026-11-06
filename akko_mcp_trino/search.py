@@ -40,7 +40,7 @@ import hashlib
 import json
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -53,7 +53,7 @@ from .sql_guard import (
     sql_literal,
     validate_identifier,
 )
-from .trino_client import every_row
+from .trino_client import Cancellation, every_row
 
 # Why a part of the scope was not searched, besides an error's kind.
 ROW_CAP = "row_cap"
@@ -244,6 +244,7 @@ def search(
     reserve_seconds: float,
     max_catalogs: int,
     concurrency: int = 1,
+    slots: Optional[threading.Semaphore] = None,
 ) -> dict:
     """Search the tables and columns that hold every word of ``text``, for the verified caller.
 
@@ -262,8 +263,10 @@ def search(
     allow. A complete search that found nothing, over every call of its chain of cursors,
     adds ``hint``; with several words, it goes on with the per-word pass, whose pages carry
     ``partial`` and say what that pass searched. ``concurrency`` catalogs are read at once,
-    each as the caller and within the call; the answer is the one of a search of one
-    catalog at a time."""
+    each as the caller and within the call, in threads that take one of ``slots`` each (the
+    reads in flight of every call of the process); with none free, the call reads the
+    catalog itself. Unless the call's budget runs out, the answer and the cursor are those
+    of a search of one catalog at a time."""
     words = search_words(text, min_length)
     if not words:
         raise ValueError(
@@ -321,14 +324,19 @@ def search(
             raise TimeoutError("no time left in the call for the search")
         return left
 
-    def schemas_of(cat: str, first: str) -> list[str]:
+    def stoppable(cancel: Optional[Cancellation]) -> dict:
+        """The keyword that lets ``cancel`` stop a read in Trino, when there is one."""
+        return {"cancel": cancel} if cancel is not None else {}
+
+    def schemas_of(cat: str, first: str, cancel: Optional[Cancellation] = None) -> list[str]:
         """The schemas of ``cat`` from ``first`` on, sorted, without information_schema."""
         sql = (
             f"SELECT schema_name FROM {cat}.information_schema.schemata "
             f"WHERE schema_name >= {sql_literal(first)} "
             "AND schema_name <> 'information_schema' ORDER BY schema_name"
         )
-        return [str(r[0]) for r in every_row(lambda s: ctx.run(s, timeout=allowed()), sql)]
+        rows = every_row(lambda s: ctx.run(s, timeout=allowed(), **stoppable(cancel)), sql)
+        return [str(r[0]) for r in rows]
 
     if only_schema and not ctx.schema_visible(only_catalog, only_schema, timeout=allowed()):
         # system.jdbc.columns filtered on a schema the caller does not see answers no row and
@@ -416,14 +424,27 @@ def search(
             f"AND {any_own} ORDER BY {hits(column_flags)} DESC, c.table_name, c.ordinal_position"
         )
 
-    def read(mode: str, phase: str, cat: str, sch: str, offset: int, room: int) -> dict:
+    def read(
+        mode: str,
+        phase: str,
+        cat: str,
+        sch: str,
+        offset: int,
+        room: int,
+        cancel: Optional[Cancellation] = None,
+    ) -> dict:
         """The matching tables, or columns, of one schema from row ``offset``, ``room`` of
         them at most, for the search of every word or for its per-word pass. Every view
         read is filtered by equality on the catalog and the schema, the joined ones too,
         so Trino reads that schema only."""
         cat_, sch_ = sql_literal(cat), sql_literal(sch)
         sql = (every_word_sql if mode == EVERY_WORD else per_word_sql)(phase, cat_, sch_)
-        return ctx.run(f"{sql} OFFSET {offset} LIMIT {room + 1}", max_rows=room, timeout=allowed())
+        return ctx.run(
+            f"{sql} OFFSET {offset} LIMIT {room + 1}",
+            max_rows=room,
+            timeout=allowed(),
+            **stoppable(cancel),
+        )
 
     def found_by(flags: list) -> list[str]:
         """The words whose flag is true, in the order given."""
@@ -445,7 +466,7 @@ def search(
         begin: Optional[Cursor],
         cat: str,
         used: int,
-        cancelled: Optional[threading.Event],
+        cancelled: Optional[Cancellation],
     ) -> list[tuple]:
         """One catalog of a pass, from ``begin`` when it is that catalog's, as the events
         the pass then replays in order: ``used`` rows already taken before it (0 when the
@@ -477,7 +498,7 @@ def search(
                 return events
             ask()
             try:
-                schemas = schemas_of(cat, first)
+                schemas = schemas_of(cat, first, cancelled)
             except CallTimeout:
                 raise
             except TimeoutError:
@@ -499,7 +520,7 @@ def search(
                     return events
                 ask()
                 try:
-                    res = read(mode, phase, cat, sch, offset, room)
+                    res = read(mode, phase, cat, sch, offset, room, cancelled)
                 except CallTimeout:
                     raise
                 except TimeoutError:
@@ -597,7 +618,16 @@ def search(
                 if stop is not None:
                     break
         else:
-            cancelled = threading.Event()
+            # A window of ``concurrency`` catalogs past the one replayed: each walked in a
+            # thread that takes one of ``slots`` while it runs; with none free, the call
+            # walks its next catalog itself, as one at a time, so it always advances.
+            cancelled = Cancellation()
+            free = slots if slots is not None else threading.BoundedSemaphore(concurrency)
+            pool = ThreadPoolExecutor(
+                max_workers=min(concurrency, len(catalogs)), thread_name_prefix="mcp-search"
+            )
+            futures: dict[int, Future] = {}
+            ahead = 0  # the catalogs before this one are in a thread or read
 
             def walk_alone(cat: str) -> Optional[list[tuple]]:
                 """The walk of ``cat`` read at the same time as others; None once the pass
@@ -607,24 +637,36 @@ def search(
                 except _Abandoned:
                     return None
 
-            pool = ThreadPoolExecutor(
-                max_workers=min(concurrency, len(catalogs)), thread_name_prefix="mcp-search"
-            )
+            def fill(end: int) -> None:
+                """Start the catalogs up to ``end``, while a slot is free."""
+                nonlocal ahead
+                while ahead < min(end, len(catalogs)) and free.acquire(blocking=False):
+                    # Each walk runs as the caller, within the call: the context of this call.
+                    futures[ahead] = pool.submit(
+                        contextvars.copy_context().run, walk_alone, catalogs[ahead]
+                    )
+                    # Its slot is given back once it ends, or once it is cancelled unstarted.
+                    futures[ahead].add_done_callback(lambda _: free.release())
+                    ahead += 1
+
             try:
-                # Each walk runs as the caller, within the call: the context of this call.
-                futures = [
-                    pool.submit(contextvars.copy_context().run, walk_alone, cat) for cat in catalogs
-                ]
-                for index, future in enumerate(futures):
-                    failed = replay(index, future.result() or [])
+                fill(concurrency)
+                for index, cat in enumerate(catalogs):
+                    if index in futures:
+                        events = futures.pop(index).result() or []
+                    else:
+                        events = walk(mode, begin, cat, len(tables) + len(matches), None)
+                        ahead = index + 1
+                    failed = replay(index, events)
                     if failed is not None:
                         return failed
                     if stop is not None:
                         break
+                    fill(index + 1 + concurrency)
             finally:
-                # No statement starts past the stop, and none outlives the call: each read
-                # in flight is bounded by what is left of it, and cancelled in Trino then.
-                cancelled.set()
+                # The pass needs nothing more: the reads in flight are cancelled in Trino at
+                # once, none starts, and no thread outlives the call.
+                cancelled.cancel()
                 pool.shutdown(wait=True, cancel_futures=True)
         return {
             "tables": tables,

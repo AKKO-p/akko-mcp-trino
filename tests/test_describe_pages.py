@@ -198,3 +198,34 @@ def test_a_table_read_in_one_page_keeps_its_grain(setups):
     out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert out["table"]["grain"] == ["c000", "c001"]
     assert out["context_sources"] == {"catalog": "ok"}
+
+
+def test_a_page_past_the_last_column_is_empty_and_last():
+    describe, _ = _describe(250)
+    out = describe(column_offset=300)
+    assert (out["rows"], out["truncated"], out["next_column_offset"], out["columns_cut"]) == (
+        [],
+        False,
+        None,
+        False,
+    )
+
+
+def test_a_refused_column_offset_names_its_argument():
+    describe, _ = _describe(10)
+    out = describe(column_offset=-1)
+    assert "column_offset" in out["error"]
+
+
+def test_a_grain_whole_on_a_page_after_the_first_is_not_served(setups):
+    provider = Memory(
+        tables={TableRef("demo", "sales", "orders"): TableContext(grain=("c150", "c151"))}
+    )
+    mcp, _, _ = with_context(setups, WideGate(250), provider)
+    out = json.loads(
+        in_request(
+            lambda: mcp.tools["describe_table"]("demo", "sales", "orders", column_offset=100)
+        )
+    )
+    assert "grain" not in out.get("table", {}), "a page does not prove the table's grain"
+    assert out["context_sources"] == {"catalog": "partial"}

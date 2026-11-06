@@ -368,6 +368,101 @@
             "null"
           ],
           "minimum": 0
+        },
+        "describeMaxColumns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "searchConcurrency": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 32
+        },
+        "searchMaxThreads": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 256
+        },
+        "profileModes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "sample",
+              "bernoulli",
+              "full"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "profileMaxColumns": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 500
+        },
+        "profileSampleRows": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "profileValueChars": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "profileTypeChars": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "profileDescribeRows": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "profileClientTag": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Za-z0-9_.:=/-]{1,100}$"
+        },
+        "profileTimeoutSeconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "profileMaxConcurrent": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 64
         }
       },
       "additionalProperties": false

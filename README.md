@@ -739,14 +739,20 @@ included, since a schema in a cursor only ever enters a string literal. Without 
 call budget (`MCP_CALL_TIMEOUT_SECONDS=0`) a search of every catalog would have no
 bound: it is refused, a named catalog is searched, and `--check` warns of it.
 It reads `MCP_SEARCH_CONCURRENCY` catalogs at once (8 by default), each as the caller
-and within what is left of the call, and answers exactly what a search of one catalog
-at a time would: the same rows in the same order, the same `not_searched`, and a
-`next_cursor` that resumes at the first catalog it did not finish. What a catalog after
-that one found is not served, and no statement starts once the page is full; a read in
-flight ends with the call, cancelled in Trino at what is left of it. For Trino, each
-call of `search_columns` then runs up to that many metadata statements at once: bound
-them with a resource group on the server's `TRINO_SOURCE`, as for `profile_table`'s
-client tag, or set `MCP_SEARCH_CONCURRENCY=1` to read one catalog at a time.
+and within what is left of the call, never more than that many past the catalog it is
+answering from. When the call's budget is not exhausted, it answers what a search of one
+catalog at a time does: the same rows in the same order, the same `not_searched`, and the
+same `next_cursor`. When the budget runs out, the page is a correct partial page whose
+content can differ, since it read further: nothing past the first catalog it did not
+finish is served, and `next_cursor` resumes there. Once the page is full, the reads still
+in flight are cancelled in Trino at once and none starts. A catalog that hangs at the head
+is waited for as one catalog at a time would, up to the query's or the call's budget.
+`MCP_SEARCH_MAX_THREADS` (32) bounds the reads in flight in the threads of the whole
+process, all calls together: a call that finds none free reads its next catalog itself, so
+it always advances. For Trino, each call of `search_columns` runs up to
+`MCP_SEARCH_CONCURRENCY` metadata statements at once: bound them with a resource group on
+the server's `TRINO_SOURCE`, as for `profile_table`'s client tag, or set
+`MCP_SEARCH_CONCURRENCY=1` to read one catalog at a time, as 0.7 did.
 `--check` also warns of `MCP_SEARCH_RESERVE_SECONDS=0` with a call budget: a search
 may then run to the end of the call, which answers its own `time_budget` error. The
 audit line says how many tables and columns came and whether the search was cut,
@@ -1035,6 +1041,7 @@ reads its own variables from the same environment.
 | `MCP_SEARCH_MAX_WORDS` | the most words a text of `search_columns` may hold, 1 at least; above it the search is refused before Trino | `8` |
 | `MCP_SEARCH_MAX_WORD_LENGTH` | the longest word `search_columns` takes, not below `MCP_SEARCH_MIN_LENGTH`; a longer word is refused before Trino | `64` |
 | `MCP_SEARCH_CONCURRENCY` | the catalogs one call of `search_columns` reads at once, 1 to 32: as many metadata statements in flight in Trino for that call; the answer is the same at any value | `8` |
+| `MCP_SEARCH_MAX_THREADS` | the reads of `search_columns` in flight in the threads of one process, all calls together, 1 to 256; a call that finds none free reads its next catalog itself | `32` |
 | `MCP_DESCRIBE_MAX_COLUMNS` | the most columns of a table `describe_table` reads, page by page, 1 to 100000; past them the answer says `columns_cut` | `5000` |
 | `MCP_SEARCH_RESERVE_SECONDS` | the seconds of the call's budget `search_columns` keeps in reserve, so that it answers what it searched before the call runs out; 0 or more, below `MCP_CALL_TIMEOUT_SECONDS` when that is set; 0 is warned of | `2` |
 | `TRINO_QUERY_TIMEOUT_SECONDS` | time budget of one query: past it, the server cancels the query in Trino; `0` leaves the limit to Trino | `60` |
@@ -1122,7 +1129,8 @@ then adds:
   `MCP_CONTEXT_RESPONSE_CHARS`; the columns left are listed. A text cut at `MCP_CONTEXT_TEXT_CHARS`
   is named in `cut`.
 
-Without a provider, `describe_table` answers and describes itself as in 0.7.2, except
+Without a provider, `describe_table` answers as in 0.7.2 plus `next_column_offset` and
+`columns_cut`, with a new description that says how to read the next page, and
 `describer_errors`: a describer of a plugin that raises is now counted there. With a provider, its
 description says that this text comes from a catalogue and is data, never instructions. The context
 is read last, after the sample, and never hides the columns nor fails the call. A provider that is

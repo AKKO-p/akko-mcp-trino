@@ -59,6 +59,10 @@ DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
 # each is one metadata statement in flight in Trino, for that one call.
 DEFAULT_SEARCH_CONCURRENCY = 8
 MAX_SEARCH_CONCURRENCY = 32
+# The reads of `search_columns` in flight in its threads in one process, all calls together,
+# and the most it may be set to; a call that finds none free reads its catalogs itself.
+DEFAULT_SEARCH_MAX_THREADS = 32
+MAX_SEARCH_MAX_THREADS = 256
 # The most columns of a table `describe_table` reads, page by page, and the most it may be
 # set to: a page past the first reads DESCRIBE from the first column to the end of the page.
 DEFAULT_DESCRIBE_MAX_COLUMNS = 5000
@@ -236,6 +240,7 @@ class Config:
     search_max_word_length: int = DEFAULT_SEARCH_MAX_WORD_LENGTH
     search_reserve_seconds: float = DEFAULT_SEARCH_RESERVE_SECONDS
     search_concurrency: int = DEFAULT_SEARCH_CONCURRENCY
+    search_max_threads: int = DEFAULT_SEARCH_MAX_THREADS
     # Read commands the allow-list refuses by default, named one by one by the
     # administrator (comma-separated: EXPLAIN, SHOW STATS, SHOW CREATE, SHOW GRANTS,
     # SHOW ROLES, SHOW SESSION). They can show facts beyond a row filter or a column
@@ -340,6 +345,11 @@ class Config:
             found.append(
                 f"MCP_SEARCH_CONCURRENCY={self.search_concurrency}: search_columns reads 1 to "
                 f"{MAX_SEARCH_CONCURRENCY} catalogs at once"
+            )
+        if not 1 <= self.search_max_threads <= MAX_SEARCH_MAX_THREADS:
+            found.append(
+                f"MCP_SEARCH_MAX_THREADS={self.search_max_threads}: search_columns runs 1 to "
+                f"{MAX_SEARCH_MAX_THREADS} reads at once in a process"
             )
         if self.search_min_length < 1:
             found.append(
@@ -535,6 +545,12 @@ class Config:
                 f"MCP_EXTRA_READ_COMMANDS={', '.join(extra)}: these reads can show facts "
                 "beyond a row filter or a column mask"
             )
+        if self.describe_max_columns > self.profile_describe_rows:
+            found.append(
+                f"MCP_DESCRIBE_MAX_COLUMNS={self.describe_max_columns} is above "
+                f"MCP_PROFILE_DESCRIBE_ROWS={self.profile_describe_rows}: describe_table shows "
+                "columns profile_table cannot name"
+            )
         if "full" in self.allowed_profile_modes() and self.profile_budget_seconds() == 0:
             found.append(
                 "MCP_PROFILE_MODES allows full while MCP_PROFILE_TIMEOUT_SECONDS, "
@@ -620,6 +636,9 @@ class Config:
             ),
             search_concurrency=int(
                 os.environ.get("MCP_SEARCH_CONCURRENCY", str(DEFAULT_SEARCH_CONCURRENCY))
+            ),
+            search_max_threads=int(
+                os.environ.get("MCP_SEARCH_MAX_THREADS", str(DEFAULT_SEARCH_MAX_THREADS))
             ),
             context_providers=os.environ.get("MCP_CONTEXT_PROVIDERS", ""),
             context_timeout_seconds=float(os.environ.get("MCP_CONTEXT_TIMEOUT_SECONDS", "5")),

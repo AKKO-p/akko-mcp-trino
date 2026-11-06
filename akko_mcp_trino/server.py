@@ -158,6 +158,7 @@ def build_server(
         search_max_word_length=config.search_max_word_length,
         search_reserve_seconds=config.search_reserve_seconds,
         search_concurrency=config.search_concurrency,
+        search_max_threads=config.search_max_threads,
         describe_max_columns=config.describe_max_columns,
         extra_reads=parse_extra_reads(config.extra_read_commands),
         context=context,

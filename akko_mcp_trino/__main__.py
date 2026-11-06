@@ -129,7 +129,8 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         f"search_columns: words of {config.search_min_length} to "
         f"{config.search_max_word_length} characters, {config.search_max_words} words at "
         f"most, {config.search_reserve_seconds:g} s of the call's budget kept in reserve, "
-        f"{config.search_concurrency} catalogs at once",
+        f"{config.search_concurrency} catalogs at once, {config.search_max_threads} reads at "
+        "once in all",
         f"describe_table: pages of {config.max_rows} columns, {config.describe_max_columns} "
         "columns at most",
         f"profile_table: modes {', '.join(config.allowed_profile_modes())}; up to "
