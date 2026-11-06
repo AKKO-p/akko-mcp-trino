@@ -28,8 +28,13 @@ class NegotiationError(Exception):
 
 
 def load_spnego() -> Any:
-    """Import ``spnego``; raises ``ValueError`` when the ``kerberos`` extra is missing."""
+    """Import ``spnego`` and the Kerberos bindings it needs (``gssapi``, and ``krb5`` to read
+    a keytab); raises ``ValueError`` when the ``kerberos`` extra is missing. ``pyspnego``
+    installed alone imports, but cannot speak Kerberos: that is refused at start, not taken
+    for an outage on every call."""
     try:
+        import gssapi  # noqa: F401
+        import krb5  # noqa: F401
         import spnego
     except ImportError:
         raise ValueError(

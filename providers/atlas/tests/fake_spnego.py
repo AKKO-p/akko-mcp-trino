@@ -43,7 +43,10 @@ class _Context:
 
 
 def install(monkeypatch: Any, fake: FakeSpnego | None = None) -> FakeSpnego:
-    """Put the stand-in in place of ``spnego`` for the test."""
+    """Put the stand-in in place of ``spnego``, and empty modules in place of the Kerberos
+    bindings it needs (``gssapi``, ``krb5``), for the test."""
     fake = fake or FakeSpnego()
     monkeypatch.setitem(sys.modules, "spnego", fake.module())
+    for binding in ("gssapi", "krb5"):
+        monkeypatch.setitem(sys.modules, binding, types.ModuleType(binding))
     return fake

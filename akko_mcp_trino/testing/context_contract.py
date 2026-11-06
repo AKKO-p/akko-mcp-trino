@@ -1307,9 +1307,9 @@ class GateContract:
             gate.hidden_column in reply.get("column_context", {})
             and (target is None or any(join.get("table") == _dotted(target) for join in joins))
             and bool(other.get("table") or other.get("column_context")),
-            f"a caller who sees everything ({mode}) is not served the hidden column, the "
-            "join to the hidden target and the hidden table's context: the gate run cannot "
-            "test anything",
+            f"a caller who sees everything ({mode}) is not served the hidden column, "
+            + ("" if target is None else "the join to the hidden target, ")
+            + "and the hidden table's context: the gate run cannot test anything",
         )
 
     def _each_run(

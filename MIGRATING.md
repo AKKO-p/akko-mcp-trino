@@ -24,8 +24,9 @@ names, with these changes:
   set now, and each glossary and classification too. `*` is a name like any other, never a
   wildcard.
 - `ATLAS_CLUSTERS` is required, and its catalogs are folded to lower case.
-- `ATLAS_MAX_CONCURRENT_REQUESTS` (default 4) bounds the glossary term reads sent at once;
-  `ATLAS_MAX_QUERY_CHARS` (6000), `ATLAS_PROXY` and `ATLAS_SPN` are new too.
+- New settings: `ATLAS_GLOSSARIES` and `ATLAS_CLASSIFICATIONS` (the allow lists, see above),
+  `ATLAS_MAX_CONCURRENT_REQUESTS` (default 4, the glossary term reads sent at once),
+  `ATLAS_MAX_QUERY_CHARS` (6000), `ATLAS_PROXY` and `ATLAS_SPN`.
 - `ATLAS_URL` takes several addresses, for Atlas in high availability; `ATLAS_PASSWORD_FILE`,
   `ATLAS_KNOX_TOKEN[_FILE]` and `ATLAS_AUTH=kerberos` are new ways to authenticate.
 

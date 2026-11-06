@@ -43,7 +43,7 @@ secret.
 | `ATLAS_USER`, `ATLAS_PASSWORD` or `ATLAS_PASSWORD_FILE` | Basic authentication, with a read-only account; the file comes first | empty |
 | `ATLAS_KNOX_TOKEN` or `ATLAS_KNOX_TOKEN_FILE` | a Knox token, sent as `Authorization: Bearer`, for Atlas behind a Knox topology with the `ATLAS` role; not with `ATLAS_USER` | empty |
 | `ATLAS_PRINCIPAL`, `ATLAS_KEYTAB` | Kerberos (SPNEGO), with `ATLAS_AUTH=kerberos`: the account's principal and the path of its keytab. The path is never printed. | empty |
-| `ATLAS_SPN` | the service name Atlas runs under, `<service>@<host>`, with `ATLAS_AUTH=kerberos`, when an address is not the host's canonical name | `HTTP@<host of each address>` |
+| `ATLAS_SPN` | with `ATLAS_AUTH=kerberos`, the service name Atlas runs under, `<service>@<host>`, used for every address of `ATLAS_URL`: set it when all addresses share one principal (the name of a load balancer or a service); with one principal per server in high availability, leave it unset | `HTTP@<host of each address>` |
 | `ATLAS_CLUSTERS` | JSON object, Trino catalog to Atlas cluster: `{"lake": "primary"}`. Catalogs are folded to lower case, as Trino lists them; two that fold to the same name are refused. A catalog not named here is not mapped and nothing is asked about it. | required |
 | `ATLAS_TABLE_TYPES` | entity types a table is looked up under, in order; the first that holds it wins | `hive_table,iceberg_table` |
 | `ATLAS_MAX_QUERY_CHARS` | longest query string of one bulk read; a batch of tables is split under it | `6000` |
@@ -135,11 +135,11 @@ answer's text or the secret.
 
 ## Kerberos (SPNEGO)
 
-With `ATLAS_AUTH=kerberos`, the provider answers Atlas's `WWW-Authenticate: Negotiate` with a
-token from `pyspnego`. Each negotiation gets a new ticket from the keytab, kept in a cache in
-memory (`MEMORY:`), so an expired ticket is never used and no process of its own renews one; it is
-one request to the KDC. Once Atlas opens a session (`ATLASSESSIONID`), no new negotiation happens until Atlas asks
-for one, and a redirect of Atlas's passive server negotiates again with the active one. A
+With `ATLAS_AUTH=kerberos`, the provider answers Atlas's `WWW-Authenticate: Negotiate` with a token
+from `pyspnego`. Each negotiation gets a new ticket from the keytab, kept in a cache in memory
+(`MEMORY:`), so an expired ticket is never used and no process of its own renews one; it is one
+request to the KDC. Once Atlas opens a session (`ATLASSESSIONID`), no new negotiation happens until
+Atlas asks for one, and a redirect of Atlas's passive server negotiates again with the active one. A
 negotiation that fails makes the provider unavailable for the call, with no other address tried.
 Mutual authentication of Atlas is left to TLS (`https` and `ATLAS_CA_BUNDLE`).
 
@@ -166,9 +166,9 @@ What the container needs:
    the allow lists, to every caller who sees the object in Trino. Give it only the glossaries,
    classifications and business metadata that anyone who sees the table may read.
 3. **A refusal stops it, not a retry loop.** A refused account (401, 403, or a redirect to a
-   login page on another host) is not asked again for an hour, or until its secret file
-   changes, or `SIGHUP`, so that the provider never locks it in a directory that counts failed
-   logins.
+   login page on another host) is not asked again for `MCP_CONTEXT_REFUSED_RETRY_SECONDS`
+   (3600 by default, a setting of the server), or until its secret file changes, or `SIGHUP`,
+   so that the provider never locks it in a directory that counts failed logins.
 
 ## Checking the configuration
 

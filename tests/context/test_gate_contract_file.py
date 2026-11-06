@@ -446,29 +446,22 @@ WITHOUT_JOINS = {
 CHECKS = [name for name in dir(GateContract) if name.startswith("test_")]
 
 
-def test_a_provider_without_joins_passes_and_says_why_the_join_is_not_checked(
-    tmp_path, monkeypatch
-):
+JOIN_CHECK = "test_a_hidden_join_target_is_checked_when_the_catalogue_gives_joins"
+
+
+@pytest.mark.parametrize("check", [c for c in CHECKS if c != JOIN_CHECK])
+def test_a_provider_without_joins_passes_every_check(tmp_path, monkeypatch, check):
     gate = gate_of(tmp_path, WITHOUT_JOINS, hidden_join_target=None)
-    contract = GateContract()
-    contract.test_nothing_of_a_hidden_object_reaches_any_answer_status_or_audit_line(
-        gate, monkeypatch
-    )
-    contract.test_a_hidden_and_a_missing_table_answer_the_same_shape(gate, monkeypatch)
+    getattr(GateContract(), check)(gate, monkeypatch)
+
+
+def test_a_provider_without_joins_says_why_the_join_is_not_checked(tmp_path, monkeypatch):
+    gate = gate_of(tmp_path, WITHOUT_JOINS, hidden_join_target=None)
     with pytest.raises(pytest.skip.Exception, match="the provider gives no join"):
-        contract.test_a_hidden_join_target_is_checked_when_the_catalogue_gives_joins(
-            gate, monkeypatch
-        )
+        getattr(GateContract(), JOIN_CHECK)(gate, monkeypatch)
 
 
-@pytest.mark.parametrize(
-    "check",
-    [
-        c
-        for c in CHECKS
-        if c != "test_a_hidden_join_target_is_checked_when_the_catalogue_gives_joins"
-    ],
-)
+@pytest.mark.parametrize("check", [c for c in CHECKS if c != JOIN_CHECK])
 def test_a_provider_that_gives_joins_cannot_leave_the_join_unchecked(tmp_path, monkeypatch, check):
     gate = gate_of(tmp_path, hidden_join_target=None)
     with pytest.raises(

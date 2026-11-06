@@ -84,6 +84,15 @@ def test_kerberos_without_pyspnego_refuses_to_start(monkeypatch):
             from_env({k: v for k, v in KERBEROS.items() if k != name})
 
 
+@pytest.mark.parametrize("binding", ["gssapi", "krb5"])
+def test_kerberos_without_its_bindings_refuses_to_start(monkeypatch, binding):
+    # pyspnego installed alone imports, but cannot speak Kerberos without its bindings.
+    install(monkeypatch)
+    monkeypatch.setitem(sys.modules, binding, None)
+    with pytest.raises(ValueError, match=r"needs the kerberos extra"):
+        from_env(KERBEROS)
+
+
 def test_a_negotiate_challenge_is_answered_from_the_keytab(monkeypatch):
     fake = install(monkeypatch)
     atlas = FakeAtlas("atlas-2.4")
@@ -216,3 +225,20 @@ def test_the_service_name_is_checked_at_start(monkeypatch, env, says):
     basic = {"ATLAS_URL": ATLAS, "ATLAS_USER": "r", "ATLAS_PASSWORD": "p", **env}
     with pytest.raises(ValueError, match="need ATLAS_AUTH=kerberos"):
         read_settings({**basic, "ATLAS_CLUSTERS": '{"lake": "primary"}'})
+
+
+def test_the_service_name_is_the_same_for_every_address(monkeypatch):
+    fake = install(monkeypatch)
+    atlas = FakeAtlas("atlas-2.4")
+    active = negotiating(atlas)
+
+    def first_down(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "atlas-a":
+            raise httpx.ConnectError("down")
+        return active(request)
+
+    env = {"ATLAS_URL": f"{ATLAS},{OTHER}", "ATLAS_TABLE_TYPES": "hive_table"}
+    calls(build(first_down, ATLAS_SPN="HTTP@atlas.example.test", **env))
+    calls(build(first_down, **env))
+    # Set, it names one host for every address; unset, each address names its own.
+    assert [c["hostname"] for c in fake.contexts] == ["atlas.example.test", "atlas-b"]
