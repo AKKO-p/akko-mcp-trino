@@ -62,6 +62,11 @@ _ENV_KEYS = [
     "MCP_CONTEXT_MAX_COLUMNS",
     "MCP_PROFILE_MAX_COLUMNS",
     "MCP_PROFILE_SAMPLE_ROWS",
+    "MCP_PROFILE_MODES",
+    "MCP_PROFILE_VALUE_CHARS",
+    "MCP_PROFILE_DESCRIBE_ROWS",
+    "MCP_PROFILE_CLIENT_TAG",
+    "MCP_PROFILE_TIMEOUT_SECONDS",
     "MCP_VISIBILITY_ENABLED",
 ]
 
@@ -569,6 +574,8 @@ def test_the_least_reserve_covers_the_wait_of_the_chain_past_its_deadline():
         "MCP_CONTEXT_MAX_COLUMNS",
         "MCP_PROFILE_MAX_COLUMNS",
         "MCP_PROFILE_SAMPLE_ROWS",
+        "MCP_PROFILE_VALUE_CHARS",
+        "MCP_PROFILE_DESCRIBE_ROWS",
     ],
 )
 def test_a_bound_below_one_is_refused(monkeypatch, name):
@@ -609,3 +616,75 @@ def test_context_warnings_come_only_with_a_provider(monkeypatch):
 def test_a_providers_list_of_nothing_warns_of_nothing(monkeypatch):
     monkeypatch.setenv("MCP_CONTEXT_PROVIDERS", " , ")
     assert Config.from_env().warnings() == []
+
+
+# ---- profile_table: modes, value length, DESCRIBE rows, client tag, time budget
+
+
+def test_the_profile_settings_have_their_defaults():
+    c = Config.from_env()
+    assert (c.profile_modes, c.profile_value_chars, c.profile_describe_rows) == (
+        "sample,bernoulli,full",
+        200,
+        5000,
+    )
+    assert (c.profile_client_tag, c.profile_timeout_seconds) == ("mcp-profile", 0.0)
+    assert c.allowed_profile_modes() == ("sample", "bernoulli", "full")
+    assert c.problems() == []
+
+
+def test_the_profile_settings_are_read_from_their_variables(monkeypatch):
+    for name, value in {
+        "MCP_PROFILE_MODES": " Sample , full,sample",
+        "MCP_PROFILE_VALUE_CHARS": "21",
+        "MCP_PROFILE_DESCRIBE_ROWS": "22",
+        "MCP_PROFILE_CLIENT_TAG": "agents-profile",
+        "MCP_PROFILE_TIMEOUT_SECONDS": "2.5",
+    }.items():
+        monkeypatch.setenv(name, value)
+    c = Config.from_env()
+    assert c.allowed_profile_modes() == ("sample", "full"), "folded, once each, in order"
+    assert (c.profile_value_chars, c.profile_describe_rows) == (21, 22)
+    assert (c.profile_client_tag, c.profile_timeout_seconds) == ("agents-profile", 2.5)
+    assert c.problems() == []
+
+
+@pytest.mark.parametrize("modes", ["", " , ", "sample,stats", "all"])
+def test_profile_modes_empty_or_unknown_refuse_to_start(monkeypatch, modes):
+    monkeypatch.setenv("MCP_PROFILE_MODES", modes)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_MODES={modes!r}: name one mode at least, comma-separated, among "
+        "sample, bernoulli and full"
+    ]
+
+
+@pytest.mark.parametrize("tag", ["", " ", "a,b", "a b", "é", "x" * 101])
+def test_a_profile_client_tag_trino_cannot_carry_refuses_to_start(monkeypatch, tag):
+    monkeypatch.setenv("MCP_PROFILE_CLIENT_TAG", tag)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_CLIENT_TAG={tag.strip()!r}: a client tag is 1 to 100 letters, digits "
+        "and _ . : = / -, without a comma"
+    ]
+
+
+@pytest.mark.parametrize("seconds", ["-1", "nan", "inf"])
+def test_a_negative_or_infinite_profile_timeout_refuses_to_start(monkeypatch, seconds):
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", seconds)
+    assert Config.from_env().problems() == [
+        f"MCP_PROFILE_TIMEOUT_SECONDS={float(seconds):g}: a time budget is 0 (the call's) "
+        "or a number of seconds above 0"
+    ]
+
+
+def test_a_profile_timeout_past_the_call_budget_refuses_to_start(monkeypatch):
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "5")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "6")
+    assert Config.from_env().problems() == [
+        "MCP_PROFILE_TIMEOUT_SECONDS=6 is past MCP_CALL_TIMEOUT_SECONDS=5: the aggregate "
+        "query runs within its call; set it to 5 or less, or 0 for the call's budget"
+    ]
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "5")
+    assert Config.from_env().problems() == []
+    monkeypatch.setenv("MCP_CALL_TIMEOUT_SECONDS", "0")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "600")
+    assert Config.from_env().problems() == [], "without a call budget, any budget of its own"

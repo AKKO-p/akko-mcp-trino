@@ -55,12 +55,16 @@ from .config import (
     DEFAULT_DESCRIBE_SCHEMA_TABLES,
     DEFAULT_MAX_CATALOGS,
     DEFAULT_MAX_ROWS,
+    DEFAULT_PROFILE_CLIENT_TAG,
+    DEFAULT_PROFILE_DESCRIBE_ROWS,
     DEFAULT_PROFILE_MAX_COLUMNS,
     DEFAULT_PROFILE_SAMPLE_ROWS,
+    DEFAULT_PROFILE_VALUE_CHARS,
     DEFAULT_SEARCH_MAX_WORD_LENGTH,
     DEFAULT_SEARCH_MAX_WORDS,
     DEFAULT_SEARCH_MIN_LENGTH,
     DEFAULT_SEARCH_RESERVE_SECONDS,
+    PROFILE_MODES,
 )
 from .context import ContextSetup
 from .context.reply import ContextReader, ContextService
@@ -80,7 +84,7 @@ from .sql_guard import (
     tables_for_column,
     validate_identifier,
 )
-from .trino_client import TrinoClient, every_row, gate_runner
+from .trino_client import TrinoClient, every_row, gate_runner, query_tags
 
 MAX_SAMPLE_ROWS = 20
 # The most tables of the agent's statement the advice on an unknown column checks, each by
@@ -455,6 +459,19 @@ _ORDERED_TYPE = re.compile(
 # The modes of profile_table and the scope each one says it read.
 _PROFILE_SCOPES = {"sample": "first_rows", "bernoulli": "random_sample", "full": "visible_rows"}
 _SKIPPED = ["distinct", "min", "max"]
+# The types whose min and max are text, or binary rendered as hexadecimal: those are cut at
+# MCP_PROFILE_VALUE_CHARS. A number, a date or a boolean is never cut.
+_CUT_TYPE = re.compile(r"varchar(\(\d+\))?|char(\(\d+\))?|varbinary")
+
+
+def _cut(value: Any, chars: int) -> tuple[Any, bool]:
+    """``value`` as served, binary rendered as ``_plain`` renders it, cut at ``chars``
+    characters; and whether it was cut."""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = _plain(value)
+    if isinstance(value, str) and len(value) > chars:
+        return value[:chars], True
+    return value, False
 
 
 def _quoted(name: str) -> str:
@@ -504,29 +521,50 @@ def _profiled_columns(
     return list(columns)
 
 
-# The description of profile_table, written for a model.
-_PROFILE_DOC = (
-    "Profile a table from the rows you may read: an aggregate query runs as you, so masks "
-    "and row filters apply as in execute_query."
-    """
+# What each mode of profile_table reads, said in its description when the server allows it.
+_PROFILE_MODE_DOCS = {
+    "sample": '"sample" reads the first rows, up to the server\'s limit, in no chosen order',
+    "bernoulli": (
+        '"bernoulli" reads a random sample of percent of the rows, percent above 0 and at most 100'
+    ),
+    "full": '"full" reads every row you may read, within the time budget',
+}
 
-        Args: catalog, schema, table as bare names; columns, optional, the columns to
-        profile, named exactly as describe_table lists them, by default the first ones it
-        lists, up to the server's limit;
-        columns past the server's row limit for DESCRIBE cannot be named. mode, optional:
-        "sample" (the default) reads the first rows, up to the server's limit, in no
-        chosen order; "bernoulli" reads a random sample of percent of the rows, percent
-        above 0 and at most 100; "full" reads every row you may read, within the call's
-        time budget. percent, only with "bernoulli". Returns JSON {"table", "scope",
-        "rows": n, "columns": [{"column", "type", "non_null", "null_fraction",
-        "approx_distinct", "min", "max"}]}: scope is "first_rows", "random_sample" or
-        "visible_rows", after the mode; rows is the count of the rows read; null_fraction
-        is null when rows is 0. A column whose type has no order (array, map, row, json
-        and the like) has its count only and "skipped": ["distinct", "min", "max"]. On
-        failure returns {"error": "...", "kind": "..."}; "time_budget" means the query ran
-        past the call's budget: profile fewer columns, or use "sample".
-        """
-)
+
+def _profile_doc(modes: Sequence[str]) -> str:
+    """The description of profile_table, written for a model, for the ``modes`` this
+    server allows: a mode it does not allow is never named."""
+    quoted = ", ".join(f'"{m}"' for m in modes)
+    scopes = ", ".join(f'"{_PROFILE_SCOPES[m]}"' for m in modes)
+    sentences = [
+        "Profile a table from the rows you may read: an aggregate query runs as you, so "
+        "masks and row filters apply as in execute_query.",
+        "",
+        "Args: catalog, schema, table as bare names; columns, optional, the columns to "
+        "profile, named exactly as describe_table lists them, by default the first ones it "
+        "lists, up to the server's limit;",
+        "columns past MCP_PROFILE_DESCRIBE_ROWS for DESCRIBE cannot be named.",
+        f"mode, one of {quoted}"
+        + ('; "sample" is the default' if "sample" in modes else ", always given")
+        + ": "
+        + "; ".join(_PROFILE_MODE_DOCS[m] for m in modes)
+        + ".",
+        'percent, only with "bernoulli".' if "bernoulli" in modes else "Leave percent out.",
+        'Returns JSON {"table", "scope", "rows": n, "columns_cut": bool, "columns": '
+        '[{"column", "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}:',
+        f"scope is {scopes}, after the mode; rows is the count of the rows read;",
+        "null_fraction is null when rows is 0; columns_cut is true when DESCRIBE listed more "
+        "columns than the server reads.",
+        "A text or binary min or max longer than the server's limit is cut, and the column "
+        'says which in "cut": ["min"], ["max"] or both.',
+        "A column whose type has no order (array, map, row, json and the like) has its "
+        'count only and "skipped": ["distinct", "min", "max"].',
+        'On failure returns {"error": "...", "kind": "..."}; "time_budget" means the query '
+        "ran past its budget and was cancelled: profile fewer columns"
+        + (', or use "sample".' if "sample" in modes else "."),
+    ]
+    return "\n        ".join(sentences).replace("\n        \n", "\n\n") + "\n        "
+
 
 # A describer adds to what describe_table answers, from what Trino described:
 # ``(catalog, schema, table, rows) -> dict``, merged into the answer.
@@ -684,6 +722,11 @@ def register_query_tools(
     context: ContextSetup | None = None,
     profile_max_columns: int = DEFAULT_PROFILE_MAX_COLUMNS,
     profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS,
+    profile_modes: Sequence[str] = PROFILE_MODES,
+    profile_value_chars: int = DEFAULT_PROFILE_VALUE_CHARS,
+    profile_describe_rows: int = DEFAULT_PROFILE_DESCRIBE_ROWS,
+    profile_client_tag: str = DEFAULT_PROFILE_CLIENT_TAG,
+    profile_timeout_seconds: float = 0.0,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -711,7 +754,12 @@ def register_query_tools(
     EXPLAIN among them, explain_query prints the plan; without it, it only checks.
     `profile_table` profiles `profile_max_columns` columns at most, and its sample reads
     the first `profile_sample_rows` rows (`MCP_PROFILE_MAX_COLUMNS`,
-    `MCP_PROFILE_SAMPLE_ROWS`)."""
+    `MCP_PROFILE_SAMPLE_ROWS`); it serves the modes of `profile_modes` only, cuts a text or
+    binary min or max at `profile_value_chars` characters, reads `DESCRIBE` up to
+    `profile_describe_rows` rows, and runs its aggregate query with the client tag
+    `profile_client_tag`, within `profile_timeout_seconds` when above 0, else the call's
+    budget (`MCP_PROFILE_MODES`, `MCP_PROFILE_VALUE_CHARS`, `MCP_PROFILE_DESCRIBE_ROWS`,
+    `MCP_PROFILE_CLIENT_TAG`, `MCP_PROFILE_TIMEOUT_SECONDS`)."""
     tools = ToolContext(
         mcp,
         client,
@@ -1140,15 +1188,22 @@ def register_query_tools(
         percent: float = 0.0,
     ) -> str:
         try:
-            if not isinstance(mode, str) or mode not in _PROFILE_SCOPES:
-                raise ValueError(f"Invalid mode: {mode!r}. A mode is sample, bernoulli or full.")
+            if not isinstance(mode, str) or mode not in profile_modes:
+                raise ValueError(
+                    f"Invalid mode: {mode!r}. This server allows {', '.join(profile_modes)}."
+                )
             share = _sample_percent(mode, percent)
             cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
             tbl = validate_identifier(table, "table")
             fqn = f"{cat}.{sch}.{tbl}"
             note(tables=[fqn])
-            described = {str(r[0]): str(r[1]) for r in run(f"DESCRIBE {fqn}")["rows"]}
+            # One row more than the bound, past the server's row cap, tells whether DESCRIBE
+            # listed more columns than are read.
+            listing = run(f"DESCRIBE {fqn}", row_limit=profile_describe_rows + 1)
+            listed = listing["rows"]
+            columns_cut = was_cut(listing) or len(listed) > profile_describe_rows
+            described = {str(r[0]): str(r[1]) for r in listed[:profile_describe_rows]}
             chosen = _profiled_columns(columns, described, profile_max_columns)
             ordered = {c: bool(_ORDERED_TYPE.fullmatch(described[c])) for c in chosen}
             aggregates = ["count(*)"]
@@ -1174,7 +1229,10 @@ def register_query_tools(
                     kind=READ_ONLY,
                 )
             note(sql=statement)
-            row = iter(run(statement)["rows"][0])
+            # The tag lets Trino put the query in a resource group, besides the extensions' tags.
+            with query_tags(profile_client_tag):
+                answer = run(statement, timeout=profile_timeout_seconds)
+            row = iter(answer["rows"][0])
             note(rows=1)
             rows = next(row)
             profiled = []
@@ -1191,17 +1249,31 @@ def register_query_tools(
                 }
                 if ordered[c]:
                     entry.update(approx_distinct=next(row), min=next(row), max=next(row))
+                    if _CUT_TYPE.fullmatch(described[c]):
+                        cut = []
+                        for end in ("min", "max"):
+                            entry[end], shortened = _cut(entry[end], profile_value_chars)
+                            if shortened:
+                                cut.append(end)
+                        if cut:
+                            entry["cut"] = cut
                 else:
                     entry["skipped"] = list(_SKIPPED)
                 profiled.append(entry)
             # Rendered as the cells of execute_query are; nothing else of the query.
             return dumps(
-                {"table": fqn, "scope": _PROFILE_SCOPES[mode], "rows": rows, "columns": profiled}
+                {
+                    "table": fqn,
+                    "scope": _PROFILE_SCOPES[mode],
+                    "rows": rows,
+                    "columns_cut": columns_cut,
+                    "columns": profiled,
+                }
             )
         except Exception as e:  # noqa: BLE001
             return error_reply(e)
 
-    profile_table.__doc__ = _PROFILE_DOC
+    profile_table.__doc__ = _profile_doc(profile_modes)
     tool("Profile table")(profile_table)
 
     show_plan = "EXPLAIN" in extra_reads

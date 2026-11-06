@@ -8,6 +8,7 @@ An extension reads its own settings from the environment it is given (see
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -57,6 +58,16 @@ DEFAULT_SEARCH_RESERVE_SECONDS = 2.0
 # The most columns `profile_table` profiles in one call, and the rows its sample reads.
 DEFAULT_PROFILE_MAX_COLUMNS = 50
 DEFAULT_PROFILE_SAMPLE_ROWS = 100000
+# The modes of `profile_table` there are, and those a server allows by default.
+PROFILE_MODES = ("sample", "bernoulli", "full")
+DEFAULT_PROFILE_MODES = ",".join(PROFILE_MODES)
+# The characters of a text or binary min or max it serves, the rows of its DESCRIBE it reads,
+# and the client tag of its aggregate query, by which Trino may put it in a resource group.
+DEFAULT_PROFILE_VALUE_CHARS = 200
+DEFAULT_PROFILE_DESCRIBE_ROWS = 5000
+DEFAULT_PROFILE_CLIENT_TAG = "mcp-profile"
+# What a client tag may hold: Trino splits the tags on commas.
+_CLIENT_TAG_RE = re.compile(r"[A-Za-z0-9_.:=/-]{1,100}")
 # The least MCP_CONTEXT_RESERVE_SECONDS a server with a context provider accepts. Past its
 # deadline, the chain waits up to 0.25 s for a provider to hand back control (its
 # ``_GRACE_SECONDS``, which includes the 0.1 s a cancelled read is given to end): a shorter
@@ -68,6 +79,13 @@ MIN_CONTEXT_RESERVE_SECONDS = 0.3
 def provider_names(value: str) -> list[str]:
     """The names a ``MCP_CONTEXT_PROVIDERS`` value lists, in order."""
     return [n.strip() for n in value.split(",") if n.strip()]
+
+
+def profile_mode_names(value: str) -> tuple[str, ...]:
+    """The modes a ``MCP_PROFILE_MODES`` value lists, folded to lower case, once each, in
+    order; known or not."""
+    names = [n.strip().lower() for n in value.split(",") if n.strip()]
+    return tuple(dict.fromkeys(names))
 
 
 def _is_table_name(text: str) -> bool:
@@ -234,9 +252,19 @@ class Config:
     context_max_columns: int = 500
     profile_max_columns: int = DEFAULT_PROFILE_MAX_COLUMNS
     profile_sample_rows: int = DEFAULT_PROFILE_SAMPLE_ROWS
+    profile_modes: str = DEFAULT_PROFILE_MODES
+    profile_value_chars: int = DEFAULT_PROFILE_VALUE_CHARS
+    profile_describe_rows: int = DEFAULT_PROFILE_DESCRIBE_ROWS
+    profile_client_tag: str = DEFAULT_PROFILE_CLIENT_TAG
+    # The time budget of the aggregate query of `profile_table`; 0: the call's.
+    profile_timeout_seconds: float = 0.0
     # The raw `MCP_VISIBILITY_ENABLED`, kept only to refuse `false`: the filter by Trino's
     # rights cannot be turned off.
     visibility_switch: str = ""
+
+    def allowed_profile_modes(self) -> tuple[str, ...]:
+        """The modes of ``profile_table`` this server allows (``MCP_PROFILE_MODES``)."""
+        return profile_mode_names(self.profile_modes)
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
@@ -368,9 +396,35 @@ class Config:
             ("MCP_CONTEXT_MAX_COLUMNS", self.context_max_columns),
             ("MCP_PROFILE_MAX_COLUMNS", self.profile_max_columns),
             ("MCP_PROFILE_SAMPLE_ROWS", self.profile_sample_rows),
+            ("MCP_PROFILE_VALUE_CHARS", self.profile_value_chars),
+            ("MCP_PROFILE_DESCRIBE_ROWS", self.profile_describe_rows),
         ):
             if count < 1:
                 found.append(f"{name}={count}: a bound is 1 or more")
+        modes = self.allowed_profile_modes()
+        if not modes or not set(modes) <= set(PROFILE_MODES):
+            found.append(
+                f"MCP_PROFILE_MODES={self.profile_modes!r}: name one mode at least, "
+                "comma-separated, among sample, bernoulli and full"
+            )
+        if not _CLIENT_TAG_RE.fullmatch(self.profile_client_tag):
+            found.append(
+                f"MCP_PROFILE_CLIENT_TAG={self.profile_client_tag!r}: a client tag is 1 to "
+                "100 letters, digits and _ . : = / -, without a comma"
+            )
+        budget = self.profile_timeout_seconds
+        if not math.isfinite(budget) or budget < 0:
+            found.append(
+                f"MCP_PROFILE_TIMEOUT_SECONDS={budget:g}: a time budget is 0 (the call's) "
+                "or a number of seconds above 0"
+            )
+        elif 0 < self.call_timeout_seconds < budget:
+            found.append(
+                f"MCP_PROFILE_TIMEOUT_SECONDS={budget:g} is past "
+                f"MCP_CALL_TIMEOUT_SECONDS={self.call_timeout_seconds:g}: the aggregate query "
+                f"runs within its call; set it to {self.call_timeout_seconds:g} or less, or 0 "
+                "for the call's budget"
+            )
         if self.context_canary and not _is_table_name(self.context_canary):
             found.append(
                 f"MCP_CONTEXT_CANARY={self.context_canary!r}: name one table as "
@@ -428,6 +482,7 @@ class Config:
     @staticmethod
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
         """Read every setting from the environment."""
+        tag = os.environ.get("MCP_PROFILE_CLIENT_TAG", DEFAULT_PROFILE_CLIENT_TAG)
         return Config(
             trino_host=os.environ.get("TRINO_HOST", "localhost"),
             trino_port=int(os.environ.get("TRINO_PORT", "8080")),
@@ -519,5 +574,14 @@ class Config:
             profile_sample_rows=int(
                 os.environ.get("MCP_PROFILE_SAMPLE_ROWS", str(DEFAULT_PROFILE_SAMPLE_ROWS))
             ),
+            profile_modes=os.environ.get("MCP_PROFILE_MODES", DEFAULT_PROFILE_MODES),
+            profile_value_chars=int(
+                os.environ.get("MCP_PROFILE_VALUE_CHARS", str(DEFAULT_PROFILE_VALUE_CHARS))
+            ),
+            profile_describe_rows=int(
+                os.environ.get("MCP_PROFILE_DESCRIBE_ROWS", str(DEFAULT_PROFILE_DESCRIBE_ROWS))
+            ),
+            profile_client_tag=tag.strip(),
+            profile_timeout_seconds=float(os.environ.get("MCP_PROFILE_TIMEOUT_SECONDS", "0")),
             visibility_switch=os.environ.get("MCP_VISIBILITY_ENABLED", ""),
         )

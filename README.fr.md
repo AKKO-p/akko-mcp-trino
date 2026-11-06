@@ -358,9 +358,34 @@ Le [README](README.md#local-hosts-over-stdio) donne la configuration.
 | `list_tables` | `catalog`, `schema`, `offset` (facultatif) | une page des tables et vues de ce schéma, `next_offset`, `truncated` |
 | `describe_schema` | `catalog`, `schema`, `offset` (facultatif) | une page de tables entières avec leur type, leur commentaire et toutes leurs colonnes (nom, type, commentaire), `next_offset`, `shortened` ; avec un fournisseur de contexte, une `description` par table et `context_sources` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 à 20) | colonnes, types, commentaires, `truncated` ; un échantillon gouverné sur demande ; ce qu'ajoutent les descripteurs d'une extension, et `describer_errors` quand l'un a échoué ; avec un fournisseur de contexte, `table`, `column_context`, `terms`, `context_sources`, `context_truncated` et `undescribed_columns` (voir [Contexte d'un catalogue](#contexte-dun-catalogue)) |
-| `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (tous facultatifs sauf la table) | `{"table", "scope", "rows": n, "columns": [{"column", "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}` : des agrégats des lignes que l'appelant peut lire, calculés par une seule requête sous son identité, donc masques et filtres de lignes s'appliquent comme dans `execute_query`. Les `columns` sont nommées comme `DESCRIBE` les liste, par défaut les `MCP_PROFILE_MAX_COLUMNS` premières. `mode` vaut `sample` (par défaut : les `MCP_PROFILE_SAMPLE_ROWS` premières lignes, `"scope": "first_rows"`, pas un tirage aléatoire), `bernoulli` (`TABLESAMPLE BERNOULLI (percent)`, `0 < percent <= 100`, `"scope": "random_sample"`, parcourt toutes les lignes pour tirer l'échantillon) ou `full` (toutes les lignes que l'appelant peut lire, `"scope": "visible_rows"`, dans le budget de temps de l'appel, sinon `"kind": "time_budget"`). `null_fraction` vaut null quand `rows` vaut 0. Un type sans ordre (`array`, `map`, `row`, `json`, tout type qu'on ne sait pas ordonné) n'a que son compte et `"skipped": ["distinct", "min", "max"]` ; `min` et `max` sont rendus comme les cellules d'`execute_query` |
+| `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (tous facultatifs sauf la table) | `{"table", "scope", "rows": n, "columns_cut": bool, "columns": [{"column", "type", "non_null", "null_fraction", "approx_distinct", "min", "max"}]}` : des agrégats des lignes que l'appelant peut lire, calculés par une seule requête sous son identité, donc masques et filtres de lignes s'appliquent comme dans `execute_query`. Les `columns` sont nommées comme `DESCRIBE` les liste, par défaut les `MCP_PROFILE_MAX_COLUMNS` premières ; `DESCRIBE` est lu jusqu'à `MCP_PROFILE_DESCRIBE_ROWS` lignes, et `"columns_cut": true` dit qu'il en listait plus, qu'on ne peut pas nommer. `mode` est l'un de `MCP_PROFILE_MODES` : `sample` (par défaut : les `MCP_PROFILE_SAMPLE_ROWS` premières lignes, `"scope": "first_rows"`, pas un tirage aléatoire), `bernoulli` (`TABLESAMPLE BERNOULLI (percent)`, `0 < percent <= 100`, `"scope": "random_sample"`, parcourt toutes les lignes pour tirer l'échantillon) ou `full` (toutes les lignes que l'appelant peut lire, `"scope": "visible_rows"`) ; un mode que le serveur ne permet pas est refusé avant toute requête, et la description ne nomme que les modes permis. La requête d'agrégats porte l'étiquette client `MCP_PROFILE_CLIENT_TAG` et tourne dans `MCP_PROFILE_TIMEOUT_SECONDS` (0 : le budget de l'appel) ; au-delà, elle est annulée dans Trino et la réponse est `"kind": "time_budget"`. `null_fraction` vaut null quand `rows` vaut 0. Un type sans ordre (`array`, `map`, `row`, `json`, tout type qu'on ne sait pas ordonné) n'a que son compte et `"skipped": ["distinct", "min", "max"]` ; `min` et `max` sont rendus comme les cellules d'`execute_query`, et un texte ou un binaire plus long que `MCP_PROFILE_VALUE_CHARS` est coupé, avec `"cut": ["min"]`, `["max"]` ou les deux |
 | `explain_query` | `sql` | `{"valid": true}` : Trino a analysé la requête en lecture sous l'identité de l'appelant, sans l'exécuter ; le plan seulement si `EXPLAIN` figure dans `MCP_EXTRA_READ_COMMANDS` |
 | `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | colonnes, lignes, nombre de lignes, `truncated` |
+
+La requête d'agrégats de `profile_table` porte l'étiquette client `MCP_PROFILE_CLIENT_TAG`
+(`mcp-profile` par défaut) : les groupes de ressources de Trino peuvent ainsi borner leur nombre
+simultané et leur mémoire, par exemple avec le gestionnaire de groupes de ressources par fichier (les
+chiffres sont un exemple à adapter, pas une mesure) :
+
+```json
+{
+  "rootGroups": [
+    {
+      "name": "global",
+      "softMemoryLimit": "80%",
+      "hardConcurrencyLimit": 100,
+      "maxQueued": 1000,
+      "subGroups": [
+        {"name": "profile", "softMemoryLimit": "10%", "hardConcurrencyLimit": 2, "maxQueued": 20}
+      ]
+    }
+  ],
+  "selectors": [
+    {"clientTags": ["mcp-profile"], "group": "global.profile"},
+    {"group": "global"}
+  ]
+}
+```
 
 Chaque tool passe par Trino sous l'identité du mode choisi, les tools de liste compris : Trino ne
 liste que ce que cette identité peut voir. Une valeur masquée ou une ligne absente est la policy
@@ -590,6 +615,11 @@ Le contexte suit ce que Trino liste pour l'appelant. Les réglages, avec leurs v
 | `MCP_CONTEXT_CANARY` | une table `catalog.schema.table` qu'aucun appelant de ce serveur ne doit voir : le contexte n'est servi à un appelant que tant que Trino la lui cache | aucune |
 | `MCP_CONTEXT_TEXT_CHARS`, `MCP_CONTEXT_RESPONSE_CHARS`, `MCP_CONTEXT_MAX_COLUMNS` | texte d'un champ, contexte d'une réponse, colonnes décrites par table, 1 au moins | `500`, `60000`, `500` |
 | `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS` | colonnes que `profile_table` profile au plus en un appel, et lignes que lit son mode `sample`, 1 au moins | `50`, `100000` |
+| `MCP_PROFILE_MODES` | modes que `profile_table` permet, séparés par des virgules, parmi `sample`, `bernoulli` et `full` ; vide ou nom inconnu : refus de démarrer | `sample,bernoulli,full` |
+| `MCP_PROFILE_VALUE_CHARS` | caractères d'un `min` ou d'un `max` texte ou binaire qu'il sert, au-delà desquels la valeur est coupée, 1 au moins | `200` |
+| `MCP_PROFILE_DESCRIBE_ROWS` | lignes de son `DESCRIBE` qu'il lit, au-delà du plafond de lignes, 1 au moins ; une colonne au-delà ne peut pas être nommée | `5000` |
+| `MCP_PROFILE_CLIENT_TAG` | étiquette client de sa requête d'agrégats (pas de son `DESCRIBE`), pour un groupe de ressources de Trino : 1 à 100 lettres, chiffres et `_ . : = / -` | `mcp-profile` |
+| `MCP_PROFILE_TIMEOUT_SECONDS` | budget de temps de sa requête d'agrégats, au-delà duquel elle est annulée dans Trino ; 0 : le budget de l'appel, sinon au plus `MCP_CALL_TIMEOUT_SECONDS` quand celui-ci est au-dessus de 0 | `0` |
 | `MCP_VISIBILITY_ENABLED` | supprimé en 0.8 : le filtre par les droits de Trino ne se désactive pas, et `false` refuse de démarrer | aucune |
 
 `--check` imprime une ligne `context:` (les fournisseurs et chaque réglage du tableau, de

@@ -161,6 +161,11 @@ def build_server(
         context=context,
         profile_max_columns=config.profile_max_columns,
         profile_sample_rows=config.profile_sample_rows,
+        profile_modes=config.allowed_profile_modes(),
+        profile_value_chars=config.profile_value_chars,
+        profile_describe_rows=config.profile_describe_rows,
+        profile_client_tag=config.profile_client_tag,
+        profile_timeout_seconds=config.profile_timeout_seconds,
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds)
     registrars = [r for ext in exts for r in ext.tool_registrars()]

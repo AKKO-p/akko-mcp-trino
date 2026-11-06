@@ -7,10 +7,12 @@ them, so masks and row filters apply, and nothing but the aggregates comes back.
 import datetime as dt
 import decimal
 import json
+import threading
 
 import pytest
 
 from akko_mcp_trino import tools as tools_module
+from akko_mcp_trino import trino_client
 from akko_mcp_trino.audit import InMemoryAudit
 from akko_mcp_trino.audit import time as audit_time
 from akko_mcp_trino.server import build_server
@@ -42,9 +44,11 @@ class Trino:
     def __init__(self, *answers):
         self.answers = list(answers)
         self.calls = []
+        self.keywords = []
 
     def query(self, sql, user=None, params=None, **keywords):
         self.calls.append(sql)
+        self.keywords.append(keywords)
         out = self.answers.pop(0)
         if isinstance(out, BaseException):
             raise out
@@ -53,7 +57,7 @@ class Trino:
         return out
 
 
-def _profile(*answers, max_columns=50, sample_rows=100000, audit=None, budget=0.0):
+def _profile(*answers, max_columns=50, sample_rows=100000, audit=None, budget=0.0, **settings):
     mcp, trino = FakeMCP(), Trino(*answers)
     register_query_tools(
         mcp,
@@ -62,6 +66,7 @@ def _profile(*answers, max_columns=50, sample_rows=100000, audit=None, budget=0.
         call_timeout_seconds=budget,
         profile_max_columns=max_columns,
         profile_sample_rows=sample_rows,
+        **settings,
     )
     return mcp.tools["profile_table"], trino
 
@@ -84,6 +89,7 @@ def test_profile_table_sends_one_aggregate_query_and_never_show_stats():
         "table": ORDERS,
         "scope": "first_rows",
         "rows": 3,
+        "columns_cut": False,
         "columns": [
             {
                 "column": "id",
@@ -353,7 +359,7 @@ def test_nothing_but_the_aggregates_comes_back():
     answer.update(truncated=False, stats={"anything": 1}, columns=["c"] * 9)
     tool, _ = _profile(DESCRIBED, answer)
     out = _call(tool, "tpch", "tiny", "orders")
-    assert set(out) == {"table", "scope", "rows", "columns"}
+    assert set(out) == {"table", "scope", "rows", "columns_cut", "columns"}
 
 
 def test_a_trino_error_is_returned_with_its_kind():
@@ -393,7 +399,6 @@ def test_the_audit_line_names_the_aggregate_the_table_and_one_row():
 def test_the_description_says_the_aggregates_run_as_the_caller():
     tool, _ = _profile()
     doc = tool.__doc__
-    assert "columns past the server's row limit for DESCRIBE cannot be named" in doc
     assert doc.startswith(
         "Profile a table from the rows you may read: an aggregate query runs as you, so "
         "masks and row filters apply as in execute_query."
@@ -420,3 +425,191 @@ def test_the_server_bounds_the_profile_by_its_settings(monkeypatch):
     out = _call(mcp.tools["profile_table"], "tpch", "tiny", "orders")
     assert [c["column"] for c in out["columns"]] == ["a"]
     assert sent[1].endswith(f'FROM (SELECT "a" FROM {ORDERS} LIMIT 7)')
+
+
+# ---- the settings: modes, value length, DESCRIBE rows, client tag, time budget
+
+
+def test_a_mode_this_server_closed_is_refused_without_a_query():
+    tool, trino = _profile(DESCRIBED, profile_modes=("sample", "bernoulli"))
+    out = _call(tool, "tpch", "tiny", "orders", mode="full")
+    assert out["kind"] == "invalid_argument" and trino.calls == []
+    assert "sample, bernoulli" in out["error"], "the refusal names the modes allowed"
+
+
+def test_the_default_mode_closed_is_refused_too():
+    tool, trino = _profile(DESCRIBED, profile_modes=("full",))
+    out = _call(tool, "tpch", "tiny", "orders")
+    assert out["kind"] == "invalid_argument" and "full" in out["error"] and trino.calls == []
+
+
+def test_the_description_names_only_the_modes_this_server_allows():
+    tool, _ = _profile(profile_modes=("sample", "full"))
+    assert '"sample"' in tool.__doc__ and '"full"' in tool.__doc__
+    assert "bernoulli" not in tool.__doc__.lower()
+    tool, _ = _profile()
+    assert all(f'"{m}"' in tool.__doc__ for m in ("sample", "bernoulli", "full"))
+
+
+def test_a_long_text_value_is_cut_and_says_so():
+    columns = _described(("name", "varchar(40)"), ("raw", "varbinary"), ("code", "char(3)"))
+    row = _aggregates(2, 2, 2, "abcdefgh", "abc", 2, 2, b"\x00\x01\x02", b"\xff", 2, 1, "x", "y")
+    tool, _ = _profile(columns, row, profile_value_chars=5)
+    by_name = {c["column"]: c for c in _call(tool, "tpch", "tiny", "orders")["columns"]}
+    assert (by_name["name"]["min"], by_name["name"]["max"]) == ("abcde", "abc")
+    assert by_name["name"]["cut"] == ["min"]
+    assert (by_name["raw"]["min"], by_name["raw"]["max"]) == ("00010", "ff")
+    assert by_name["raw"]["cut"] == ["min"]
+    assert "cut" not in by_name["code"]
+    row = _aggregates(1, 1, 1, "abcdefgh", "abcdefgh")
+    tool, _ = _profile(_described(("name", "varchar")), row, profile_value_chars=2)
+    assert _call(tool, "tpch", "tiny", "orders")["columns"][0]["cut"] == ["min", "max"]
+
+
+def test_numbers_dates_and_booleans_are_never_cut():
+    columns = _described(
+        ("n", "bigint"), ("d", "date"), ("b", "boolean"), ("p", "decimal(12,2)"), ("u", "uuid")
+    )
+    row = _aggregates(
+        1,
+        1,
+        1,
+        123456789,
+        987654321,
+        1,
+        1,
+        dt.date(2026, 1, 2),
+        dt.date(2026, 3, 4),
+        1,
+        1,
+        False,
+        True,
+        1,
+        1,
+        decimal.Decimal("1234567.89"),
+        decimal.Decimal("9876543.21"),
+        1,
+        1,
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+    )
+    tool, _ = _profile(columns, row, profile_value_chars=1)
+    out = _call(tool, "tpch", "tiny", "orders")
+    assert [c["min"] for c in out["columns"]] == [
+        123456789,
+        "2026-01-02",
+        False,
+        "1234567.89",
+        "00000000-0000-0000-0000-000000000001",
+    ]
+    assert not [c for c in out["columns"] if "cut" in c]
+
+
+def test_describe_is_read_up_to_its_own_bound_and_says_when_it_was_cut():
+    three = _described(("a", "bigint"), ("b", "bigint"), ("c", "bigint"))
+    tool, trino = _profile(three, _aggregates(0, 0, 0, None, None), profile_describe_rows=2)
+    out = _call(tool, "tpch", "tiny", "orders", columns=["a"])
+    assert trino.keywords[0] == {"row_limit": 3}, "one row more than its bound, past the cap"
+    assert out["columns_cut"] is True
+    tool, trino = _profile(three, profile_describe_rows=2)
+    out = _call(tool, "tpch", "tiny", "orders", columns=["c"])
+    assert out["kind"] == "invalid_argument" and len(trino.calls) == 1
+    tool, _ = _profile(three, _aggregates(0, 0, 0, None, None), profile_describe_rows=3)
+    assert _call(tool, "tpch", "tiny", "orders", columns=["c"])["columns_cut"] is False
+
+
+def test_the_description_names_the_setting_that_bounds_describe():
+    tool, _ = _profile()
+    assert "columns past MCP_PROFILE_DESCRIBE_ROWS for DESCRIBE cannot be named" in tool.__doc__
+    assert "TRINO_MAX_ROWS" not in tool.__doc__
+
+
+def test_the_aggregate_query_has_its_own_budget():
+    tool, trino = _profile(DESCRIBED, _aggregates(1, 1, 1, 1, 1, 1, 1, "a", "a"))
+    _call(tool, "tpch", "tiny", "orders")
+    assert "timeout" not in trino.keywords[1], "0: the call's budget"
+    tool, trino = _profile(
+        DESCRIBED, _aggregates(1, 1, 1, 1, 1, 1, 1, "a", "a"), profile_timeout_seconds=4.5
+    )
+    _call(tool, "tpch", "tiny", "orders")
+    assert trino.keywords[1]["timeout"] == 4.5 and "timeout" not in trino.keywords[0]
+
+
+# ---- through the real Trino client: its row cap, its client tags, its cancel
+
+
+def _through_the_client(monkeypatch, described, aggregate, **settings):
+    """profile_table of a server built over the real TrinoClient, with the Trino driver
+    replaced: it answers DESCRIBE with ``described`` (tuples) and the aggregate with the
+    row ``aggregate``, or, for "slow", only once the query is cancelled. Returns the tool,
+    the statements with the client tags each was sent with, and the cursors."""
+    seen, cursors = [], []
+
+    class Cursor:
+        query_id = "q1"
+        description = [("c",)]
+
+        def __init__(self, tags):
+            self.tags, self.rows, self.slow, self.cancelled = tags, [], False, 0
+            self.stop = threading.Event()
+
+        def execute(self, sql, params=None):
+            seen.append((sql, self.tags))
+            if sql.startswith("DESCRIBE"):
+                self.rows = list(described)
+            elif aggregate == "slow":
+                self.slow = True
+            else:
+                self.rows = [tuple(aggregate)]
+
+        def fetchmany(self, n):
+            if self.slow:
+                assert self.stop.wait(5), "the budget never cancelled the query"
+                raise RuntimeError("Query was canceled")
+            return self.rows[:n]
+
+        def cancel(self):
+            self.cancelled += 1
+            self.stop.set()
+
+    def connect(**kw):
+        cursor = Cursor(kw.get("client_tags"))
+        cursors.append(cursor)
+        return type("Connection", (), {"cursor": lambda self: cursor})()
+
+    monkeypatch.setattr(trino_client.trino.dbapi, "connect", connect)
+    mcp, _ = build_server(core_config(**settings), mcp_factory=lambda name, **_: FakeMCP())
+    return mcp.tools["profile_table"], seen, cursors
+
+
+def test_a_table_wider_than_the_row_cap_is_profiled_to_its_last_column(monkeypatch):
+    wide = [(f"c{i:03d}", "bigint", "", "") for i in range(150)]
+    tool, seen, _ = _through_the_client(
+        monkeypatch, wide, (5, 4, 4, 1, 9), max_rows=100, profile_max_columns=150
+    )
+    out = _call(tool, "tpch", "tiny", "orders", columns=["c149"])
+    assert out["columns_cut"] is False and out["columns"][0]["column"] == "c149"
+    assert seen[1][0].startswith('SELECT count(*), count("c149")')
+
+
+def test_the_client_tag_is_on_the_aggregate_and_not_on_describe(monkeypatch):
+    tool, seen, _ = _through_the_client(
+        monkeypatch, [("id", "bigint", "", "")], (1, 1, 1, 1, 1), profile_client_tag="agents"
+    )
+    _call(tool, "tpch", "tiny", "orders")
+    assert [tags for _, tags in seen] == [None, ["agents"]]
+    with trino_client.query_tags("tool=profile_table"):
+        _call(tool, "tpch", "tiny", "orders")
+    assert [tags for _, tags in seen[2:]] == [
+        ["tool=profile_table"],
+        ["tool=profile_table", "agents"],
+    ], "added to the tags an extension sets, never in their place"
+
+
+def test_its_own_budget_past_says_time_budget_and_cancels_the_query(monkeypatch):
+    tool, seen, cursors = _through_the_client(
+        monkeypatch, [("id", "bigint", "", "")], "slow", profile_timeout_seconds=0.05
+    )
+    out = _call(tool, "tpch", "tiny", "orders", mode="full")
+    assert out["kind"] == "time_budget" and "columns" not in out
+    assert cursors[1].cancelled >= 1, "the query is cancelled in Trino"

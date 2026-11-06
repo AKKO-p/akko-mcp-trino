@@ -166,12 +166,16 @@ def test_the_core_never_sends_trino_the_callers_own_token():
     assert "return bearer" not in source
 
 
-def test_the_core_audit_line_has_its_six_fields_and_trino_gets_only_the_gate_tag():
+def test_the_core_audit_line_has_its_six_fields_and_trino_gets_only_its_two_tags():
     line = AuditEvent(request_id="r", tool="t", subject="s", ok=True).as_dict()
     assert set(line) == {"request_id", "tool", "subject", "ok", "error", "duration_ms"}
     assert 'f"request_id=' not in _source() and 'f"tool=' not in _source()
-    # The one client tag of the core marks the statements of the filter by Trino's rights.
-    assert set(re.findall(r'^[A-Z_]*TAG = "([^"]*)"', _source(), re.M)) == {"mcp-gate"}
+    # The client tags of the core: one marks the statements of the filter by Trino's rights,
+    # the other, by default, the aggregate query of profile_table (MCP_PROFILE_CLIENT_TAG).
+    assert set(re.findall(r'^[A-Z_]*TAG = "([^"]*)"', _source(), re.M)) == {
+        "mcp-gate",
+        "mcp-profile",
+    }
     assert "query_tags(GATE_TAG)" in (CORE / "trino_client.py").read_text(encoding="utf-8")
 
 

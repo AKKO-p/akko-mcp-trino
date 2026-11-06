@@ -481,8 +481,20 @@ def test_cli_check_says_the_bounds_of_profile_table(monkeypatch, capsys):
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("MCP_PROFILE_MAX_COLUMNS", "12")
     monkeypatch.setenv("MCP_PROFILE_SAMPLE_ROWS", "3456")
+    monkeypatch.setenv("MCP_PROFILE_MODES", "sample,full")
+    monkeypatch.setenv("MCP_PROFILE_VALUE_CHARS", "78")
+    monkeypatch.setenv("MCP_PROFILE_DESCRIBE_ROWS", "901")
+    monkeypatch.setenv("MCP_PROFILE_CLIENT_TAG", "agents-profile")
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "4.5")
     assert check_config(Config.from_env()) == 0
-    assert "profile_table: up to 12 columns, sample of 3456 first rows" in capsys.readouterr().out
+    assert (
+        "profile_table: modes sample, full; up to 12 columns, sample of 3456 first rows, "
+        "values cut at 78 characters, DESCRIBE read up to 901 rows, client tag agents-profile, "
+        "time budget 4.5 s"
+    ) in capsys.readouterr().out
+    monkeypatch.setenv("MCP_PROFILE_TIMEOUT_SECONDS", "0")
+    assert check_config(Config.from_env()) == 0
+    assert "client tag agents-profile, time budget the call's\n" in capsys.readouterr().out
 
 
 def test_cli_check_shows_a_malformed_algorithm_setting_as_written(monkeypatch, capsys):
