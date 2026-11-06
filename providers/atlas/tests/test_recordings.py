@@ -45,3 +45,33 @@ def test_every_term_named_is_in_its_glossary_listing(version):
         glossary = qualified.rpartition("@")[2]
         if glossary in listed:
             assert guid in listed[glossary], f"{qualified} is missing from its glossary listing"
+
+
+@pytest.mark.parametrize("version", VERSIONS, ids=lambda p: p.name)
+def test_a_paging_client_finds_every_named_term(version):
+    """Pages read as a client reads them: offset 0, then by the limit, until a short page."""
+    named: dict[str, set[str]] = {}
+    pages: dict[tuple[str, int], dict] = {}
+    for path in sorted(version.glob("*.json")):
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        _named_terms(doc, named)
+        if path.name.startswith("search-terms-of-glossary-"):
+            body = doc["request"]["body"]
+            glossary = body["entityFilters"]["attributeValue"].lstrip("@")
+            pages[(glossary, body["offset"])] = doc
+    for glossary in {g for g, _ in pages}:
+        limit = pages[(glossary, 0)]["request"]["body"]["limit"]
+        seen: set[str] = set()
+        offset = 0
+        while True:
+            assert (glossary, offset) in pages, f"no page at offset {offset} of {glossary}"
+            page = pages[(glossary, offset)]
+            assert page["request"]["body"]["limit"] == limit
+            entities = page["response"]["body"].get("entities") or []
+            seen |= {entity["guid"] for entity in entities}
+            if len(entities) < limit:
+                break
+            offset += limit
+        for guid, (qualified,) in named.items():
+            if qualified.endswith("@" + glossary):
+                assert guid in seen, f"a paging client never reads {qualified}"

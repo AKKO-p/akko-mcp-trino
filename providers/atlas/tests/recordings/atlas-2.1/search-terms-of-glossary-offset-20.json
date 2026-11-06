@@ -8,7 +8,7 @@
    },
    "excludeDeletedEntities": true,
    "limit": 10,
-   "offset": 23,
+   "offset": 20,
    "typeName": "AtlasGlossaryTerm"
   },
   "method": "POST",
@@ -17,7 +17,7 @@
  },
  "response": {
   "body": {
-   "approximateCount": 32,
+   "approximateCount": 29,
    "entities": [
     {
      "attributes": {
@@ -168,7 +168,7 @@
     "includeSubClassifications": true,
     "includeSubTypes": true,
     "limit": 10,
-    "offset": 23,
+    "offset": 20,
     "typeName": "AtlasGlossaryTerm"
    }
   },

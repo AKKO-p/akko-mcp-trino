@@ -22,8 +22,8 @@ The 2.1 answers were changed further, by hand:
 
 - business attributes were removed: tables keep `stewardship.approvalStatus` and
   `stewardship.ownerTeam`, columns and terms keep `approvalStatus` only;
-- the glossary listing was rewritten: it announces 32 terms, in pages at offsets 0, 10 and 23
-  (the gap is not recorded), and its last page holds every term the other recordings name.
+- the glossary listing was rewritten: it announces 29 terms, in pages of 10 at offsets 0, 10
+  and 20, read as a client pages, and holds every term the other recordings name.
 
 `test_recordings.py` checks that the recordings agree with one another; `anonymize.py` says how
 to add a version.
