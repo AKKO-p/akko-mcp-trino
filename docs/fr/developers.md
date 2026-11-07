@@ -359,8 +359,7 @@ Le contrat vérifie que :
   `ContextContract.REPLY_MARGIN_SECONDS` (0,5 s), sans laisser de requête ouverte ;
 - par une vraie socket vers un catalogue de données qui ne répond jamais, seul et derrière la
   chaîne du cœur, une lecture de tables ou de termes coûte l'échéance plus cette marge et se dit
-  indisponible, et sa connexion est fermée : aucune requête ne reste en attente dans le
-  catalogue de données ;
+  indisponible, et sa connexion est fermée par le client ;
 - un 401 lève `ProviderRefused` et n'est pas réessayé ;
 - un délai dépassé, un 503 ou un corps qui n'est pas du JSON lève `ProviderUnavailable` ;
 - ni les journaux (`httpx` à `WARNING`, comme le serveur le règle), ni `check_lines()` relu après

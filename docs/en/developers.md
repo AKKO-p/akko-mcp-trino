@@ -347,7 +347,7 @@ The contract checks that:
   `ContextContract.REPLY_MARGIN_SECONDS` (0.5 s), and leaves no request open;
 - over a real socket to a data catalog that never answers, alone and behind the core's chain, a
   read of tables or of terms costs the deadline plus that margin and is unavailable, and its
-  connection is closed, so that no request stays pending at the data catalog;
+  connection is closed by the client;
 - a 401 raises `ProviderRefused` and is not retried;
 - a timeout, a 503 or a body that is not JSON raises `ProviderUnavailable`;
 - neither the logs (`httpx` at `WARNING`, as the server sets it), nor `check_lines()` read again

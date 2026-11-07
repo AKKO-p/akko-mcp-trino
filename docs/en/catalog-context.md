@@ -72,8 +72,9 @@ they use up that reserve. A statement that is too slow proves nothing (`not_chec
 or the select check, no join for a target), and the call still answers. Anything else that fails
 on the way serves no context and says `error` for every source. The call stops waiting for a
 read 0.25 s past its deadline at most. A provider that follows the contract has then closed its
-connection to the data catalog, so no request stays pending there; a read that ignores its
-cancellation is abandoned.
+connection to the data catalog, so the server holds nothing open there. HTTP cannot withdraw a
+request already sent: the data catalog may still read and answer it, and that answer reaches no
+one. A read that ignores its cancellation is abandoned.
 
 ## What describe_schema serves
 
