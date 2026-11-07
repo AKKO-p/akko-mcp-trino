@@ -21,7 +21,7 @@ These pages describe `main`. The documentation of a release is at its tag.
 |---|---|
 | [Deployment](deployment.md) | install and run, the transports, the container, Helm on Kubernetes and OpenShift, Trino Gateway, with or without a data catalog, with or without modules |
 | [Identity](identity.md) | the four identity modes, the user claim, token verification, what happens on a request |
-| [Connect an MCP host](hosts.md) | Claude Desktop, Cursor, any stdio host, the Python SDK, an agent |
+| [Connect an MCP host](hosts.md) | Claude Desktop, Cursor, Claude Code, VS Code, any stdio host, the Python SDK, two agents (one on the Mistral Agents API) |
 | [Context from a data catalog](catalog-context.md) | what a context provider serves, its limits, the `file` provider |
 | [Modules](modules.md) | `token-policy`, `fingerprint-audit` and `trino-tags`, with real examples |
 | [Developers](developers.md) | the architecture, tool plugins, extensions, writing a context provider |

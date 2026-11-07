@@ -1,0 +1,19 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "trino-token",
+      "description": "The user's access token for the MCP server",
+      "password": true
+    }
+  ],
+  "servers": {
+    "trino": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:trino-token}"
+      }
+    }
+  }
+}

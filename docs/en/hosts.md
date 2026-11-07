@@ -3,8 +3,9 @@
 **English** · [Français](../fr/hosts.md)
 
 The host sends the user's access token, issued for this server. The server verifies it and names
-the caller in the audit line. This page connects two MCP hosts, Claude Desktop and Cursor, then
-any stdio host, the Python SDK and an agent. It covers three paths:
+the caller in the audit line. This page connects four MCP hosts, Claude Desktop, Cursor, Claude
+Code and VS Code, then any stdio host, the Python SDK and two agents, one of them on the Mistral
+Agents API. It covers three paths:
 
 | Path | Transport | Who the query runs as | For |
 |---|---|---|---|
@@ -13,13 +14,16 @@ any stdio host, the Python SDK and an agent. It covers three paths:
 | [3. A shared server for a team](#3-a-shared-server-for-a-team-streamable-http-and-a-token-per-user) | streamable HTTP over https | each user, from their own bearer token (`jwt`, the default) | a team, one server |
 
 > **What we verified, and what we did not.** We ran every JSON block of the three paths, with only
-> the placeholders changed, through the official MCP Python SDK. It started each stdio entry, or
-> sent each HTTP entry's `url` and `headers`, against the sandbox with akko-mcp-trino 0.7.0 from
-> PyPI and Docker Hub. It listed the 8 tools of 0.7 and called `search_columns`. The pins were
-> raised to 0.7.2 afterwards, and the nine tools listed below are those of `main`; neither was
-> part of that run. The keys of each block are the ones the hosts document, and the repository's
-> tests check them. We did not drive the Claude Desktop or Cursor interfaces: the menu names come
-> from their documentation. The [appendix](#appendix-what-was-verified) gives the details.
+> the placeholders changed, through the official MCP Python SDK, against the sandbox with its data
+> catalog. The run used akko-mcp-trino built from `main`, not a release. The SDK started each
+> stdio entry, or sent each HTTP entry's `url` and `headers`. It listed the nine tools, called
+> `search_columns`, and called `describe_table` on a table the data catalog describes. Claude
+> Code's `claude mcp add` and `claude mcp list` ran for real; asking it a question needs a login,
+> and we did not run that step. The Mistral agent ran for real, with a Mistral key. The keys of
+> each block are the ones the hosts document, and the repository's tests check them. We did not
+> drive the Claude Desktop, Cursor or VS Code interfaces: the menu names come from their
+> documentation. The pins stay at 0.7.2, the current release. The
+> [appendix](#appendix-what-was-verified) gives the versions and the details.
 
 ## Where the configuration lives
 
@@ -30,12 +34,17 @@ any stdio host, the Python SDK and an agent. It covers three paths:
 | Claude Desktop, Linux | `~/.config/Claude/claude_desktop_config.json` | same |
 | Cursor, every project | `~/.cursor/mcp.json`, in your home directory (`%USERPROFILE%\.cursor\mcp.json` on Windows) | |
 | Cursor, one project | `.cursor/mcp.json` at the project's root | |
+| Claude Code | `~/.claude.json` for the scopes `local` (the default) and `user`; `.mcp.json` at the project's root for the scope `project` | written by `claude mcp add`; `claude mcp list` checks each server |
+| VS Code, one workspace | `.vscode/mcp.json` in the workspace | the object is `servers`, not `mcpServers` |
+| VS Code, every workspace | the `mcp.json` of your user profile, opened by the command **MCP: Open User Configuration** | same |
 
-Both files hold one object, `mcpServers`, with one entry per server. The examples name the entry
-`trino`. If your file already has other servers, add the entry next to them.
+The files of Claude Desktop, Cursor and Claude Code hold one object, `mcpServers`, with one entry
+per server. VS Code names that object `servers`, and keeps the values it asks you for in `inputs`.
+The examples name the entry `trino`. If your file already has other servers, add the entry next
+to them.
 
-**How each host reaches the server.** Cursor connects to a streamable HTTP server itself, with an
-entry that has a `url` and `headers`. Claude Desktop's configuration file starts local servers
+**How each host reaches the server.** Cursor, Claude Code and VS Code connect to a streamable HTTP
+server themselves, with an entry that has a `url` and `headers`. Claude Desktop's configuration file starts local servers
 only, with an entry that has a `command`, its `args` and `env`. Its remote connectors, added under
 **Customize > Connectors**, connect from Anthropic's cloud, not from your computer
 ([Claude Help Center](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp)).
@@ -96,18 +105,79 @@ The header's value goes in `env`, and `args` holds `Authorization:${AUTH_HEADER}
 space. `mcp-remote` replaces `${AUTH_HEADER}` itself, and its documentation warns that Claude
 Desktop on Windows and Cursor mangle spaces inside `args`.
 
+For **Claude Code**, add the server from the command line
+([Claude Code, MCP](https://code.claude.com/docs/en/mcp)):
+
+```bash
+claude mcp add --transport http trino http://localhost:3000/mcp \
+  --header "Authorization: Bearer <the user's access token>"
+```
+
+```text
+Added HTTP MCP server trino with URL: http://localhost:3000/mcp to local config
+Headers: {
+  "Authorization": "[REDACTED]"
+}
+```
+
+The default scope, `local`, keeps the entry in `~/.claude.json`, for you and this project only.
+`--scope project` writes it to `.mcp.json`, a file meant to be shared: never put a token there.
+
+For **VS Code**, put this in `.vscode/mcp.json`
+([`examples/vscode-mcp.json`](../../examples/vscode-mcp.json)):
+
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "trino-token",
+      "description": "The user's access token for the MCP server",
+      "password": true
+    }
+  ],
+  "servers": {
+    "trino": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:trino-token}"
+      }
+    }
+  }
+}
+```
+
+VS Code asks for the token the first time it starts the server, and keeps it out of the file
+([VS Code, MCP configuration](https://code.visualstudio.com/docs/copilot/reference/mcp-configuration)).
+
 ### Check that it works
 
 In Cursor, the server is listed under **Customize**, with its tools under *Available Tools*. In
 Claude Desktop, open the **+** menu of the message box (*Add files, connectors, and more*), then
-**Connectors**, **Manage connectors**, and select `trino`. You should see nine tools:
+**Connectors**, **Manage connectors**, and select `trino`. In VS Code, run the command
+**MCP: List Servers**. Claude Code checks each server from the command line:
+
+```bash
+claude mcp list
+```
+
+```text
+Checking MCP server health…
+
+trino: http://localhost:3000/mcp (HTTP) - ✔ Connected
+```
+
+In a Claude Code session, `/mcp` shows the server's status. You should see nine tools:
 `search_columns`, `list_catalogs`, `list_schemas`, `list_tables`, `describe_schema`,
 `describe_table`, `profile_table`, `explain_query` and `execute_query`. The 0.7 releases have 8,
 without `profile_table`. Then ask the two questions of the
 [quickstart](quickstart.md#ask-a-question).
 
 To switch users, paste another token and restart the server. In Cursor, turn it off and on again
-under **Customize**; in Claude Desktop, restart the application.
+under **Customize**; in Claude Desktop, restart the application. In Claude Code, run
+`claude mcp remove trino`, then add it again with the new token. VS Code stores the token it
+asked for; its documentation does not say how to replace it, and we did not try.
 
 ## 2. Your own Trino, from your workstation: stdio and `oauth2`
 
@@ -201,7 +271,14 @@ below). For `TRINO_VERIFY`, mount the authority into the container too
 
 Starting the server and listing its tools never triggers a login, so the host shows the tools at
 once. The first tool call does. The server opens Trino's login page in your browser and writes
-its URL to stderr, which the hosts keep in their logs. Claude Desktop writes
+its URL to stderr, which the hosts keep in their logs. In the sandbox run, where Trino is
+`trino`, the line read:
+
+```text
+WARNING:akko_mcp_trino.trino_client:Open this URL to authenticate with Trino: https://trino:8443/oauth2/token/initiate/...
+```
+
+Claude Desktop writes
 `mcp-server-trino.log` in `~/Library/Logs/Claude`, `%APPDATA%\Claude\logs` or
 `~/.config/Claude/logs`; Cursor shows it in the **Output** panel, under **MCP Logs**. Sign in.
 The server then checks who you are with `SELECT current_user` and runs the call.
@@ -274,6 +351,9 @@ If the server's certificate is signed by your organization's own authority, add
 shell. `mcp-remote` can also read the header from a file (`--header-file`, one `Name: value` per
 line) instead of the configuration.
 
+For **Claude Code** and **VS Code**, use the command and the file of path 1 with the server's
+address, `https://mcp.example.com/mcp`.
+
 **Getting and renewing the token.** Each user asks the identity provider for an access token
 whose audience is the server (`MCP_OIDC_AUDIENCE` or `MCP_RESOURCE_URL`), the way your
 organization hands out tokens to command-line tools. The server refuses a token issued for Trino,
@@ -291,7 +371,7 @@ audit would name that user for everyone. The same reasoning rules out one shared
 
 ## Local hosts over stdio
 
-Claude Desktop, Cursor and Mistral Vibe can start the server themselves. There is no HTTP
+Claude Desktop, Cursor, Claude Code, VS Code and Mistral Vibe can start the server themselves. There is no HTTP
 request then, so the server takes the caller's identity from the environment: the user's own
 access token, issued for this server, verified exactly like a bearer header, and bound to the
 process. With `MCP_AUTH_REQUIRED=true`, the default, the server refuses to start without it.
@@ -330,6 +410,30 @@ The entry below is [`examples/mcp-stdio.json`](../../examples/mcp-stdio.json):
 
 `MCP_JWT_USER_CLAIM` is set for Keycloak; the default is `sub` (see
 [The user claim](identity.md#the-user-claim)).
+
+In **Claude Code**, each variable goes in an `--env`, and the command follows `--`:
+
+```bash
+claude mcp add trino \
+  --env MCP_TRANSPORT=stdio \
+  --env TRINO_HOST=trino.example.internal \
+  --env TRINO_PORT=8443 \
+  --env TRINO_HTTP_SCHEME=https \
+  --env MCP_JWKS_URL=https://idp.example.com/realms/data/protocol/openid-connect/certs \
+  --env MCP_OIDC_ISSUER=https://idp.example.com/realms/data \
+  --env MCP_OIDC_AUDIENCE=akko-mcp \
+  --env MCP_JWT_USER_CLAIM=preferred_username \
+  --env TRINO_TOKEN_EXCHANGE_URL=https://idp.example.com/realms/data/protocol/openid-connect/token \
+  --env TRINO_TOKEN_EXCHANGE_CLIENT_ID=akko-mcp \
+  --env "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET=<this server's client secret>" \
+  --env TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \
+  --env "MCP_USER_TOKEN=<the user's access token, issued for the MCP server>" \
+  -- uvx akko-mcp-trino==0.7.2
+```
+
+`claude mcp get trino` then shows the entry, the variables in clear, and `Status: ✔ Connected`
+once the server answers. In **VS Code**, the same entry goes under `servers`, with
+`"type": "stdio"`.
 
 ## From Python
 
@@ -373,30 +477,96 @@ python examples/agent.py "Which catalogs can I see, and what is in them?"
 
 The [examples](../../examples/README.md) folder has the details.
 
+## From the Mistral Agents API
+
+[`examples/mistral_agents.py`](../../examples/mistral_agents.py) uses the official `mistralai` SDK
+and its MCP client. The MCP client runs in your process: it reaches the server with the user's
+token in a header and runs each tool call the model asks for. Mistral's Conversations API receives
+the question, the tool descriptions and the tool results. It never receives the token and never
+reaches the server, so the server can stay on `localhost` or on a private network.
+
+```python
+async def main(question: str) -> None:
+    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
+    server = MCPClientStreamableHTTP(
+        StreamableHTTPServerParams(
+            url=os.environ.get("MCP_URL", "http://localhost:3000/mcp"),
+            headers={"Authorization": f"Bearer {os.environ['USER_TOKEN']}"},
+        )
+    )
+    model = os.environ.get("MISTRAL_MODEL", "mistral-medium-latest")
+    async with RunContext(model=model) as run_ctx:
+        await run_ctx.register_mcp_client(server)
+        result = await client.beta.conversations.run_async(run_ctx=run_ctx, inputs=question)
+```
+
+The file adds the imports and prints each tool call, the start of each tool result, then the
+answer:
+
+```bash
+pip install "mistralai[agents]==3.7.0"
+export MISTRAL_API_KEY=...
+export MCP_URL=http://localhost:3000/mcp
+export USER_TOKEN=<the user's access token>
+python examples/mistral_agents.py "Which customers do we have, with their e-mail and country?"
+```
+
+With Carol's token and `mistral-medium-latest`, the model listed the catalogs, the schemas and
+the tables, described `customers`, then read it. Carol gets five European customers, with masked
+addresses:
+
+```text
+tool call: list_catalogs {}
+tool result: [{"type": "text", "text": "{\"catalogs\": [\"demo\"], \"next_offset\": null, \"truncated\": false}"}]
+tool call: list_schemas {"catalog": "demo"}
+...
+tool call: describe_table {"catalog": "demo", "schema": "crm", "table": "customers"}
+...
+tool call: execute_query {"sql": "SELECT full_name, email, country FROM demo.crm.customers"}
+...
+Here are the customers with their email addresses and countries:
+
+| **Full Name**   | **Email**               | **Country** |
+|-----------------|-------------------------|-------------|
+| Lena Vogel      | ***@example.com         | DE          |
+| Hugo Martin     | ***@example.com         | FR          |
+| Sofia Ruiz      | ***@example.org         | ES          |
+| Giulia Conti    | ***@example.org         | IT          |
+| Emma de Vries   | ***@example.org         | NL          |
+```
+
 ## Check a configuration without the host
 
 [`examples/check_host_config.py`](../../examples/check_host_config.py) reads the same file the
 host reads, starts or reaches the server the way the host would, lists the tools and calls
-`search_columns`. It is not part of the package: run it from a clone of this repository, with
-Python 3.12 or later.
+`search_columns`. With `--describe`, it also calls `describe_table`. It is not part of the
+package: run it from a clone of this repository, with Python 3.12 or later.
 
 ```bash
 git clone https://github.com/AKKO-p/akko-mcp-trino.git
 cd akko-mcp-trino
 python3 -m venv .venv && . .venv/bin/activate
 pip install akko-mcp-trino==0.7.2
-python3 examples/check_host_config.py ~/.cursor/mcp.json --search email
+python3 examples/check_host_config.py ~/.cursor/mcp.json --search email --describe demo.crm.customers
 ```
 
-```
+Against the sandbox with its data catalog (the `catalogs` profile), with Carol's token, the
+output was:
+
+```text
 entry: trino (streamable HTTP)
 server: trino-mcp 0.7.2
-8 tools: search_columns, list_catalogs, list_schemas, list_tables, describe_schema, describe_table, explain_query, execute_query
+9 tools: search_columns, list_catalogs, list_schemas, list_tables, describe_schema, describe_table, profile_table, explain_query, execute_query
 search_columns('email'):
-{"tables": [...], "matches": [...], "complete": true, "next_cursor": null}
+{"tables": [{"catalog": "demo", "schema": "crm", "table": "customers", "comment": "People and companies who hold an account"}], "matches": [{"catalog": "demo", "schema": "crm", "table": "customers", "column": "email", "type": "varchar", "comment": null}], "schemas_searched": 5, "not_searched": [], "complete": true, "next_cursor": null}
+describe_table('demo.crm.customers'):
+{"columns": ["Column", "Type", "Extra", "Comment"], "rows": [["id", "integer", "", ""], ...], "truncated": false, "next_column_offset": null, "columns_cut": false, "table": {"description": "Everyone who holds an account: one row per person or company", "sources": {"description": "atlas"}, "terms": [{"name": "Customer", "ref": "t1"}]}, "column_context": {"id": {"description": "Identifier of the customer", "sources": {"description": "atlas"}}, ...}, "terms": {"t1": {"name": "Customer", "glossary": "Sales", "definition": "A person or a company that holds at least one account", "status": "approved", "source": "atlas"}}, "context_truncated": false, "undescribed_columns": [], "context_sources": {"atlas": "ok"}}
 ```
 
-This output is from 0.7.2, which has 8 tools. From 0.8, the list also includes `profile_table`.
+The run used `main`, which still reports version 0.7.2. The `description`, the terms and
+`context_sources` come from the data catalog, Apache Atlas, through the server: see
+[Context from a data catalog](catalog-context.md). A server without a data catalog, such as the stdio entry
+above, answers with the columns only.
 
 It resolves Cursor's `${env:NAME}` from your environment, as Cursor does, and stops if one is not
 set. For a file that holds several servers, name the entry with `--server trino`.
@@ -421,32 +591,60 @@ set. For a file that holds several servers, name the entry with `--server trino`
 
 ## Appendix: what was verified
 
-On November 1 and 2, 2026, the runs used the sandbox at commit `dac01db` on a Linux host,
-akko-mcp-trino 0.7.0 from PyPI (`uvx akko-mcp-trino==0.7.0`) and Docker Hub
-(`akkoai/akko-mcp-trino:0.7.0`), the official MCP Python SDK 2.3.0, Node.js 22 and 20.18.1, and
-`mcp-remote` 0.15.2. The pins of this page were raised to 0.7.2 afterwards.
+On November 7, 2026, the runs used akko-mcp-trino built from commit `2236ee9` of `main`, as an
+image and as a wheel, on a Linux host. That build reports version 0.7.2. They used the sandbox at
+commit `67f936a` with its `catalogs` profile: `trinodb/trino:482`,
+`quay.io/keycloak/keycloak:26.7.5`, `openpolicyagent/opa:1.21.1-static`, `postgres:17.11-alpine`
+and Apache Atlas 2.4.0, built from the sandbox's `catalogs/atlas/Dockerfile`. The clients were the
+official MCP Python SDK 2.3.0 on Python 3.13, Node.js 22.23.4, `mcp-remote` 0.15.2, uv 0.13.7,
+Claude Code 2.1.319 (`@anthropic-ai/claude-code` from npm) and `mistralai` 3.7.0. Each run listed
+nine tools, found `demo.crm.customers.email` with `search_columns("email")`, and called
+`describe_table` on `demo.crm.customers`.
 
 | Configuration | Run as | Result |
 |---|---|---|
-| Cursor, path 1 (`url`, `headers`) | streamable HTTP, Carol's token | 8 tools in 0.7; `search_columns("email")` finds `demo.crm.customers.email` |
-| Claude Desktop, path 1 (`npx mcp-remote`) | stdio, the bridge started by the client, on Node.js 22 and on Node.js 20.18.1 | the same |
-| Cursor and Claude Desktop, path 2 (`uvx`, `oauth2`) | stdio, the sandbox's Trino with its OAuth2 authenticator, a scripted browser signing in at Keycloak | the warning quoted above at start; 8 tools in 0.7 before any login; the first call opens the login, then answers; `SELECT current_user` returns `carol_analyst` |
-| path 2, the host giving up | a first call with a 5-second timeout during the login, then a second call | the first times out, the second answers as `carol_analyst` |
-| path 2 with Docker | stdio, `docker run -i` | 8 tools in 0.7, the search answers |
-| Cursor and Claude Desktop, path 3 | https behind a TLS proxy, a private authority (`NODE_EXTRA_CA_CERTS` for the bridge) | 8 tools in 0.7, the search answers |
-| the errors in the table | `curl` and the same clients | the messages quoted above |
+| Cursor, path 1 (`url`, `headers`) | streamable HTTP, Carol's token | 9 tools; the search answers; `describe_table` carries the data catalog's context, `context_sources` `{"atlas": "ok"}` |
+| Claude Desktop, path 1 (`npx mcp-remote`) | stdio, the bridge started by the client, on Node.js 22 | the same |
+| VS Code, path 1 (`servers`, `inputs`) | streamable HTTP, the input answered with Carol's token | the same |
+| Claude Code, path 1 | `claude mcp add --transport http`, then `claude mcp list` and `claude mcp get` | `✔ Connected`, as quoted above |
+| Cursor and Claude Desktop, path 2 (`uvx`, `oauth2`) | stdio, the sandbox's Trino with an OAuth2 authenticator, a scripted browser signing in at Keycloak | the warning quoted above at start; 9 tools before any login; the first call writes the login URL, then answers once signed in; the audit names `carol_analyst` |
+| path 2 with Docker | stdio, `docker run -i` | the same |
+| Cursor and Claude Desktop, path 3 | https behind a TLS proxy, a private authority (`NODE_EXTRA_CA_CERTS` for the bridge, `SSL_CERT_FILE` for the SDK) | 9 tools; the search answers; `describe_table` carries the context |
+| the stdio entry (`MCP_USER_TOKEN`) | stdio, `jwt` mode, token exchange at Keycloak | 9 tools; the search answers; `describe_table` returns the columns, without context, as that entry configures no data catalog |
+| Claude Code, the stdio entry | `claude mcp add ... -- uvx ...`, then `claude mcp get` | `✔ Connected` |
+| From Python | the block run as it is | `{"columns": ["_col0"], "rows": [[1]], "row_count": 1, "truncated": false}` |
+| From the Mistral Agents API | `mistral-medium-latest`, Carol's token | the tool calls and the answer quoted above |
 
 For the sandbox runs, only the placeholders changed: the token, Trino's name inside the sandbox
-network (`trino`), its catalog `demo` and its demo authority (`TRINO_VERIFY`). The Docker run
-also had `--network` and a volume for that authority. The checker resolved Cursor's
-`${env:NAME}`, the way Cursor's documentation describes. The Trino OAuth2 authenticator was added
-to the sandbox for this test only: the sandbox itself authenticates with JWT. The rows of the
-errors table on `PATH` and on an old Trino come from the documentation, not from a run. We did
-not open Claude Desktop or Cursor and click through them.
+network (`trino`), its catalog `demo`, the identity provider's addresses and its demo authority
+(`TRINO_VERIFY`, and `TRINO_TOKEN_EXCHANGE_VERIFY` for the stdio entry). `akko-mcp-trino==0.7.2`
+became the wheel built from `main` (`uvx --from <wheel> akko-mcp-trino`), and the Docker image
+the image built from `main`. The Docker run also had `--network` and a volume for the authority.
+The checker answered VS Code's `${input:trino-token}` from `INPUT_TRINO_TOKEN`. The Trino OAuth2
+authenticator was added to the sandbox for this test only: the sandbox itself authenticates with
+JWT.
+
+What did not run on `main`:
+
+- Asking Claude Code a question, and its `/mcp` panel: both need a login to Anthropic, and we used
+  none. The commands for that step come from Claude Code's documentation.
+- VS Code's interface, and its stdio entry: VS Code cannot be driven here. Its file was run through
+  the SDK, with its keys as VS Code's documentation gives them.
+- The Claude Desktop, Cursor and VS Code interfaces, menus included.
+- [`examples/agent.py`](../../examples/agent.py), with `mistral-small-latest` and then
+  `mistral-medium-latest`: the provider answered `429 - Rate limit exceeded` each time. Its first run on `main` failed on a name the SDK 2.3.0
+  had changed (`Tool.inputSchema`, now `Tool.input_schema`); the example is fixed.
+- Path 2 with the host giving up during the login, and the bridge on Node.js 20.18.1. Both ran on
+  November 1 and 2, 2026, with akko-mcp-trino 0.7.0 and the sandbox at commit `dac01db`.
+- The rows of the errors table. They come from that same run of 0.7.0, except the rows on `PATH`
+  and on an old Trino, which come from the documentation.
 
 Sources: [Connect to local MCP servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers)
 (Claude Desktop's file, logs and tools),
 [Add a connector that isn't in the directory](https://claude.com/docs/connectors/custom) (Claude's
 remote connectors), [Cursor, Model Context Protocol](https://cursor.com/docs/context/mcp)
-(Cursor's files, keys and variables) and [mcp-remote](https://github.com/punkpeye/mcp-remote) (the
-bridge).
+(Cursor's files, keys and variables), [Claude Code, MCP](https://code.claude.com/docs/en/mcp)
+(`claude mcp`, its scopes and files),
+[VS Code, MCP configuration](https://code.visualstudio.com/docs/copilot/reference/mcp-configuration)
+(`servers`, `inputs` and the keys of an entry) and [mcp-remote](https://github.com/punkpeye/mcp-remote)
+(the bridge).

@@ -151,6 +151,50 @@ def test_the_stdio_entry_of_the_hosts_page_is_the_example_file(language):
     assert example in blocks
 
 
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_the_vscode_file_of_the_hosts_page_is_the_example_file(language):
+    """The .vscode/mcp.json the page shows is examples/vscode-mcp.json, byte for byte once
+    parsed."""
+    import json
+
+    page = (ROOT / "docs" / language / "hosts.md").read_text(encoding="utf-8")
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", page, re.S)]
+    example = json.loads((ROOT / "examples" / "vscode-mcp.json").read_text(encoding="utf-8"))
+    assert example in blocks
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_the_claude_code_stdio_command_launches_the_stdio_entry(language):
+    """`claude mcp add ... -- uvx ...` on the page sets the variables of examples/mcp-stdio.json,
+    in the same order and with the same values, and runs the same command."""
+    import json
+    import shlex
+
+    page = (ROOT / "docs" / language / "hosts.md").read_text(encoding="utf-8")
+    [command] = [
+        b for b in re.findall(r"```bash\n(.*?)```", page, re.S) if "--env MCP_TRANSPORT" in b
+    ]
+    words = shlex.split(command.replace("\\\n", " "))
+    cut = words.index("--")
+    env = [words[i + 1].split("=", 1) for i in range(cut) if words[i] == "--env"]
+    entry = json.loads((ROOT / "examples" / "mcp-stdio.json").read_text(encoding="utf-8"))
+    entry = entry["mcpServers"]["trino"]
+    assert words[:4] == ["claude", "mcp", "add", "trino"]
+    assert [tuple(e) for e in env] == list(entry["env"].items())
+    assert words[cut + 1 :] == [entry["command"], *entry["args"]]
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_the_mistral_agent_of_the_hosts_page_is_the_example_file(language):
+    """The code and the commands the page shows are those of examples/mistral_agents.py."""
+    page = (ROOT / "docs" / language / "hosts.md").read_text(encoding="utf-8")
+    example = (ROOT / "examples" / "mistral_agents.py").read_text(encoding="utf-8")
+    [code] = [b for b in re.findall(r"```python\n(.*?)```", page, re.S) if "RunContext" in b]
+    [run] = [b for b in re.findall(r"```bash\n(.*?)```", page, re.S) if "mistral_agents" in b]
+    assert code in example
+    assert all(f"    {line}" in example.splitlines() for line in run.splitlines())
+
+
 # The one sentence that says what SHOW STATS or EXPLAIN can show, in each language.
 _ALLOWED = {
     "en": "Some reads, such as `SHOW STATS` or `EXPLAIN`, can show facts beyond a row filter or a "

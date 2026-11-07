@@ -22,7 +22,7 @@ Ces pages décrivent `main`. La documentation d'une version publiée se trouve �
 |---|---|
 | [Déploiement](deployment.md) | installer et lancer, les transports, le conteneur, Helm sur Kubernetes et OpenShift, Trino Gateway, avec ou sans catalogue de données, avec ou sans modules |
 | [Identité](identity.md) | les quatre modes d'identité, le claim de l'utilisateur, la vérification du token, le trajet d'une requête |
-| [Brancher un MCP host](hosts.md) | Claude Desktop, Cursor, tout MCP host en stdio, le SDK Python, un agent |
+| [Brancher un MCP host](hosts.md) | Claude Desktop, Cursor, Claude Code, VS Code, tout MCP host en stdio, le SDK Python, deux agents (dont un sur l'API Agents de Mistral) |
 | [Contexte d'un catalogue de données](catalog-context.md) | ce que sert un fournisseur de contexte, ses limites, le fournisseur `file` |
 | [Modules](modules.md) | `token-policy`, `fingerprint-audit` et `trino-tags`, avec des exemples réels |
 | [Développeurs](developers.md) | l'architecture, les plugins de tools, les extensions, écrire un fournisseur de contexte |
