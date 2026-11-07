@@ -36,6 +36,7 @@ from akko_mcp_trino.context import (
     TermRef,
 )
 from akko_mcp_trino.testing import ContextContract, ContractHarness, ContractNames
+from akko_mcp_trino.testing.context_contract import _SLOW_SECONDS
 
 log = logging.getLogger(__name__)
 
@@ -455,6 +456,20 @@ class Late(Recorded):
             raise
 
 
+class CutLate(Recorded):
+    """Cuts its reads long after its deadline, as late as the contract's slow catalogue."""
+
+    async def _all(self, calls: list, deadline: float) -> list:
+        return await super()._all(calls, deadline + _SLOW_SECONDS)
+
+
+class Threaded(Recorded):
+    """Sends each request from a thread, where no cancellation reaches the socket."""
+
+    async def _get(self, path: str, params: dict[str, str]) -> Any:
+        return await asyncio.to_thread(asyncio.run, super()._get(path, params))
+
+
 class Retrying(Recorded):
     """Sends a refused request again."""
 
@@ -653,6 +668,16 @@ RESET = "test_a_reset_hook_is_synchronous_quick_and_quiet"
             "test_a_slow_catalogue_returns_before_the_deadline_plus_margin_and_closes_its_connection",
             "past its deadline",
         ),
+        (
+            Lingering,
+            "test_a_read_past_its_deadline_closes_its_connection",
+            "must close its connection: 1 of 2 left open",
+        ),
+        (
+            Lingering,
+            "test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection",
+            "must close its connection: 1 of 2 left open",
+        ),
     ],
 )
 def test_the_contract_catches_a_provider_that_breaks_a_rule(kind, check, says):
@@ -704,3 +729,23 @@ def test_a_provider_without_an_owner_passes_and_says_why_the_owner_is_not_checke
     contract.test_served_sets_reflect_the_configuration(harness)
     with pytest.raises(pytest.skip.Exception, match="declares no owner"):
         getattr(contract, OWNER_CHECK)(harness)
+
+
+def test_a_provider_that_cuts_after_the_chain_is_cut_once_by_the_chain():
+    """A cut far later than the chain's own: the chain's single cancellation ends the read and
+    closes its connection, and leaving ``asyncio.timeout`` on it disarms the provider's timer.
+    A cut that fires during that close, a few milliseconds after the chain's cancellation, can
+    still leave the connection open; no test can show that race deterministically."""
+    ContextContract().test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
+        harness_of(CutLate)
+    )
+
+
+def test_a_client_in_a_thread_leaves_its_connection_open():
+    """A client run in a thread is out of reach of any cancellation: its connection stays open
+    until the client's own timeout, whatever the chain does. The contract says so, and only
+    that."""
+    with pytest.raises(pytest.fail.Exception, match="must close its connection: 1 of 1 left open"):
+        ContextContract().test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
+            harness_of(Threaded)
+        )

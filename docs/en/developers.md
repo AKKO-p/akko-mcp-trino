@@ -239,13 +239,45 @@ follows these rules:
 - It imports neither `akko_mcp_trino.trino_client` nor `akko_mcp_trino.identity`, never receives
   the Trino client or the caller's identity, and never writes to its data catalog.
 
+The chain ends a read past its deadline in bounded time, and cancels it once at most. At the
+deadline, a provider that keeps it has already cancelled its own request, and its HTTP client is
+closing the connection. A second cancellation would land in that close and cut it short: the
+connection would stay open, with the request still pending at the data catalog, which would serve
+it once it recovers. So the chain first gives a read still running at its deadline 0.1 s to end
+on its own. A read still running after that is cancelled, unless a cancellation is already on its
+way to it, and given 0.1 s more. A read that ignores its cancellation is abandoned and no longer
+holds its tables. What a read hands back within the first 0.1 s is served, with the status it
+earns. The call waits at most 0.25 s past the deadline: the chain's two waits take 0.2 s, and
+the 0.05 s left absorbs the event loop's lag; past it the call stops waiting first, and the
+reads still running are abandoned all the same. The call is then counted as one that ended:
+`partial` for a source that had already served tables, `unavailable` otherwise, and the statuses
+already settled, such as an open breaker. This is why
+`MCP_CONTEXT_RESERVE_SECONDS` is at least 0.3 with a provider.
+
+So the connection is closed only when the provider follows this rule:
+
+- its cut fires at the deadline, not later, with `asyncio.timeout(deadline - time.monotonic())`
+  for example;
+- the cut wraps the HTTP call itself, so that the client closes the connection while the
+  cancellation is pending;
+- after the cut, it awaits nothing: it returns or raises.
+
+A cut that fires later than the deadline, child tasks that hold timeouts of their own, or an HTTP
+client run in a thread can leave a connection open, with its request pending at the data catalog.
+A later cut can meet the chain's cancellation in the client's close; a child task's own cut is
+not seen by the chain; a thread is out of reach of any cancellation.
+
 ### The contract
 
 `akko_mcp_trino.testing` publishes the contract that checks these rules. Install it in the
 provider's test environment with `pip install "akko-mcp-trino[contract]"`, which brings `pytest`
-with a version range, not a pin. It needs no network, no data catalog and no Trino. The provider
-sends its requests to a transport that answers from the data catalog's recorded answers, or, on
-purpose, late, with a 401, a 503, a body that is not JSON, or a 500 that holds the secret.
+with a version range, not a pin. It needs no data catalog, no Trino, and no network beyond the
+loopback interface: four checks open a socket on 127.0.0.1. The provider sends its requests to a
+transport that answers from the data catalog's recorded answers, or, on purpose, late, with a
+401, a 503, a body that is not JSON, or a 500 that holds the secret. The four checks send them
+over a real socket instead, to a server on 127.0.0.1 that accepts connections and never answers,
+for a describe and for terms, each with the provider alone and behind the core's chain. If your
+test suite blocks sockets, allow 127.0.0.1 for these checks.
 
 Subclass `ContextContract` in the provider's tests and give it a `harness` fixture that returns a
 `ContractHarness`: the factory `build(env, transport)`, the function `replay` that plays back the
@@ -313,6 +345,9 @@ The contract checks that:
 - no type carries a data value;
 - a slow data catalog returns control within the deadline plus
   `ContextContract.REPLY_MARGIN_SECONDS` (0.5 s), and leaves no request open;
+- over a real socket to a data catalog that never answers, alone and behind the core's chain, a
+  read of tables or of terms costs the deadline plus that margin and is unavailable, and its
+  connection is closed, so that no request stays pending at the data catalog;
 - a 401 raises `ProviderRefused` and is not retried;
 - a timeout, a 503 or a body that is not JSON raises `ProviderUnavailable`;
 - neither the logs (`httpx` at `WARNING`, as the server sets it), nor `check_lines()` read again

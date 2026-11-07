@@ -464,6 +464,74 @@ def test_reads_left_behind_count_against_the_cap_until_they_end(loop, stubborn):
     assert len(stubborn.calls) == 2
 
 
+def test_a_caller_that_stops_waiting_during_the_cut_leaves_no_key_held(loop, stubborn):
+    """The caller's own timeout lands once the chain has cancelled a read that ignores it: the
+    read abandoned no longer holds its table, it was cancelled once only, and the call is
+    counted as one that ended would be, a source that served tables as partial."""
+    stubborn.known[CLIENTS] = TableContext()
+    broken = Fake("broken")
+    broken.maps_error = OSError("unreadable")
+    metrics = Metrics()
+    chain = _chain(loop, stubborn, broken, clock=time.monotonic, metrics=metrics)
+    stubborn.delay = 0.0
+    chain.gather([ORDERS], deadline=time.monotonic() + 5)
+    stubborn.delay = 60.0
+    broken_before = metrics.registry.get_sample_value(
+        "mcp_trino_context_errors_total", {"provider": "broken", "status": "error"}
+    )
+
+    async def stop_waiting_once_the_chain_cancelled():
+        deadline = time.monotonic() + 0.5
+        gathering = asyncio.ensure_future(chain._gather((ORDERS, CLIENTS), deadline))
+        # No clock: the chain's own cancellation, then the caller's, in that order.
+        while stubborn.cancelled == 0:
+            await asyncio.sleep(0.001)
+        gathering.cancel()
+        try:
+            await gathering
+        except asyncio.CancelledError:
+            pass
+        return gathering.cancelled(), dict(chain._tables._inflight), dict(chain._tables._leaders)
+
+    cancelled, inflight, leaders = loop.submit(stop_waiting_once_the_chain_cancelled(), timeout=5)
+    assert cancelled and inflight == {} and leaders == {}
+    assert stubborn.cancelled == 1
+
+    def errors(provider, status):
+        labels = {"provider": provider, "status": status}
+        return metrics.registry.get_sample_value("mcp_trino_context_errors_total", labels)
+
+    assert errors("stubborn", "partial") == 1 and errors("stubborn", "unavailable") is None
+    assert errors("broken", "error") == broken_before + 1
+    stubborn.delay = 0.0
+    again = chain.gather([CLIENTS], deadline=time.monotonic() + 5)
+    assert again.statuses["stubborn"] == "ok" and len(stubborn.calls) == 3
+    _set(loop, stubborn.hold)
+    _until(lambda: _tasks_left(loop) == 0)
+
+
+def test_a_read_that_ends_in_the_first_wait_past_the_deadline_is_taken_as_it_ended(
+    loop, monkeypatch
+):
+    """What a source hands back within the wait it is given past its deadline is served, and
+    its status says so: complete data is not called partial. The source ends as soon as the
+    chain starts that wait, whatever the clock."""
+    fake = Fake("one", known={ORDERS: TableContext(description="A")})
+    _gate(loop, fake)
+    real_cut = chain_module._cut
+
+    async def opening_the_gate(late):
+        fake.gate.set()
+        return await real_cut(late)
+
+    monkeypatch.setattr(chain_module, "_cut", opening_the_gate)
+    chain = _chain(loop, fake, clock=time.monotonic)
+    # Far enough for the read to start before it: the gate, not the clock, ends the read.
+    got = chain.gather([ORDERS], deadline=time.monotonic() + 0.5)
+    assert got.statuses["one"] == "ok"
+    assert got.tables[ORDERS] == (("one", TableContext(description="A")),)
+
+
 def test_a_secret_changed_during_a_refused_call_is_tried_at_once(loop):
     fake = Fake("one")
     fake.fail = ProviderRefused("401")

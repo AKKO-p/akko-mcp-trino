@@ -123,7 +123,9 @@ Ces endpoints n'existent que sur les transports HTTP, sur le port de santé.
   `mcp_trino_query_duration_seconds`. Avec des fournisseurs de contexte chargés, il expose aussi,
   par fournisseur, `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total` (par statut),
   `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total` (trouvé ou
-  non), `mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`.
+  non), `mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`. Un appel que
+  l'outil cesse d'attendre est compté comme s'il avait fini, chaque source lue étant `partial` ou
+  `unavailable` ; un arrêt du serveur pendant une lecture en compte ainsi quelques-uns.
 
 ## Montée de version
 

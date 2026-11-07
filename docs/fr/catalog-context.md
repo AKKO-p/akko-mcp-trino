@@ -76,7 +76,10 @@ plus, et laisse `MCP_CONTEXT_RESERVE_SECONDS` du budget de l'appel. S'il en rest
 fournisseur n'est appelé, et les sources disent `unavailable`. Les requêtes du filtre de visibilité
 s'arrêtent avant d'entamer cette réserve. Une requête trop lente ne prouve rien (`not_checked` pour
 le canari ou le contrôle de lecture, pas de jointure vers une cible), et l'appel répond quand même.
-Tout autre échec en chemin ne sert aucun contexte et dit `error` pour chaque source.
+Tout autre échec en chemin ne sert aucun contexte et dit `error` pour chaque source. L'appel
+cesse d'attendre une lecture 0,25 s après son échéance au plus. Un fournisseur qui suit le contrat
+a alors fermé sa connexion au catalogue de données, si bien qu'aucune requête n'y reste en
+attente ; une lecture qui ignore son annulation est abandonnée.
 
 ## Ce que sert describe_schema
 
