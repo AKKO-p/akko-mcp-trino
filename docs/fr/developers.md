@@ -249,8 +249,7 @@ fournisseur suit ces règles :
 La chaîne termine en un temps borné une lecture qui dépasse son échéance, et ne l'annule qu'une
 fois au plus. À l'échéance, un fournisseur qui la respecte a déjà annulé sa propre requête, et son
 client HTTP ferme la connexion. Une seconde annulation tomberait pendant cette fermeture et
-l'interromprait : la connexion resterait ouverte, la requête toujours en attente dans le catalogue
-de données, qui la servirait une fois rétabli. La chaîne donne donc d'abord 0,1 s à une lecture
+l'interromprait : la connexion resterait ouverte, et le catalogue de données pourrait encore servir la requête une fois rétabli. La chaîne donne donc d'abord 0,1 s à une lecture
 encore en cours à son échéance pour finir d'elle-même. Une lecture encore en cours après ce délai
 est annulée, sauf si une annulation est déjà en route vers elle, et reçoit 0,1 s de plus. Une
 lecture qui ignore son annulation est abandonnée, et ne retient plus ses tables. Ce qu'une lecture
@@ -271,8 +270,7 @@ La connexion n'est donc fermée que si le fournisseur suit cette règle :
 - après la coupure, il n'attend plus rien : il rend ou il lève.
 
 Une coupure qui tombe après l'échéance, des tâches filles qui ont leurs propres délais, ou un
-client HTTP qui tourne dans un thread peuvent laisser une connexion ouverte, sa requête en
-attente dans le catalogue de données. Une coupure tardive peut rencontrer l'annulation de la
+client HTTP qui tourne dans un thread peuvent laisser une connexion ouverte, tenue par une requête que le catalogue de données peut encore servir. Une coupure tardive peut rencontrer l'annulation de la
 chaîne pendant la fermeture du client ; la coupure qu'une tâche fille porte elle-même échappe
 à la chaîne ; un thread est hors de portée de toute annulation.
 
@@ -356,11 +354,10 @@ Le contrat vérifie que :
   contrôle ;
 - aucun type ne porte de valeur ;
 - un catalogue de données lent rend la main avant l'échéance plus
-  `ContextContract.REPLY_MARGIN_SECONDS` (0,5 s), sans laisser de requête ouverte ;
+  `ContextContract.REPLY_MARGIN_SECONDS` (0,5 s), sans laisser de connexion ouverte ;
 - par une vraie socket vers un catalogue de données qui ne répond jamais, seul et derrière la
   chaîne du cœur, une lecture de tables ou de termes coûte l'échéance plus cette marge et se dit
-  indisponible, et sa connexion est fermée : aucune requête ne reste en attente dans le
-  catalogue de données ;
+  indisponible, et sa connexion est fermée par le client ;
 - un 401 lève `ProviderRefused` et n'est pas réessayé ;
 - un délai dépassé, un 503 ou un corps qui n'est pas du JSON lève `ProviderUnavailable` ;
 - ni les journaux (`httpx` à `WARNING`, comme le serveur le règle), ni `check_lines()` relu après
