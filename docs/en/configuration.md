@@ -59,7 +59,7 @@ says why.
 | `MCP_AUTH_ENABLED` | verify the callers' bearer tokens (token verification) | `true` |
 | `MCP_AUTH_REQUIRED` | refuse with `401` a request without a valid token. In `jwt` and `impersonation` modes, the server refuses to start without it. In `oauth2` mode, it adds an MCP token check and never disables the Trino login | `true` |
 | `MCP_JWKS_URL` | the identity provider's JWKS endpoint | none (required when authentication is enabled) |
-| `MCP_OIDC_ISSUER` | the issuer a token must carry | none (required when authentication is enabled; empty, every token is refused) |
+| `MCP_OIDC_ISSUER` | the issuer a token must carry | none (required when authentication is enabled: empty, the server refuses to start) |
 | `MCP_OIDC_AUDIENCE` | the audience a token must carry: the one the identity provider gives tokens issued for this server (RFC 8707); never Trino's | none (this or `MCP_RESOURCE_URL` is required when authentication is enabled) |
 | `MCP_RESOURCE_URL` | this server's canonical URL, such as `https://mcp.example.com/mcp`. It is accepted as an audience, and named in the protected resource metadata the server then publishes (RFC 9728) and in the challenge of a `401` | none |
 | `MCP_JWT_LEEWAY_SECONDS` | tolerance on `exp`, `nbf` and `iat` for clock drift between the issuer and this server | `30` |
