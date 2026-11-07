@@ -2,7 +2,7 @@
 
 An example that fails at its first import teaches nothing, and nothing else in
 the suite imports it. So every `from mcp... import name` in the examples and in
-the README's Python snippets is checked against the installed SDK.
+the documentation's Python snippets is checked against the installed SDK.
 """
 
 from __future__ import annotations
@@ -21,11 +21,12 @@ def _sources() -> list[tuple[str, str]]:
         (str(p.relative_to(ROOT)), p.read_text(encoding="utf-8"))
         for p in sorted((ROOT / "examples").glob("*.py"))
     ]
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    found += [
-        (f"README.md snippet {i}", block)
-        for i, block in enumerate(re.findall(r"```python\n(.*?)```", readme, re.S))
-    ]
+    for page in sorted((ROOT / "docs").glob("*/*.md")):
+        text = page.read_text(encoding="utf-8")
+        found += [
+            (f"{page.relative_to(ROOT)} snippet {i}", block)
+            for i, block in enumerate(re.findall(r"```python\n(.*?)```", text, re.S))
+        ]
     return found
 
 
@@ -63,7 +64,7 @@ _HOST_KEYS = {
     "cursor": [{"type", "command", "args", "env", "envFile"}, {"url", "headers", "auth"}],
     "mcp": [{"command", "args", "env"}, {"url", "headers"}],
 }
-# A block of the guide may be for either host.
+# A block of the pages that connect a host may be for either host.
 _HOST_KEYS["guide"] = _HOST_KEYS["claude-desktop"] + _HOST_KEYS["cursor"]
 
 
@@ -72,13 +73,13 @@ def _configs() -> list[tuple[str, dict]]:
         (p.name, json.loads(p.read_text(encoding="utf-8")))
         for p in sorted((ROOT / "examples").glob("*.json"))
     ]
-    guide = (ROOT / "docs" / "guides" / "connect-claude-desktop-cursor.md").read_text(
-        encoding="utf-8"
-    )
-    found += [
-        (f"guide json {i}", json.loads(block))
-        for i, block in enumerate(re.findall(r"```json\n(.*?)```", guide, re.S))
-    ]
+    for language in ("en", "fr"):
+        for page in ("hosts", "quickstart"):
+            text = (ROOT / "docs" / language / f"{page}.md").read_text(encoding="utf-8")
+            found += [
+                (f"guide {language}/{page} json {i}", json.loads(block))
+                for i, block in enumerate(re.findall(r"```json\n(.*?)```", text, re.S))
+            ]
     return found
 
 

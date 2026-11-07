@@ -7,16 +7,18 @@ Merci d'envisager une contribution. Ce projet est petit à dessein, et il doit l
 ## Règles de base
 
 - **Les tests d'abord.** Chaque changement vient avec un test qui échoue avant le changement et
-  passe après. La couverture doit rester à 100 % ; la CI refuse moins.
+  passe après. La couverture doit rester à 100 % ; la CI refuse moins.
 - **Le paquet reste neutre vis-à-vis des produits.** Rien dans `akko_mcp_trino/` ne peut importer
   une couche produit ni coder en dur une valeur d'un éditeur. `lint-vendor-neutral.sh` le vérifie.
 - **Le serveur ne décide pas des accès.** Trino en décide, pour l'identité que donne le mode
   d'identité. Un changement qui met une politique dans le serveur (listes de tables autorisées,
   réécriture du SQL par rôle…) sera refusé : cela relève du moteur.
-- **Échouer fermé.** Dans le doute, refuser. Une garde qui ne peut pas vérifier ne doit pas faire
+- **Refuser dans le doute.** Dans le doute, refuser. Un contrôle qui ne peut pas vérifier ne doit pas faire
   semblant.
-- **L'anglais dans le code.** Le code, les commentaires et les messages de commit sont en anglais.
-  Les README et ce guide existent en anglais et en français, et changent ensemble.
+- **Le code en anglais.** Le code, les commentaires et les messages de commit sont en anglais.
+  Les README, la documentation (`docs/en` et `docs/fr`, page par page) et ce guide existent en
+  anglais et en français, et changent ensemble. [Développeurs](docs/fr/developers.md#contribuer-à-la-documentation)
+  donne les termes qu'emploie la documentation.
 
 ## Installation
 
@@ -48,7 +50,7 @@ s'installe depuis un verrou, en versions exactes et avec leurs empreintes, écri
 | `requirements/image.txt` | `requirements/image.in` : les dépendances que le paquet déclare | l'image de conteneur, les contrôles de licences et de vulnérabilités |
 | `requirements/build.txt` | `requirements/build.in` : l'outil de construction et le backend de `[build-system]` | l'étape de construction de l'image, et les contrôles, avec `dev.txt` |
 | `requirements/release.txt` | `requirements/release.in` : les outils de construction et twine | la publication (sdist, wheel, envoi) |
-| `requirements/dev.txt` | `requirements/dev.in` : les outils des contrôles, par leur nom, aux versions de l'image et de la publication | la CI et l'installation de développement, sur chaque version de Python |
+| `requirements/dev.txt` | `requirements/dev.in` : les outils que lancent les contrôles, sans version dans la source, résolus aux versions de l'image et de la publication | la CI et l'installation de développement, sur chaque version de Python |
 | `requirements/kerberos.txt` | son `.in` : l'extra `kerberos` de l'adaptateur Atlas | le contrôle des licences seulement |
 
 Les versions des outils (pytest, ruff, mypy et les autres) ne vivent que dans
@@ -60,15 +62,15 @@ Les wheels et le sdist sont construits par le backend verrouillé, sans isolatio
 verrou. L'image installe son verrou par `pip install --only-binary=:all: --require-hashes`, puis le
 paquet sans ses dépendances ; `pip check` fait échouer la construction s'il manque au verrou une
 dépendance que le paquet ou un paquet verrouillé déclare. Il ne voit pas une dépendance qu'apporte
-seulement un extra, comme la CLI de `mcp[cli]`. L'adaptateur Atlas entre dans le verrou avec la
-version qui publie les deux ; d'ici là, l'image l'installe sans ses dépendances.
+seulement un extra, comme la CLI de `mcp[cli]`. Le fournisseur Atlas entrera dans le verrou
+avec la version qui publiera les deux paquets ; d'ici là, l'image l'installe sans ses dépendances.
 
-`dev.txt`, `image.txt` et `kerberos.txt` installent le paquet depuis son dossier (`-e`, ou
-`-r image.in`) ; ils laissent donc hors du verrou
-le paquet lui-même, pip et setuptools (`--unsafe-package`) : les contrôles installent `build.txt`,
-qui épingle setuptools, avec `dev.txt`. Un verrou qui épingle pip ou setuptools est compilé par
-Dependabot avec `--allow-unsafe`, qui échoue sur un paquet installé depuis son dossier. Les autres
-verrous les épinglent (`--allow-unsafe`). Le verrou `kerberos` construit gssapi et krb5 depuis
+`dev.txt`, `image.txt` et `kerberos.txt` installent le paquet depuis son dossier (`-e` ou
+`-r image.in`). Ils laissent donc hors du verrou le paquet lui-même, pip et setuptools
+(`--unsafe-package`). Dependabot compile tout verrou qui épingle pip ou setuptools avec
+`--allow-unsafe`, ce qui échoue pour un paquet installé depuis son dossier. setuptools reste quand
+même épinglé pour les contrôles, parce qu'ils installent `build.txt` avec `dev.txt`. `build.txt` et
+`release.txt` épinglent pip et setuptools (`--allow-unsafe`). Le verrou `kerberos` construit gssapi et krb5 depuis
 leurs sdists (empreintes vérifiées) contre le MIT Kerberos du système (`libkrb5-dev`) ; les outils
 de construction que pip télécharge pour ces deux-là ne sont pas verrouillés, et rien n'en entre
 dans l'image.
@@ -78,8 +80,8 @@ pour que l'image soit reproductible ; Dependabot en apporte les mises à jour 
 version corrective de Python ou de nouveaux paquets système, sous forme d'une nouvelle étiquette et
 d'un nouveau digest. Le Python de l'image est celui des verrous : `scripts/lock.sh` le lit dans la
 version de la ligne `FROM` du Dockerfile (`LOCK_PYTHON`), et `tests/test_locks.py` vérifie que les
-verrous ont été compilés avec lui. Une nouvelle version mineure de Python se fait à la main : la
-ligne `FROM`, puis `bash scripts/lock.sh compile` sur ce Python.
+verrous ont été compilés avec lui. Passer à une nouvelle version mineure de Python est une étape
+manuelle : la ligne `FROM`, puis `bash scripts/lock.sh compile` sur ce Python.
 
 `scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions : `LOCK_PYTHON`,
 les versions de Python des contrôles et de l'adaptateur Atlas (`CHECK_PYTHONS`), les plateformes de
@@ -114,7 +116,7 @@ lock.sh: requirements/image.txt resolves for linux/amd64 (52 wheels)
 lock.sh: requirements/image.txt resolves for linux/arm64 (52 wheels)
 ```
 
-pip-compile prévient que « The generated requirements file may be rejected by pip install » : le
+pip-compile prévient que « The generated requirements file may be rejected by pip install » : le
 paquet lui-même reste hors des verrous à dessein, car il s'installe depuis sa source.
 
 Dependabot met les verrous à jour une fois par mois, en une seule pull request, et ne déplace une
@@ -126,7 +128,7 @@ verrou `kerberos` a besoin.
 La publication télécharge un seul outil hors pip, `mcp-publisher`, à la version exacte de
 `MCP_PUBLISHER_VERSION` dans `.github/workflows/release.yml`, et échoue si son archive ne correspond
 pas à `MCP_PUBLISHER_SHA256`. Dependabot ne peut pas le suivre : pour le changer, on reprend les deux
-depuis la nouvelle version, l'empreinte étant la ligne de `mcp-publisher_linux_amd64.tar.gz` dans son
+depuis la nouvelle version. L'empreinte est la ligne de `mcp-publisher_linux_amd64.tar.gz` dans son
 `registry_<version>_checksums.txt`.
 
 ## Pull requests
@@ -137,7 +139,7 @@ depuis la nouvelle version, l'empreinte étant la ligne de `mcp-publisher_linux_
    *pourquoi* le changement existe. Les préfixes conventionnels (`feat:`, `fix:`, `docs:`) sont
    bienvenus.
 4. Mettez à jour `CHANGELOG.md` sous *Unreleased*.
-5. Ouvrez la pull request ; la CI lance le lint, la garde de neutralité, les tests sur chaque
+5. Ouvrez la pull request ; la CI lance le lint, le contrôle de neutralité, les tests sur chaque
    version de Python de `scripts/lock.sh`, la fraîcheur des verrous, la construction du paquet et
    celle de l'image.
 

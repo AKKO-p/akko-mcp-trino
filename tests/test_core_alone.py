@@ -114,11 +114,12 @@ def test_the_core_ships_its_listed_modules_and_no_other():
     assert {p.relative_to(CORE).with_suffix("").as_posix() for p in _modules()} == CORE_MODULES
 
 
-def test_every_setting_the_core_reads_is_documented():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_every_setting_the_core_reads_is_documented(language):
+    page = (ROOT / "docs" / language / "configuration.md").read_text(encoding="utf-8")
     read = set(re.findall(r'environ\.get\("([A-Z_]+)"', _source()))
     assert read, "the core reads its settings from the environment"
-    assert {name for name in read if f"`{name}`" not in readme} == set()
+    assert {name for name in read if f"`{name}`" not in page} == set()
 
 
 def test_the_core_identity_modes_are_exchange_impersonation_oauth2_or_one_named():
@@ -290,8 +291,8 @@ def test_adapters_install_the_contract_by_an_extra_with_ranges():
     assert project["optional-dependencies"]["contract"] == ["pytest>=8,<10"]
     for text in (
         testing.__doc__ or "",
-        (ROOT / "README.md").read_text(encoding="utf-8"),
-        (ROOT / "README.fr.md").read_text(encoding="utf-8"),
+        (ROOT / "docs" / "en" / "developers.md").read_text(encoding="utf-8"),
+        (ROOT / "docs" / "fr" / "developers.md").read_text(encoding="utf-8"),
     ):
         assert 'pip install "akko-mcp-trino[contract]"' in text
 

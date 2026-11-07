@@ -8,16 +8,18 @@ keeping it small is a feature.
 ## Ground rules
 
 - **Tests first.** Every change comes with a test that fails before the change
-  and passes after it. Coverage must stay at 100 %; CI refuses less.
+  and passes after it. Coverage must stay at 100%; CI refuses less.
 - **The package stays product-neutral.** Nothing in `akko_mcp_trino/` may import
   a product layer or hardcode a vendor value. `lint-vendor-neutral.sh` checks.
 - **The server does not decide access.** Trino does, for the identity the
   identity mode gives. A change that puts policy in the server (allow-lists of
   tables, per-role SQL rewriting…) will be declined: that belongs in the engine.
-- **Fail closed.** When in doubt, refuse. A guard that cannot verify must not
+- **Fail closed.** When in doubt, refuse. A check that cannot verify must not
   pretend to.
-- **English in the code** — code, comments, commit messages. The READMEs and
-  this guide exist in English and in French, changed together.
+- **Code in English.** Code, comments and commit messages are in English. The READMEs, the
+  documentation (`docs/en` and `docs/fr`, page for page) and this guide exist in English
+  and French and are updated together. [Developers](docs/en/developers.md#contributing-to-the-docs)
+  gives the terms the documentation uses.
 
 ## Set up
 
@@ -49,7 +51,7 @@ written by [pip-compile](https://pip-tools.readthedocs.io/) from its source:
 | `requirements/image.txt` | `requirements/image.in`: the dependencies the package declares | the container image, the license and vulnerability checks |
 | `requirements/build.txt` | `requirements/build.in`: the build frontend and the backend of `[build-system]` | the image's build stage, and the checks, with `dev.txt` |
 | `requirements/release.txt` | `requirements/release.in`: the build tools and twine | the release (sdist, wheel, upload) |
-| `requirements/dev.txt` | `requirements/dev.in`: the tools of the checks, by name, at the versions of the image and the release | CI and the set-up above, on every Python version |
+| `requirements/dev.txt` | `requirements/dev.in`: the tools the checks run, unpinned in the source, resolved to the versions used by the image and the release | CI and the setup above, on every Python version |
 | `requirements/kerberos.txt` | its `.in`: the `kerberos` extra of the Atlas provider | the license check only |
 
 The versions of the tools (pytest, ruff, mypy and the others) live in
@@ -63,15 +65,17 @@ The image installs its lock with `pip install --only-binary=:all:
 --require-hashes`, then the package without dependencies; `pip check` fails
 the build if the lock misses a dependency that the package or a locked package
 declares. It does not see a dependency that only an extra brings, such as the
-CLI of `mcp[cli]`. The Atlas provider enters the lock with the release that
-publishes both; until then the image installs it without dependencies.
+CLI of `mcp[cli]`. The Atlas provider will be added to the lock in the release
+that publishes both packages; until then, the image installs it without
+dependencies.
 
 `dev.txt`, `image.txt` and `kerberos.txt` install the package from its
-directory (`-e`, or `-r image.in`), so they leave out the package itself, pip and setuptools (`--unsafe-package`): the
-checks install `build.txt`, which pins setuptools, with `dev.txt`. A lock that
-pins pip or setuptools is compiled by Dependabot with `--allow-unsafe`, which
-fails on a package installed from its directory. The other locks pin them
-(`--allow-unsafe`). The `kerberos` lock builds gssapi and krb5 from their
+directory (`-e` or `-r image.in`). They therefore leave out the package itself,
+pip and setuptools (`--unsafe-package`). Dependabot compiles any lock that pins
+pip or setuptools with `--allow-unsafe`, and that fails for a package installed
+from its directory. setuptools still gets pinned for the checks, because they
+install `build.txt` together with `dev.txt`. `build.txt` and `release.txt` pin
+pip and setuptools (`--allow-unsafe`). The `kerberos` lock builds gssapi and krb5 from their
 sdists (hashes checked) against the system's MIT Kerberos (`libkrb5-dev`); the
 build tools pip fetches for those two are not locked, and nothing of it enters
 the image.
@@ -81,8 +85,8 @@ that the image is reproducible; Dependabot brings its security updates, a
 Python patch release or new system packages, as a new tag and digest. The
 image's Python is the one of the locks: `scripts/lock.sh` reads it from the
 version on the Dockerfile's `FROM` line (`LOCK_PYTHON`), and
-`tests/test_locks.py` checks that the locks were compiled on it. A new Python
-minor version is made by hand: the `FROM` line, then
+`tests/test_locks.py` checks that the locks were compiled on it. Moving to a new
+Python minor version is a manual step: the `FROM` line, then
 `bash scripts/lock.sh compile` on that Python.
 
 `scripts/lock.sh` is the one place CI and the release read the versions from:
@@ -132,8 +136,8 @@ image has the MIT Kerberos headers that the `kerberos` lock needs.
 The release downloads one tool outside pip, `mcp-publisher`, at the exact
 version of `MCP_PUBLISHER_VERSION` in `.github/workflows/release.yml`, and
 fails unless its archive matches `MCP_PUBLISHER_SHA256`. Dependabot cannot
-follow it: to move it, set both from the new release, the hash being the line
-of `mcp-publisher_linux_amd64.tar.gz` in its `registry_<version>_checksums.txt`.
+follow it: to move it, set both from the new release. The hash is the
+`mcp-publisher_linux_amd64.tar.gz` line of its `registry_<version>_checksums.txt`.
 
 ## Pull requests
 
@@ -143,7 +147,7 @@ of `mcp-publisher_linux_amd64.tar.gz` in its `registry_<version>_checksums.txt`.
    *why* the change exists. Conventional prefixes (`feat:`, `fix:`, `docs:`)
    are welcome.
 4. Update `CHANGELOG.md` under *Unreleased*.
-5. Open the pull request; CI runs lint, the neutrality guard, the tests on
+5. Open the pull request; CI runs lint, the neutrality check, the tests on
    every Python version of `scripts/lock.sh`, the freshness of the locks, a
    package build and an image build.
 

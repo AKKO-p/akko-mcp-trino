@@ -1,8 +1,9 @@
-"""The README's "Run it" section must describe commands that actually exist.
+"""The README and the documentation must describe commands and settings that actually exist.
 
 Documentation that drifts from the code is worse than none: a reader trusts
-it. So the README is parsed and its claims are checked against the module —
-the entrypoint it names, the variables it lists, the defaults it states.
+it. So the README and the pages of docs/en and docs/fr are parsed and their claims are
+checked against the module: the entrypoint they name, the variables they list, the
+defaults they state.
 """
 
 from __future__ import annotations
@@ -17,15 +18,29 @@ from akko_mcp_trino.config import Config
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
+LANGUAGES = ["en", "fr"]
 
 
-def test_readme_names_the_real_entrypoint():
-    assert "python -m akko_mcp_trino" in README
+def doc(language: str, page: str) -> str:
+    """One page of the documentation, in one language."""
+    return (ROOT / "docs" / language / f"{page}.md").read_text(encoding="utf-8")
+
+
+def docs(language: str) -> str:
+    """Every page of the documentation in one language, one after the other."""
+    pages = sorted((ROOT / "docs" / language).glob("*.md"))
+    return "\n".join(p.read_text(encoding="utf-8") for p in pages)
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_readme_names_the_real_entrypoint(language):
+    assert "python -m akko_mcp_trino" in doc(language, "deployment")
     assert (pathlib.Path(__file__).resolve().parents[1] / "akko_mcp_trino" / "__main__.py").exists()
 
 
 def test_every_variable_the_readme_lists_is_read_by_config():
-    listed = set(re.findall(r"`(TRINO_[A-Z_]+|MCP_[A-Z_]+)`", README))
+    text = README + docs("en") + docs("fr")
+    listed = set(re.findall(r"`(TRINO_[A-Z_]+|MCP_[A-Z_]+)`", text))
     source = (
         pathlib.Path(__file__).resolve().parents[1] / "akko_mcp_trino" / "config.py"
     ).read_text(encoding="utf-8")
@@ -44,7 +59,9 @@ def test_every_variable_the_readme_lists_is_read_by_config():
     assert unknown == [], f"README lists variables the code never reads: {unknown}"
 
 
-def test_readme_defaults_match_the_code(monkeypatch):
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_readme_defaults_match_the_code(monkeypatch, language):
+    configuration = doc(language, "configuration")
     for name in (
         "MCP_PORT",
         "MCP_HEALTH_PORT",
@@ -54,10 +71,10 @@ def test_readme_defaults_match_the_code(monkeypatch):
     ):
         monkeypatch.delenv(name, raising=False)
     cfg = Config.from_env()
-    assert cfg.mcp_port == 3000 and "`3000`" in README
-    assert cfg.health_port == 3001 and "`3001`" in README
-    assert cfg.transport == "streamable-http" and "`streamable-http`" in README
-    assert cfg.max_rows == 100 and "`100`" in README
+    assert cfg.mcp_port == 3000 and "`3000`" in configuration
+    assert cfg.health_port == 3001 and "`3001`" in configuration
+    assert cfg.transport == "streamable-http" and "`streamable-http`" in configuration
+    assert cfg.max_rows == 100 and "`100`" in configuration
     assert cfg.read_only is True
 
 
@@ -73,8 +90,10 @@ def test_package_version_matches_pyproject_and_changelog():
     assert f"version-{__version__}-blue" in README
 
 
-def test_readme_states_the_safe_defaults_the_code_has(monkeypatch):
-    """The defaults are the security posture: the README must say the ones the code has."""
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_readme_states_the_safe_defaults_the_code_has(monkeypatch, language):
+    """The defaults are the security posture: the configuration page must say the ones the
+    code has, in both languages."""
     for name in (
         "TRINO_IDENTITY_MODE",
         "MCP_AUTH_ENABLED",
@@ -86,7 +105,9 @@ def test_readme_states_the_safe_defaults_the_code_has(monkeypatch):
     cfg = Config.from_env()
     rows = {
         m.group(1): m.group(2)
-        for m in re.finditer(r"^\| `([A-Z_]+)`[^\n]*\| `([^`]+)` \|$", README, re.M)
+        for m in re.finditer(
+            r"^\| `([A-Z_]+)`[^\n]*\| `([^`]+)` \|$", doc(language, "configuration"), re.M
+        )
     }
     assert cfg.trino_identity_mode == rows["TRINO_IDENTITY_MODE"] == "jwt"
     assert cfg.auth_enabled is True and rows["MCP_AUTH_ENABLED"] == "true"
@@ -110,12 +131,17 @@ def test_migration_guide_and_changelog_name_every_breaking_default():
         assert name in guide and name in changelog, name
 
 
-def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path):
+@pytest.mark.parametrize(
+    "language, heading, none",
+    [("en", "## The file provider", "none"), ("fr", "## Le fournisseur `file`", "aucune")],
+)
+def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path, language, heading, none):
     from akko_mcp_trino.context import CLASSIFICATION, GLOSSARY, OWNER, PROPERTY
     from akko_mcp_trino.context.file import from_env
 
-    section = README[README.index("### The file provider") :]
-    section = section[: section.index("\n### ", 4)]
+    page = doc(language, "catalog-context")
+    section = page[page.index(heading) :]
+    section = section[: section.index("\n```", 4)]
     rows = {
         m.group(1): m.group(2)
         for m in re.finditer(r"^\| `(MCP_CONTEXT_FILE[A-Z_]*)` \|.*\| ([^|]+) \|$", section, re.M)
@@ -145,7 +171,7 @@ def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path):
     document = {"version": 1, "catalogs": ["demo"], "tables": [table], "terms": terms}
     path.write_text(json.dumps(document), encoding="utf-8")
     sets = from_env({"MCP_CONTEXT_FILE": str(path)}).served_sets()
-    assert rows["MCP_CONTEXT_FILE"].strip() == "none"
+    assert rows["MCP_CONTEXT_FILE"].strip() == none
     with pytest.raises(ValueError, match="MCP_CONTEXT_FILE is not set"):
         from_env({})
     for name, kind in (
@@ -153,7 +179,7 @@ def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path):
         ("MCP_CONTEXT_FILE_CLASSIFICATIONS", CLASSIFICATION),
         ("MCP_CONTEXT_FILE_PROPERTIES", PROPERTY),
     ):
-        assert rows[name].strip() == "none" and sets[kind] == frozenset(), name
+        assert rows[name].strip() == none and sets[kind] == frozenset(), name
         # the README says: exact names, `*` is a name, empty entries are ignored
         named = from_env({"MCP_CONTEXT_FILE": str(path), name: "a, ,*"}).served_sets()
         assert named[kind] == frozenset({"a", "*"}), name
@@ -163,9 +189,9 @@ def test_readme_defaults_of_the_file_provider_match_the_code(tmp_path):
     assert served.served_sets()[OWNER] != frozenset()
 
 
-def _resource_groups(path: pathlib.Path) -> list[dict]:
-    """The Trino resource group examples of a README: its JSON blocks with rootGroups."""
-    blocks = re.findall(r"```json\n(.*?)```", path.read_text(encoding="utf-8"), re.S)
+def _resource_groups(text: str) -> list[dict]:
+    """The Trino resource group examples of a text: its JSON blocks with rootGroups."""
+    blocks = re.findall(r"```json\n(.*?)```", text, re.S)
     return [json.loads(b) for b in blocks if '"rootGroups"' in b]
 
 
@@ -184,11 +210,11 @@ def _leaves(groups: list[dict], prefix: str = "") -> tuple[set[str], set[str]]:
     return every, leaves
 
 
-@pytest.mark.parametrize("readme", ["README.md", "README.fr.md"])
-def test_the_resource_group_example_selects_only_leaf_groups(readme):
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_the_resource_group_example_selects_only_leaf_groups(language):
     """Trino refuses a query its selector puts in a group that has sub-groups: a selector
     must name a leaf, so the queries without the tag need a group of their own."""
-    examples = _resource_groups(pathlib.Path(__file__).resolve().parents[1] / readme)
+    examples = _resource_groups(docs(language))
     assert len(examples) == 2, "profile_table's tag and trino-tags' tool tag"
     for example in examples:
         every, leaves = _leaves(example["rootGroups"])
@@ -203,6 +229,10 @@ def test_the_resource_group_example_selects_only_leaf_groups(readme):
     [
         ("README.md", "Nine tools"),
         ("README.fr.md", "Neuf tools"),
+        ("docs/en/index.md", "nine tools"),
+        ("docs/fr/index.md", "neuf tools"),
+        ("docs/en/tools.md", "eight other tools"),
+        ("docs/fr/tools.md", "huit autres tools"),
         ("DOCKERHUB.md", "Nine tools"),
         ("akko_mcp_trino/__init__.py", "Nine tools"),
     ],
@@ -214,30 +244,34 @@ def test_the_public_texts_count_the_nine_tools(path, word):
 
 
 _RIGHTS = {
-    "README.md": [
-        "### Deployment with a catalogue",
+    "docs/en/deployment.md": [
+        "## With a data catalog",
         "Descriptions follow what Trino lists to the caller. With "
-        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` also requires that Trino validates a "
-        "select by the caller of the columns it lists, while `describe_schema` keeps serving the "
-        "descriptions of the tables Trino lists.",
-        "It serves glossary terms, classifications and business metadata only when their "
-        "glossary, classification or set is named in the allow lists, closed by default, and the "
-        "owner only when it is configured (for Atlas: `ATLAS_GLOSSARIES`, "
-        "`ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, empty means none, and "
-        "`ATLAS_OWNER_ATTRIBUTE`).",
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` also asks Trino to confirm that the "
+        "caller may select the columns it lists. `describe_schema` keeps serving the descriptions "
+        "of the tables Trino lists.",
+        "The provider serves glossary terms, classifications and business metadata only when "
+        "their glossary, classification or set is named in an allow list. The allow lists are "
+        "empty by default. The owner is served only when it is configured (for Atlas: "
+        "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, empty means none, "
+        "and `ATLAS_OWNER_ATTRIBUTE`).",
+    ],
+    "docs/en/configuration.md": [
         "Raising it past 8 mostly adds metadata load on Trino, with little gain.",
     ],
-    "README.fr.md": [
-        "## Déploiement avec un catalogue",
+    "docs/fr/deployment.md": [
+        "## Avec un catalogue de données",
         "Les descriptions suivent ce que Trino liste à l'appelant. Avec "
-        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` exige en plus que Trino valide un "
-        "SELECT par l'appelant des colonnes qu'il liste, tandis que `describe_schema` continue de "
-        "servir les descriptions des tables que Trino liste.",
-        "Il ne sert les termes de glossaire, les classifications et les métadonnées métier "
-        "que si leur glossaire, leur classification ou leur ensemble est nommé dans les listes "
-        "blanches, fermées par défaut, et le propriétaire seulement s'il est configuré (pour "
-        "Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, vide "
-        "veut dire aucun, et `ATLAS_OWNER_ATTRIBUTE`).",
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` demande en plus à Trino de confirmer "
+        "que l'appelant peut faire un SELECT des colonnes qu'il liste. `describe_schema` continue "
+        "de servir les descriptions des tables que Trino liste.",
+        "Le fournisseur ne sert les termes de glossaire, les classifications et les métadonnées "
+        "métier que si leur glossaire, leur classification ou leur ensemble est nommé dans une "
+        "liste blanche. Les listes blanches sont vides par défaut. Le propriétaire n'est servi "
+        "que s'il est configuré (pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, "
+        "`ATLAS_BUSINESS_METADATA`, vide veut dire aucun, et `ATLAS_OWNER_ATTRIBUTE`).",
+    ],
+    "docs/fr/configuration.md": [
         "Le monter au-delà de 8 ajoute surtout de la charge de métadonnées sur Trino, pour peu "
         "de gain.",
     ],
@@ -280,7 +314,8 @@ def test_the_readme_says_what_the_context_of_a_catalogue_serves_and_under_which_
     assert "seulement de celles que l'appelant peut aussi" not in flat
 
 
-# What a real run of the integration suite showed, quoted by both READMEs, one per module.
+# What a real run of the integration suite showed, quoted by the modules page of both
+# languages, one per module.
 _MODULE_EXAMPLES = [
     "MCP_REQUIRED_SCOPES=data:query",
     'WWW-Authenticate: Bearer resource_metadata="http://mcp-scoped:3000/.well-known/'
@@ -294,11 +329,13 @@ _MODULE_EXAMPLES = [
 ]
 
 
-@pytest.mark.parametrize("readme", ["README.md", "README.fr.md"])
-def test_each_readme_quotes_a_real_example_of_each_module(readme):
-    text = (pathlib.Path(__file__).resolve().parents[1] / readme).read_text(encoding="utf-8")
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_each_readme_quotes_a_real_example_of_each_module(language):
+    text = doc(language, "modules")
     assert [e for e in _MODULE_EXAMPLES if e not in text] == []
-    assert text.count("Not tested live") + text.count("Non testé en live") == 2, "Entra ID, Okta"
+    assert text.count("Not tested live") + text.count("Non testé en conditions réelles") == 2, (
+        "Entra ID, Okta"
+    )
 
 
 def _sections(path):
@@ -333,4 +370,4 @@ def test_the_contributor_guide_exists_in_both_languages_section_for_section():
     assert "bash scripts/lock.sh check" in _commands(dependencies)
     readme_fr = (ROOT / "README.fr.md").read_text(encoding="utf-8")
     assert "# Dépendances et verrous" not in readme_fr
-    assert "](CONTRIBUTING.fr.md" in readme_fr and "](CONTRIBUTING.md" not in readme_fr
+    assert "/CONTRIBUTING.fr.md)" in readme_fr and "/CONTRIBUTING.md)" not in readme_fr

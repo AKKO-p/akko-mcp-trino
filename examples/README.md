@@ -9,7 +9,7 @@
 | [`mcp-stdio.json`](mcp-stdio.json) | Claude Desktop, Cursor or Mistral Vibe launching the server over stdio (`uvx akko-mcp-trino==0.7.2`), the user's token in `MCP_USER_TOKEN` |
 | [`agent.py`](agent.py) | a complete agent on any OpenAI-compatible model (Mistral, through La Plateforme, OpenRouter or LiteLLM; or any other provider), driving the MCP tools with the user's token: `search_columns` to find where the data lives, `describe_schema` to learn it, `execute_query` to read it |
 
-[The guide](../docs/guides/connect-claude-desktop-cursor.md) walks through each of them.
+[Connect an MCP host](../docs/en/hosts.md) walks through each of them.
 
 The server verifies the user's token at the door (its audience must be the
 server's own) and, by default, runs every query as that user, with a token for
