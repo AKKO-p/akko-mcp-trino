@@ -29,6 +29,7 @@ refuses "a resource URL off the endpoint" "the published resource must be the UR
 refuses "reencrypt to the plain HTTP port" "the server listens in plain HTTP" -f values.yaml --set route.enabled=true,route.tls.termination=reencrypt
 refuses "impersonation without a credential" "requires trino.credential=password or clientCertificate" -f values.yaml --set trino.identityMode=impersonation,trino.httpScheme=https
 refuses "a disruption budget that blocks every drain" "blocks every node drain" -f values.yaml --set podDisruptionBudget.enabled=true
+refuses "the door on without an issuer" "auth.issuer is required" -f values.yaml --set auth.issuer=
 refuses "a JWKS over http without acknowledgeInsecureJwks" "is not https" -f values.yaml --set auth.acknowledgeInsecureJwks=false
 refuses "a NodePort without acknowledgePlainHttp" "service.acknowledgePlainHttp=true" -f values.yaml --set service.type=NodePort
 refuses "helm test without the health Service" "keep service.exposeHealthPort=true" -f values.yaml --set service.exposeHealthPort=false

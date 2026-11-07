@@ -1,6 +1,7 @@
 """akko_mcp_trino.auth: unverified JWT helpers, Principal, JwksJwtAuth (real crypto), build_auth."""
 
 import base64
+import dataclasses
 import json
 import time
 
@@ -163,6 +164,21 @@ def test_build_auth_fails_closed_when_no_jwks():
     # UnverifiedJwtAuth any more: it accepted any forged JWT, which is fail-open.
     with pytest.raises(ValueError):
         auth.build_auth(_cfg(True))
+
+
+def test_an_empty_issuer_refuses_every_signed_token():
+    # The behaviour build_auth now refuses to start with: PyJWT compares "" to iss, so a
+    # token from the right issuer, signed by the right key, is refused.
+    p = auth.JwksJwtAuth("https://kc.example/jwks", "", _AUD, jwks_client=_FakeJwks())
+    assert p.verify(_bearer(_sign())) is None
+
+
+def test_build_auth_refuses_an_empty_issuer():
+    # An empty issuer is compared to iss by PyJWT, so the server would start and then
+    # refuse every caller; it must refuse to start instead.
+    cfg = dataclasses.replace(_cfg(True, jwks_url="https://kc.example/jwks"), oidc_issuer="")
+    with pytest.raises(ValueError, match="MCP_OIDC_ISSUER is empty"):
+        auth.build_auth(cfg)
 
 
 def test_token_id_is_carried_from_jti_for_audit():

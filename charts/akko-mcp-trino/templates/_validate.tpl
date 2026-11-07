@@ -58,6 +58,9 @@ render time with a message that names the value to change.
 {{- if and (not (hasPrefix "https://" $v.auth.jwksUrl)) (not $v.auth.acknowledgeInsecureJwks) }}
 {{- fail (printf "auth.jwksUrl=%s is not https: the JWKS is the door's trust anchor, and over http anyone on the path could substitute keys. Use https, or set auth.acknowledgeInsecureJwks=true (a test only)." $v.auth.jwksUrl) }}
 {{- end }}
+{{- if not $v.auth.issuer }}
+{{- fail "auth.issuer is required when auth is enabled: the issuer the identity provider puts in its tokens (iss). Empty, the server refuses to start." }}
+{{- end }}
 {{- if not (or $v.auth.audience $v.auth.resourceUrl) }}
 {{- fail "auth.audience or auth.resourceUrl is required when auth is enabled: the audience of the tokens issued for this server." }}
 {{- end }}

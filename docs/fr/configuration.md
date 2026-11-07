@@ -59,7 +59,7 @@ serveur refuse de démarrer et dit pourquoi.
 | `MCP_AUTH_ENABLED` | vérifier les bearer tokens des appelants (la vérification du token) | `true` |
 | `MCP_AUTH_REQUIRED` | refuser avec un `401` une requête sans token valide. En modes `jwt` et `impersonation`, le serveur refuse de démarrer sans lui. En mode `oauth2`, ajoute un contrôle de token MCP et ne désactive jamais la connexion à Trino | `true` |
 | `MCP_JWKS_URL` | l'endpoint JWKS de l'identity provider | aucune (obligatoire quand l'authentification est active) |
-| `MCP_OIDC_ISSUER` | l'issuer qu'un token doit porter | aucun (obligatoire quand l'authentification est active ; vide, chaque token est refusé) |
+| `MCP_OIDC_ISSUER` | l'issuer qu'un token doit porter | aucun (obligatoire quand l'authentification est active : vide, le serveur refuse de démarrer) |
 | `MCP_OIDC_AUDIENCE` | l'audience qu'un token doit porter : celle que l'identity provider donne aux tokens émis pour ce serveur (RFC 8707) ; jamais celle de Trino | aucune (celle-ci ou `MCP_RESOURCE_URL` est obligatoire quand l'authentification est active) |
 | `MCP_RESOURCE_URL` | l'URL canonique de ce serveur, comme `https://mcp.example.com/mcp`. Elle est acceptée comme audience, et nommée dans les métadonnées de ressource protégée que le serveur publie alors (RFC 9728) et dans le challenge d'un `401` | aucune |
 | `MCP_JWT_LEEWAY_SECONDS` | tolérance sur `exp`, `nbf` et `iat` pour le décalage d'horloge entre l'issuer et ce serveur | `30` |

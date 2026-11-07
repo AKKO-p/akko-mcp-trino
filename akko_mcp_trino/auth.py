@@ -108,6 +108,14 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
             "unverified JWT checking (fail-closed). Set MCP_JWKS_URL, MCP_OIDC_ISSUER "
             "and MCP_OIDC_AUDIENCE to your identity provider."
         )
+    if not config.oidc_issuer:
+        # PyJWT skips the issuer check only for None; an empty string is compared to the
+        # token's iss, so every token would be refused after the server had started.
+        raise ValueError(
+            "MCP_AUTH_ENABLED=true but MCP_OIDC_ISSUER is empty: every token would be "
+            "refused. Set MCP_OIDC_ISSUER to the issuer your identity provider puts in "
+            "its tokens (iss)."
+        )
     accepted = accepted_audiences(config, [*audiences, config.resource_url])
     if not accepted:
         raise ValueError(
