@@ -507,3 +507,20 @@ def test_every_workflow_is_read_only_unless_a_job_says_otherwise() -> None:
     assert signing == SIGNING_JOBS
     analyze = _jobs((ROOT / ".github/workflows/codeql.yml").read_text())["analyze"]
     assert "security-events: write" in analyze
+
+
+def test_the_tool_versions_live_in_the_dev_lock_only() -> None:
+    """The test and dev extras name the tools without a version, so that an update moves
+    requirements/dev.txt alone; the contract extra keeps its range for adapters."""
+    for pyproject in (ROOT / "pyproject.toml", ROOT / "providers/atlas/pyproject.toml"):
+        extras = tomllib.loads(pyproject.read_text())["project"]["optional-dependencies"]
+        for name in ("test", "dev"):
+            assert extras[name], (pyproject, name)
+            for requirement in extras[name]:
+                assert re.fullmatch(r"[A-Za-z0-9_.-]+", requirement), (pyproject, requirement)
+    dev = (ROOT / "requirements/dev.in").read_text()
+    lock = (ROOT / "requirements/dev.txt").read_text()
+    for tool in ("pytest", "pytest-cov", "ruff", "mypy", "pip-audit"):
+        assert re.search(rf"^{tool}$", dev, re.M), tool
+        assert re.search(rf"^{tool}==\S+ \\$", lock, re.M), tool
+    assert "==" not in "".join(line for line in dev.splitlines() if not line.startswith("#"))

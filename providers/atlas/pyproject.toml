@@ -38,8 +38,9 @@ dependencies = [
 
 [project.optional-dependencies]
 kerberos = ["pyspnego[kerberos]>=0.11,<1"]
-test = ["pytest==9.1.1", "pytest-cov==7.1.0"]
-dev = ["pytest==9.1.1", "pytest-cov==7.1.0", "ruff==0.16.7", "mypy==2.3.1"]
+# The tools, by name: their versions live in requirements/dev.txt of the repository only.
+test = ["pytest", "pytest-cov"]
+dev = ["pytest", "pytest-cov", "ruff", "mypy"]
 
 [project.entry-points."akko_mcp_trino.context"]
 atlas = "akko_mcp_trino_atlas:from_env"
