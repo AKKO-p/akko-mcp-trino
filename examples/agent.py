@@ -48,7 +48,7 @@ def _openai_tools(mcp_tools) -> list[dict]:
             "function": {
                 "name": t.name,
                 "description": t.description or "",
-                "parameters": t.inputSchema,
+                "parameters": t.input_schema,
             },
         }
         for t in mcp_tools
