@@ -151,42 +151,89 @@ def test_the_stdio_entry_of_the_hosts_page_is_the_example_file(language):
     assert example in blocks
 
 
-@pytest.mark.parametrize("language", ["en", "fr"])
-def test_the_vscode_file_of_the_hosts_page_is_the_example_file(language):
-    """The .vscode/mcp.json the page shows is examples/vscode-mcp.json, byte for byte once
-    parsed."""
+def _json_blocks(language: str) -> list:
     import json
 
     page = (ROOT / "docs" / language / "hosts.md").read_text(encoding="utf-8")
-    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", page, re.S)]
-    example = json.loads((ROOT / "examples" / "vscode-mcp.json").read_text(encoding="utf-8"))
-    assert example in blocks
+    return [json.loads(b) for b in re.findall(r"```json\n(.*?)```", page, re.S)]
+
+
+def _example(name: str) -> dict:
+    import json
+
+    return json.loads((ROOT / "examples" / name).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+@pytest.mark.parametrize("name", ["vscode-mcp.json", "vscode-mcp-stdio.json"])
+def test_the_vscode_files_of_the_hosts_page_are_the_example_files(language, name):
+    """The .vscode/mcp.json files the page shows are those of examples/, byte for byte once
+    parsed."""
+    assert _example(name) in _json_blocks(language)
+
+
+def test_the_vscode_stdio_entry_is_the_stdio_entry_with_its_secrets_asked():
+    """The VS Code stdio entry launches what examples/mcp-stdio.json launches, with the same
+    variables in the same order; only the token and the client secret come from inputs."""
+    stdio = _example("mcp-stdio.json")["mcpServers"]["trino"]
+    vscode = _example("vscode-mcp-stdio.json")["servers"]["trino"]
+    asked = {
+        "MCP_USER_TOKEN": "${input:trino-token}",
+        "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET": "${input:trino-client-secret}",
+    }
+    assert (vscode["command"], vscode["args"]) == (stdio["command"], stdio["args"])
+    assert vscode["env"] == {k: asked.get(k, v) for k, v in stdio["env"].items()}
+    assert list(vscode["env"]) == list(stdio["env"])
+
+
+def _claude_mcp_add(language: str, marker: str) -> list[str]:
+    """The words of the `claude mcp add` command of the bash block that holds marker."""
+    import shlex
+
+    page = (ROOT / "docs" / language / "hosts.md").read_text(encoding="utf-8")
+    [block] = [b for b in re.findall(r"```bash\n(.*?)```", page, re.S) if marker in b]
+    [line] = [
+        line
+        for line in block.replace("\\\n", " ").splitlines()
+        if line.startswith("claude mcp add")
+    ]
+    return shlex.split(line, comments=True)
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_the_claude_code_http_command_reaches_the_cursor_entry(language):
+    """`claude mcp add --transport http` on the page reaches the URL of examples/cursor.json,
+    with the same header, the token read from a variable rather than typed."""
+    words = _claude_mcp_add(language, "--transport http")
+    entry = _example("cursor.json")["mcpServers"]["trino"]
+    assert words[:7] == ["claude", "mcp", "add", "--transport", "http", "trino", entry["url"]]
+    assert words[7:] == ["--header", "Authorization: Bearer $TRINO_TOKEN"]
+    assert entry["headers"]["Authorization"].startswith("Bearer ")
 
 
 @pytest.mark.parametrize("language", ["en", "fr"])
 def test_the_claude_code_stdio_command_launches_the_stdio_entry(language):
-    """`claude mcp add ... -- uvx ...` on the page sets the variables of examples/mcp-stdio.json,
-    in the same order and with the same values, and runs the same command."""
-    import json
-    import shlex
-
-    page = (ROOT / "docs" / language / "hosts.md").read_text(encoding="utf-8")
-    [command] = [
-        b for b in re.findall(r"```bash\n(.*?)```", page, re.S) if "--env MCP_TRANSPORT" in b
-    ]
-    words = shlex.split(command.replace("\\\n", " "))
+    """`claude mcp add ... --transport stdio trino -- uvx ...` on the page sets the variables of
+    examples/mcp-stdio.json, in the same order and with the same values, and runs the same
+    command. The token and the client secret come from variables read without echo, in place of
+    the placeholders of the example."""
+    words = _claude_mcp_add(language, "--env MCP_TRANSPORT")
     cut = words.index("--")
     env = [words[i + 1].split("=", 1) for i in range(cut) if words[i] == "--env"]
-    entry = json.loads((ROOT / "examples" / "mcp-stdio.json").read_text(encoding="utf-8"))
-    entry = entry["mcpServers"]["trino"]
-    assert words[:4] == ["claude", "mcp", "add", "trino"]
-    assert [tuple(e) for e in env] == list(entry["env"].items())
+    entry = _example("mcp-stdio.json")["mcpServers"]["trino"]
+    expected = [(k, f"${k}" if v.startswith("<") else v) for k, v in entry["env"].items()]
+    assert words[:3] == ["claude", "mcp", "add"]
+    assert words[cut - 3 : cut] == ["--transport", "stdio", "trino"]
+    assert [tuple(e) for e in env] == expected
     assert words[cut + 1 :] == [entry["command"], *entry["args"]]
 
 
 @pytest.mark.parametrize("language", ["en", "fr"])
 def test_the_mistral_agent_of_the_hosts_page_is_the_example_file(language):
-    """The code and the commands the page shows are those of examples/mistral_agents.py."""
+    """The code and the commands the page shows are those of examples/mistral_agents.py.
+
+    The suite does not install mistralai: the example's imports are checked where it is
+    installed (test_examples), and were run with mistralai 3.7.0 for the page."""
     page = (ROOT / "docs" / language / "hosts.md").read_text(encoding="utf-8")
     example = (ROOT / "examples" / "mistral_agents.py").read_text(encoding="utf-8")
     [code] = [b for b in re.findall(r"```python\n(.*?)```", page, re.S) if "RunContext" in b]

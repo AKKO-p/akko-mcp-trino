@@ -93,10 +93,10 @@ async def _check(session: ClientSession, search: str, describe: str | None) -> N
 
 async def run(cfg: dict, search: str, describe: str | None = None) -> None:
     if "url" in cfg:
-        http = create_mcp_http_client(headers=cfg.get("headers") or {})
-        async with streamable_http_client(cfg["url"], http_client=http) as (read, write):
-            async with ClientSession(read, write) as session:
-                await _check(session, search, describe)
+        async with create_mcp_http_client(headers=cfg.get("headers") or {}) as http:
+            async with streamable_http_client(cfg["url"], http_client=http) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await _check(session, search, describe)
     else:
         params = StdioServerParameters(
             command=cfg["command"], args=cfg.get("args", []), env=cfg.get("env")

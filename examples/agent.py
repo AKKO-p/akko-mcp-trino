@@ -2,15 +2,16 @@
 
 Works unchanged with Mistral (La Plateforme, or through OpenRouter or LiteLLM),
 and with any other provider that speaks the OpenAI chat-completions API with
-tool calling. The model never sees a token; the MCP server receives the user's
-token on every tool call, verifies it, and queries Trino as that user (by default,
-with a token for Trino the server obtains by token exchange, never the user's own).
+tool calling. The model never sees a token, but it sees the tool results; the
+MCP server receives the user's token on every tool call, verifies it, and
+queries Trino as that user (by default, with a token for Trino the server
+obtains by token exchange, never the user's own).
 
     export LLM_BASE_URL=https://api.mistral.ai/v1
-    export LLM_API_KEY=...
+    read -rs LLM_API_KEY && export LLM_API_KEY    # read without echo: not in the shell history
     export LLM_MODEL=mistral-small-latest
     export MCP_URL=http://localhost:3000/mcp      # or .../sse for the sse transport
-    export USER_TOKEN=<the user's access token, issued for the MCP server>
+    read -rs USER_TOKEN && export USER_TOKEN      # the user's token, issued for the MCP server
     python examples/agent.py "Give me three customer e-mails and their country"
 
 Dependencies: pip install akko-mcp-trino openai

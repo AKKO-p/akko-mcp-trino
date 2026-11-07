@@ -4,12 +4,16 @@ The MCP client runs here, in this process, with the official mistralai SDK: it
 reaches the server with the user's token in a header, lists the tools and runs
 each tool call the model asks for. Mistral's Conversations API receives the
 question, the tool descriptions and the tool results; it never receives the
-token, and it never reaches the server.
+token, and it never reaches the server. The tool results hold data the user may
+read: check Mistral's own data and privacy settings.
+
+`read -rs` reads the key and the token without showing them, so neither enters
+the shell history.
 
     pip install "mistralai[agents]==3.7.0"
-    export MISTRAL_API_KEY=...
+    read -rs MISTRAL_API_KEY && export MISTRAL_API_KEY
     export MCP_URL=http://localhost:3000/mcp
-    export USER_TOKEN=<the user's access token>
+    read -rs USER_TOKEN && export USER_TOKEN
     python examples/mistral_agents.py "Which customers do we have, with their e-mail and country?"
 
 MISTRAL_MODEL chooses the model (default mistral-medium-latest).
