@@ -7,7 +7,9 @@ secret the contract can look for, and which recorded objects play which role
 (:class:`ContractNames`). The contract needs no network, no catalogue and no Trino:
 every request the provider sends goes to a transport that answers from the recordings,
 or, on purpose, slowly, with a 401, a 503, a body that is not JSON, or a 500 whose body
-holds the secret. The transport counts what is sent and what is still in flight.
+holds the secret. The transport counts what is sent and what is still in flight. Two
+checks send the requests over a real socket instead, to a server on 127.0.0.1 that accepts
+connections and never answers: one with the provider alone, one behind the core's chain.
 
 A provider that sends no HTTP request, such as ``file``, skips the checks that need one,
 each with ``pytest.skip("no HTTP")``. Each check fails with ``pytest.fail`` and a message
@@ -26,19 +28,22 @@ import inspect
 import json
 import logging
 import re
+import socket
 import subprocess
 import sys
 import time
 import traceback
 from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import Any
 from urllib.parse import quote, quote_plus
 
 import httpx
 import pytest
 
+from ..config import Config
+from ..context.chain import ContextChain, ContextSettings
 from ..context.errors import ProviderError, ProviderRefused, ProviderUnavailable
 from ..context.loop import ContextLoop
 from ..context.provider import ContextProvider
@@ -230,6 +235,89 @@ def _running(harness: ContractHarness, env: Mapping[str, str] | None = None) -> 
             loop.submit(provider.aclose(), _SUBMIT_SECONDS)
         finally:
             loop.close()
+
+
+class _Silent:
+    """A catalogue on 127.0.0.1 that accepts connections and never answers.
+
+    It never reads either: what a client sends stays queued, as at a catalogue that hangs.
+    """
+
+    def __init__(self) -> None:
+        self._server = socket.create_server(("127.0.0.1", 0))
+        self._server.setblocking(False)
+        self.port: int = self._server.getsockname()[1]
+        self._accepted: list[socket.socket] = []
+
+    def asked(self) -> int:
+        """Count the connections clients have opened so far."""
+        self._accept()
+        return len(self._accepted)
+
+    def open_connections(self) -> int:
+        """Count the connections their client has not closed."""
+        self._accept()
+        return sum(not _closed_by_client(conn) for conn in self._accepted)
+
+    def close(self) -> None:
+        for conn in self._accepted:
+            conn.close()
+        self._server.close()
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                conn, _ = self._server.accept()
+            except BlockingIOError:
+                return
+            conn.setblocking(False)
+            self._accepted.append(conn)
+
+
+def _closed_by_client(conn: socket.socket) -> bool:
+    """Say whether the client closed ``conn``; what it sent and the catalogue left is read."""
+    try:
+        while conn.recv(65536):
+            pass
+    except OSError as error:
+        # Nothing more to read: still open. A reset: closed.
+        return not isinstance(error, BlockingIOError)
+    return True
+
+
+class _ToSilent(httpx.AsyncBaseTransport):
+    """Sends every request over a real socket to a ``_Silent`` catalogue, whatever its address."""
+
+    def __init__(self, port: int) -> None:
+        self._port = port
+        self._http = httpx.AsyncHTTPTransport()
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        request.url = request.url.copy_with(scheme="http", host="127.0.0.1", port=self._port)
+        return await self._http.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+
+@dataclass(frozen=True)
+class _Cut:
+    """A read of a silent catalogue: what it returned or raised, when, and what it left open."""
+
+    name: str
+    result: Any
+    error: BaseException | None
+    elapsed: float
+    asked: int
+    left: int
+
+
+def _default_settings() -> ContextSettings:
+    """The chain's settings at the server's defaults, whatever the environment says."""
+    defaults: dict[str, Any] = {field.name: field.default for field in fields(Config)}
+    return ContextSettings(
+        **{field.name: defaults[f"context_{field.name}"] for field in fields(ContextSettings)}
+    )
 
 
 class _Lines(logging.Handler):
@@ -640,6 +728,86 @@ class ContextContract:
             f"of {self.SLOW_DEADLINE_SECONDS}s plus {self.REPLY_MARGIN_SECONDS}s",
         )
         _require(in_flight == 0, "a request past the deadline must be cancelled, not left open")
+
+    def test_a_read_past_its_deadline_closes_its_connection(self, harness: ContractHarness) -> None:
+        """Over a real socket to a catalogue that never answers, the provider alone keeps its
+        deadline, raises ``ProviderUnavailable`` and closes its connection."""
+        cut = self._read_a_silent_catalogue(harness, behind_chain=False)
+        _require(cut.asked > 0, "the silent catalogue must have been asked")
+        _require(
+            cut.elapsed <= self.SLOW_DEADLINE_SECONDS + self.REPLY_MARGIN_SECONDS,
+            f"over a socket, describe handed back control {cut.elapsed:.2f}s after it started, "
+            f"past its deadline of {self.SLOW_DEADLINE_SECONDS}s plus "
+            f"{self.REPLY_MARGIN_SECONDS}s",
+        )
+        _require(
+            isinstance(cut.error, ProviderUnavailable),
+            "a catalogue past the deadline must raise ProviderUnavailable",
+        )
+        _require(
+            cut.left == 0,
+            f"a read past its deadline must close its connection: {cut.left} of {cut.asked} "
+            "left open, the request still pending at the catalogue",
+        )
+
+    def test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
+        self, harness: ContractHarness
+    ) -> None:
+        """Behind the core's chain, as the server runs it, and over a real socket to a catalogue
+        that never answers, a read costs the deadline and the chain's grace, no more, and its
+        connection is closed: no request is left pending at the catalogue."""
+        cut = self._read_a_silent_catalogue(harness, behind_chain=True)
+        _require(cut.asked > 0, "the silent catalogue must have been asked")
+        _require(
+            cut.error is None
+            and cut.elapsed <= self.SLOW_DEADLINE_SECONDS + self.REPLY_MARGIN_SECONDS,
+            f"behind the chain, describe handed back control {cut.elapsed:.2f}s after it "
+            f"started, past its deadline of {self.SLOW_DEADLINE_SECONDS}s plus "
+            f"{self.REPLY_MARGIN_SECONDS}s",
+        )
+        _require(
+            cut.result.statuses[cut.name] == UNAVAILABLE,
+            "a read past its deadline must say unavailable",
+        )
+        _require(
+            cut.left == 0,
+            f"a read cut at its deadline must close its connection: {cut.left} of {cut.asked} "
+            "left open, the request still pending at the catalogue",
+        )
+
+    def _read_a_silent_catalogue(self, harness: ContractHarness, *, behind_chain: bool) -> "_Cut":
+        """Describe a table of a catalogue that never answers, over a real socket, with the
+        slow deadline; then count the connections still open, given the margin to close."""
+        self._skip_without_http(harness)
+        silent = _Silent()
+        provider = harness.build(harness.env, _ToSilent(silent.port))
+        settings = replace(_default_settings(), timeout_seconds=self.SLOW_DEADLINE_SECONDS)
+        loop = ContextLoop()
+        loop.start()
+        chain = ContextChain([provider], settings, loop=loop)
+        refs = [harness.names.described]
+        got: list = []
+        try:
+            started = time.monotonic()
+            deadline = started + self.SLOW_DEADLINE_SECONDS
+            if behind_chain:
+                error = _Run.failure(lambda: got.append(chain.gather(refs, deadline=deadline)))
+            else:
+                read = provider.describe(refs, deadline=deadline)
+                error = _Run.failure(lambda: got.append(loop.submit(read, _SUBMIT_SECONDS)))
+            elapsed = time.monotonic() - started
+            # The close is sent on the loop's next turns: given the margin, never more.
+            end = time.monotonic() + self.REPLY_MARGIN_SECONDS
+            while (left := silent.open_connections()) and time.monotonic() < end:
+                time.sleep(0.01)
+            asked = silent.asked()
+        finally:
+            try:
+                chain.close()
+            finally:
+                loop.close()
+                silent.close()
+        return _Cut(provider.name, got[0] if got else None, error, elapsed, asked, left)
 
     def test_a_401_raises_refused_and_is_not_retried(self, harness: ContractHarness) -> None:
         """A refused account raises ``ProviderRefused`` and no request is sent twice; the core

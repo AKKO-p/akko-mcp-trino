@@ -246,6 +246,19 @@ fournisseur suit ces règles :
 - Il n'importe ni `akko_mcp_trino.trino_client` ni `akko_mcp_trino.identity`, ne reçoit jamais le
   client Trino ni l'identité de l'appelant, et n'écrit jamais dans son catalogue de données.
 
+La chaîne termine en un temps borné une lecture qui dépasse son échéance, et ne l'annule qu'une
+fois au plus. À l'échéance, un fournisseur qui la respecte a déjà annulé sa propre requête, et son
+client HTTP ferme la connexion. Une seconde annulation tomberait pendant cette fermeture et
+l'interromprait : la connexion resterait ouverte, la requête toujours en attente dans le catalogue
+de données, qui la servirait une fois rétabli. La chaîne donne donc d'abord 0,1 s à une lecture
+encore en cours à son échéance pour finir d'elle-même. Une lecture encore en cours après ce délai
+est annulée, sauf si une annulation est déjà en route vers elle, et reçoit 0,1 s de plus. Une
+lecture qui ignore son annulation est laissée derrière, et ne retient plus ses tables. L'appel
+attend au plus 0,25 s après l'échéance, plus que ces deux délais, d'où le minimum de 0,3 pour
+`MCP_CONTEXT_RESERVE_SECONDS` avec un fournisseur. Coupez vos propres lectures à l'échéance, avec
+`asyncio.timeout` par exemple, et laissez votre client HTTP fermer ce qu'il a coupé ; un
+fournisseur qui ne le fait pas est coupé par la chaîne, une fois.
+
 ### Le contrat
 
 `akko_mcp_trino.testing` publie le contrat qui vérifie ces règles. On l'installe dans
@@ -253,7 +266,9 @@ l'environnement de test du fournisseur avec `pip install "akko-mcp-trino[contrac
 `pytest` par une plage de versions, sans l'épingler. Il ne demande ni réseau, ni catalogue de
 données, ni Trino. Le fournisseur envoie ses requêtes à un transport qui répond avec les réponses
 enregistrées du catalogue de données, ou, exprès, en retard, par un 401, un 503, un corps qui n'est
-pas du JSON, ou un 500 qui contient le secret.
+pas du JSON, ou un 500 qui contient le secret. Deux vérifications les envoient plutôt par une
+vraie socket, à un serveur sur 127.0.0.1 qui accepte les connexions et ne répond jamais, l'une
+avec le fournisseur seul, l'autre derrière la chaîne du cœur.
 
 On sous-classe `ContextContract` dans les tests du fournisseur, et on lui donne une fixture
 `harness` qui rend un `ContractHarness` : la fabrique `build(env, transport)`, la fonction `replay`
@@ -323,6 +338,9 @@ Le contrat vérifie que :
 - aucun type ne porte de valeur ;
 - un catalogue de données lent rend la main avant l'échéance plus
   `ContextContract.REPLY_MARGIN_SECONDS` (0,5 s), sans laisser de requête ouverte ;
+- par une vraie socket vers un catalogue de données qui ne répond jamais, seul et derrière la
+  chaîne du cœur, une lecture coûte l'échéance plus cette marge et se dit indisponible, et sa
+  connexion est fermée : aucune requête ne reste en attente dans le catalogue de données ;
 - un 401 lève `ProviderRefused` et n'est pas réessayé ;
 - un délai dépassé, un 503 ou un corps qui n'est pas du JSON lève `ProviderUnavailable` ;
 - ni les journaux (`httpx` à `WARNING`, comme le serveur le règle), ni `check_lines()` relu après

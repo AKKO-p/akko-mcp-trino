@@ -96,9 +96,9 @@ MAX_PROFILE_MAX_CONCURRENT = 64
 _CLIENT_TAG_RE = re.compile(r"[A-Za-z0-9_.:=/-]{1,100}")
 # The least MCP_CONTEXT_RESERVE_SECONDS a server with a context provider accepts. Past its
 # deadline, the chain waits up to 0.25 s for a provider to hand back control (its
-# ``_GRACE_SECONDS``, which includes the 0.1 s a cancelled read is given to end): a shorter
-# reserve lets the context end past the call's own deadline, and the call then answers its
-# time_budget error instead of the columns.
+# ``_GRACE_SECONDS``, which includes 0.1 s for a late read to end on its own, then 0.1 s for
+# it to end once cancelled): a shorter reserve lets the context end past the call's own
+# deadline, and the call then answers its time_budget error instead of the columns.
 MIN_CONTEXT_RESERVE_SECONDS = 0.3
 
 

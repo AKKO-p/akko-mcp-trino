@@ -239,13 +239,27 @@ follows these rules:
 - It imports neither `akko_mcp_trino.trino_client` nor `akko_mcp_trino.identity`, never receives
   the Trino client or the caller's identity, and never writes to its data catalog.
 
+The chain ends a read past its deadline in bounded time, and cancels it once at most. At the
+deadline, a provider that keeps it has already cancelled its own request, and its HTTP client is
+closing the connection. A second cancellation would land in that close and cut it short: the
+connection would stay open, with the request still pending at the data catalog, which would serve
+it once it recovers. So the chain first gives a read still running at its deadline 0.1 s to end
+on its own. A read still running after that is cancelled, unless a cancellation is already on its
+way to it, and given 0.1 s more. A read that ignores its cancellation is left behind and no longer
+holds its tables. The call waits at most 0.25 s past the deadline, more than both waits, which is
+why `MCP_CONTEXT_RESERVE_SECONDS` is at least 0.3 with a provider. Cut your own reads at the
+deadline, with `asyncio.timeout` for example, and let your HTTP client close what it cut; a
+provider that does not is cut by the chain, once.
+
 ### The contract
 
 `akko_mcp_trino.testing` publishes the contract that checks these rules. Install it in the
 provider's test environment with `pip install "akko-mcp-trino[contract]"`, which brings `pytest`
 with a version range, not a pin. It needs no network, no data catalog and no Trino. The provider
 sends its requests to a transport that answers from the data catalog's recorded answers, or, on
-purpose, late, with a 401, a 503, a body that is not JSON, or a 500 that holds the secret.
+purpose, late, with a 401, a 503, a body that is not JSON, or a 500 that holds the secret. Two
+checks send them over a real socket instead, to a server on 127.0.0.1 that accepts connections
+and never answers, one with the provider alone and one behind the core's chain.
 
 Subclass `ContextContract` in the provider's tests and give it a `harness` fixture that returns a
 `ContractHarness`: the factory `build(env, transport)`, the function `replay` that plays back the
@@ -313,6 +327,9 @@ The contract checks that:
 - no type carries a data value;
 - a slow data catalog returns control within the deadline plus
   `ContextContract.REPLY_MARGIN_SECONDS` (0.5 s), and leaves no request open;
+- over a real socket to a data catalog that never answers, alone and behind the core's chain, a
+  read costs the deadline plus that margin and is unavailable, and its connection is closed, so
+  that no request stays pending at the data catalog;
 - a 401 raises `ProviderRefused` and is not retried;
 - a timeout, a 503 or a body that is not JSON raises `ProviderUnavailable`;
 - neither the logs (`httpx` at `WARNING`, as the server sets it), nor `check_lines()` read again

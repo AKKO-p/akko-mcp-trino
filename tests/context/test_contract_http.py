@@ -653,6 +653,16 @@ RESET = "test_a_reset_hook_is_synchronous_quick_and_quiet"
             "test_a_slow_catalogue_returns_before_the_deadline_plus_margin_and_closes_its_connection",
             "past its deadline",
         ),
+        (
+            Lingering,
+            "test_a_read_past_its_deadline_closes_its_connection",
+            "must close its connection: 1 of 2 left open",
+        ),
+        (
+            Lingering,
+            "test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection",
+            "must close its connection: 1 of 2 left open",
+        ),
     ],
 )
 def test_the_contract_catches_a_provider_that_breaks_a_rule(kind, check, says):

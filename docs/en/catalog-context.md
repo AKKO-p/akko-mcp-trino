@@ -70,7 +70,9 @@ A provider that is down, slow or refused is read within `MCP_CONTEXT_TIMEOUT_SEC
 called, and the sources say `unavailable`. The statements of the visibility filter stop before
 they use up that reserve. A statement that is too slow proves nothing (`not_checked` for the canary
 or the select check, no join for a target), and the call still answers. Anything else that fails
-on the way serves no context and says `error` for every source.
+on the way serves no context and says `error` for every source. A read past its deadline is ended
+within 0.25 s, and its connection to the data catalog is closed: no request stays pending there,
+to be served once the data catalog recovers.
 
 ## What describe_schema serves
 
