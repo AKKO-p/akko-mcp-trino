@@ -7,9 +7,11 @@ secret the contract can look for, and which recorded objects play which role
 (:class:`ContractNames`). The contract needs no network, no catalogue and no Trino:
 every request the provider sends goes to a transport that answers from the recordings,
 or, on purpose, slowly, with a 401, a 503, a body that is not JSON, or a 500 whose body
-holds the secret. The transport counts what is sent and what is still in flight. Two
+holds the secret. The transport counts what is sent and what is still in flight. Four
 checks send the requests over a real socket instead, to a server on 127.0.0.1 that accepts
-connections and never answers: one with the provider alone, one behind the core's chain.
+connections and never answers, for a describe and for terms, each with the provider alone
+and behind the core's chain: the contract needs no network beyond the loopback interface.
+A suite run under a socket blocker must allow 127.0.0.1.
 
 A provider that sends no HTTP request, such as ``file``, skips the checks that need one,
 each with ``pytest.skip("no HTTP")``. Each check fails with ``pytest.fail`` and a message
@@ -34,7 +36,7 @@ import sys
 import time
 import traceback
 from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, fields, replace
 from typing import Any
 from urllib.parse import quote, quote_plus
@@ -298,6 +300,19 @@ class _ToSilent(httpx.AsyncBaseTransport):
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+
+@dataclass(frozen=True)
+class _Silenced:
+    """A provider built on a silent catalogue, its chain and their loop."""
+
+    provider: ContextProvider
+    chain: ContextChain
+    loop: ContextLoop
+
+    def alone(self, read: Coroutine[Any, Any, Any]) -> Any:
+        """Run one read of the provider on the loop, without the chain."""
+        return self.loop.submit(read, _SUBMIT_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -732,23 +747,11 @@ class ContextContract:
     def test_a_read_past_its_deadline_closes_its_connection(self, harness: ContractHarness) -> None:
         """Over a real socket to a catalogue that never answers, the provider alone keeps its
         deadline, raises ``ProviderUnavailable`` and closes its connection."""
-        cut = self._read_a_silent_catalogue(harness, behind_chain=False)
-        _require(cut.asked > 0, "the silent catalogue must have been asked")
-        _require(
-            cut.elapsed <= self.SLOW_DEADLINE_SECONDS + self.REPLY_MARGIN_SECONDS,
-            f"over a socket, describe handed back control {cut.elapsed:.2f}s after it started, "
-            f"past its deadline of {self.SLOW_DEADLINE_SECONDS}s plus "
-            f"{self.REPLY_MARGIN_SECONDS}s",
+        refs = [harness.names.described]
+        cut = self._read_a_silent_catalogue(
+            harness, lambda run, deadline: run.alone(run.provider.describe(refs, deadline=deadline))
         )
-        _require(
-            isinstance(cut.error, ProviderUnavailable),
-            "a catalogue past the deadline must raise ProviderUnavailable",
-        )
-        _require(
-            cut.left == 0,
-            f"a read past its deadline must close its connection: {cut.left} of {cut.asked} "
-            "left open, the request still pending at the catalogue",
-        )
+        self._require_closed_alone(cut, "describe")
 
     def test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
         self, harness: ContractHarness
@@ -756,58 +759,115 @@ class ContextContract:
         """Behind the core's chain, as the server runs it, and over a real socket to a catalogue
         that never answers, a read costs the deadline and the chain's grace, no more, and its
         connection is closed: no request is left pending at the catalogue."""
-        cut = self._read_a_silent_catalogue(harness, behind_chain=True)
-        _require(cut.asked > 0, "the silent catalogue must have been asked")
-        _require(
-            cut.error is None
-            and cut.elapsed <= self.SLOW_DEADLINE_SECONDS + self.REPLY_MARGIN_SECONDS,
-            f"behind the chain, describe handed back control {cut.elapsed:.2f}s after it "
-            f"started, past its deadline of {self.SLOW_DEADLINE_SECONDS}s plus "
-            f"{self.REPLY_MARGIN_SECONDS}s",
-        )
-        _require(
-            cut.result.statuses[cut.name] == UNAVAILABLE,
-            "a read past its deadline must say unavailable",
-        )
-        _require(
-            cut.left == 0,
-            f"a read cut at its deadline must close its connection: {cut.left} of {cut.asked} "
-            "left open, the request still pending at the catalogue",
-        )
-
-    def _read_a_silent_catalogue(self, harness: ContractHarness, *, behind_chain: bool) -> "_Cut":
-        """Describe a table of a catalogue that never answers, over a real socket, with the
-        slow deadline; then count the connections still open, given the margin to close."""
-        self._skip_without_http(harness)
-        silent = _Silent()
-        provider = harness.build(harness.env, _ToSilent(silent.port))
-        settings = replace(_default_settings(), timeout_seconds=self.SLOW_DEADLINE_SECONDS)
-        loop = ContextLoop()
-        loop.start()
-        chain = ContextChain([provider], settings, loop=loop)
         refs = [harness.names.described]
+        cut = self._read_a_silent_catalogue(
+            harness, lambda run, deadline: run.chain.gather(refs, deadline=deadline)
+        )
+        self._require_closed_behind_the_chain(cut, "describe")
+
+    def test_a_terms_read_past_its_deadline_closes_its_connection(
+        self, harness: ContractHarness
+    ) -> None:
+        """The same as a describe, for the glossary terms: the provider alone, over a real
+        socket to a catalogue that never answers, raises in time and closes its connection."""
+        keys = self._recorded_term_keys(harness)
+        cut = self._read_a_silent_catalogue(
+            harness, lambda run, deadline: run.alone(run.provider.terms(keys, deadline=deadline))
+        )
+        self._require_closed_alone(cut, "terms")
+
+    def test_a_terms_read_the_chain_cuts_at_its_deadline_closes_its_connection(
+        self, harness: ContractHarness
+    ) -> None:
+        """The same as a describe, for the glossary terms, behind the core's chain."""
+        keys = self._recorded_term_keys(harness)
+        cut = self._read_a_silent_catalogue(
+            harness,
+            lambda run, deadline: run.chain.terms({run.provider.name: keys}, deadline=deadline),
+        )
+        self._require_closed_behind_the_chain(cut, "terms")
+
+    def _recorded_term_keys(self, harness: ContractHarness) -> list[str]:
+        """The keys of the terms the recorded catalogue attaches to the tables of the names."""
+        self._skip_without_http(harness)
+        with _running(harness) as run:
+            found = run.describe(_refs(harness.names), self.DEADLINE_SECONDS)
+        keys = sorted(_term_keys(found.values()))
+        _require(
+            bool(keys),
+            "ContractNames: the term column must carry a term of a served glossary",
+        )
+        return keys
+
+    def _read_a_silent_catalogue(
+        self, harness: ContractHarness, read: Callable[["_Silenced", float], Any]
+    ) -> "_Cut":
+        """Run ``read`` with the slow deadline against a catalogue that never answers, over a
+        real socket; then count the connections still open, given the margin to close."""
+        self._skip_without_http(harness)
+        settings = replace(_default_settings(), timeout_seconds=self.SLOW_DEADLINE_SECONDS)
         got: list = []
-        try:
+        # Each resource is closed only once it is open, the last opened first.
+        with ExitStack() as opened:
+            silent = _Silent()
+            opened.callback(silent.close)
+            loop = ContextLoop()
+            loop.start()
+            opened.callback(loop.close)
+            provider = harness.build(harness.env, _ToSilent(silent.port))
+            opened.callback(_Run.failure, lambda: loop.submit(provider.aclose(), _SUBMIT_SECONDS))
+            run = _Silenced(provider, ContextChain([provider], settings, loop=loop), loop)
             started = time.monotonic()
             deadline = started + self.SLOW_DEADLINE_SECONDS
-            if behind_chain:
-                error = _Run.failure(lambda: got.append(chain.gather(refs, deadline=deadline)))
-            else:
-                read = provider.describe(refs, deadline=deadline)
-                error = _Run.failure(lambda: got.append(loop.submit(read, _SUBMIT_SECONDS)))
+            error = _Run.failure(lambda: got.append(read(run, deadline)))
             elapsed = time.monotonic() - started
             # The close is sent on the loop's next turns: given the margin, never more.
             end = time.monotonic() + self.REPLY_MARGIN_SECONDS
             while (left := silent.open_connections()) and time.monotonic() < end:
                 time.sleep(0.01)
             asked = silent.asked()
-        finally:
-            try:
-                chain.close()
-            finally:
-                loop.close()
-                silent.close()
         return _Cut(provider.name, got[0] if got else None, error, elapsed, asked, left)
+
+    def _require_closed_alone(self, cut: "_Cut", read: str) -> None:
+        _require(cut.asked > 0, "the silent catalogue must have been asked")
+        _require(
+            cut.elapsed <= self.SLOW_DEADLINE_SECONDS + self.REPLY_MARGIN_SECONDS,
+            f"over a socket, {read} handed back control {cut.elapsed:.2f}s after it started, "
+            f"past its deadline of {self.SLOW_DEADLINE_SECONDS}s plus "
+            f"{self.REPLY_MARGIN_SECONDS}s",
+        )
+        _require(
+            isinstance(cut.error, ProviderUnavailable),
+            f"{read} of a catalogue past the deadline must raise ProviderUnavailable",
+        )
+        _require(
+            cut.left == 0,
+            f"a {read} read past its deadline must close its connection: {cut.left} of "
+            f"{cut.asked} left open, the request still pending at the catalogue",
+        )
+
+    def _require_closed_behind_the_chain(self, cut: "_Cut", read: str) -> None:
+        _require(cut.asked > 0, "the silent catalogue must have been asked")
+        _require(
+            cut.error is None,
+            f"behind the chain, {read} raised {type(cut.error).__name__}: the chain must "
+            "hand back control within its grace",
+        )
+        _require(
+            cut.elapsed <= self.SLOW_DEADLINE_SECONDS + self.REPLY_MARGIN_SECONDS,
+            f"behind the chain, {read} handed back control {cut.elapsed:.2f}s after it "
+            f"started, past its deadline of {self.SLOW_DEADLINE_SECONDS}s plus "
+            f"{self.REPLY_MARGIN_SECONDS}s",
+        )
+        _require(
+            cut.result.statuses[cut.name] == UNAVAILABLE,
+            f"a {read} read past its deadline must say unavailable",
+        )
+        _require(
+            cut.left == 0,
+            f"a {read} read cut at its deadline must close its connection: {cut.left} of "
+            f"{cut.asked} left open, the request still pending at the catalogue",
+        )
 
     def test_a_401_raises_refused_and_is_not_retried(self, harness: ContractHarness) -> None:
         """A refused account raises ``ProviderRefused`` and no request is sent twice; the core

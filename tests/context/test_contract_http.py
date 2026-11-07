@@ -455,6 +455,20 @@ class Late(Recorded):
             raise
 
 
+class CutLate(Recorded):
+    """Cuts its reads 0.15 s past its deadline, after the chain has cancelled them."""
+
+    async def _all(self, calls: list, deadline: float) -> list:
+        return await super()._all(calls, deadline + 0.15)
+
+
+class Threaded(Recorded):
+    """Sends each request from a thread, where no cancellation reaches the socket."""
+
+    async def _get(self, path: str, params: dict[str, str]) -> Any:
+        return await asyncio.to_thread(asyncio.run, super()._get(path, params))
+
+
 class Retrying(Recorded):
     """Sends a refused request again."""
 
@@ -714,3 +728,24 @@ def test_a_provider_without_an_owner_passes_and_says_why_the_owner_is_not_checke
     contract.test_served_sets_reflect_the_configuration(harness)
     with pytest.raises(pytest.skip.Exception, match="declares no owner"):
         getattr(contract, OWNER_CHECK)(harness)
+
+
+def test_a_cut_later_than_the_deadline_alone_still_closes_its_connection():
+    """A provider that cuts 0.15 s late is cancelled by the chain first, once: leaving its
+    ``asyncio.timeout`` disarms its own timer, so no second cancellation reaches the close.
+    A cut that fires during the close itself, a few milliseconds after the chain's, can
+    still leave the connection open; that race cannot be shown deterministically."""
+    ContextContract().test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
+        harness_of(CutLate)
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="a client run in a thread is out of reach of any cancellation: its connection stays "
+    "open until the client's own timeout, whatever the chain does",
+)
+def test_a_client_in_a_thread_leaves_its_connection_open():
+    ContextContract().test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
+        harness_of(Threaded)
+    )
