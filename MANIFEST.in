@@ -8,7 +8,8 @@ prune .venv
 # metadata and READMEs. The documentation in both languages, and every file its links name,
 # so that the check of its links runs from the sdist too.
 include README.fr.md DOCKERHUB.md CONTRIBUTING.md CONTRIBUTING.fr.md SECURITY.md SECURITY.fr.md
-include LICENSE NOTICE charts/akko-mcp-trino/README.md integration/compose.yaml
+include LICENSE NOTICE charts/akko-mcp-trino/README.md charts/akko-mcp-trino/ci/gateway-values.yaml
+include integration/compose.yaml
 graft docs/en
 graft docs/fr
 graft docs/guides
