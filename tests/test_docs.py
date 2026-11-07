@@ -137,3 +137,47 @@ def test_the_absolute_links_of_the_readmes_name_files_that_exist():
             if not target.exists() or (anchor and anchor not in anchors(target)):
                 broken.append(f"{name}: {link}")
     assert broken == []
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_the_stdio_entry_of_the_hosts_page_is_the_example_file(language):
+    """The entry the page shows is the one examples/mcp-stdio.json holds, byte for byte once
+    parsed, so that a fix to one cannot leave the other behind."""
+    import json
+
+    page = (ROOT / "docs" / language / "hosts.md").read_text(encoding="utf-8")
+    blocks = [json.loads(b) for b in re.findall(r"```json\n(.*?)```", page, re.S)]
+    example = json.loads((ROOT / "examples" / "mcp-stdio.json").read_text(encoding="utf-8"))
+    assert example in blocks
+
+
+# The one sentence that says what SHOW STATS or EXPLAIN can show, in each language.
+_ALLOWED = {
+    "en": "Some reads, such as `SHOW STATS` or `EXPLAIN`, can show facts beyond a row filter or a "
+    "column mask.",
+    "fr": "Certaines lectures, comme `SHOW STATS` ou `EXPLAIN`, peuvent révéler des informations "
+    "au-delà d'un filtre de lignes ou d'un masque de colonne.",
+}
+_SUBJECT = {
+    "en": re.compile(r"beyond a row filter|statistics of the query|past a row filter", re.I),
+    "fr": re.compile(
+        r"au-delà d'un filtre de lignes|au-delà d'un row filter|statistiques de la requête", re.I
+    ),
+}
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+def test_only_the_security_page_says_what_extra_reads_can_show(language):
+    readme = "README.md" if language == "en" else "README.fr.md"
+    texts = {readme: (ROOT / readme).read_text(encoding="utf-8")}
+    texts |= {
+        str(p.relative_to(ROOT)): p.read_text(encoding="utf-8")
+        for p in sorted((ROOT / "docs" / language).glob("*.md"))
+    }
+    flat = {
+        name: " ".join(text.replace("\u202f", " ").replace("\u00a0", " ").split())
+        for name, text in texts.items()
+    }
+    found = {name: len(_SUBJECT[language].findall(t)) for name, t in flat.items()}
+    assert {name: n for name, n in found.items() if n} == {f"docs/{language}/security.md": 1}
+    assert _ALLOWED[language] in flat[f"docs/{language}/security.md"]

@@ -245,31 +245,31 @@ def test_the_public_texts_count_the_nine_tools(path, word):
 
 _RIGHTS = {
     "docs/en/deployment.md": [
-        "## Deployment with a catalogue",
+        "## With a data catalog",
         "Descriptions follow what Trino lists to the caller. With "
-        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` also requires that Trino validates a "
-        "select by the caller of the columns it lists, while `describe_schema` keeps serving the "
-        "descriptions of the tables Trino lists.",
-        "It serves glossary terms, classifications and business metadata only when their "
-        "glossary, classification or set is named in the allow lists, closed by default, and the "
-        "owner only when it is configured (for Atlas: `ATLAS_GLOSSARIES`, "
-        "`ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, empty means none, and "
-        "`ATLAS_OWNER_ATTRIBUTE`).",
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` also asks Trino to confirm that the "
+        "caller may select the columns it lists. `describe_schema` keeps serving the descriptions "
+        "of the tables Trino lists.",
+        "The provider serves glossary terms, classifications and business metadata only when "
+        "their glossary, classification or set is named in an allow list. The allow lists are "
+        "empty by default. The owner is served only when it is configured (for Atlas: "
+        "`ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, empty means none, "
+        "and `ATLAS_OWNER_ATTRIBUTE`).",
     ],
     "docs/en/configuration.md": [
         "Raising it past 8 mostly adds metadata load on Trino, with little gain.",
     ],
     "docs/fr/deployment.md": [
-        "## Déploiement avec un catalogue",
+        "## Avec un catalogue de données",
         "Les descriptions suivent ce que Trino liste à l'appelant. Avec "
-        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` exige en plus que Trino valide un "
-        "SELECT par l'appelant des colonnes qu'il liste, tandis que `describe_schema` continue de "
-        "servir les descriptions des tables que Trino liste.",
-        "Il ne sert les termes de glossaire, les classifications et les métadonnées métier "
-        "que si leur glossaire, leur classification ou leur ensemble est nommé dans les listes "
-        "blanches, fermées par défaut, et le propriétaire seulement s'il est configuré (pour "
-        "Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, `ATLAS_BUSINESS_METADATA`, vide "
-        "veut dire aucun, et `ATLAS_OWNER_ATTRIBUTE`).",
+        "`MCP_CONTEXT_REQUIRE_SELECT=true`, `describe_table` demande en plus à Trino de confirmer "
+        "que l'appelant peut faire un SELECT des colonnes qu'il liste. `describe_schema` continue "
+        "de servir les descriptions des tables que Trino liste.",
+        "Le fournisseur ne sert les termes de glossaire, les classifications et les métadonnées "
+        "métier que si leur glossaire, leur classification ou leur ensemble est nommé dans une "
+        "liste blanche. Les listes blanches sont vides par défaut. Le propriétaire n'est servi "
+        "que s'il est configuré (pour Atlas : `ATLAS_GLOSSARIES`, `ATLAS_CLASSIFICATIONS`, "
+        "`ATLAS_BUSINESS_METADATA`, vide veut dire aucun, et `ATLAS_OWNER_ATTRIBUTE`).",
     ],
     "docs/fr/configuration.md": [
         "Le monter au-delà de 8 ajoute surtout de la charge de métadonnées sur Trino, pour peu "
@@ -333,7 +333,9 @@ _MODULE_EXAMPLES = [
 def test_each_readme_quotes_a_real_example_of_each_module(language):
     text = doc(language, "modules")
     assert [e for e in _MODULE_EXAMPLES if e not in text] == []
-    assert text.count("Not tested live") + text.count("Non testé en live") == 2, "Entra ID, Okta"
+    assert text.count("Not tested live") + text.count("Non testé en conditions réelles") == 2, (
+        "Entra ID, Okta"
+    )
 
 
 def _sections(path):
