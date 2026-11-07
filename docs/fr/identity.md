@@ -119,9 +119,10 @@ agir au nom de tout utilisateur que la règle permet.
 ```bash
 export TRINO_IDENTITY_MODE=service
 export TRINO_USER=mcp-reader
-export TRINO_PASSWORD=...               # ou TRINO_CLIENT_CERT et TRINO_CLIENT_KEY ; https seulement
+read -rs TRINO_PASSWORD && export TRINO_PASSWORD   # ou TRINO_CLIENT_CERT et TRINO_CLIENT_KEY ; https seulement
 ```
 
+`read -rs` lit le mot de passe sans l'afficher : il reste hors de l'historique du shell.
 Chaque requête s'exécute sous `TRINO_USER`, quel que soit l'appelant. Donnez à cette identité des
 droits en lecture seule, et seulement sur les données que tout appelant de ce serveur peut lire.
 Le serveur écrit un avertissement au démarrage, `--check` l'affiche, et chaque MCP host le reçoit

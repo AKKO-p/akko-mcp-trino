@@ -2,15 +2,16 @@
 
 Works unchanged with Mistral (La Plateforme, or through OpenRouter or LiteLLM),
 and with any other provider that speaks the OpenAI chat-completions API with
-tool calling. The model never sees a token; the MCP server receives the user's
-token on every tool call, verifies it, and queries Trino as that user (by default,
-with a token for Trino the server obtains by token exchange, never the user's own).
+tool calling. The model never sees a token, but it sees the tool results; the
+MCP server receives the user's token on every tool call, verifies it, and
+queries Trino as that user (by default, with a token for Trino the server
+obtains by token exchange, never the user's own).
 
     export LLM_BASE_URL=https://api.mistral.ai/v1
-    export LLM_API_KEY=...
+    read -rs LLM_API_KEY && export LLM_API_KEY    # read without echo: not in the shell history
     export LLM_MODEL=mistral-small-latest
     export MCP_URL=http://localhost:3000/mcp      # or .../sse for the sse transport
-    export USER_TOKEN=<the user's access token, issued for the MCP server>
+    read -rs USER_TOKEN && export USER_TOKEN      # the user's token, issued for the MCP server
     python examples/agent.py "Give me three customer e-mails and their country"
 
 Dependencies: pip install akko-mcp-trino openai
@@ -21,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextlib import AsyncExitStack
 
 import anyio
 from mcp import ClientSession
@@ -48,7 +50,7 @@ def _openai_tools(mcp_tools) -> list[dict]:
             "function": {
                 "name": t.name,
                 "description": t.description or "",
-                "parameters": t.inputSchema,
+                "parameters": t.input_schema,
             },
         }
         for t in mcp_tools
@@ -61,11 +63,12 @@ async def run(question: str) -> str:
     headers = {"Authorization": f"Bearer {os.environ['USER_TOKEN']}"}
 
     url = os.environ.get("MCP_URL", "http://localhost:3000/mcp")
-    if url.rstrip("/").endswith("/sse"):
-        opener = sse_client(url, headers=headers)
-    else:
-        opener = streamable_http_client(url, http_client=create_mcp_http_client(headers=headers))
-    async with opener as streams:
+    async with AsyncExitStack() as stack:
+        if url.rstrip("/").endswith("/sse"):
+            streams = await stack.enter_async_context(sse_client(url, headers=headers))
+        else:
+            http = await stack.enter_async_context(create_mcp_http_client(headers=headers))
+            streams = await stack.enter_async_context(streamable_http_client(url, http_client=http))
         r, w = streams[0], streams[1]
         async with ClientSession(r, w) as session:
             await session.initialize()

@@ -117,10 +117,11 @@ service credential: whoever holds it can act as any user the rule allows.
 ```bash
 export TRINO_IDENTITY_MODE=service
 export TRINO_USER=mcp-reader
-export TRINO_PASSWORD=...               # or TRINO_CLIENT_CERT and TRINO_CLIENT_KEY; https only
+read -rs TRINO_PASSWORD && export TRINO_PASSWORD   # or TRINO_CLIENT_CERT and TRINO_CLIENT_KEY; https only
 ```
 
-Every query runs as `TRINO_USER`, whoever calls. Give that identity read-only rights, and only on
+`read -rs` reads the password without showing it, so it stays out of your shell history. Every
+query runs as `TRINO_USER`, whoever calls. Give that identity read-only rights, and only on
 data every caller of this server may read. The server logs a warning at start, `--check` prints
 it, and every host receives it in the `instructions` of the MCP initialization. Token verification
 stays on by default. To run without it, locally, also set `MCP_AUTH_ENABLED=false` and
