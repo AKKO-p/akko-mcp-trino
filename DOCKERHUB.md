@@ -3,17 +3,16 @@
 **Give your AI agents read-only access to Trino, with the rights of the user they work for.**
 
 akko-mcp-trino is an [MCP](https://modelcontextprotocol.io) server for Trino, under the
-Apache 2.0 licence. It lets an agent find the tables and columns that hold what it is looking
-for, describe a schema or a table, list catalogs, schemas and tables, explain a query and run
-it, and it refuses every write it is sent: each statement is parsed,
-and a write anywhere in it is refused before Trino.
+Apache 2.0 license. An agent can use it to find tables and columns, describe a schema or a table,
+list catalogs, schemas and tables, and explain or run a query. The server parses every statement
+and refuses any write before it reaches Trino.
 
-- **The user's own rights, safe by default.** In `jwt` mode, the default, the server verifies
-  the user's token (issued for this server), exchanges it at the identity provider for a token
-  whose audience is Trino (OAuth 2.0 Token Exchange, RFC 8693), and Trino runs the query as that
-  person. The user's token is never passed on, and a request without a valid token gets `401`.
-- **Without token exchange**, `impersonation` mode: the server's own account (password or
-  client certificate) and a Trino impersonation rule only that account has.
+- **Per-user rights by default.** In `jwt` mode, the default, the server verifies the user's
+  token (issued for this server), exchanges it at the identity provider for a token whose
+  audience is Trino (OAuth 2.0 Token Exchange, RFC 8693), and Trino runs the query as that
+  user. The user's token is never passed on, and a request without a valid token gets `401`.
+- **Without token exchange**, `impersonation` mode uses the server's own account (password or
+  client certificate) and a Trino impersonation rule that only this account has.
 - **Or one identity, only when named** (`service` mode), announced as a warning at start and
   to every host.
 - **Bounded and audited.** 100 rows, 60 s per query, 120 s per tool call by default, one audit
@@ -26,16 +25,16 @@ Source, documentation and issues: **[github.com/AKKO-p/akko-mcp-trino](https://g
 
 ## Understand in five steps
 
-![In an illustrative setup with a service account with broad rights, Trino sees mcp-svc and returns 10 customers with e-mails in clear. With akko-mcp-trino in its default jwt mode, Trino sees carol_analyst and returns 5 European customers with e-mails masked.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-1-problem-light.svg)
+![In an illustrative setup with a service account with broad rights, Trino sees mcp-svc and returns 10 customers with unmasked emails. With akko-mcp-trino in its default jwt mode, Trino sees carol_analyst and returns 5 European customers with masked emails.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-1-problem-light.svg)
 
 An agent connected through one service account with broad rights reaches Trino under that
 account, so the rules written for Carol no longer apply (the left panel is an illustration).
 akko-mcp-trino brings Carol's own identity to Trino.
 
-![alice_admin sees the 10 customers in clear, carol_analyst the 5 European customers with masked e-mails, and dave_viewer is refused by Trino (Access Denied).](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg)
+![alice_admin sees the 10 customers unmasked, carol_analyst the 5 European customers with masked emails, and dave_viewer is refused by Trino (Access Denied).](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-2-who-sees-what-light.svg)
 
-The same question from the three users of the sandbox. Trino answers each of them with the
-sandbox's OPA policy; the server copies no rule.
+The same question from the three users of the sandbox. Trino applies the sandbox's OPA
+policy to each of them; the server copies no rule.
 
 ![A real trial of Mistral on 0.7.0: a search by four words matched word by word, a wrong join, the server's hint, describe_table, the fixed join and the answer.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-3-step-by-step-light.svg)
 
@@ -45,9 +44,9 @@ A real trial, tool call by tool call: every tool answer shown is the server's.
 
 Four identity modes, from the safest to the simplest, and three questions to pick yours.
 
-![Mistral answers right 62.5% of the time on 0.6.1 and 70% on 0.7.0, Claude 93.3% on both. Mistral goes from 5.8 to 3.0 tool calls per question, Claude from 8.5 to 4.9.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-5-measurements-light.svg)
+![Mistral answers correctly 62.5% of the time on 0.6.1 and 70% on 0.7.0, Claude 93.3% on both. Mistral goes from 5.8 to 3.0 tool calls per question, Claude from 8.5 to 4.9.](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/v0.7.0/docs/images/understand-5-measurements-light.svg)
 
-The same five business questions asked to Mistral and to Claude, on 0.6.1 and on 0.7.0. Mistral
+The same five business questions, put to Mistral and to Claude, on 0.6.1 and on 0.7.0. Mistral
 varies more from one run to the next than the gap between the versions, and 0.7.0 sends about 41%
 more input tokens per question (longer tool descriptions). The interactive version of these steps is on
 [akko-ai.com/en/docs/understand](https://akko-ai.com/en/docs/understand/).
@@ -91,25 +90,21 @@ docker run -d --name akko-mcp-trino -p 3000:3000 -p 3001:3001 \
   akkoai/akko-mcp-trino:0.7
 ```
 
-Without token exchange: `-e TRINO_IDENTITY_MODE=impersonation -e TRINO_USER=mcp-service` and a
-password or client certificate for that account. One identity for every caller:
-`-e TRINO_IDENTITY_MODE=service -e TRINO_USER=mcp-reader -e TRINO_PASSWORD=...`. Upgrading from
-0.6: let the engine's policy read `system.jdbc` and `system.metadata` (the two new tools read them),
-keep `MCP_CALL_TIMEOUT_SECONDS` at 0 or above `MCP_SEARCH_RESERVE_SECONDS` (2 by default), and read a
-`truncated` listing on with `next_offset`. Upgrading from 0.6 or 0.5: see
-[MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md).
+Without token exchange, use `-e TRINO_IDENTITY_MODE=impersonation -e TRINO_USER=mcp-service`, with
+a password or a client certificate for that account. For one identity for every caller, use
+`-e TRINO_IDENTITY_MODE=service -e TRINO_USER=mcp-reader -e TRINO_PASSWORD=...`.
 
 The MCP endpoint is `http://localhost:3000/mcp` (streamable HTTP); the host sends the user's
 access token as `Authorization: Bearer <token>`. Then:
 
 ```bash
 curl -s localhost:3001/health   # {"status":"ok"}
-curl -s localhost:3001/ready    # {"status":"ready"} once Trino answers
+curl -s localhost:3001/ready    # {"status":"ready"} once Trino responds
 docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
 ```
 
 Before serving, `akko-mcp-trino --check` prints the effective configuration (never a secret)
-and exits with 2 if something would refuse to start:
+and exits with status 2 if a setting would stop the server from starting:
 
 ```bash
 docker run --rm -e TRINO_HOST=... -e TRINO_HTTP_SCHEME=https -e MCP_JWKS_URL=... \
@@ -122,6 +117,12 @@ points are described in the [documentation](https://github.com/AKKO-p/akko-mcp-t
 [identity](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/identity.md),
 [hosts](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/hosts.md)) and on
 [akko-ai.com](https://akko-ai.com/en/docs/open-source-core/).
+
+## Upgrading
+
+From 0.7.0: 0.7.1 and 0.7.2 are security releases. With Keycloak, set
+`MCP_JWT_USER_CLAIM=preferred_username` before upgrading. From 0.6 or earlier, see
+[MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md).
 
 ## About
 

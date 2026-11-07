@@ -2,32 +2,39 @@
 
 [English](../en/modules.md) · **Français**
 
-Le cœur livre trois extensions à lui, chacune désactivée tant que `MCP_EXTENSIONS` ne la nomme
-pas (séparées par des virgules) : `token-policy`, `fingerprint-audit` et `trino-tags`. Leur ordre
-compte là où des extensions se rencontrent : un document public du même chemin est celui de la
-dernière extension, le challenge d'un refus est celui de la première qui en donne un, et l'audit
-est enveloppé dans cet ordre.
+Le cœur livre trois modules : `token-policy`, `fingerprint-audit` et `trino-tags`. Chacun reste
+désactivé tant que `MCP_EXTENSIONS` ne le nomme pas (séparés par des virgules). Dans le code, un
+module est une extension (`akko_mcp_trino.extensions.Extension`), chargée comme toute autre.
+
+L'ordre dans `MCP_EXTENSIONS` compte quand deux modules ou extensions touchent la même chose :
+
+- si deux publient un document au même chemin, le dernier l'emporte ;
+- pour un refus, le premier qui rend un challenge l'emporte ;
+- les enveloppes d'audit s'appliquent dans cet ordre.
 
 ## token-policy
 
-Un token vérifié doit aussi nommer un client admis et porter les portées
-exigées. Le client est la première des revendications de `MCP_JWT_CLIENT_CLAIMS` que porte le
-token, et ses portées la première de `MCP_JWT_SCOPE_CLAIMS` ; les deux sont comparés exactement,
-casse comprise, sans joker. Un client étranger reçoit le 401 d'un token invalide
-(`X-Reason: client_not_allowed`), et n'apprend jamais quelle portée l'aurait laissé entrer, car le
-client est vérifié d'abord. Un token sans toutes les portées exigées reçoit 403
-`insufficient_scope`, dont le `WWW-Authenticate` nomme les portées à demander (RFC 6750 §3.1), et
-les métadonnées de ressource protégée ajoutent `scopes_supported`. Une requête sans token vérifié,
-que `MCP_AUTH_REQUIRED=false` laisse passer le cœur, reçoit le 401 et le challenge du cœur, jamais
-un 403. Chaque client et chaque portée doit être un scope-token OAuth (ASCII imprimable, sans
-espace, sans guillemet, sans barre oblique inverse), sinon il refuse de démarrer ; sans aucune des
-deux listes aussi : il n'imposerait rien. Les revendications sont lues à leur présence : la
-première que porte le token est lue, quoi qu'elle contienne, si bien qu'un `scp` vide ne renvoie
-jamais à `scope` ; ne listez que des revendications que l'identity provider pose lui-même, jamais
-une qu'alimente un attribut modifiable par l'utilisateur.
+Un token vérifié doit aussi nommer un client admis et porter les portées exigées. Le client est le
+premier des claims de `MCP_JWT_CLIENT_CLAIMS` que porte le token, et ses portées le premier de
+`MCP_JWT_SCOPE_CLAIMS`. Les deux sont comparés exactement, casse comprise, sans joker.
 
-Par exemple, la suite d'intégration (`integration/compose.yaml`, serveur `mcp-scoped`) le règle
-ainsi :
+- Un client non admis reçoit le 401 d'un token invalide (`X-Reason: client_not_allowed`). Il
+  n'apprend jamais quelle portée l'aurait laissé entrer, car le client est vérifié d'abord.
+- Un token sans toutes les portées exigées reçoit un 403 `insufficient_scope`. Son
+  `WWW-Authenticate` nomme les portées à demander (RFC 6750 §3.1), et les métadonnées de ressource
+  protégée ajoutent `scopes_supported`.
+- Une requête sans token vérifié, que le cœur laisse passer parce que `MCP_AUTH_REQUIRED=false`,
+  reçoit le 401 et le challenge du cœur, jamais un 403.
+
+Chaque client et chaque portée doit être un scope-token OAuth (ASCII imprimable, sans espace, sans
+guillemet, sans barre oblique inverse) ; sinon, le serveur refuse de démarrer. Il refuse aussi de
+démarrer quand aucune des deux listes n'est posée, puisque le module n'imposerait rien. C'est la
+présence d'un claim qui compte : le premier que porte le token est lu, quoi qu'il contienne, si
+bien qu'un `scp` vide ne se rabat jamais sur `scope`. Ne listez que des claims que l'identity
+provider pose lui-même. Ne listez jamais un claim rempli à partir d'un attribut que l'utilisateur
+peut modifier.
+
+Par exemple, la suite d'intégration (`integration/compose.yaml`, serveur `mcp-scoped`) pose :
 
 ```sh
 MCP_EXTENSIONS=token-policy
@@ -35,7 +42,7 @@ MCP_ALLOWED_CLIENTS=mcp-host
 MCP_REQUIRED_SCOPES=data:query
 ```
 
-Un token du client `mcp-host` sans la portée `data:query` reçoit cette réponse :
+Un token du client `mcp-host` sans la portée `data:query` reçoit cette réponse :
 
 ```http
 HTTP/1.1 403 Forbidden
@@ -45,7 +52,7 @@ WWW-Authenticate: Bearer resource_metadata="http://mcp-scoped:3000/.well-known/o
 {"error":"insufficient_scope","message":"the token lacks a scope this server requires: ask the identity provider for a token with the scopes the WWW-Authenticate header names"}
 ```
 
-et les métadonnées de ressource protégée nomment la portée :
+Les métadonnées de ressource protégée nomment la portée :
 
 ```json
 {
@@ -56,32 +63,36 @@ et les métadonnées de ressource protégée nomment la portée :
 }
 ```
 
-Voici les revendications, par identity provider :
+Voici les claims, par identity provider :
 
-- Keycloak : les défauts (`MCP_JWT_CLIENT_CLAIMS=azp,client_id`, `MCP_JWT_SCOPE_CLAIMS=scope`), testés par la suite d'intégration.
-- Entra ID : `MCP_JWT_SCOPE_CLAIMS=scp` ; le client est dans `azp` ou `appid` selon la version du token, vérifiez donc l'un de vos tokens. Non testé en live.
-- Okta : `MCP_JWT_SCOPE_CLAIMS=scp`, `MCP_JWT_CLIENT_CLAIMS=cid`. Non testé en live.
+- Keycloak : les défauts (`MCP_JWT_CLIENT_CLAIMS=azp,client_id`, `MCP_JWT_SCOPE_CLAIMS=scope`), testés par la suite d'intégration.
+- Entra ID : `MCP_JWT_SCOPE_CLAIMS=scp` ; le client est dans `azp` ou `appid` selon la version du token, vérifiez donc l'un de vos tokens. Non testé en conditions réelles.
+- Okta : `MCP_JWT_SCOPE_CLAIMS=scp`, `MCP_JWT_CLIENT_CLAIMS=cid`. Non testé en conditions réelles.
 
 ## fingerprint-audit
 
-La ligne d'audit ajoute ce que l'appel a fait, après les champs du
-cœur, dans cet ordre : `request_id`, `tool`, `subject`, `token_id` (le `jti` du token, jamais le
-token), `ok`, `error`, `sql_sha256`, `tables`, `duration_ms`, `rows`, `truncated`,
-`metadata_served` (les tables dont la description de catalogue est parvenue à l'appelant). Le
-texte SQL n'a toujours aucun champ. `sql_sha256` est le SHA-256 de l'instruction envoyée à Trino
-pour l'appelant ; un tool qui en envoie plusieurs garde la dernière qu'il a notée, celle qui a
-répondu à l'agent (l'agrégat de `profile_table`, l'échantillon de `describe_table`). L'historique
-de Trino garde le texte, et un moteur de politiques qui l'enregistre obtient la même empreinte :
-c'est la jointure. Chaque liste garde `MCP_AUDIT_MAX_NAMES` noms ; au-delà, `tables_cut` ou
-`metadata_served_cut`, juste après la liste, dit combien il y en avait de plus, chacun compté une
-fois. Un champ qu'une autre extension ajoute à la ligne n'écrase jamais l'un de ceux-ci : il est
-retiré et compté dans `extra_dropped`. Le serveur enveloppe l'audit dans l'ordre de
-`MCP_EXTENSIONS`, chacune autour de la précédente : nommez `fingerprint-audit` avant toute autre
-extension qui enveloppe l'audit.
+Ce module ajoute à la ligne d'audit ce que l'appel a fait, après les champs du cœur, dans cet
+ordre : `request_id`, `tool`, `subject`, `token_id` (le `jti` du token, jamais le token), `ok`,
+`error`, `sql_sha256`, `tables`, `duration_ms`, `rows`, `truncated`, `metadata_served` (les tables
+dont la description de catalogue de données est parvenue à l'appelant). Le texte SQL n'a toujours
+aucun champ.
 
-Par exemple, la ligne d'un appel d'`execute_query` dans la suite d'intégration (le sujet et les
-identifiants sont remplacés par des valeurs fictives ; l'ordre des champs et l'empreinte sont
-ceux de l'exécution) :
+`sql_sha256` est le SHA-256 de l'instruction envoyée à Trino pour l'appelant. Un tool qui en envoie
+plusieurs garde la dernière qu'il a notée, celle qui a répondu à l'agent (l'agrégat de
+`profile_table`, l'échantillon de `describe_table`). L'historique de Trino garde le texte, et un
+moteur de policies qui l'enregistre obtient la même empreinte : servez-vous de l'empreinte pour les
+joindre.
+
+Chaque liste garde `MCP_AUDIT_MAX_NAMES` noms. Au-delà, `tables_cut` ou `metadata_served_cut`,
+juste après la liste, dit combien il y en avait de plus, chacun compté une fois. Un champ qu'une
+autre extension ajoute à la ligne n'écrase jamais l'un de ceux-ci : il est retiré et compté dans
+`extra_dropped`. Le serveur enveloppe l'audit dans l'ordre de `MCP_EXTENSIONS`, chaque enveloppe
+autour de la précédente : nommez donc `fingerprint-audit` avant toute autre extension qui enveloppe
+l'audit.
+
+Voici la ligne d'un appel d'`execute_query` dans la suite d'intégration. Le sujet et les
+identifiants sont remplacés par des valeurs fictives ; l'ordre des champs et l'empreinte sont ceux
+de l'exécution :
 
 ```json
 {
@@ -102,16 +113,19 @@ ceux de l'exécution) :
 
 ## trino-tags
 
-Chaque requête d'un appel porte deux étiquettes client (`X-Trino-Client-Tags`) :
-`request_id=<id>`, l'identifiant de requête envoyé par la périphérie ou créé par le serveur, et
-`tool=<tool>`, chacune seulement quand elle est connue. Trino les garde avec la requête : son
-historique, ses groupes de ressources et un moteur de politiques qui les enregistre voient quel
-appel du serveur l'a envoyée. Le cœur ne garde l'identifiant de la périphérie que s'il est un
-token simple, et le module ne garde un nom de tool que s'il en est un aussi, sinon `tool=other` :
-aucune virgule ni aucun `=` ne peut ajouter une étiquette. L'étiquette du filtre
-(`mcp-gate`) et celle du profil (`mcp-profile`) s'y ajoutent. Par exemple, un groupe de
-ressources pour les requêtes que les agents écrivent eux-mêmes (les chiffres sont un exemple à
-adapter, pas une mesure ; chaque sélecteur nomme un groupe feuille) :
+Chaque requête d'un appel porte deux étiquettes client (`X-Trino-Client-Tags`), chacune seulement
+quand elle est connue : `request_id=<id>`, l'identifiant de requête envoyé par la passerelle placée
+devant le serveur, ou créé par le serveur, et `tool=<tool>`. Trino les garde avec la requête : son
+historique, ses groupes de ressources et un moteur de policies qui les enregistre voient quel appel
+du serveur l'a envoyée.
+
+Le cœur ne garde un identifiant de requête reçu que s'il est un identifiant simple, et le module ne
+garde un nom de tool que s'il en est un aussi, sinon `tool=other`. Aucune virgule ni aucun `=` ne
+peut donc ajouter une étiquette. L'étiquette du filtre de visibilité (`mcp-gate`) et celle du
+profil (`mcp-profile`) s'y ajoutent.
+
+Voici un groupe de ressources pour les requêtes que les agents écrivent eux-mêmes. Les chiffres
+sont un point de départ, pas une mesure, et chaque sélecteur nomme un groupe feuille :
 
 ```json
 {
@@ -135,15 +149,15 @@ adapter, pas une mesure ; chaque sélecteur nomme un groupe feuille) :
 ```
 
 Dans la suite d'intégration, un appel d'`execute_query` envoyé avec `X-Request-Id: req-docs-0001`
-a lancé sa requête avec ces étiquettes client :
+a lancé sa requête avec ces étiquettes client :
 
 ```text
 X-Trino-Client-Tags: request_id=req-docs-0001,tool=execute_query
 ```
 
-et `system.runtime.queries` de Trino la montre dans le groupe que nomme le sélecteur sur
+Le `system.runtime.queries` de Trino montre la requête dans le groupe que nomme le sélecteur sur
 `tool=execute_query` (`integration/trino/resource-groups.json`, avec les mêmes sélecteurs que
-ci-dessus) :
+ci-dessus) :
 
 ```text
 query_id                     resource_group_id    source
@@ -152,6 +166,6 @@ query_id                     resource_group_id    source
 
 ## Réglages
 
-`MCP_ALLOWED_CLIENTS`, `MCP_REQUIRED_SCOPES` et `MCP_AUDIT_MAX_NAMES` sont dans
-[Configuration](configuration.md#modules), et `MCP_JWT_CLIENT_CLAIMS` et `MCP_JWT_SCOPE_CLAIMS`
-dans [son tableau d'identité](configuration.md#identité).
+`MCP_ALLOWED_CLIENTS` et `MCP_REQUIRED_SCOPES` sont dans [Configuration](configuration.md#modules),
+`MCP_AUDIT_MAX_NAMES` dans [son tableau d'audit](configuration.md#audit), et `MCP_JWT_CLIENT_CLAIMS`
+et `MCP_JWT_SCOPE_CLAIMS` dans [son tableau d'identité](configuration.md#identité).

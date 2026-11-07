@@ -2,9 +2,11 @@
 
 **English** · [Français](../fr/index.md)
 
-akko-mcp-trino is an MCP server for Trino. An agent reads through it with the rights of the user
-it acts for, and every write is refused before Trino. Start with the [quickstart](quickstart.md),
-then open the page you need.
+akko-mcp-trino is an MCP server for Trino. Through it, an agent reads data with the rights of the
+user it acts for, and the server refuses every write before it reaches Trino. Start with the
+[quickstart](quickstart.md), then open the page you need.
+
+These pages describe `main`. The documentation of a release is at its tag.
 
 ## Learn
 
@@ -17,36 +19,42 @@ then open the page you need.
 
 | Page | What it covers |
 |---|---|
-| [Deployment](deployment.md) | install and run, the transports, the container, Helm on Kubernetes and OpenShift, Trino Gateway, with or without a catalogue |
-| [Identity](identity.md) | the four identity modes, the user claim, the door, what happens on a request |
+| [Deployment](deployment.md) | install and run, the transports, the container, Helm on Kubernetes and OpenShift, Trino Gateway, with or without a data catalog, with or without modules |
+| [Identity](identity.md) | the four identity modes, the user claim, token verification, what happens on a request |
 | [Connect an MCP host](hosts.md) | Claude Desktop, Cursor, any stdio host, the Python SDK, an agent |
-| [Context from a catalogue](catalog-context.md) | what a context provider serves, its bounds, the `file` provider |
+| [Context from a data catalog](catalog-context.md) | what a context provider serves, its limits, the `file` provider |
 | [Modules](modules.md) | `token-policy`, `fingerprint-audit` and `trino-tags`, with real examples |
+| [Developers](developers.md) | the architecture, tool plugins, extensions, writing a context provider |
 
 ## Look up
 
 | Page | What it covers |
 |---|---|
 | [The tools](tools.md) | the nine tools, their arguments, their answers, their errors |
-| [Configuration](configuration.md) | every variable, by theme, with its default and its bounds |
+| [Configuration](configuration.md) | every variable, by theme, with its default and its limits |
+| [Security](security.md) | what read-only covers, Trino first, the statements an agent may send |
 | [Operations](operations.md) | resource groups, refusals, warnings, audit, health, metrics, upgrades |
 
 ## Understand
 
 | Page | What it covers |
 |---|---|
-| [Security](security.md) | what read-only covers, Trino first, the commands an agent may send |
-| [Developers](developers.md) | the architecture, tool plugins, extensions, writing a context provider |
 | [Design notes](design-notes.md) | why the server is built this way, and a few questions |
+
+## Contribute
+
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md) gives the ground rules, the checks and the locks.
+[Developers](developers.md#contributing-to-the-docs) gives the terms these pages use.
 
 ## Reference files
 
 These files stay at the root of the repository: [`examples/`](../../examples/),
 [`CHANGELOG.md`](../../CHANGELOG.md) and [`MIGRATING.md`](../../MIGRATING.md),
-[`CONTRIBUTING.md`](../../CONTRIBUTING.md), [`SECURITY.md`](../../SECURITY.md), the Helm chart's
+[`SECURITY.md`](../../SECURITY.md), the Helm chart's
 [README](../../charts/akko-mcp-trino/README.md) and the Atlas provider's
 [README](../../providers/atlas/README.md).
 
 The interactive version of the five steps of the README is on
-[akko-ai.com/en/docs/understand](https://akko-ai.com/en/docs/understand/), and how it works, end
-to end, on [akko-ai.com/en/docs/how-it-works](https://akko-ai.com/en/docs/how-it-works/).
+[akko-ai.com/en/docs/understand](https://akko-ai.com/en/docs/understand/). How it works, end to
+end, is on [akko-ai.com/en/docs/how-it-works](https://akko-ai.com/en/docs/how-it-works/), and the
+site's guide is on [akko-ai.com/en/docs/open-source-core](https://akko-ai.com/en/docs/open-source-core/).

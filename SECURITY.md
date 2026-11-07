@@ -2,8 +2,7 @@
 
 **English** · [Français](SECURITY.fr.md)
 
-This server sits between AI agents and data. Take any weakness in it seriously;
-we do.
+This server sits between AI agents and data. Please report any weakness you find.
 
 ## Supported versions
 
@@ -11,7 +10,7 @@ we do.
 |---|---|
 | 0.7.x | yes |
 | 0.6.x | yes |
-| 0.5.x and earlier | no: `jwt` mode passes the caller's token on to Trino, and the defaults serve requests without a token. Upgrade with [MIGRATING.md](MIGRATING.md). |
+| 0.5.x and earlier | no: `jwt` mode passed the caller's token on to Trino, and the defaults served requests without a token. Upgrade with [MIGRATING.md](MIGRATING.md). |
 
 ## Reporting a vulnerability
 
@@ -33,14 +32,14 @@ runs each query as the caller through the server's own account and an
 impersonation rule only that account has. `service` runs every query as one
 identity; it is never a default, and it is announced as a warning at start, in
 `--check` and to every MCP host. In every mode, the caller's name comes from
-their verified token, never from a header they wrote.
+their verified token, never from a header they set.
 
-**The door.** A request without a valid token (none, forged, expired, or
-issued for another audience) is refused with `401` by default. The modes that
-run as the caller refuse to start behind a door that would let such a request
-through.
+**Token verification.** A request without a valid token (none, forged,
+expired, or issued for another audience) is refused with `401` by default. The
+server refuses to start in a mode that runs as the caller when token
+verification would let such a request through.
 
-**What read-only covers.** The read-only guard refuses every write that passes
+**What read-only covers.** The read-only check refuses every write that passes
 through this server: each statement is parsed, and a write anywhere in its tree
 is refused before Trino, as are table functions and the `system` catalog. It is
 not a guarantee about the user's rights in Trino. In `jwt` and `impersonation`
@@ -61,7 +60,7 @@ For read-only end to end, the engine must hold the line too:
 - in `impersonation` mode, limit the impersonation rule to the users agents act
   for, and keep the account's credential like any service credential;
 - refuse table functions and the `system` catalog in the policy as well: the
-  guard is a second line, not the only one.
+  server's check is a second line of defense, not the only one.
 
 **Bounds.** A row cap (100), a time budget per query (60 s, cancelled in Trino)
 and per tool call (120 s) apply by default; `0` removes a time budget, and that
@@ -69,11 +68,13 @@ is a choice to make explicitly.
 
 ## What counts
 
-Anything that lets a caller read data their Trino identity could not read (the
-caller's own in `jwt` and `impersonation` modes, the configured one in
-`service` mode), run a write through any tool while `TRINO_READ_ONLY` is true,
-reach Trino as another identity than the mode allows, get a token accepted
-that was not issued for this server, make the server send Trino the caller's
-own token or a token it did not obtain for Trino, act without a verified
-identity while `MCP_AUTH_REQUIRED` is true, or extract a token, a client secret
-or a password from a log, an error message or `--check`.
+A report qualifies if it lets a caller:
+
+- read data that their Trino identity cannot read (the caller's own in `jwt` and
+  `impersonation` modes, the configured one in `service` mode);
+- run a write through any tool while `TRINO_READ_ONLY` is true;
+- reach Trino as an identity the mode does not allow;
+- get a token accepted that was not issued for this server;
+- make the server send Trino the caller's own token, or any token it did not obtain for Trino;
+- act without a verified identity while `MCP_AUTH_REQUIRED` is true;
+- extract a token, a client secret or a password from a log, an error message or `--check`.

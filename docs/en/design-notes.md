@@ -4,94 +4,82 @@
 
 ## Why
 
-An agent that reads a lakehouse needs a small, predictable surface: a few tools
-whose descriptions a model understands, answers that never run away, and a
-guarantee that a prompt injection cannot turn a question into a `DROP TABLE`
-through it. This server is that surface, and nothing else. It does not decide
-access: Trino decides for each user with the rules it already has, or, in
-`service` mode, for the one identity you give it.
+The [README](https://github.com/AKKO-p/akko-mcp-trino#why) says why this server exists: an agent
+needs a small, predictable surface over Trino, and Trino keeps deciding access.
 
 ## Notes
 
-**The guard is a pure ASGI middleware, not `BaseHTTPMiddleware`.** The latter
-runs the downstream in a separate task and breaks ContextVar propagation: the
-verified caller would never reach the tools.
+**The middleware is pure ASGI, not `BaseHTTPMiddleware`.** `BaseHTTPMiddleware` runs the rest of
+the app in a separate task and breaks ContextVar propagation: the verified caller would never
+reach the tools.
 
-**Mounting is transport-independent.** One code path builds the transport app
-and mounts the guard, whatever the transport. The guard once lived only on the
-branch the default transport never took; a test now asserts it for both.
+**Mounting does not depend on the transport.** One code path builds the transport app and mounts
+the middleware, whatever the transport. A test checks this for every transport, because the
+middleware once sat only on a code path the default transport never took.
 
-**Every tool goes through the identity mode, not only `execute_query`.**
-Listing catalogs, schemas and tables is reading metadata; a test walks every
-tool to check it reaches Trino the same way.
+**Every tool goes through the identity mode, not only `execute_query`.** Listing catalogs,
+schemas and tables reads metadata, and metadata is data. A test walks every tool to check that it
+reaches Trino the same way.
 
-**Read-only is decided on the AST, anywhere in the tree.** A leading-keyword
-check lets `WITH w AS (DELETE FROM t) SELECT 1` through. So did a root-node
-check, until a live adversarial proof caught it. The guard now walks the whole
-tree.
+**The read-only check runs on the AST, anywhere in the tree.** A check of the leading keyword lets
+`WITH w AS (DELETE FROM t) SELECT 1` through. So did a check of the root node, until an
+adversarial test against a live Trino caught it. The check now walks the whole tree.
 
-**Table functions are refused.** `TABLE(pg.system.query(query => '...'))` parses
-as a plain `SELECT`, yet it sends raw SQL to the source under the connector's
-own account, so the engine applies neither row filters nor column masks. The
-guard refuses every table function and the `system` catalog (which shows other
-users' SQL in `system.runtime.queries`). The engine policy must refuse them as
-well, `system.jdbc` and `system.metadata` aside; the guard is a second line, not
-the only one.
+**Table functions are refused.** `TABLE(pg.system.query(query => '...'))` parses as a plain
+`SELECT`, yet it sends raw SQL to the source under the connector's own account, so the engine
+applies neither row filters nor column masks. The read-only check refuses every table function
+and the `system` catalog, which shows other users' SQL in `system.runtime.queries`. The engine's
+policy must refuse them as well, `system.jdbc` and `system.metadata` aside: the server's check is
+a second line of defense, not the only one.
 
-**No token passthrough.** Up to 0.5, `jwt` mode sent Trino the caller's own
-token, once verified. The MCP authorization specification forbids it: a token
-issued for one service must not be sent on to another, or that service may
-trust a token that was never meant for it (the "confused deputy"). Since 0.6,
-the server accepts only tokens whose audience is its own, refuses a token
-issued for Trino, and obtains for Trino a token of its own by OAuth 2.0 Token
-Exchange (RFC 8693). Where the provider cannot exchange tokens, `impersonation`
-is the explicit fallback; it is never chosen in silence.
+**No token passthrough.** The MCP authorization specification forbids sending a token issued for
+one service on to another: that service might trust a token that was never meant for it (the
+"confused deputy"). The server accepts only tokens whose audience is its own, refuses a token
+issued for Trino, and obtains a token of its own for Trino by OAuth 2.0 Token Exchange (RFC 8693).
+Where the identity provider cannot exchange tokens, `impersonation` is the explicit fallback; it
+is never chosen silently. [MIGRATING.md](../../MIGRATING.md) describes the versions that passed the
+caller's token on.
 
-**The verified identity, never one the caller names.** The caller's name
-always comes from their verified token. A caller sending a header that names a
-Trino user changes nothing: the server builds its own request to Trino. A
-password, a token or a client certificate is never sent over plain http, and an
-identity mode the core does not know refuses to start rather than fall back.
+**The verified identity, never one the caller names.** The caller's name always comes from their
+verified token. A caller who sends a header that names a Trino user changes nothing: the server
+builds its own request to Trino. A password, a token or a client certificate is never sent over
+plain http, and an identity mode the core does not know stops the server from starting rather than
+falling back to another.
 
-**Safe by default.** Up to 0.5, the defaults ran every query as `TRINO_USER`
-and served a request without a token. Since 0.6, the default runs every query as
-the caller and refuses a request without a valid token; `service` mode and an
-open door are still possible, chosen by name, and announced as warnings. The
-row and time budgets have defaults too: unbounded was a choice nobody had made.
+**Safe by default.** By default, every query runs as the caller, and a request without a valid
+token is refused. `service` mode and token verification turned off remain possible, chosen by
+name, and announced as warnings. The row and time limits have defaults too: unlimited was a
+choice nobody had made.
 
-**An extension can only refuse.** Its guards run around the token
-verification, never instead of it, and the read-only guard applies whatever
-they answer.
+**An extension can only refuse.** Its guards run around token verification, never instead of
+it, and the read-only check applies whatever they return.
 
-**The server does not decide access.** Trino does, for each caller or for the
-configured identity. Putting policy in the server would duplicate, and eventually
-contradict, what the engine already enforces for every other client.
+**The server does not decide access.** See [Trino first](security.md#trino-first).
 
 ## Questions
 
-### The catalogue already has its own MCP server
+### What if the data catalog already has its own MCP server?
 
-A team that already runs the MCP server of its catalogue keeps it, side by side: nothing in
-this server blocks or replaces it. That is the first mode of
-[Deployment](deployment.md#deployment-with-a-catalogue), and it fits when the metadata of the
-catalogue is not sensitive. When metadata must follow the rights on the data, a context
-provider serves it only for the tables and columns Trino lists to the caller.
+The [first mode of deployment](deployment.md#with-a-data-catalog) runs the server next to it:
+nothing in this server blocks or replaces it.
 
 ### Can a user still write in Trino?
 
-The read-only guard covers what passes through this server. It is not a guarantee about what a
+The read-only check covers what passes through this server. It is not a guarantee about what a
 user may do in Trino by other means: if the policy lets the user write, the user can still write
 through any other Trino client. [Security](security.md#read-only-through-this-server) says how to
-make the engine hold the line too.
+make the engine enforce read-only too.
 
 ### Why not one shared identity?
 
-In `service` mode every query runs as one Trino account, whoever asks. Everyone then reads what
-that account reads, Trino's row filters and masks can no longer tell users apart, and the audit
-names the account rather than the person. So `service` is never the default: the server warns
-at start and tells every host, and it only fits data that every caller may read anyway.
+In `service` mode, every query runs as one Trino account, whoever asks. Everyone then reads what
+that account reads, Trino's row filters and column masks can no longer tell users apart, and the
+audit names the account rather than the person. That is why `service` is never the default: the
+server warns at start and tells every host, and the mode fits only data that every caller may
+read anyway.
 
 ### Does the server talk to a model?
 
-No. The server never talks to a model, so any model works. An agent's model never sees the
-user's token either: the server receives it on every tool call and verifies it.
+No. The server never talks to a model, so any model works. In the [example agent](hosts.md#from-an-agent),
+the model never sees the user's token either: the agent sends it to the server with each tool
+call.
