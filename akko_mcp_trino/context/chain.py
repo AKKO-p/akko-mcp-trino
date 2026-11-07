@@ -262,7 +262,7 @@ class ContextChain:
                 jobs[provider.name] = (provider, mine)
             else:
                 statuses[provider.name] = NOT_MAPPED
-        found, read = await self._collect(jobs, self._tables, _describe, deadline)
+        found, read = await self._collect(jobs, self._tables, _describe, deadline, statuses)
         statuses.update(read)
         self._count(statuses)
         tables = {
@@ -305,7 +305,9 @@ class ContextChain:
         cache: ByteCache,
         fetch: Fetch,
         deadline: float,
+        settled: Mapping[str, str] = MappingProxyType({}),
     ) -> tuple[dict[str, dict[Any, Any]], dict[str, str]]:
+        # ``settled``: the statuses the caller set before, counted here if the call is cut.
         found: dict[str, dict[Any, Any]] = {}
         statuses: dict[str, str] = {}
         tasks: dict[asyncio.Task, tuple[ContextProvider, str]] = {}
@@ -354,20 +356,19 @@ class ContextChain:
                         provider, stamp, task, task in done, found[provider.name], deadline
                     )
         except asyncio.CancelledError:
-            # The caller stopped waiting: the sources still being read are cut short.
-            self._count(
-                {
-                    provider.name: UNAVAILABLE
-                    for task, (provider, _) in tasks.items()
-                    if not task.done()
-                }
-            )
+            # The caller stopped waiting (or the loop is closing): the call serves nothing of
+            # the sources read, each cut short, and is counted as one that ended would be.
+            cut = {
+                provider.name: PARTIAL if found[provider.name] else UNAVAILABLE
+                for provider, _ in tasks.values()
+            }
+            self._count({**settled, **statuses, **cut})
             raise
         finally:
             for task in tasks:
                 _cancel_once(task)
                 if not task.done():
-                    # Left behind, not awaited: its reads no longer hold their keys.
+                    # Abandoned, not awaited: its reads no longer hold their keys.
                     cache.abandon(task)
         return found, statuses
 

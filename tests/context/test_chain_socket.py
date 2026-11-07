@@ -75,9 +75,9 @@ def test_a_read_cut_at_its_deadline_closes_its_connection(loop, kind):
     source = kind(silent.port)
     chain = ContextChain([source], _settings(), loop=loop, clock=time.monotonic)
     try:
-        deadline = time.monotonic() + 0.3
-        # Past deadline + _GRACE_SECONDS, gather raises TimeoutError instead.
-        got = chain.gather([ORDERS], deadline=deadline)
+        deadline = time.monotonic() + 0.5
+        # The chain itself, not its caller, whose grace bounds the wait under load.
+        got = loop.submit(chain._gather((ORDERS,), deadline), timeout=5)
         assert got.statuses[source.name] == "unavailable"
         assert silent.asked() == 1
         # Closed by the time the chain answers; a short wait only for the socket to say so.

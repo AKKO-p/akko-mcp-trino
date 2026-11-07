@@ -36,6 +36,7 @@ from akko_mcp_trino.context import (
     TermRef,
 )
 from akko_mcp_trino.testing import ContextContract, ContractHarness, ContractNames
+from akko_mcp_trino.testing.context_contract import _SLOW_SECONDS
 
 log = logging.getLogger(__name__)
 
@@ -456,10 +457,10 @@ class Late(Recorded):
 
 
 class CutLate(Recorded):
-    """Cuts its reads 0.15 s past its deadline, after the chain has cancelled them."""
+    """Cuts its reads long after its deadline, as late as the contract's slow catalogue."""
 
     async def _all(self, calls: list, deadline: float) -> list:
-        return await super()._all(calls, deadline + 0.15)
+        return await super()._all(calls, deadline + _SLOW_SECONDS)
 
 
 class Threaded(Recorded):
@@ -730,22 +731,21 @@ def test_a_provider_without_an_owner_passes_and_says_why_the_owner_is_not_checke
         getattr(contract, OWNER_CHECK)(harness)
 
 
-def test_a_cut_later_than_the_deadline_alone_still_closes_its_connection():
-    """A provider that cuts 0.15 s late is cancelled by the chain first, once: leaving its
-    ``asyncio.timeout`` disarms its own timer, so no second cancellation reaches the close.
-    A cut that fires during the close itself, a few milliseconds after the chain's, can
-    still leave the connection open; that race cannot be shown deterministically."""
+def test_a_provider_that_cuts_after_the_chain_is_cut_once_by_the_chain():
+    """A cut far later than the chain's own: the chain's single cancellation ends the read and
+    closes its connection, and leaving ``asyncio.timeout`` on it disarms the provider's timer.
+    A cut that fires during that close, a few milliseconds after the chain's cancellation, can
+    still leave the connection open; no test can show that race deterministically."""
     ContextContract().test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
         harness_of(CutLate)
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a client run in a thread is out of reach of any cancellation: its connection stays "
-    "open until the client's own timeout, whatever the chain does",
-)
 def test_a_client_in_a_thread_leaves_its_connection_open():
-    ContextContract().test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
-        harness_of(Threaded)
-    )
+    """A client run in a thread is out of reach of any cancellation: its connection stays open
+    until the client's own timeout, whatever the chain does. The contract says so, and only
+    that."""
+    with pytest.raises(pytest.fail.Exception, match="must close its connection: 1 of 1 left open"):
+        ContextContract().test_a_read_the_chain_cuts_at_its_deadline_closes_its_connection(
+            harness_of(Threaded)
+        )

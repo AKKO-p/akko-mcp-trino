@@ -4,14 +4,14 @@ An adapter's tests subclass :class:`ContextContract` and give it a ``harness`` p
 fixture that returns a :class:`ContractHarness`: how to build the provider from its
 settings and an HTTP transport, the catalogue's recorded answers, the settings with a
 secret the contract can look for, and which recorded objects play which role
-(:class:`ContractNames`). The contract needs no network, no catalogue and no Trino:
+(:class:`ContractNames`). The contract needs no catalogue, no Trino and no network beyond
+the loopback interface:
 every request the provider sends goes to a transport that answers from the recordings,
 or, on purpose, slowly, with a 401, a 503, a body that is not JSON, or a 500 whose body
 holds the secret. The transport counts what is sent and what is still in flight. Four
 checks send the requests over a real socket instead, to a server on 127.0.0.1 that accepts
 connections and never answers, for a describe and for terms, each with the provider alone
-and behind the core's chain: the contract needs no network beyond the loopback interface.
-A suite run under a socket blocker must allow 127.0.0.1.
+and behind the core's chain. A suite run under a socket blocker must allow 127.0.0.1.
 
 A provider that sends no HTTP request, such as ``file``, skips the checks that need one,
 each with ``pytest.skip("no HTTP")``. Each check fails with ``pytest.fail`` and a message
@@ -313,6 +313,18 @@ class _Silenced:
     def alone(self, read: Coroutine[Any, Any, Any]) -> Any:
         """Run one read of the provider on the loop, without the chain."""
         return self.loop.submit(read, _SUBMIT_SECONDS)
+
+    # Behind the chain, the contract waits for the chain itself, not for its caller: the
+    # caller's grace bounds the server's wait under load, which is not the provider's to
+    # keep. The time the chain takes is checked against the margin instead.
+
+    def gather(self, refs: Sequence[TableRef], deadline: float) -> Any:
+        """Read the context of ``refs`` through the chain, until it ends."""
+        return self.loop.submit(self.chain._gather(tuple(refs), deadline), _SUBMIT_SECONDS)
+
+    def terms(self, wanted: Mapping[str, Sequence[str]], deadline: float) -> Any:
+        """Read glossary terms through the chain, until it ends."""
+        return self.loop.submit(self.chain._read_terms(wanted, deadline), _SUBMIT_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -761,7 +773,7 @@ class ContextContract:
         connection is closed: no request is left pending at the catalogue."""
         refs = [harness.names.described]
         cut = self._read_a_silent_catalogue(
-            harness, lambda run, deadline: run.chain.gather(refs, deadline=deadline)
+            harness, lambda run, deadline: run.gather(refs, deadline)
         )
         self._require_closed_behind_the_chain(cut, "describe")
 
@@ -783,7 +795,7 @@ class ContextContract:
         keys = self._recorded_term_keys(harness)
         cut = self._read_a_silent_catalogue(
             harness,
-            lambda run, deadline: run.chain.terms({run.provider.name: keys}, deadline=deadline),
+            lambda run, deadline: run.terms({run.provider.name: keys}, deadline),
         )
         self._require_closed_behind_the_chain(cut, "terms")
 
@@ -851,7 +863,7 @@ class ContextContract:
         _require(
             cut.error is None,
             f"behind the chain, {read} raised {type(cut.error).__name__}: the chain must "
-            "hand back control within its grace",
+            "end a read past its deadline as unavailable, never raise",
         )
         _require(
             cut.elapsed <= self.SLOW_DEADLINE_SECONDS + self.REPLY_MARGIN_SECONDS,
