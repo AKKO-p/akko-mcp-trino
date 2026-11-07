@@ -254,10 +254,12 @@ de données, qui la servirait une fois rétabli. La chaîne donne donc d'abord 0
 encore en cours à son échéance pour finir d'elle-même. Une lecture encore en cours après ce délai
 est annulée, sauf si une annulation est déjà en route vers elle, et reçoit 0,1 s de plus. Une
 lecture qui ignore son annulation est abandonnée, et ne retient plus ses tables. Ce qu'une lecture
-rend pendant les premières 0,1 s est servi, avec le statut qu'il mérite. L'appel attend au plus
+rend pendant le premier dixième de seconde est servi, avec le statut qu'il mérite. L'appel attend au plus
 0,25 s après l'échéance : les deux délais de la chaîne prennent 0,2 s, et les 0,05 s qui restent
-absorbent le retard de la boucle d'événements ; au-delà, l'appel cesse d'attendre le premier, et
-les lectures encore en cours sont abandonnées et comptées `unavailable` tout de même. D'où le
+absorbent le retard de la boucle d'événements ; au-delà, c'est l'appel qui cesse d'attendre en
+premier, et les lectures encore en cours sont abandonnées tout de même. L'appel est alors compté
+comme s'il avait fini : `partial` pour une source qui avait déjà servi des tables, `unavailable`
+sinon, et les statuts déjà établis, comme un disjoncteur ouvert. D'où le
 minimum de 0,3 pour `MCP_CONTEXT_RESERVE_SECONDS` avec un fournisseur.
 
 La connexion n'est donc fermée que si le fournisseur suit cette règle :
@@ -271,8 +273,8 @@ La connexion n'est donc fermée que si le fournisseur suit cette règle :
 Une coupure qui tombe après l'échéance, des tâches filles qui ont leurs propres délais, ou un
 client HTTP qui tourne dans un thread peuvent laisser une connexion ouverte, sa requête en
 attente dans le catalogue de données. Une coupure tardive peut rencontrer l'annulation de la
-chaîne pendant la fermeture du client ; la coupure propre d'une tâche fille échappe à la
-chaîne ; un thread est hors de portée de toute annulation.
+chaîne pendant la fermeture du client ; la coupure qu'une tâche fille porte elle-même échappe
+à la chaîne ; un thread est hors de portée de toute annulation.
 
 ### Le contrat
 

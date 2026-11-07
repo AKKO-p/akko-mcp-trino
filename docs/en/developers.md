@@ -249,7 +249,9 @@ way to it, and given 0.1 s more. A read that ignores its cancellation is abandon
 holds its tables. What a read hands back within the first 0.1 s is served, with the status it
 earns. The call waits at most 0.25 s past the deadline: the chain's two waits take 0.2 s, and
 the 0.05 s left absorbs the event loop's lag; past it the call stops waiting first, and the
-reads still running are abandoned and counted as `unavailable` all the same. This is why
+reads still running are abandoned all the same. The call is then counted as one that ended:
+`partial` for a source that had already served tables, `unavailable` otherwise, and the statuses
+already settled, such as an open breaker. This is why
 `MCP_CONTEXT_RESERVE_SECONDS` is at least 0.3 with a provider.
 
 So the connection is closed only when the provider follows this rule:

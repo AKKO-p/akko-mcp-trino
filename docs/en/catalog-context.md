@@ -73,7 +73,7 @@ or the select check, no join for a target), and the call still answers. Anything
 on the way serves no context and says `error` for every source. The call stops waiting for a
 read 0.25 s past its deadline at most. A provider that follows the contract has then closed its
 connection to the data catalog, so no request stays pending there; a read that ignores its
-cancellation is left behind.
+cancellation is abandoned.
 
 ## What describe_schema serves
 
