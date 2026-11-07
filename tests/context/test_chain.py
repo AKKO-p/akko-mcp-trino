@@ -464,6 +464,49 @@ def test_reads_left_behind_count_against_the_cap_until_they_end(loop, stubborn):
     assert len(stubborn.calls) == 2
 
 
+def test_a_caller_that_stops_waiting_during_the_cut_leaves_no_key_held(loop, stubborn):
+    """The caller's own timeout lands in the cut's second wait: the read left behind no
+    longer holds its table, it was cancelled once only, and the call is counted."""
+    metrics = Metrics()
+    chain = _chain(loop, stubborn, clock=time.monotonic, metrics=metrics)
+
+    async def stop_waiting_in_the_second_wait():
+        deadline = time.monotonic() + 0.1
+        gathering = asyncio.ensure_future(chain._gather((ORDERS,), deadline))
+        # Past the first wait of the cut, halfway through the second.
+        await asyncio.sleep(0.1 + 1.5 * chain_module._CANCEL_WAIT_SECONDS)
+        gathering.cancel()
+        try:
+            await gathering
+        except asyncio.CancelledError:
+            pass
+        return gathering.cancelled(), dict(chain._tables._inflight), dict(chain._tables._leaders)
+
+    cancelled, inflight, leaders = loop.submit(stop_waiting_in_the_second_wait(), timeout=5)
+    assert cancelled and inflight == {} and leaders == {}
+    assert stubborn.cancelled == 1
+    errors = {"provider": "stubborn", "status": "unavailable"}
+    assert metrics.registry.get_sample_value("mcp_trino_context_errors_total", errors) == 1
+    stubborn.delay = 0.0
+    start = time.monotonic()
+    again = chain.gather([ORDERS], deadline=start + 5)
+    assert time.monotonic() - start < 1
+    assert again.statuses["stubborn"] == "ok" and len(stubborn.calls) == 2
+    _set(loop, stubborn.hold)
+    _until(lambda: _tasks_left(loop) == 0)
+
+
+def test_a_read_that_ends_in_the_first_wait_past_the_deadline_is_taken_as_it_ended(loop):
+    """What a source hands back within the wait it is given past its deadline is served, and
+    its status says so: complete data is not called partial."""
+    fake = Fake("one", known={ORDERS: TableContext(description="A")})
+    fake.delay = 0.25
+    chain = _chain(loop, fake, clock=time.monotonic)
+    got = chain.gather([ORDERS], deadline=time.monotonic() + 0.2)
+    assert got.statuses["one"] == "ok"
+    assert got.tables[ORDERS] == (("one", TableContext(description="A")),)
+
+
 def test_a_secret_changed_during_a_refused_call_is_tried_at_once(loop):
     fake = Fake("one")
     fake.fail = ProviderRefused("401")

@@ -76,8 +76,8 @@ def test_a_read_cut_at_its_deadline_closes_its_connection(loop, kind):
     chain = ContextChain([source], _settings(), loop=loop, clock=time.monotonic)
     try:
         deadline = time.monotonic() + 0.3
+        # Past deadline + _GRACE_SECONDS, gather raises TimeoutError instead.
         got = chain.gather([ORDERS], deadline=deadline)
-        assert time.monotonic() <= deadline + chain_module._GRACE_SECONDS
         assert got.statuses[source.name] == "unavailable"
         assert silent.asked() == 1
         # Closed by the time the chain answers; a short wait only for the socket to say so.
@@ -89,5 +89,10 @@ def test_a_read_cut_at_its_deadline_closes_its_connection(loop, kind):
 
 
 def test_the_chain_ends_its_waits_within_its_grace():
-    """The source's own deadline, then the chain's single cancellation, each given its wait."""
-    assert 2 * chain_module._CANCEL_WAIT_SECONDS < chain_module._GRACE_SECONDS
+    """Past the deadline the chain waits ``_CANCEL_WAIT_SECONDS`` for a read to end on its own,
+    then as long again once it cancelled it: it ends by the deadline plus twice that plus the
+    loop's lag. The caller waits ``_GRACE_SECONDS``; what is left between the two is the lag
+    the chain accepts (0.05 s). Past it the caller stops waiting first, and the reads still
+    running are abandoned and counted all the same."""
+    accepted_lag = chain_module._GRACE_SECONDS - 2 * chain_module._CANCEL_WAIT_SECONDS
+    assert accepted_lag == pytest.approx(0.05)

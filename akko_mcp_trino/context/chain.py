@@ -39,7 +39,9 @@ log = logging.getLogger(__name__)
 # Internal scheduling margins, not operating settings. A read past its deadline is given
 # _CANCEL_WAIT_SECONDS to end on its own, then, cancelled once, as long again; an outage
 # reported that close to the deadline is the deadline. The caller waits _GRACE_SECONDS
-# past the deadline, more than both waits together.
+# past the deadline: the chain's waits end at 2 * _CANCEL_WAIT_SECONDS plus the loop's lag,
+# and the 0.05 s left is the lag accepted. Past it the caller stops waiting first; the
+# reads still running are then abandoned and counted all the same.
 _CANCEL_WAIT_SECONDS = 0.1
 _GRACE_SECONDS = 0.25
 
@@ -345,14 +347,28 @@ class ContextChain:
             if tasks:
                 done, late = await asyncio.wait(tasks, timeout=max(deadline - self._clock(), 0.0))
                 if late:
-                    await _cut(late, cache)
+                    # A read that ends on its own in the first wait is taken as it ended.
+                    done |= await _cut(late)
                 for task, (provider, stamp) in tasks.items():
                     statuses[provider.name] = self._outcome(
                         provider, stamp, task, task in done, found[provider.name], deadline
                     )
+        except asyncio.CancelledError:
+            # The caller stopped waiting: the sources still being read are cut short.
+            self._count(
+                {
+                    provider.name: UNAVAILABLE
+                    for task, (provider, _) in tasks.items()
+                    if not task.done()
+                }
+            )
+            raise
         finally:
             for task in tasks:
                 _cancel_once(task)
+                if not task.done():
+                    # Left behind, not awaited: its reads no longer hold their keys.
+                    cache.abandon(task)
         return found, statuses
 
     async def _read(
@@ -482,7 +498,7 @@ class ContextChain:
             self._metrics.context_cache.labels(provider=name, result=result).inc()
 
 
-async def _cut(late: set[asyncio.Task], cache: ByteCache) -> None:
+async def _cut(late: set[asyncio.Task]) -> set[asyncio.Task]:
     """End the reads past their deadline, each cancelled once at most, in bounded time.
 
     A source that keeps its deadline is already ending when it passes: its own timeout
@@ -490,18 +506,15 @@ async def _cut(late: set[asyncio.Task], cache: ByteCache) -> None:
     cancellation would land in that close and cut it short, leaving the connection open
     with the request still pending at the catalogue. So each read is first given
     ``_CANCEL_WAIT_SECONDS`` to end on its own; one still running is then cancelled, unless
-    a cancellation is already on its way to it, and given as long again. A source that
-    ignores its cancellation is left behind, not awaited, and its reads no longer hold
-    their keys.
+    a cancellation is already on its way to it, and given as long again. Returns the reads
+    that ended on their own in the first wait; the caller abandons those still running.
     """
-    _, running = await asyncio.wait(late, timeout=_CANCEL_WAIT_SECONDS)
-    if not running:
-        return
-    for task in running:
-        _cancel_once(task)
-    _, stuck = await asyncio.wait(running, timeout=_CANCEL_WAIT_SECONDS)
-    for task in stuck:
-        cache.abandon(task)
+    ended, running = await asyncio.wait(late, timeout=_CANCEL_WAIT_SECONDS)
+    if running:
+        for task in running:
+            _cancel_once(task)
+        await asyncio.wait(running, timeout=_CANCEL_WAIT_SECONDS)
+    return ended
 
 
 def _cancel_once(task: asyncio.Task) -> None:
