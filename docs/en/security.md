@@ -59,8 +59,10 @@ Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed in
 - **Commands go through an allow list**: `SELECT`, `DESCRIBE` of a table, `SHOW CATALOGS`,
   `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` and `SHOW FUNCTIONS`. Any other command is
   refused, including one a later Trino release adds.
-- Some reads, such as `SHOW STATS` or `EXPLAIN`, can show facts beyond a row filter or a column mask. They are refused unless the administrator names them in `MCP_EXTRA_READ_COMMANDS`
-  (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`).
+- Some reads, such as `SHOW STATS` or `EXPLAIN`, can show facts beyond a row filter or a
+  column mask. They are refused unless the administrator names them in
+  `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`,
+  `SHOW ROLES`, `SHOW SESSION`).
 - **Writes are refused anywhere in the tree.** The statement is parsed into an AST. It is refused
   if it holds more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`,
   `DROP`, `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including inside a CTE,
@@ -73,7 +75,7 @@ Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed in
   Only `SHOW CATALOGS`, and a `SHOW SCHEMAS`, `SHOW TABLES` or `SHOW COLUMNS` whose `FROM` gives
   the full name, catalog included, get through.
 
-So set `TRINO_CATALOG` to a data catalog. The engine's policy must also refuse `system`, except
+So set `TRINO_CATALOG` to a catalog that holds data, never `system`. The engine's policy must also refuse `system`, except
 reads of `system.jdbc` and `system.metadata` (see
 [Read-only through this server](#read-only-through-this-server)); the server's check is a second
 line of defense, not the only one.

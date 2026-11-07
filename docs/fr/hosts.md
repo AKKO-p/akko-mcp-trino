@@ -293,7 +293,7 @@ a expiré : demandez-en un nouveau, remplacez-le et relancez le serveur dans l
 lui-même le token de son utilisateur, par l'autorisation MCP. Avec `MCP_RESOURCE_URL`, le serveur
 publie les métadonnées qui mènent le MCP host à l'identity provider. Cursor documente une
 connexion OAuth pour les serveurs distants, et c'est ce que fait `mcp-remote` quand on ne lui donne
-pas d'en-tête. Nous n'avons vérifié aucun de ces deux chemins avec ce serveur, donc cette page ne
+pas d'en-tête. Aucun de ces deux chemins n'a été vérifié avec ce serveur, donc cette page ne
 montre que l'en-tête. Une équipe ne doit jamais partager un token entre plusieurs personnes : le
 serveur verrait un seul utilisateur, Trino appliquerait les droits de celui-là, et l'audit le
 nommerait pour tout le monde. Le même raisonnement écarte une identité partagée ; voir

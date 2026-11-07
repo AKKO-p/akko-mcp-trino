@@ -13,7 +13,7 @@ Merci d'envisager une contribution. Ce projet est petit à dessein, et il doit l
 - **Le serveur ne décide pas des accès.** Trino en décide, pour l'identité que donne le mode
   d'identité. Un changement qui met une politique dans le serveur (listes de tables autorisées,
   réécriture du SQL par rôle…) sera refusé : cela relève du moteur.
-- **Refuser dans le doute.** Dans le doute, refuser. Une garde qui ne peut pas vérifier ne doit pas faire
+- **Refuser dans le doute.** Dans le doute, refuser. Un contrôle qui ne peut pas vérifier ne doit pas faire
   semblant.
 - **Le code en anglais.** Le code, les commentaires et les messages de commit sont en anglais.
   Les README, la documentation (`docs/en` et `docs/fr`, page par page) et ce guide existent en
@@ -139,7 +139,7 @@ depuis la nouvelle version. L'empreinte est la ligne de `mcp-publisher_linux_amd
    *pourquoi* le changement existe. Les préfixes conventionnels (`feat:`, `fix:`, `docs:`) sont
    bienvenus.
 4. Mettez à jour `CHANGELOG.md` sous *Unreleased*.
-5. Ouvrez la pull request ; la CI lance le lint, la garde de neutralité, les tests sur chaque
+5. Ouvrez la pull request ; la CI lance le lint, le contrôle de neutralité, les tests sur chaque
    version de Python de `scripts/lock.sh`, la fraîcheur des verrous, la construction du paquet et
    celle de l'image.
 

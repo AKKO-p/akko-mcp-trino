@@ -1,6 +1,6 @@
 # akko-mcp-trino
 
-**Give your AI agents read-only access to Trino, with the rights of the user they work for.**
+**Give your AI agents read-only access to Trino, and nothing more.**
 
 akko-mcp-trino is an [MCP](https://modelcontextprotocol.io) server for Trino, under the
 Apache 2.0 license. An agent can use it to find tables and columns, describe a schema or a table,

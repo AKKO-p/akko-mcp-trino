@@ -283,8 +283,8 @@ expired: fetch a new one, replace it, and restart the server in the host.
 **What a team should do instead.** Each user's host should obtain and renew that user's token
 itself, through MCP authorization. With `MCP_RESOURCE_URL` set, the server publishes the metadata
 that points a host to the identity provider. Cursor documents OAuth sign-in for remote servers,
-and signing in is what `mcp-remote` does when no header is given. We have not verified either
-flow with this server, so this page shows the header only. A team must never share one token
+and signing in is what `mcp-remote` does when no header is given. Neither flow has been verified
+with this server, so this page shows the header only. A team must never share one token
 between people: the server would see one user, Trino would apply that user's rights, and the
 audit would name that user for everyone. The same reasoning rules out one shared identity; see
 [Design notes](design-notes.md#why-not-one-shared-identity).

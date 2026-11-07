@@ -59,7 +59,7 @@ entries of other hosts.
 
 ## Ask a question
 
-Ask *"Which column holds the customers' email address?"*. The model calls `search_columns` with a
+Ask *"Which column holds the customers' email address?"* The model calls `search_columns` with a
 word such as `email`, and the server returns, for Carol:
 
 ```
@@ -68,7 +68,7 @@ word such as `email`, and the server returns, for Carol:
  "schemas_searched": 4, "not_searched": [], "complete": true, "next_cursor": null}
 ```
 
-Then ask *"List our customers with their email and country."*. With Carol's token, five European
+Then ask *"List our customers with their email and country."* With Carol's token, five European
 customers come back, with masked addresses (`***@example.com`). With `./token.sh alice_admin`,
 all ten come back, unmasked. With `./token.sh dave_viewer`, the search finds nothing and says it
 is complete, because the policy hides the table from Dave.

@@ -15,7 +15,7 @@ says why.
 | `TRINO_USER` | the server's own Trino account. In `service` mode, every query runs as this account; in `impersonation` mode, it authenticates and impersonates the caller; ignored in `oauth2` mode | `trino` |
 | `TRINO_PASSWORD` | its password, sent with Basic authentication; refused over `http`. `--check` says whether one is set, never which | none |
 | `TRINO_CLIENT_CERT`, `TRINO_CLIENT_KEY` | a client certificate and its key (PEM paths) the account authenticates with instead (mTLS); https only | none |
-| `TRINO_CATALOG` | the session catalog, where a name without a catalog is read. Set it to a data catalog: with `system`, such names are refused | `system` |
+| `TRINO_CATALOG` | the session catalog, where a name without a catalog is read. Set it to a catalog that holds your data, such as `iceberg`: with `system`, such names are refused | `system` |
 | `TRINO_READ_ONLY` | refuse writes in `execute_query` | `true` |
 | `MCP_EXTRA_READ_COMMANDS` | read commands refused by default, enabled one by one, comma-separated: `EXPLAIN` (also enables the plan in `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES` (with `SHOW CURRENT ROLES` and `SHOW ROLE GRANTS`), `SHOW SESSION`. Read [Security](security.md#the-statements-an-agent-may-send) before enabling one. Announced at every start and to every host; an unknown name is a startup error | none |
 | `TRINO_SOURCE` | the source Trino records for every query (`X-Trino-Source`) | the server name |

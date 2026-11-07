@@ -22,16 +22,16 @@ langues dans le même commit. Ces pages emploient un seul mot par notion :
 | la passerelle placée devant le serveur | ce qui envoie `X-Request-Id` au serveur | the proxy or gateway in front of the server |
 
 Les pages anglaises suivent l'orthographe américaine. Dans la prose, les personas sont des prénoms
-(Alice, Carol, Dave) ; le login exact n'apparaît que dans les blocs de code et de sortie. Les pages
-françaises suivent le lexique du guide français : claim, issuer, fallback, service account, row
-filter, column mask et bearer token restent en anglais, avec une espace fine insécable avant
+(Alice, Carol, Dave) ; le login exact n'apparaît que dans les blocs de code et de sortie. Dans les pages
+françaises, claim, issuer, fallback, service account, row filter, column mask et bearer token
+restent en anglais, avec une espace fine insécable avant
 `; : ! ?` et des espaces insécables à l'intérieur des « ».
 
 ## Architecture
 
-Chaque module de `akko_mcp_trino/` a une seule responsabilité et ses tests, dans `tests/` :
+Chaque fichier de `akko_mcp_trino/` a une seule responsabilité et ses tests, dans `tests/` :
 
-| Module | Responsabilité |
+| Fichier | Responsabilité |
 |---|---|
 | `config.py` | lire l'environnement, des valeurs par défaut neutres |
 | `auth.py` | la vérification JWT avec le JWKS, `Principal` |
@@ -277,8 +277,8 @@ NAMES = ContractNames(
     described=TableRef("warehouse", "ledger", "invoices"),
     partitioned=TableRef("warehouse", "ledger", "payments"),
     partition_column="booking_month",
-    dropped=TableRef("warehouse", "ledger", "refunds"),     # marked deleted in the catalogue
-    unknown=TableRef("warehouse", "ledger", "ghosts"),      # not in the catalogue
+    dropped=TableRef("warehouse", "ledger", "refunds"),     # marked deleted in the data catalog
+    unknown=TableRef("warehouse", "ledger", "ghosts"),      # not in the data catalog
     trap=TableRef("warehouse", "o'brien.été", "l'année fiscale.v2"),
     term_column="invoice_total",          # a column of `described` with a served term
     foreign_glossary="personnel",         # a glossary outside the allow list
@@ -292,9 +292,9 @@ class TestMyProviderContract(ContextContract):
             build=lambda env, transport: MyProvider(env, transport=transport),
             replay=replay,
             env={
-                "MY_CATALOGUE_TOKEN": SECRET,
-                "MY_CATALOGUE_GLOSSARIES": "finance",
-                "MY_CATALOGUE_SERVE_OWNER": "true",
+                "MY_CATALOG_TOKEN": SECRET,
+                "MY_CATALOG_GLOSSARIES": "finance",
+                "MY_CATALOG_SERVE_OWNER": "true",
             },
             secret=SECRET,
             names=NAMES,

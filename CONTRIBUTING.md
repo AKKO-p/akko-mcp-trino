@@ -14,7 +14,7 @@ keeping it small is a feature.
 - **The server does not decide access.** Trino does, for the identity the
   identity mode gives. A change that puts policy in the server (allow-lists of
   tables, per-role SQL rewriting…) will be declined: that belongs in the engine.
-- **Fail closed.** When in doubt, refuse. A guard that cannot verify must not
+- **Fail closed.** When in doubt, refuse. A check that cannot verify must not
   pretend to.
 - **Code in English.** Code, comments and commit messages are in English. The READMEs, the
   documentation (`docs/en` and `docs/fr`, page for page) and this guide exist in English
@@ -147,7 +147,7 @@ follow it: to move it, set both from the new release. The hash is the
    *why* the change exists. Conventional prefixes (`feat:`, `fix:`, `docs:`)
    are welcome.
 4. Update `CHANGELOG.md` under *Unreleased*.
-5. Open the pull request; CI runs lint, the neutrality guard, the tests on
+5. Open the pull request; CI runs lint, the neutrality check, the tests on
    every Python version of `scripts/lock.sh`, the freshness of the locks, a
    package build and an image build.
 

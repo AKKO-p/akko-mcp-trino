@@ -60,7 +60,7 @@ des autres MCP hosts.
 
 ## Poser une question
 
-Demandez *« Quelle colonne contient l'adresse e-mail des clients ? »*. Le modèle appelle
+Demandez *« Quelle colonne contient l'adresse e-mail des clients ? »* Le modèle appelle
 `search_columns` avec un mot comme `email`, et le serveur rend, pour Carol :
 
 ```
@@ -69,11 +69,10 @@ Demandez *« Quelle colonne contient l'adresse e-mail des clients ? »*. Le 
  "schemas_searched": 4, "not_searched": [], "complete": true, "next_cursor": null}
 ```
 
-Demandez ensuite *« Liste nos clients avec leur e-mail et leur pays. »*. Avec le token de Carol,
+Demandez ensuite *« Liste nos clients avec leur e-mail et leur pays. »* Avec le token de Carol,
 cinq clients européens reviennent, avec des adresses masquées (`***@example.com`). Avec
 `./token.sh alice_admin`, les dix reviennent, sans masque. Avec `./token.sh dave_viewer`, la
-recherche ne trouve rien et se dit complète, parce que la policy cache la table à Dave : il n'a pas
-le droit de la voir.
+recherche ne trouve rien et se dit complète, parce que la policy cache la table à Dave.
 
 Pour changer d'utilisateur, collez un autre token et relancez le serveur dans le MCP host. Pour
 vérifier une configuration sans MCP host, voir

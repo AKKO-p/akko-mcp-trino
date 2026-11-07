@@ -15,7 +15,7 @@ serveur refuse de démarrer et dit pourquoi.
 | `TRINO_USER` | le compte Trino propre au serveur. En mode `service`, chaque requête s'exécute sous ce compte ; en mode `impersonation`, il s'authentifie et agit au nom de l'appelant ; ignoré en mode `oauth2` | `trino` |
 | `TRINO_PASSWORD` | son mot de passe, envoyé par authentification Basic ; refusé en `http`. `--check` dit si un mot de passe est posé, jamais lequel | aucun |
 | `TRINO_CLIENT_CERT`, `TRINO_CLIENT_KEY` | un certificat client et sa clé (chemins PEM) avec lesquels le compte s'authentifie à la place (mTLS) ; https seulement | aucun |
-| `TRINO_CATALOG` | le catalog de session, où un nom sans catalog est lu. Réglez-le sur un catalog de données : avec `system`, de tels noms sont refusés | `system` |
+| `TRINO_CATALOG` | le catalog de session, où un nom sans catalog est lu. Réglez-le sur un catalog qui contient vos données, comme `iceberg` : avec `system`, de tels noms sont refusés | `system` |
 | `TRINO_READ_ONLY` | refuser les écritures dans `execute_query` | `true` |
 | `MCP_EXTRA_READ_COMMANDS` | commandes de lecture refusées par défaut, ouvertes une à une, séparées par des virgules : `EXPLAIN` (ouvre aussi le plan dans `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES` (avec `SHOW CURRENT ROLES` et `SHOW ROLE GRANTS`), `SHOW SESSION`. Lisez [Sécurité](security.md#les-instructions-quun-agent-peut-envoyer) avant d'en ouvrir une. Annoncé à chaque démarrage et à chaque MCP host ; un nom inconnu est une erreur de démarrage | aucune |
 | `TRINO_SOURCE` | la source que Trino enregistre pour chaque requête (`X-Trino-Source`) | le nom du serveur |

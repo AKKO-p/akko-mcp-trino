@@ -22,15 +22,14 @@ same commit. These pages use one word per concept:
 | the proxy or gateway in front of the server | whatever sends `X-Request-Id` to the server | « la passerelle placée devant le serveur » |
 
 English pages use American spelling. In prose, personas are first names (Alice, Carol, Dave); the
-exact login appears only in code and output blocks. French pages follow the lexicon of the
-French guide: claim, issuer, fallback, service account, row filter, column mask and bearer token
-stay in English, with narrow no-break spaces before `; : ! ?` and no-break spaces inside « ».
+exact login appears only in code and output blocks. In French pages, claim, issuer, fallback, service
+account, row filter, column mask and bearer token stay in English, with narrow no-break spaces before `; : ! ?` and no-break spaces inside « ».
 
 ## Architecture
 
-Every module in `akko_mcp_trino/` has one responsibility and its tests, in `tests/`:
+Every file in `akko_mcp_trino/` has one responsibility and its tests, in `tests/`:
 
-| Module | Responsibility |
+| File | Responsibility |
 |---|---|
 | `config.py` | read the environment, neutral defaults |
 | `auth.py` | JWT verification against JWKS, `Principal` |
@@ -270,8 +269,8 @@ NAMES = ContractNames(
     described=TableRef("warehouse", "ledger", "invoices"),
     partitioned=TableRef("warehouse", "ledger", "payments"),
     partition_column="booking_month",
-    dropped=TableRef("warehouse", "ledger", "refunds"),     # marked deleted in the catalogue
-    unknown=TableRef("warehouse", "ledger", "ghosts"),      # not in the catalogue
+    dropped=TableRef("warehouse", "ledger", "refunds"),     # marked deleted in the data catalog
+    unknown=TableRef("warehouse", "ledger", "ghosts"),      # not in the data catalog
     trap=TableRef("warehouse", "o'brien.été", "l'année fiscale.v2"),
     term_column="invoice_total",          # a column of `described` with a served term
     foreign_glossary="personnel",         # a glossary outside the allow list
@@ -285,9 +284,9 @@ class TestMyProviderContract(ContextContract):
             build=lambda env, transport: MyProvider(env, transport=transport),
             replay=replay,
             env={
-                "MY_CATALOGUE_TOKEN": SECRET,
-                "MY_CATALOGUE_GLOSSARIES": "finance",
-                "MY_CATALOGUE_SERVE_OWNER": "true",
+                "MY_CATALOG_TOKEN": SECRET,
+                "MY_CATALOG_GLOSSARIES": "finance",
+                "MY_CATALOG_SERVE_OWNER": "true",
             },
             secret=SECRET,
             names=NAMES,

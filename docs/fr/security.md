@@ -62,9 +62,10 @@ Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans l
 - **Les commandes passent par une liste blanche** : `SELECT`, `DESCRIBE` d'une table,
   `SHOW CATALOGS`, `SHOW SCHEMAS`, `SHOW TABLES`, `SHOW COLUMNS` et `SHOW FUNCTIONS`. Toute autre
   commande est refusée, y compris une commande qu'une version future de Trino ajouterait.
-- Certaines lectures, comme `SHOW STATS` ou `EXPLAIN`, peuvent révéler des informations au-delà d'un filtre de lignes ou d'un masque de colonne. Elles sont refusées, sauf si l'administrateur les nomme dans
-  `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES`,
-  `SHOW SESSION`).
+- Certaines lectures, comme `SHOW STATS` ou `EXPLAIN`, peuvent révéler des informations au-delà
+  d'un filtre de lignes ou d'un masque de colonne. Elles sont refusées, sauf si l'administrateur
+  les nomme dans `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`,
+  `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`).
 - **Les écritures sont refusées n'importe où dans l'arbre.** L'instruction est analysée en arbre.
   Elle est refusée si elle contient plus d'une instruction, ou si un `INSERT`, `UPDATE`, `DELETE`,
   `MERGE`, `CREATE`, `DROP`, `ALTER`, `GRANT`, `CALL` ou `SET` apparaît n'importe où dans l'arbre,
@@ -78,7 +79,7 @@ Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans l
   Seuls `SHOW CATALOGS`, et un `SHOW SCHEMAS`, `SHOW TABLES` ou `SHOW COLUMNS` dont le `FROM` donne
   le nom complet, catalog compris, passent.
 
-Réglez donc `TRINO_CATALOG` sur un catalog de données. La policy du moteur doit aussi refuser
+Réglez donc `TRINO_CATALOG` sur un catalog qui contient des données, jamais `system`. La policy du moteur doit aussi refuser
 `system`, sauf la lecture de `system.jdbc` et `system.metadata` (voir
 [Lecture seule à travers ce serveur](#lecture-seule-à-travers-ce-serveur)) ; le contrôle du
 serveur est une deuxième ligne de défense, pas la seule.

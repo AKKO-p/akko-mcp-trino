@@ -160,8 +160,11 @@ next-page request and every cancellation goes through it. The sandbox runs it wi
 COMPOSE_FILE=compose.yaml:gateway/compose.gateway.yaml docker compose up -d --wait
 COMPOSE_FILE=compose.yaml:gateway/compose.gateway.yaml ./demo.sh --check
 COMPOSE_FILE=compose.yaml:gateway/compose.gateway.yaml docker compose --profile tools down -v
-tests/gateway.sh
+tests/gateway.sh   # the checks, end to end
 ```
+
+Start the variant with the same `COMPOSE_FILE` every time, and stop it with it too: a
+`docker compose down` without it leaves the second cluster and the gateway behind.
 
 `tests/gateway.sh` checks that each cluster runs the queries as the user who asked, that a
 capped result goes through the gateway, and that a query past its time budget is cancelled in
@@ -203,8 +206,8 @@ Without a provider, no data catalog code is loaded and no data catalog is called
 
 The chart has no value of its own for the context: its variables go in `extraEnv`, a secret only
 through `valueFrom`, and the `file` provider's JSON file in `extraVolumes` and `extraVolumeMounts`.
-Images built from `main` carry the Atlas provider, inactive, without the Kerberos libraries; the
-0.7 images do not. For Atlas with Basic authentication:
+The published images (0.7.x) do not carry the Atlas provider. Build the image from `main`,
+which installs it inactive, without the Kerberos libraries. For Atlas with Basic authentication:
 
 ```yaml
 extraEnv:

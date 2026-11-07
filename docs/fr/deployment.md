@@ -161,8 +161,11 @@ page suivante et chaque annulation passent par elle. Le sandbox la lance ainsi�
 COMPOSE_FILE=compose.yaml:gateway/compose.gateway.yaml docker compose up -d --wait
 COMPOSE_FILE=compose.yaml:gateway/compose.gateway.yaml ./demo.sh --check
 COMPOSE_FILE=compose.yaml:gateway/compose.gateway.yaml docker compose --profile tools down -v
-tests/gateway.sh
+tests/gateway.sh   # les contrôles, de bout en bout
 ```
+
+Lancez la variante avec le même `COMPOSE_FILE` à chaque fois, et arrêtez-la avec lui aussi : un
+`docker compose down` sans lui laisse derrière lui le second cluster et la passerelle.
 
 `tests/gateway.sh` vérifie que chaque cluster exécute les requêtes au nom de l'utilisateur qui les
 a posées, qu'un résultat plafonné passe par la passerelle, et qu'une requête qui dépasse son budget
@@ -209,8 +212,8 @@ fournisseur.
 
 La chart n'a pas de valeur à elle pour le contexte : ses variables vont dans `extraEnv`, un secret
 seulement par `valueFrom`, et le fichier JSON du fournisseur `file` dans `extraVolumes` et
-`extraVolumeMounts`. Les images construites depuis `main` portent le fournisseur Atlas, inactif,
-sans les bibliothèques Kerberos ; les images 0.7 ne le portent pas. Pour Atlas avec une
+`extraVolumeMounts`. Les images publiées (0.7.x) ne portent pas le fournisseur Atlas. Construisez l'image depuis
+`main`, qui l'installe inactif, sans les bibliothèques Kerberos. Pour Atlas avec une
 authentification Basic :
 
 ```yaml
