@@ -78,7 +78,7 @@ détail étant l'erreur qu'a levée le contrôle.
 `streamable-http` (`/mcp`) est le transport par défaut, celui qu'attendent les MCP hosts actuels.
 Posez `MCP_TRANSPORT=sse` pour les MCP hosts plus anciens (`/sse`) ; la vérification du token est
 la même sur les deux. Avec `MCP_TRANSPORT=stdio`, le MCP host lance lui-même le serveur : voir
-[MCP hosts locaux en stdio](hosts.md#mcp-hosts-locaux-en-stdio).
+[Tout MCP host en stdio, avec votre propre token](hosts.md#tout-mcp-host-en-stdio-avec-votre-propre-token).
 
 ## Conteneur
 

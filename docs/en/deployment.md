@@ -78,7 +78,7 @@ detail being the error the check raised.
 `streamable-http` (`/mcp`) is the default, and what current hosts expect. Set
 `MCP_TRANSPORT=sse` for older hosts (`/sse`); token verification is the same on both. With
 `MCP_TRANSPORT=stdio`, the host starts the server itself: see
-[Local hosts over stdio](hosts.md#local-hosts-over-stdio).
+[Any host over stdio, with your own token](hosts.md#any-host-over-stdio-with-your-own-token).
 
 ## Container
 
