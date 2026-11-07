@@ -1,5 +1,7 @@
 # Security policy
 
+**English** · [Français](SECURITY.fr.md)
+
 This server sits between AI agents and data. Take any weakness in it seriously;
 we do.
 

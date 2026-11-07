@@ -16,7 +16,8 @@ Merci d'envisager une contribution. Ce projet est petit à dessein, et il doit l
 - **Échouer fermé.** Dans le doute, refuser. Une garde qui ne peut pas vérifier ne doit pas faire
   semblant.
 - **L'anglais dans le code.** Le code, les commentaires et les messages de commit sont en anglais.
-  Les README et ce guide existent en anglais et en français, et changent ensemble.
+  Les README, la documentation (`docs/en` et `docs/fr`, page pour page) et ce guide existent en
+  anglais et en français, et changent ensemble.
 
 ## Installation
 
