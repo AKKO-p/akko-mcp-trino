@@ -5,8 +5,12 @@ prune providers
 prune .venv
 # What the tests read besides the package (they run from the sdist in CI): the texts they
 # check, the locks, their scripts, the Dockerfile, the workflows, and the Atlas provider's
-# metadata and READMEs.
-include README.fr.md DOCKERHUB.md CONTRIBUTING.md CONTRIBUTING.fr.md
+# metadata and READMEs. The documentation in both languages, and every file its links name,
+# so that the check of its links runs from the sdist too.
+include README.fr.md DOCKERHUB.md CONTRIBUTING.md CONTRIBUTING.fr.md SECURITY.md SECURITY.fr.md
+include LICENSE NOTICE charts/akko-mcp-trino/README.md integration/compose.yaml
+graft docs/en
+graft docs/fr
 graft docs/guides
 include requirements/*.in requirements/*.txt scripts/*.sh Dockerfile .github/workflows/*.yml
 include providers/atlas/pyproject.toml providers/atlas/README.md providers/atlas/README.fr.md

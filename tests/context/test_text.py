@@ -77,8 +77,9 @@ def test_the_bound_written_in_the_docs_is_the_codes():
         return " ".join((root / name).read_text(encoding="utf-8").split())
 
     window = 4 * NAME_CHARS + 1
-    for name in ("README.md", "CHANGELOG.md", "MIGRATING.md"):
+    for name in ("docs/en/catalog-context.md", "CHANGELOG.md", "MIGRATING.md"):
         assert f"longer than {NAME_CHARS} characters once cleaned" in text(name), name
-    assert f"reads at most {window} characters" in text("README.md")
-    assert f"de plus de {NAME_CHARS} caractères une fois nettoyé" in text("README.fr.md")
-    assert f"lit au plus {window} caractères" in text("README.fr.md")
+    assert f"reads at most {window} characters" in text("docs/en/catalog-context.md")
+    french = text("docs/fr/catalog-context.md")
+    assert f"de plus de {NAME_CHARS} caractères une fois nettoyé" in french
+    assert f"lit au plus {window} caractères" in french
