@@ -253,22 +253,39 @@ l'interromprait : la connexion resterait ouverte, la requête toujours en atte
 de données, qui la servirait une fois rétabli. La chaîne donne donc d'abord 0,1 s à une lecture
 encore en cours à son échéance pour finir d'elle-même. Une lecture encore en cours après ce délai
 est annulée, sauf si une annulation est déjà en route vers elle, et reçoit 0,1 s de plus. Une
-lecture qui ignore son annulation est laissée derrière, et ne retient plus ses tables. L'appel
-attend au plus 0,25 s après l'échéance, plus que ces deux délais, d'où le minimum de 0,3 pour
-`MCP_CONTEXT_RESERVE_SECONDS` avec un fournisseur. Coupez vos propres lectures à l'échéance, avec
-`asyncio.timeout` par exemple, et laissez votre client HTTP fermer ce qu'il a coupé ; un
-fournisseur qui ne le fait pas est coupé par la chaîne, une fois.
+lecture qui ignore son annulation est abandonnée, et ne retient plus ses tables. Ce qu'une lecture
+rend pendant les premières 0,1 s est servi, avec le statut qu'il mérite. L'appel attend au plus
+0,25 s après l'échéance : les deux délais de la chaîne prennent 0,2 s, et les 0,05 s qui restent
+absorbent le retard de la boucle d'événements ; au-delà, l'appel cesse d'attendre le premier, et
+les lectures encore en cours sont abandonnées et comptées `unavailable` tout de même. D'où le
+minimum de 0,3 pour `MCP_CONTEXT_RESERVE_SECONDS` avec un fournisseur.
+
+La connexion n'est donc fermée que si le fournisseur suit cette règle :
+
+- sa coupure tombe à l'échéance, pas plus tard, avec par exemple
+  `asyncio.timeout(deadline - time.monotonic())` ;
+- la coupure enveloppe l'appel HTTP lui-même, pour que le client ferme la connexion pendant que
+  l'annulation est en cours ;
+- après la coupure, il n'attend plus rien : il rend ou il lève.
+
+Une coupure qui tombe après l'échéance, des tâches filles qui ont leurs propres délais, ou un
+client HTTP qui tourne dans un thread peuvent laisser une connexion ouverte, sa requête en
+attente dans le catalogue de données. Une coupure tardive peut rencontrer l'annulation de la
+chaîne pendant la fermeture du client ; la coupure propre d'une tâche fille échappe à la
+chaîne ; un thread est hors de portée de toute annulation.
 
 ### Le contrat
 
 `akko_mcp_trino.testing` publie le contrat qui vérifie ces règles. On l'installe dans
 l'environnement de test du fournisseur avec `pip install "akko-mcp-trino[contract]"`, qui apporte
-`pytest` par une plage de versions, sans l'épingler. Il ne demande ni réseau, ni catalogue de
-données, ni Trino. Le fournisseur envoie ses requêtes à un transport qui répond avec les réponses
+`pytest` par une plage de versions, sans l'épingler. Il ne demande ni catalogue de données, ni
+Trino, ni réseau au-delà de l'interface de bouclage : quatre vérifications ouvrent une socket sur
+127.0.0.1. Le fournisseur envoie ses requêtes à un transport qui répond avec les réponses
 enregistrées du catalogue de données, ou, exprès, en retard, par un 401, un 503, un corps qui n'est
-pas du JSON, ou un 500 qui contient le secret. Deux vérifications les envoient plutôt par une
-vraie socket, à un serveur sur 127.0.0.1 qui accepte les connexions et ne répond jamais, l'une
-avec le fournisseur seul, l'autre derrière la chaîne du cœur.
+pas du JSON, ou un 500 qui contient le secret. Les quatre vérifications les envoient plutôt par
+une vraie socket, à un serveur sur 127.0.0.1 qui accepte les connexions et ne répond jamais, pour
+une description et pour des termes, chacune avec le fournisseur seul et derrière la chaîne du
+cœur. Si votre suite de tests bloque les sockets, autorisez 127.0.0.1 pour ces vérifications.
 
 On sous-classe `ContextContract` dans les tests du fournisseur, et on lui donne une fixture
 `harness` qui rend un `ContractHarness` : la fabrique `build(env, transport)`, la fonction `replay`
@@ -339,8 +356,9 @@ Le contrat vérifie que :
 - un catalogue de données lent rend la main avant l'échéance plus
   `ContextContract.REPLY_MARGIN_SECONDS` (0,5 s), sans laisser de requête ouverte ;
 - par une vraie socket vers un catalogue de données qui ne répond jamais, seul et derrière la
-  chaîne du cœur, une lecture coûte l'échéance plus cette marge et se dit indisponible, et sa
-  connexion est fermée : aucune requête ne reste en attente dans le catalogue de données ;
+  chaîne du cœur, une lecture de tables ou de termes coûte l'échéance plus cette marge et se dit
+  indisponible, et sa connexion est fermée : aucune requête ne reste en attente dans le
+  catalogue de données ;
 - un 401 lève `ProviderRefused` et n'est pas réessayé ;
 - un délai dépassé, un 503 ou un corps qui n'est pas du JSON lève `ProviderUnavailable` ;
 - ni les journaux (`httpx` à `WARNING`, comme le serveur le règle), ni `check_lines()` relu après
