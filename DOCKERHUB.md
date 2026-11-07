@@ -117,7 +117,10 @@ docker run --rm -e TRINO_HOST=... -e TRINO_HTTP_SCHEME=https -e MCP_JWKS_URL=...
 ```
 
 Every setting, the Trino configuration for each mode, local hosts over stdio and the extension
-points are described in the [README](https://github.com/AKKO-p/akko-mcp-trino#readme) and on
+points are described in the [documentation](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/index.md)
+([configuration](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/configuration.md),
+[identity](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/identity.md),
+[hosts](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/hosts.md)) and on
 [akko-ai.com](https://akko-ai.com/en/docs/open-source-core/).
 
 ## About

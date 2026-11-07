@@ -16,8 +16,9 @@ keeping it small is a feature.
   tables, per-role SQL rewriting…) will be declined: that belongs in the engine.
 - **Fail closed.** When in doubt, refuse. A guard that cannot verify must not
   pretend to.
-- **English in the code** — code, comments, commit messages. The READMEs and
-  this guide exist in English and in French, changed together.
+- **English in the code.** Code, comments and commit messages are in English. The READMEs, the
+  documentation (`docs/en` and `docs/fr`, page for page) and this guide exist in English
+  and in French, changed together.
 
 ## Set up
 

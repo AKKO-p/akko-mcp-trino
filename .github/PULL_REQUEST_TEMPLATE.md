@@ -7,5 +7,5 @@
 - [ ] A test fails before this change and passes after it (coverage stays at 100 %, line and branch).
 - [ ] The package stays product-neutral (`bash lint-vendor-neutral.sh`).
 - [ ] The server still does not decide access: Trino does.
-- [ ] Every new public name has a docstring; the README and `CHANGELOG.md` (*Unreleased*) are updated when behaviour changes.
+- [ ] Every new public name has a docstring; the documentation (`docs/en` and `docs/fr`) and `CHANGELOG.md` (*Unreleased*) are updated when behaviour changes.
 - [ ] `ruff check`, `ruff format --check`, `mypy akko_mcp_trino`, `pytest` are green locally.
