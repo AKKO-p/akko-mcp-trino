@@ -74,7 +74,8 @@ server:
   # Name announced to MCP hosts (MCP_SERVER_NAME); empty keeps the server's default.
   name: ""
   # Registrars of extra tools (MCP_TOOL_PLUGINS) and extensions (MCP_EXTENSIONS) installed
-  # in the image. The public image ships none.
+  # in the image. The public image ships the modules token-policy, fingerprint-audit and
+  # trino-tags, and no tool plugin.
   toolPlugins: []
   extensions: []
 
@@ -138,8 +139,7 @@ auth:
   # The JWKS is the trust anchor of the door: fetched over http, anyone on the path could
   # substitute keys. A non-https jwksUrl refuses to render unless this is true.
   acknowledgeInsecureJwks: false
-  # The issuer a token must carry (MCP_OIDC_ISSUER). Set it: without it, a token from any
-  # issuer that shares the JWKS and the audience is accepted (NOTES warns).
+  # The issuer a token must carry (MCP_OIDC_ISSUER), required when auth is enabled.
   issuer: ""
   # The audience the provider gives tokens issued for this server (MCP_OIDC_AUDIENCE).
   # This or `resourceUrl` is required when auth is enabled.

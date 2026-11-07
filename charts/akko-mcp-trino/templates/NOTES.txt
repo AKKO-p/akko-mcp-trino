@@ -14,11 +14,6 @@ Every caller reaches Trino as {{ .Values.trino.user }} without a verified token.
 WARNING: the JWKS is fetched over http ({{ .Values.auth.jwksUrl }}): anyone on the path could
 substitute keys and mint accepted tokens. Tests only.
 {{- end }}
-{{- if and .Values.auth.enabled (not .Values.auth.issuer) }}
-
-WARNING: auth.issuer is empty: a token is accepted from any issuer that shares the JWKS and
-the audience.
-{{- end }}
 {{- if not .Values.trino.readOnly }}
 
 WARNING: trino.readOnly=false: execute_query runs writes, within what Trino allows the caller.

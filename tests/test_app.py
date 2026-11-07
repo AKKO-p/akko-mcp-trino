@@ -575,6 +575,18 @@ def test_cli_check_fails_on_an_invalid_configuration(monkeypatch, capsys):
     assert "MCP_JWKS_URL" in capsys.readouterr().out
 
 
+def test_cli_check_fails_on_an_empty_issuer(monkeypatch, capsys):
+    from akko_mcp_trino.__main__ import check_config
+    from akko_mcp_trino.config import Config
+
+    monkeypatch.setenv("MCP_AUTH_ENABLED", "true")
+    monkeypatch.setenv("MCP_JWKS_URL", "https://idp/certs")
+    monkeypatch.setenv("MCP_OIDC_AUDIENCE", "mcp")
+    monkeypatch.delenv("MCP_OIDC_ISSUER", raising=False)
+    assert check_config(Config.from_env()) == 2
+    assert "MCP_OIDC_ISSUER is empty" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     ("env", "named"),
     [
