@@ -141,7 +141,8 @@ seulement. Claude Code y enregistre l'en-tête en clair, et `claude mcp get trin
 ne collez jamais cette sortie dans un ticket ou une discussion. `claude mcp list` n'affiche ni
 l'en-tête ni le token. `--scope project` écrit l'entrée dans `.mcp.json`, un fichier fait pour
 être versionné. Écrivez-y `"Authorization": "Bearer ${TRINO_TOKEN}"` : Claude Code remplace
-`${VAR}` dans `.mcp.json` par la valeur de votre environnement, et le token reste hors du fichier.
+`${VAR}` dans `.mcp.json` par la valeur de son propre environnement, et le token reste hors du
+fichier. Exportez la variable (`export TRINO_TOKEN`) dans le shell qui lance Claude Code.
 
 ### Cursor
 
@@ -234,10 +235,10 @@ faut :
 - [uv](https://docs.astral.sh/uv/), dont la commande `uvx` télécharge et lance akko-mcp-trino
   depuis PyPI, ou Docker (voir plus bas).
 
-L'entrée ci-dessous est celle de Cursor, dans `~/.cursor/mcp.json`
-([`examples/cursor-oauth2.json`](../../examples/cursor-oauth2.json)). Pour **Claude Desktop**,
-reprenez la même entrée sans `"type": "stdio"`
-([`examples/claude-desktop-oauth2.json`](../../examples/claude-desktop-oauth2.json)).
+Pour **Claude Desktop**, reprenez l'entrée ci-dessous sans `"type": "stdio"`
+([`examples/claude-desktop-oauth2.json`](../../examples/claude-desktop-oauth2.json)). Pour
+**Cursor**, mettez-la telle quelle dans `~/.cursor/mcp.json`
+([`examples/cursor-oauth2.json`](../../examples/cursor-oauth2.json)).
 
 ```json
 {
@@ -379,8 +380,8 @@ ajoutez `"NODE_EXTRA_CA_CERTS": "/path/to/ca.pem"` dans `env` : le pont ne l'h
 shell. `mcp-remote` sait aussi lire l'en-tête dans un fichier (`--header-file`, une ligne
 `Nom: valeur` par en-tête) plutôt que dans la configuration.
 
-Pour **Claude Code** et **VS Code**, reprenez la commande ou le fichier du chemin 1, avec
-l'adresse du serveur, `https://mcp.example.com/mcp`.
+Pour **Claude Code**, reprenez la commande du chemin 1 avec l'adresse du serveur,
+`https://mcp.example.com/mcp`.
 
 Pour **Cursor**, l'entrée pointe vers l'adresse du serveur :
 
@@ -400,6 +401,8 @@ Pour **Cursor**, l'entrée pointe vers l'adresse du serveur :
 Cursor résout `${env:NAME}` dans `url` et `headers`. L'en-tête peut donc valoir
 `"Bearer ${env:AKKO_MCP_TOKEN}"` et garder le token hors du fichier, à condition que cette
 variable soit définie quand Cursor démarre.
+
+Pour **VS Code**, reprenez le fichier du chemin 1 avec la même adresse.
 
 **Obtenir et renouveler le token.** Chaque utilisateur demande à l'IdP un token d'accès dont
 l'audience est le serveur (`MCP_OIDC_AUDIENCE` ou `MCP_RESOURCE_URL`), comme votre organisation en
@@ -459,7 +462,11 @@ Desktop et Cursor :
 ```
 
 Cet exemple règle `MCP_JWT_USER_CLAIM` pour Keycloak. La valeur par défaut est `sub` (voir
-[Le claim de l'utilisateur](identity.md#le-claim-de-lutilisateur)).
+[Le claim de l'utilisateur](identity.md#le-claim-de-lutilisateur)). Remplacez
+`<this server's client secret>` par le client secret du serveur, et
+`<the user's access token, issued for the MCP server>` par le token d'accès de l'utilisateur, émis
+pour le serveur MCP. Le fichier garde ce token et ce client secret en clair. Dans Cursor,
+`${env:NAME}` les garde hors du fichier, comme au chemin 3.
 
 Dans **Claude Code**, chaque variable passe par un `--env`, et la commande vient après `--`. Lisez
 d'abord le token et le client secret, pour que ni l'un ni l'autre n'entre dans l'historique du
@@ -570,7 +577,7 @@ anyio.run(main, os.environ["USER_TOKEN"])
 
 ## Depuis un agent
 
-[`examples/agent.py`](../../examples/agent.py) est un agent complet en quatre-vingts lignes. Il
+[`examples/agent.py`](../../examples/agent.py) est un agent complet en moins de cent lignes. Il
 associe tout modèle compatible OpenAI (Mistral sur La Plateforme, par OpenRouter ou LiteLLM, ou
 tout autre fournisseur) aux tools MCP, et envoie le token de l'utilisateur au serveur. Le modèle
 ne voit jamais le token : le serveur le reçoit à chaque tool call et le vérifie. Le modèle voit en
@@ -753,9 +760,9 @@ Plusieurs essais n'ont pas tourné sur `main` :
   documentation de Claude Code ;
 - les interfaces de Claude Desktop, de Claude Code, de Cursor et de VS Code : nous ne les avons pas
   pilotées ;
-- l'entrée `.mcp.json` avec `${TRINO_TOKEN}` au-delà de son approbation : `claude mcp list` la lit et
-  affiche `⏸ Pending approval`, car Claude Code demande cette approbation dans une session
-  interactive ; le remplacement de `${VAR}` vient de la documentation de Claude Code ;
+- l'entrée `.mcp.json` avec `${TRINO_TOKEN}` au-delà de son approbation : `claude mcp list` la
+  lit et affiche `⏸ Pending approval`, car Claude Code demande cette approbation dans une
+  session interactive ; le remplacement de `${VAR}` vient de la documentation de Claude Code ;
 - [`examples/agent.py`](../../examples/agent.py) jusqu'au bout : le fournisseur a répondu
   `429 - Rate limit exceeded` à chacun des cinq essais, trois avec `mistral-small-latest` et deux
   avec `mistral-medium-latest` ;

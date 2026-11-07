@@ -28,11 +28,13 @@ is left open on purpose: a JWKS over `http`, an empty issuer, TLS verification o
 
 ## Install
 
-Create the Secret first. In `jwt` mode it holds the token exchange client's secret:
+Create the Secret first. In `jwt` mode it holds the token exchange client's secret. `read -rs`
+reads it without showing it, so it stays out of your shell history:
 
 ```bash
+read -rs TRINO_TOKEN_EXCHANGE_CLIENT_SECRET
 kubectl create secret generic mcp-trino-credentials \
-  --from-literal=token-exchange-client-secret='...'
+  --from-literal=token-exchange-client-secret="$TRINO_TOKEN_EXCHANGE_CLIENT_SECRET"
 ```
 
 Then a values file:

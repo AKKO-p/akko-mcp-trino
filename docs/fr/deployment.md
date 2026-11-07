@@ -43,12 +43,13 @@ export MCP_JWT_USER_CLAIM=preferred_username          # Keycloak ; sub par défa
 # Un token pour Trino, par token exchange (RFC 8693), jamais celui de l'appelant
 export TRINO_TOKEN_EXCHANGE_URL=https://idp.example.com/realms/data/protocol/openid-connect/token
 export TRINO_TOKEN_EXCHANGE_CLIENT_ID=akko-mcp
-export TRINO_TOKEN_EXCHANGE_CLIENT_SECRET=...
+read -rs TRINO_TOKEN_EXCHANGE_CLIENT_SECRET && export TRINO_TOKEN_EXCHANGE_CLIENT_SECRET
 export TRINO_TOKEN_EXCHANGE_AUDIENCE=trino
 
 python -m akko_mcp_trino
 ```
 
+`read -rs` lit le client secret sans l'afficher : il reste hors de l'historique du shell.
 [Identité](identity.md) décrit les autres modes d'identité. Avant de lancer le serveur,
 `akko-mcp-trino --check` affiche la configuration effective (jamais un secret) et chaque
 avertissement. Il sort avec le code 2 si un réglage empêcherait le serveur de démarrer. En stdio,
@@ -92,6 +93,7 @@ Chaque utilisateur avec ses propres droits (`jwt`, par défaut), Trino faisant c
 identity provider :
 
 ```bash
+read -rs TRINO_TOKEN_EXCHANGE_CLIENT_SECRET && export TRINO_TOKEN_EXCHANGE_CLIENT_SECRET
 docker run -d --name akko-mcp-trino -p 3000:3000 -p 3001:3001 \
   -e TRINO_HOST=trino.example.internal -e TRINO_PORT=8443 -e TRINO_HTTP_SCHEME=https \
   -e TRINO_CATALOG=iceberg \
@@ -99,14 +101,17 @@ docker run -d --name akko-mcp-trino -p 3000:3000 -p 3001:3001 \
   -e MCP_OIDC_ISSUER=https://idp.example.com/realms/data \
   -e MCP_OIDC_AUDIENCE=akko-mcp -e MCP_JWT_USER_CLAIM=preferred_username \
   -e TRINO_TOKEN_EXCHANGE_URL=https://idp.example.com/realms/data/protocol/openid-connect/token \
-  -e TRINO_TOKEN_EXCHANGE_CLIENT_ID=akko-mcp -e TRINO_TOKEN_EXCHANGE_CLIENT_SECRET=... \
+  -e TRINO_TOKEN_EXCHANGE_CLIENT_ID=akko-mcp -e TRINO_TOKEN_EXCHANGE_CLIENT_SECRET \
   -e TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \
   akkoai/akko-mcp-trino:0.7
 ```
 
 Sans token exchange, utilisez `-e TRINO_IDENTITY_MODE=impersonation -e TRINO_USER=mcp-service`,
 avec un mot de passe ou un certificat client pour ce compte. Pour une identité unique pour tous
-les appelants, utilisez `-e TRINO_IDENTITY_MODE=service -e TRINO_USER=mcp-reader -e TRINO_PASSWORD=...`.
+les appelants, lisez le mot de passe avec `read -rs TRINO_PASSWORD && export TRINO_PASSWORD`, puis
+utilisez `-e TRINO_IDENTITY_MODE=service -e TRINO_USER=mcp-reader -e TRINO_PASSWORD`. Un `-e` sans
+valeur passe la variable de votre shell : aucun secret n'est tapé dans la ligne de commande, où
+l'historique du shell le garderait.
 
 L'endpoint MCP est `http://localhost:3000/mcp` (streamable HTTP). Le MCP host envoie le token
 d'accès de l'utilisateur dans `Authorization: Bearer <token>`. Vérifiez ensuite le serveur :

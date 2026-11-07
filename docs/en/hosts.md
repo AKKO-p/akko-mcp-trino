@@ -136,7 +136,8 @@ Claude Code stores the header there in plain text, and `claude mcp get trino` pr
 paste that output into a ticket or a chat. `claude mcp list` prints neither the header nor the
 token. `--scope project` writes the entry to `.mcp.json`, a file meant to be committed. There,
 write `"Authorization": "Bearer ${TRINO_TOKEN}"`: Claude Code expands `${VAR}` in `.mcp.json`
-from your environment, and the token stays out of the file.
+from its own environment, and the token stays out of the file. Export the variable
+(`export TRINO_TOKEN`) in the shell that starts Claude Code.
 
 ### Cursor
 
@@ -226,10 +227,10 @@ with Trino's own browser login. There is nothing to deploy and no token to paste
 - [uv](https://docs.astral.sh/uv/), whose `uvx` downloads and runs akko-mcp-trino from PyPI, or
   Docker (see below).
 
-The entry below is Cursor's, in `~/.cursor/mcp.json`
-([`examples/cursor-oauth2.json`](../../examples/cursor-oauth2.json)). For **Claude Desktop**,
-use the same entry without `"type": "stdio"`
-([`examples/claude-desktop-oauth2.json`](../../examples/claude-desktop-oauth2.json)).
+For **Claude Desktop**, use the entry below without `"type": "stdio"`
+([`examples/claude-desktop-oauth2.json`](../../examples/claude-desktop-oauth2.json)). For
+**Cursor**, put it as it is in `~/.cursor/mcp.json`
+([`examples/cursor-oauth2.json`](../../examples/cursor-oauth2.json)).
 
 ```json
 {
@@ -368,7 +369,7 @@ If the server's certificate is signed by your organization's own CA, add
 shell. `mcp-remote` can also read the header from a file (`--header-file`, one `Name: value` per
 line) instead of the configuration.
 
-For **Claude Code** and **VS Code**, use the path 1 command or file, with the server's address,
+For **Claude Code**, use the path 1 command with the server's address,
 `https://mcp.example.com/mcp`.
 
 For **Cursor**, the entry points at the server's address:
@@ -389,6 +390,8 @@ For **Cursor**, the entry points at the server's address:
 Cursor resolves `${env:NAME}` in `url` and `headers`. The header can therefore read
 `"Bearer ${env:AKKO_MCP_TOKEN}"` and keep the token out of the file, as long as Cursor starts with
 that variable set.
+
+For **VS Code**, use the path 1 file with the same address.
 
 **Getting and renewing the token.** Each user asks the identity provider for an access token
 whose audience is the server (`MCP_OIDC_AUDIENCE` or `MCP_RESOURCE_URL`), the way your
@@ -447,7 +450,8 @@ and Cursor:
 ```
 
 This example sets `MCP_JWT_USER_CLAIM` for Keycloak. The default is `sub` (see
-[The user claim](identity.md#the-user-claim)).
+[The user claim](identity.md#the-user-claim)). The file holds the token and the client secret in
+plain text. In Cursor, `${env:NAME}` keeps them out of it, as in path 3.
 
 In **Claude Code**, each variable goes in an `--env`, and the command comes after `--`. Read the
 token and the client secret first, so that neither enters your shell history:
@@ -556,7 +560,7 @@ anyio.run(main, os.environ["USER_TOKEN"])
 
 ## From an agent
 
-[`examples/agent.py`](../../examples/agent.py) is a complete agent in eighty lines. It pairs any
+[`examples/agent.py`](../../examples/agent.py) is a complete agent in under a hundred lines. It pairs any
 OpenAI-compatible model (Mistral on La Plateforme, through OpenRouter or LiteLLM, or any other
 provider) with the MCP tools, and sends the user's token to the server. The model never sees the
 token: the server receives it on every tool call and verifies it. The model does see the tool

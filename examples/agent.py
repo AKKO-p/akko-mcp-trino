@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextlib import AsyncExitStack
 
 import anyio
 from mcp import ClientSession
@@ -62,11 +63,12 @@ async def run(question: str) -> str:
     headers = {"Authorization": f"Bearer {os.environ['USER_TOKEN']}"}
 
     url = os.environ.get("MCP_URL", "http://localhost:3000/mcp")
-    if url.rstrip("/").endswith("/sse"):
-        opener = sse_client(url, headers=headers)
-    else:
-        opener = streamable_http_client(url, http_client=create_mcp_http_client(headers=headers))
-    async with opener as streams:
+    async with AsyncExitStack() as stack:
+        if url.rstrip("/").endswith("/sse"):
+            streams = await stack.enter_async_context(sse_client(url, headers=headers))
+        else:
+            http = await stack.enter_async_context(create_mcp_http_client(headers=headers))
+            streams = await stack.enter_async_context(streamable_http_client(url, http_client=http))
         r, w = streams[0], streams[1]
         async with ClientSession(r, w) as session:
             await session.initialize()
