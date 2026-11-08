@@ -174,7 +174,7 @@ exchanged for one for Trino.
 
 1. At the identity provider, create a confidential client for this server (say
    `akko-mcp`), allowed to exchange tokens, with Trino's audience available to
-   it. With Keycloak 26: *Client authentication* on, *Standard token exchange*
+   it. With Keycloak: *Client authentication* on, *Standard token exchange*
    on, and an audience mapper for the Trino client.
 2. Have the clients of your MCP hosts issue tokens whose audience is this
    server (an audience mapper for `akko-mcp`), and no longer Trino's.
