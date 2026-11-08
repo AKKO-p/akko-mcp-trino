@@ -128,9 +128,8 @@ These endpoints exist over the HTTP transports only, on the health port.
 
 [MIGRATING.md](../../MIGRATING.md) gives every step. In short:
 
-**From 0.7 to 0.8.** These pages describe `main`, which holds what 0.8 will ship.
-[MIGRATING.md](../../MIGRATING.md#from-07-to-08-unreleased) lists the changes, among them the
-modules that `MCP_EXTENSIONS` now names one by one.
+**From 0.7 to 0.8.** [MIGRATING.md](../../MIGRATING.md#from-07-to-08) lists the changes, among them
+the modules that `MCP_EXTENSIONS` now names one by one.
 
 **From 0.7.0.** 0.7.1 and 0.7.2 are security releases. `execute_query` refuses `SHOW STATS`,
 `EXPLAIN`, `SHOW CREATE` and the other reads listed in

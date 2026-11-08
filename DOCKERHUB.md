@@ -65,8 +65,8 @@ docker compose up -d --wait
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.7.2`) | one release |
-| `X.Y` (e.g. `0.7`) | the latest release of that minor line |
+| `X.Y.Z` (e.g. `0.8.0`) | one release |
+| `X.Y` (e.g. `0.8`) | the latest release of that minor line |
 | `latest` | the latest release |
 
 Every tag is built for `linux/amd64` and `linux/arm64`, runs as a non-root user (uid 10001),
@@ -88,7 +88,7 @@ docker run -d --name akko-mcp-trino -p 3000:3000 -p 3001:3001 \
   -e TRINO_TOKEN_EXCHANGE_URL=https://idp.example.com/realms/data/protocol/openid-connect/token \
   -e TRINO_TOKEN_EXCHANGE_CLIENT_ID=akko-mcp -e TRINO_TOKEN_EXCHANGE_CLIENT_SECRET \
   -e TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \
-  akkoai/akko-mcp-trino:0.7
+  akkoai/akko-mcp-trino:0.8
 ```
 
 Without token exchange, use `-e TRINO_IDENTITY_MODE=impersonation -e TRINO_USER=mcp-service`, with
@@ -103,7 +103,7 @@ access token as `Authorization: Bearer <token>`. Then:
 ```bash
 curl -s localhost:3001/health   # {"status":"ok"}
 curl -s localhost:3001/ready    # {"status":"ready"} once Trino responds
-docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
+docker run --rm akkoai/akko-mcp-trino:0.8 akko-mcp-trino --version
 ```
 
 Before serving, `akko-mcp-trino --check` prints the effective configuration (never a secret)
@@ -111,7 +111,7 @@ and exits with status 2 if a setting would stop the server from starting:
 
 ```bash
 docker run --rm -e TRINO_HOST=... -e TRINO_HTTP_SCHEME=https -e MCP_JWKS_URL=... \
-  akkoai/akko-mcp-trino:0.7 akko-mcp-trino --check
+  akkoai/akko-mcp-trino:0.8 akko-mcp-trino --check
 ```
 
 Every setting, the Trino configuration for each mode, local hosts over stdio and the extension
@@ -123,7 +123,10 @@ points are described in the [documentation](https://github.com/AKKO-p/akko-mcp-t
 
 ## Upgrading
 
-From 0.7.0: 0.7.1 and 0.7.2 are security releases. With Keycloak, set
+From 0.7 to 0.8: nothing is removed or renamed in the answers of the tools; a deployment that
+loaded the former bundle of extensions names them in `MCP_EXTENSIONS`, as
+[MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md#from-07-to-08)
+says. From 0.7.0: 0.7.1 and 0.7.2 are security releases. With Keycloak, set
 `MCP_JWT_USER_CLAIM=preferred_username` before upgrading. From 0.6 or earlier, see
 [MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md).
 

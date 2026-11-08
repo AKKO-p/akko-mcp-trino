@@ -1,6 +1,6 @@
 # Migrating
 
-## From 0.7 to 0.8 (unreleased)
+## From 0.7 to 0.8
 
 Nothing is removed or renamed in the answers of the tools.
 
