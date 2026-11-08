@@ -35,10 +35,11 @@ fi
 : "${PIP_COMPILE_ARGS:=}"
 
 # The pip-compile options of a source, the ones Dependabot reads back from the lock's header. A
-# source that installs the package from its directory (-e, itself or through -r) leaves the package out of its lock,
-# and pip and setuptools too, which Dependabot would otherwise compile with --allow-unsafe, and
-# that fails on the package's directory; such a lock installs with build.txt, which pins
-# setuptools. Any other source pins them (--allow-unsafe).
+# source that installs the packages from their directories (-e, itself or through -r) leaves the
+# packages of the repository out of its lock (the core and each provider of providers/), and pip
+# and setuptools too, which Dependabot would otherwise compile with --allow-unsafe, and that fails
+# on a package's directory; such a lock installs with build.txt, which pins setuptools. Any other
+# source pins them (--allow-unsafe).
 # Whether a source installs the package from its directory, itself or through its -r lines.
 editable() {
   local child
@@ -51,9 +52,11 @@ editable() {
 
 options() {
   if editable "$1"; then
-    local package
-    package=$(sed -nE 's/^name = "([^"]+)"/\1/p' pyproject.toml | head -1)
-    echo "--unsafe-package=$package --unsafe-package=pip --unsafe-package=setuptools"
+    local pyproject unsafe=""
+    for pyproject in pyproject.toml providers/*/pyproject.toml; do
+      unsafe+="--unsafe-package=$(sed -nE 's/^name = "([^"]+)"/\1/p' "$pyproject" | head -1) "
+    done
+    echo "${unsafe}--unsafe-package=pip --unsafe-package=setuptools"
   else
     echo "--allow-unsafe"
   fi

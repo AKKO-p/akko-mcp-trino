@@ -26,9 +26,9 @@ Seul : `pip install akko-mcp-trino-atlas` (Basic et Knox), ou
 `pip install "akko-mcp-trino-atlas[kerberos]"` pour Kerberos, qui apporte `pyspnego` et ses
 liaisons GSSAPI (bibliothèques MIT Kerberos sur le système).
 
-Le fournisseur s'enregistre sous le groupe de points d'entrée `akko_mcp_trino.context`, sous le
-nom `atlas`. Rien n'est chargé tant que `MCP_CONTEXT_PROVIDERS` ne le nomme pas ; l'image de
-conteneur d'akko-mcp-trino l'embarque, inactif, sans les bibliothèques Kerberos pour l'instant.
+Le fournisseur s'enregistre sous le groupe de points d'entrée `akko_mcp_trino.context`, sous le nom
+`atlas`. Rien n'est chargé tant que `MCP_CONTEXT_PROVIDERS` ne le nomme pas ; l'image de conteneur
+d'akko-mcp-trino l'embarque, inactif, avec son extra `kerberos` et les bibliothèques MIT Kerberos.
 
 ## Réglages
 

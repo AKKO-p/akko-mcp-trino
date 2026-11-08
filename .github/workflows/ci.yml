@@ -65,9 +65,11 @@ jobs:
           pip install --no-deps --no-build-isolation -e .
       - name: install the Atlas provider
         if: matrix.packages == 'core+atlas'
-        # --no-deps until 0.8.0: the provider requires akko-mcp-trino>=0.8.0, newer than the
-        # core of this commit; its other dependency, httpx, comes with the core.
-        run: pip install --no-deps --no-build-isolation -e providers/atlas
+        # As the core: its dependencies come from the locks, and pip check proves they hold
+        # what it declares, the core of this commit included.
+        run: |
+          pip install --no-deps --no-build-isolation -e providers/atlas
+          pip check
       - name: lint and format (ruff)
         run: |
           ruff check akko_mcp_trino tests examples integration
@@ -114,6 +116,8 @@ jobs:
           /tmp/licenses/bin/pip install --no-deps ./dist/*.whl
           if [ "${{ matrix.packages }}" = "core+atlas" ]; then
             /tmp/licenses/bin/pip install --no-deps ./dist-atlas/*.whl
+            # The image lock holds the provider's dependencies, as it does the core's.
+            /tmp/licenses/bin/pip check
             # The kerberos extra of the provider (pyspnego, gssapi, krb5), from its lock; gssapi
             # and krb5 publish no Linux wheel and are built from their sdists, against the
             # system's MIT Kerberos.

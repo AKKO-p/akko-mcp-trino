@@ -47,11 +47,11 @@ s'installe depuis un verrou, en versions exactes et avec leurs empreintes, écri
 
 | Verrou | Source | Installé par |
 |---|---|---|
-| `requirements/image.txt` | `requirements/image.in` : les dépendances que le paquet déclare | l'image de conteneur, les contrôles de licences et de vulnérabilités |
-| `requirements/build.txt` | `requirements/build.in` : l'outil de construction et le backend de `[build-system]` | l'étape de construction de l'image, et les contrôles, avec `dev.txt` |
+| `requirements/image.txt` | `requirements/image.in` : les dépendances que déclarent le cœur et l'adaptateur Atlas | l'image de conteneur, les contrôles de licences et de vulnérabilités |
+| `requirements/build.txt` | `requirements/build.in` : l'outil de construction et le backend de `[build-system]`, et Cython pour les sdists de l'extra `kerberos` | l'étape de construction de l'image, et les contrôles, avec `dev.txt` |
 | `requirements/release.txt` | `requirements/release.in` : les outils de construction et twine | la publication (sdist, wheel, envoi) |
 | `requirements/dev.txt` | `requirements/dev.in` : les outils que lancent les contrôles, sans version dans la source, résolus aux versions de l'image et de la publication | la CI et l'installation de développement, sur chaque version de Python |
-| `requirements/kerberos.txt` | son `.in` : l'extra `kerberos` de l'adaptateur Atlas | le contrôle des licences seulement |
+| `requirements/kerberos.txt` | son `.in` : l'extra `kerberos` de l'adaptateur Atlas | l'image de conteneur (son étape de construction en construit les wheels), le contrôle des licences |
 
 Les versions des outils (pytest, ruff, mypy et les autres) ne vivent que dans
 `requirements/dev.txt` : les extras `test` et `dev` de `pyproject.toml` les nomment sans version,
@@ -60,20 +60,22 @@ pour qu'une mise à jour, par Dependabot ou par `lock.sh compile`, ne change que
 Les wheels et le sdist sont construits par le backend verrouillé, sans isolation
 (`python -m build --no-isolation`), pour qu'aucun outil de construction ne soit téléchargé hors
 verrou. L'image installe son verrou par `pip install --only-binary=:all: --require-hashes`, puis le
-paquet sans ses dépendances ; `pip check` fait échouer la construction s'il manque au verrou une
-dépendance que le paquet ou un paquet verrouillé déclare. Il ne voit pas une dépendance qu'apporte
-seulement un extra, comme la CLI de `mcp[cli]`. Le fournisseur Atlas entrera dans le verrou
-avec la version qui publiera les deux paquets ; d'ici là, l'image l'installe sans ses dépendances.
+cœur et l'adaptateur Atlas sans leurs dépendances ; `pip check` fait échouer la construction s'il
+manque au verrou une dépendance que l'un d'eux ou un paquet verrouillé déclare. Il ne voit pas une
+dépendance qu'apporte seulement un extra, comme la CLI de `mcp[cli]`.
 
-`dev.txt`, `image.txt` et `kerberos.txt` installent le paquet depuis son dossier (`-e` ou
-`-r image.in`). Ils laissent donc hors du verrou le paquet lui-même, pip et setuptools
-(`--unsafe-package`). Dependabot compile tout verrou qui épingle pip ou setuptools avec
+`dev.txt`, `image.txt` et `kerberos.txt` installent les paquets depuis leurs dossiers (`-e` ou
+`-r image.in`). Ils laissent donc hors du verrou les paquets du dépôt (le cœur et l'adaptateur
+Atlas), pip et setuptools (`--unsafe-package`). Dependabot compile tout verrou qui épingle pip ou setuptools avec
 `--allow-unsafe`, ce qui échoue pour un paquet installé depuis son dossier. setuptools reste quand
 même épinglé pour les contrôles, parce qu'ils installent `build.txt` avec `dev.txt`. `build.txt` et
 `release.txt` épinglent pip et setuptools (`--allow-unsafe`). Le verrou `kerberos` construit gssapi et krb5 depuis
-leurs sdists (empreintes vérifiées) contre le MIT Kerberos du système (`libkrb5-dev`) ; les outils
-de construction que pip télécharge pour ces deux-là ne sont pas verrouillés, et rien n'en entre
-dans l'image.
+leurs sdists (empreintes vérifiées) contre le MIT Kerberos du système (`libkrb5-dev`). L'étape de
+construction de l'image les construit sans isolation, avec le Cython de `build.txt`, en wheels que
+l'étape finale installe par un montage, avec `--no-index` ; l'étape finale ajoute les
+bibliothèques d'exécution du MIT Kerberos (`libgssapi-krb5-2`). Le contrôle des licences installe
+le verrou avec isolation : les outils de construction que pip y télécharge pour ces deux-là ne
+sont pas verrouillés.
 
 Le Dockerfile nomme son image de base une seule fois, épinglée par digest, dans ses deux étapes,
 pour que l'image soit reproductible ; Dependabot en apporte les mises à jour de sécurité, une
