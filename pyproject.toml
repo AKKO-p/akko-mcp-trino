@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "akko-mcp-trino"
-version = "0.7.2"
+version = "0.8.0"
 description = "Read-only MCP server for Trino: nine tools, writes refused on the SQL tree, queries as the verified user (token exchange or impersonation) or one named identity, bounded rows and time, one audit line per call."
 readme = "README.md"
 license = "Apache-2.0"
@@ -53,7 +53,7 @@ contract = ["pytest>=8,<10"]
 test = ["pytest", "pytest-cov"]
 dev = ["pytest", "pytest-cov", "ruff", "mypy", "pip-audit"]
 # The Apache Atlas context provider (providers/atlas), with Kerberos; released with the core.
-atlas = ["akko-mcp-trino-atlas[kerberos]==0.7.2"]
+atlas = ["akko-mcp-trino-atlas[kerberos]==0.8.0"]
 
 [project.scripts]
 akko-mcp-trino = "akko_mcp_trino.__main__:main"
