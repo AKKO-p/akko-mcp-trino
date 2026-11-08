@@ -16,8 +16,12 @@ RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r requireme
 # krb5 publish no Linux wheel and are built here from their sdists, by the locked Cython and
 # without isolation, against the system's MIT Kerberos; every other wheel is the lock's own. The
 # final stage reads them through a mount, so none of this stage enters the image.
+# The apt packages are pinned to the versions of the base image's Debian release (CONTRIBUTING.md
+# says how to move them with the base image).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends gcc libc6-dev libkrb5-dev \
+ && apt-get install -y --no-install-recommends \
+      gcc=4:14.2.0-1 libc6-dev=2.41-12+deb13u4 libkrb5-dev=1.21.3-5+deb13u1 \
+ && rm -rf /var/lib/apt/lists/* \
  && pip wheel --no-cache-dir --no-deps --no-build-isolation --require-hashes \
       -r requirements/kerberos.txt -w /src/kerberos
 
@@ -27,9 +31,13 @@ LABEL org.opencontainers.image.title="akko-mcp-trino" \
       org.opencontainers.image.source="https://github.com/AKKO-p/akko-mcp-trino" \
       org.opencontainers.image.licenses="Apache-2.0"
 RUN useradd --create-home --uid 10001 mcp
-# The MIT Kerberos libraries that gssapi and krb5 load, for ATLAS_AUTH=kerberos.
+# The MIT Kerberos libraries that gssapi and krb5 load, for ATLAS_AUTH=kerberos; the base image
+# has none of them. Each package apt installs is pinned, its dependencies included.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+ && apt-get install -y --no-install-recommends \
+      libgssapi-krb5-2=1.21.3-5+deb13u1 libkrb5-3=1.21.3-5+deb13u1 \
+      libk5crypto3=1.21.3-5+deb13u1 libkrb5support0=1.21.3-5+deb13u1 \
+      libkeyutils1=1.6.3-6 libcom-err2=1.47.2-3+b12 \
  && rm -rf /var/lib/apt/lists/*
 COPY requirements/image.txt /tmp/requirements/
 COPY --from=build /src/dist/*.whl /tmp/

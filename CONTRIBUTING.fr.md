@@ -85,6 +85,26 @@ version de la ligne `FROM` du Dockerfile (`LOCK_PYTHON`), et `tests/test_locks.p
 verrous ont été compilés avec lui. Passer à une nouvelle version mineure de Python est une étape
 manuelle : la ligne `FROM`, puis `bash scripts/lock.sh compile` sur ce Python.
 
+Le Dockerfile installe quelques paquets Debian par apt : un compilateur et les en-têtes du MIT
+Kerberos dans l'étape de construction, les bibliothèques du MIT Kerberos dans l'étape finale.
+Chacun est épinglé à une version exacte (`nom=version`), avec `--no-install-recommends`, et
+`tests/test_locks.py` échoue sur un paquet sans version. Ces versions sont celles de la version de
+Debian de l'image de base, les mêmes sur `linux/amd64` et `linux/arm64`. Quand Dependabot change
+l'image de base, ou quand la construction échoue parce que le miroir Debian ne sert plus une
+version épinglée (une mise à jour de sécurité l'a remplacée), lisez les versions que propose la
+nouvelle base et écrivez-les dans le Dockerfile :
+
+```bash
+docker run --rm python:<version>-slim@sha256:<digest> sh -c 'apt-get update -qq &&
+  apt-get install -s --no-install-recommends libgssapi-krb5-2 | grep ^Inst &&
+  apt-cache policy gcc libc6-dev libkrb5-dev | grep -E "^[a-z]|Candidate"'
+```
+
+Les lignes `Inst` nomment `libgssapi-krb5-2` et chaque bibliothèque qu'il apporte, avec leur
+version : l'étape finale les épingle toutes. Les lignes `Candidate` donnent les versions des trois
+paquets qu'épingle l'étape de construction. Construisez ensuite l'image pour les deux plateformes
+(`docker buildx build --platform linux/amd64,linux/arm64 .`).
+
 `scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions : `LOCK_PYTHON`,
 les versions de Python des contrôles et de l'adaptateur Atlas (`CHECK_PYTHONS`), les plateformes de
 l'image (`IMAGE_PLATFORMS`) et la glibc de l'image de base (`IMAGE_GLIBC`, que la CI vérifie sur

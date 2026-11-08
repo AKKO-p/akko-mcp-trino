@@ -91,6 +91,27 @@ version on the Dockerfile's `FROM` line (`LOCK_PYTHON`), and
 Python minor version is a manual step: the `FROM` line, then
 `bash scripts/lock.sh compile` on that Python.
 
+The Dockerfile installs a few Debian packages with apt: a compiler and the MIT
+Kerberos headers in the build stage, the MIT Kerberos libraries in the final
+stage. Each one is pinned to an exact version (`name=version`), with
+`--no-install-recommends`, and `tests/test_locks.py` fails on a package without
+a version. The versions are those of the Debian release of the base image, the
+same on `linux/amd64` and `linux/arm64`. When Dependabot moves the base image,
+or when the build fails because the Debian mirror no longer serves a pinned
+version (a security update replaces it), read the versions the new base offers
+and write them in the Dockerfile:
+
+```bash
+docker run --rm python:<version>-slim@sha256:<digest> sh -c 'apt-get update -qq &&
+  apt-get install -s --no-install-recommends libgssapi-krb5-2 | grep ^Inst &&
+  apt-cache policy gcc libc6-dev libkrb5-dev | grep -E "^[a-z]|Candidate"'
+```
+
+The `Inst` lines name `libgssapi-krb5-2` and every library it brings, each with
+its version: the final stage pins them all. The `Candidate` lines give the
+versions of the three packages the build stage pins. Then build the image for both
+platforms (`docker buildx build --platform linux/amd64,linux/arm64 .`).
+
 `scripts/lock.sh` is the one place CI and the release read the versions from:
 `LOCK_PYTHON`, the Python versions of the checks and of the Atlas provider
 (`CHECK_PYTHONS`), the platforms of the image (`IMAGE_PLATFORMS`) and the

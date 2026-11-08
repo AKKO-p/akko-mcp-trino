@@ -89,7 +89,42 @@ def test_the_image_builds_the_kerberos_extra_from_its_lock_in_the_build_stage() 
     # The final stage reads the wheels through a mount: no layer of the image holds them.
     assert "--mount=type=bind,from=build,source=/src/kerberos,target=/tmp/kerberos" in final
     assert "COPY --from=build /src/kerberos" not in dockerfile
-    assert re.search(r"^cython==\S+$", (ROOT / "requirements/build.in").read_text(), re.M)
+    # A range in the source, an exact pin with its hashes in the lock.
+    assert re.search(r"^cython>=[\d.]+,<\d+$", (ROOT / "requirements/build.in").read_text(), re.M)
+    assert re.search(r"^cython==\S+ \\$", (ROOT / "requirements/build.txt").read_text(), re.M)
+
+
+APT_PIN = re.compile(r"[a-z0-9][a-z0-9+.-]*=[0-9][A-Za-z0-9.+~:-]*")
+
+
+def _apt_problems(dockerfile: str) -> list[str]:
+    """What a RUN that installs apt packages misses: a version on each package (name=version),
+    --no-install-recommends, and the removal of the apt lists."""
+    problems = []
+    for run in re.findall(r"^RUN (.*)$", dockerfile.replace("\\\n", " "), re.M):
+        for install in re.findall(r"apt-get install ([^&]*)", run):
+            args = install.split()
+            if "--no-install-recommends" not in args:
+                problems.append("--no-install-recommends")
+            problems += [a for a in args if not a.startswith("-") and not APT_PIN.fullmatch(a)]
+            if "rm -rf /var/lib/apt/lists/*" not in run:
+                problems.append("apt lists kept")
+    return problems
+
+
+def test_every_apt_package_of_the_image_is_pinned() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    assert dockerfile.count("apt-get install") == 2  # the build stage, then the final stage
+    assert _apt_problems(dockerfile) == []
+
+
+def test_the_apt_check_catches_a_package_without_a_version() -> None:
+    run = "RUN apt-get update \\\n && apt-get install -y --no-install-recommends gcc=1 libx \\\n"
+    assert _apt_problems(run + " && rm -rf /var/lib/apt/lists/*\n") == ["libx"]
+    assert _apt_problems("RUN apt-get install -y gcc=1\n") == [
+        "--no-install-recommends",
+        "apt lists kept",
+    ]
 
 
 def test_the_image_lock_holds_the_dependencies_of_the_core_and_the_atlas_provider() -> None:
