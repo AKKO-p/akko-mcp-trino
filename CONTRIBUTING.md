@@ -79,8 +79,9 @@ sdists (hashes checked) against the system's MIT Kerberos (`libkrb5-dev`). The
 image's build stage builds them without isolation, with the Cython of
 `build.txt`, into wheels that the final stage installs through a mount, with
 `--no-index`; the final stage adds the MIT Kerberos runtime libraries
-(`libgssapi-krb5-2`). The license check installs the lock with isolation: the
-build tools pip fetches there for those two are not locked.
+(`libgssapi-krb5-2`). The license check builds and installs them the same way,
+without isolation and from those wheels only, so that no build tool outside the
+locks is fetched.
 
 The Dockerfile names its base image once, pinned by digest, in both stages, so
 that the image is reproducible; Dependabot brings its security updates, a
@@ -110,7 +111,12 @@ docker run --rm python:<version>-slim@sha256:<digest> sh -c 'apt-get update -qq 
 The `Inst` lines name `libgssapi-krb5-2` and every library it brings, each with
 its version: the final stage pins them all. The `Candidate` lines give the
 versions of the three packages the build stage pins. Then build the image for both
-platforms (`docker buildx build --platform linux/amd64,linux/arm64 .`).
+platforms (`docker buildx build --platform linux/amd64,linux/arm64 .`). CI builds
+the image for `linux/arm64` too, under QEMU, and runs `--version` and the Kerberos
+`--check` in it, when a pull request or a push touches the Dockerfile,
+`requirements/`, `pyproject.toml` or `providers/atlas/pyproject.toml`, and on a
+manual run (`workflow_dispatch`): gssapi and krb5 compile under emulation, which
+takes over an hour, so it does not run on every pull request.
 
 `scripts/lock.sh` is the one place CI and the release read the versions from:
 `LOCK_PYTHON`, the Python versions of the checks and of the Atlas provider

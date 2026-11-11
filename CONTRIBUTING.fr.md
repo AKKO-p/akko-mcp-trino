@@ -73,9 +73,9 @@ même épinglé pour les contrôles, parce qu'ils installent `build.txt` avec `d
 leurs sdists (empreintes vérifiées) contre le MIT Kerberos du système (`libkrb5-dev`). L'étape de
 construction de l'image les construit sans isolation, avec le Cython de `build.txt`, en wheels que
 l'étape finale installe par un montage, avec `--no-index` ; l'étape finale ajoute les
-bibliothèques d'exécution du MIT Kerberos (`libgssapi-krb5-2`). Le contrôle des licences installe
-le verrou avec isolation : les outils de construction que pip y télécharge pour ces deux-là ne
-sont pas verrouillés.
+bibliothèques d'exécution du MIT Kerberos (`libgssapi-krb5-2`). Le contrôle des licences les
+construit et les installe de la même façon, sans isolation et depuis ces seules wheels : aucun
+outil de construction hors des verrous n'est téléchargé.
 
 Le Dockerfile nomme son image de base une seule fois, épinglée par digest, dans ses deux étapes,
 pour que l'image soit reproductible ; Dependabot en apporte les mises à jour de sécurité, une
@@ -103,7 +103,12 @@ docker run --rm python:<version>-slim@sha256:<digest> sh -c 'apt-get update -qq 
 Les lignes `Inst` nomment `libgssapi-krb5-2` et chaque bibliothèque qu'il apporte, avec leur
 version : l'étape finale les épingle toutes. Les lignes `Candidate` donnent les versions des trois
 paquets qu'épingle l'étape de construction. Construisez ensuite l'image pour les deux plateformes
-(`docker buildx build --platform linux/amd64,linux/arm64 .`).
+(`docker buildx build --platform linux/amd64,linux/arm64 .`). La CI construit aussi l'image pour
+`linux/arm64`, sous QEMU, et y lance `--version` et le `--check` Kerberos, quand une pull request
+ou un push touche le Dockerfile, `requirements/`, `pyproject.toml` ou
+`providers/atlas/pyproject.toml`, et sur un lancement manuel (`workflow_dispatch`) : gssapi et krb5
+s'y compilent sous émulation, ce qui prend plus d'une heure, d'où son absence sur chaque pull
+request.
 
 `scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions : `LOCK_PYTHON`,
 les versions de Python des contrôles et de l'adaptateur Atlas (`CHECK_PYTHONS`), les plateformes de
