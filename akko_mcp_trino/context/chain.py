@@ -19,7 +19,7 @@ from typing import Any
 
 from ..config import Config
 from ..metrics import Metrics
-from .caches import ByteCache, serialized_size
+from .caches import ByteCache, ReadInFlightFailed, serialized_size
 from .loop import ContextLoop
 from .provider import ContextProvider
 from .status import (
@@ -48,6 +48,10 @@ _GRACE_SECONDS = 0.25
 _NOT_WELL = frozenset({PARTIAL, UNAVAILABLE, REFUSED, ERROR})
 
 Fetch = Callable[[ContextProvider, Sequence[Any], float], Awaitable[Mapping[Any, Any]]]
+
+
+class _AtLimit(Exception):
+    """A read would be sent while ``max_concurrency`` reads of the source are in flight."""
 
 
 def _empty() -> Mapping:
@@ -337,13 +341,12 @@ class ContextChain:
             if blocked is not None:
                 statuses[name] = blocked
                 continue
-            if self._active[name] >= self._settings.max_concurrency:
-                statuses[name] = UNAVAILABLE
-                continue
-            self._active[name] += 1
+            # The limit is checked by the read itself, once it is sure to call the source: a
+            # call that only waits on reads already in flight takes no slot. Such a wait holds
+            # a task and a reference to the shared future, and ends at its own deadline; there
+            # are no more of them than calls in flight, each blocking its caller's thread.
             task = asyncio.create_task(self._read(provider, cache, fetch, missing, mine, deadline))
-            # Counted until it really ends, even when the chain stopped waiting for it.
-            task.add_done_callback(functools.partial(self._finished, name))
+            task.add_done_callback(_finished)
             tasks[task] = (provider, stamp)
         try:
             if tasks:
@@ -383,8 +386,19 @@ class ContextChain:
     ) -> None:
         name = provider.name
         index: dict[Hashable, Any] = {(name, item): item for item in missing}
+        held = False
 
         async def load(keys: Sequence[Hashable]) -> Mapping[Hashable, Any]:
+            # Runs only for keys no other call is reading: the call is about to send a read.
+            # Its slot is taken at the first read sent and kept for its later batches. The
+            # check must stay before any await: the cache has just registered these keys as
+            # in flight, and no other call may start waiting on a read the limit refuses.
+            nonlocal held
+            if not held:
+                if self._active[name] >= self._settings.max_concurrency:
+                    raise _AtLimit
+                self._active[name] += 1
+                held = True
             start = time.perf_counter()
             if self._metrics is not None:
                 self._metrics.context_calls.labels(provider=name).inc()
@@ -399,10 +413,15 @@ class ContextChain:
 
         keys = list(index)
         size = self._settings.batch
-        for at in range(0, len(keys), size):
-            values = await cache.load_many(keys[at : at + size], load, serialized_size)
-            for key, value in values.items():
-                mine[index[key]] = value
+        try:
+            for at in range(0, len(keys), size):
+                values = await cache.load_many(keys[at : at + size], load, serialized_size)
+                for key, value in values.items():
+                    mine[index[key]] = value
+        finally:
+            # Counted until it really ends, even when the chain stopped waiting for it.
+            if held:
+                self._active[name] -= 1
 
     def _outcome(
         self,
@@ -419,6 +438,14 @@ class ContextChain:
         exc = task.exception()
         if exc is None:
             return _settled(mine)
+        if isinstance(exc, _AtLimit):
+            # The source was not called: nothing opens, nothing is traced.
+            return cut_short
+        if isinstance(exc, ReadInFlightFailed):
+            # Another call sent the read, with its own deadline, and judged the source: this
+            # one opens nothing and traces nothing. Only a refusal or an error is passed on.
+            received = status_of(exc.cause)
+            return received if received in (REFUSED, ERROR) else cut_short
         status = status_of(exc)
         if status == REFUSED:
             self._open(provider, stamp, REFUSED, self._settings.refused_retry_seconds)
@@ -484,12 +511,6 @@ class ContextChain:
             if status in _NOT_WELL:
                 self._metrics.context_errors.labels(provider=name, status=status).inc()
 
-    def _finished(self, name: str, task: asyncio.Task) -> None:
-        self._active[name] -= 1
-        # A source left behind may fail later: its error is read so that it does not warn.
-        if not task.cancelled():
-            task.exception()
-
     def _held(self, name: str) -> float:
         return self._tables.bytes_of(name) + self._terms.bytes_of(name)
 
@@ -497,6 +518,12 @@ class ContextChain:
         if self._metrics is not None:
             result = "hit" if hit else "miss"
             self._metrics.context_cache.labels(provider=name, result=result).inc()
+
+
+def _finished(task: asyncio.Task) -> None:
+    # A source left behind may fail later: its error is read so that it does not warn.
+    if not task.cancelled():
+        task.exception()
 
 
 async def _cut(late: set[asyncio.Task]) -> set[asyncio.Task]:

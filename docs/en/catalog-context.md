@@ -142,6 +142,29 @@ served, and its account should read no more. Behind Trino Gateway, every cluster
 group must share the same access control (see
 [Deployment](deployment.md#behind-trino-gateway)).
 
+## Large catalogs
+
+Measured on one machine against Apache Atlas 2.4.0, with a table of 2,000 columns, each column
+described and holding one glossary term, in a glossary of 50,000 terms:
+
+- **Time budgets.** Atlas answered the read of that table in 5.85 s. With the defaults,
+  `MCP_CONTEXT_TIMEOUT_SECONDS=5` and `ATLAS_TIMEOUT_SECONDS=5`, four calls of `describe_table` on
+  the table in a row, caches empty at the first, served no context twice (`unavailable`), then a
+  part of it twice (`partial`). With both at 20 s, `TRINO_MAX_ROWS=2000` and
+  `MCP_CONTEXT_RESPONSE_CHARS=60000`, the first call, caches empty, answered in 12.35 s with the
+  context, cut to that length. For tables that wide, raise the two time settings together.
+- **Seeding a test catalog.** Through `POST /api/atlas/v2/glossary/terms`, the time per term grew
+  with the glossary: in batches of 500 terms, the first batch took 15.1 s and the 51st 211.6 s,
+  about 2.4 terms a second. Through `POST /api/atlas/v2/entity/bulk`, 50,000 terms of type
+  `AtlasGlossaryTerm`, each with its `anchor` relationship to the glossary, in batches of 500, took
+  734.8 s in all, about 68 a second. Updating a glossary of 50,000 terms
+  (`PUT /api/atlas/v2/glossary/{guid}/partial`) took 590 s. To seed a large test glossary, write
+  its terms through `entity/bulk`.
+- **The policy engine.** During a burst of 50 calls of `describe_table` on that table, Trino asked
+  OPA to filter its 2,000 columns for each call. An OPA limited to 64 MB was killed for lack of
+  memory; Trino then failed every statement, and the server served no context. 512 MB was enough.
+  Size the policy engine for bursts on wide tables.
+
 ## Check, logs and shutdown
 
 `--check` prints a `context:` line, with the providers and every setting of its table in
