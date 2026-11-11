@@ -152,6 +152,30 @@ fournisseur nomment ce qui est servi, et son compte ne doit rien lire de plus. D
 Gateway, tous les clusters d'un groupe de routage doivent partager le même contrôle d'accès (voir
 [Déploiement](deployment.md#derrière-trino-gateway)).
 
+## Les grands catalogues
+
+Mesuré sur une machine avec Apache Atlas 2.4.0, sur une table de 2 000 colonnes, chaque colonne
+décrite et portant un terme de glossaire, dans un glossaire de 50 000 termes :
+
+- **Budgets de temps.** Atlas a répondu à la lecture de cette table en 5,85 s. Avec les valeurs par
+  défaut, `MCP_CONTEXT_TIMEOUT_SECONDS=5` et `ATLAS_TIMEOUT_SECONDS=5`, les deux premiers appels de
+  `describe_table` sur la table, caches vides, n'ont servi aucun contexte (`unavailable`), et les
+  deux suivants une partie (`partial`). Avec les deux à 20 s, le premier appel a répondu en 12,35 s
+  avec le contexte, coupé à `MCP_CONTEXT_RESPONSE_CHARS`. Pour des tables aussi larges, montez les
+  deux réglages ensemble.
+- **Remplir un catalogue de test.** Atlas 2.4.0 compare chaque nouveau terme à tout le glossaire,
+  donc `POST /api/atlas/v2/glossary/terms` ralentit à mesure que le glossaire grandit : par lots de
+  500 termes, le premier lot a pris 15,1 s et le 51e 211,6 s. `POST /api/atlas/v2/entity/bulk` ne
+  ralentit pas : 50 000 termes de type `AtlasGlossaryTerm`, chacun avec sa relation `anchor` vers
+  le glossaire, par lots de 500, ont pris 734,8 s, environ 68 par seconde. Mettre à jour un
+  glossaire de 50 000 termes (`PUT /api/atlas/v2/glossary/{guid}/partial`) a pris 590 s. Pour
+  remplir un grand glossaire de test, écrivez ses termes par `entity/bulk`.
+- **Le moteur de policies.** Pendant une rafale de 50 appels de `describe_table` sur cette table,
+  Trino a demandé à OPA de filtrer ses 2 000 colonnes pour chaque appel. Un OPA limité à 64 Mo a été
+  tué faute de mémoire ; Trino a alors fait échouer chaque requête, et le serveur n'a servi aucun
+  contexte. 512 Mo ont suffi. Dimensionnez le moteur de policies pour les rafales sur des tables
+  larges.
+
 ## Contrôle, journaux et arrêt
 
 `--check` affiche une ligne `context:`, avec les fournisseurs et chaque réglage de son tableau dans

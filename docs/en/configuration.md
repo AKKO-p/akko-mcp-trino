@@ -119,7 +119,7 @@ says why.
 | `MCP_CONTEXT_PROVIDERS` | comma-separated names of providers installed under the entry point group `akko_mcp_trino.context`; an unknown name is a startup error | none |
 | `MCP_CONTEXT_TIMEOUT_SECONDS` | time budget of one context read, above 0 | `5` |
 | `MCP_CONTEXT_RESERVE_SECONDS` | seconds of a tool call's budget kept back, so that the context ends before the call does. At least 0.3 when a provider is loaded (the server refuses less), 0 or more otherwise | `0.5` |
-| `MCP_CONTEXT_MAX_CONCURRENCY` | maximum number of context reads in flight for one provider, at least 1 | `32` |
+| `MCP_CONTEXT_MAX_CONCURRENCY` | maximum number of context reads in flight for one provider, at least 1. It counts the reads sent to the provider, until each really ends, a read cut at its deadline included. A call that needs only what another call is already reading waits for that read, within its own deadline, and takes no slot. Past the limit, a call that would send a read says `unavailable` at once, and no breaker opens | `32` |
 | `MCP_CONTEXT_RETRY_AFTER_SECONDS` | delay before a source that is down is called again, 0 or more | `30` |
 | `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | delay before a source that refused the account is called again (`SIGHUP` lifts it at once), 0 or more | `3600` |
 | `MCP_CONTEXT_BATCH` | the tables one read of a source holds, at least 1 | `50` |

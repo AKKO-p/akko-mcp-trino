@@ -120,7 +120,7 @@ démarrer.
 | `MCP_CONTEXT_PROVIDERS` | noms, séparés par des virgules, des fournisseurs installés dans le groupe d'entry points `akko_mcp_trino.context` ; un nom inconnu est une erreur de démarrage | aucun |
 | `MCP_CONTEXT_TIMEOUT_SECONDS` | budget de temps d'une lecture de contexte, strictement positif | `5` |
 | `MCP_CONTEXT_RESERVE_SECONDS` | secondes du budget d'un appel gardées en réserve, pour que le contexte finisse avant l'appel. Au moins 0,3 quand un fournisseur est chargé (le serveur refuse moins), 0 ou plus sinon | `0.5` |
-| `MCP_CONTEXT_MAX_CONCURRENCY` | nombre maximal de lectures de contexte en cours pour un fournisseur, au moins 1 | `32` |
+| `MCP_CONTEXT_MAX_CONCURRENCY` | nombre maximal de lectures de contexte en cours pour un fournisseur, au moins 1. Il compte les lectures envoyées au fournisseur, jusqu'à ce que chacune finisse vraiment, y compris une lecture coupée à son échéance. Un appel qui n'a besoin que de ce qu'un autre appel est déjà en train de lire attend cette lecture, dans sa propre échéance, et ne prend aucune place. Au-delà de la limite, un appel qui enverrait une lecture dit `unavailable` aussitôt, et aucun coupe-circuit ne s'ouvre | `32` |
 | `MCP_CONTEXT_RETRY_AFTER_SECONDS` | délai avant de rappeler une source en panne, 0 ou plus | `30` |
 | `MCP_CONTEXT_REFUSED_RETRY_SECONDS` | délai avant de rappeler une source qui a refusé le compte (`SIGHUP` le lève aussitôt), 0 ou plus | `3600` |
 | `MCP_CONTEXT_BATCH` | les tables que contient une lecture d'une source, au moins 1 | `50` |

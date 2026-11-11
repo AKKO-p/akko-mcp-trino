@@ -581,7 +581,8 @@ def test_two_callers_of_the_same_table_share_one_read(loop):
         first = pool.submit(chain.gather, [ORDERS], deadline=clock.now + 5)
         _until(lambda: len(fake.calls) == 1)
         second = pool.submit(chain.gather, [ORDERS], deadline=clock.now + 5)
-        _until(lambda: chain._active["one"] == 2)
+        # Each call and its read: the second waits on the read of the first.
+        _until(lambda: _tasks_left(loop) == 4)
         _release(loop, fake)
         results = [first.result(), second.result()]
     assert fake.calls == [(ORDERS,)]
@@ -601,6 +602,78 @@ def test_more_calls_in_flight_than_the_limit_say_unavailable_at_once(loop):
         assert first.result().statuses["one"] == "ok"
     assert len(fake.calls) == 1
     assert chain.gather([CLIENTS], deadline=clock.now + 5).statuses["one"] == "not_found"
+
+
+def test_callers_waiting_on_a_read_in_flight_do_not_count_against_the_limit(loop, monkeypatch):
+    """50 calls on one table at once, with the default limit, below 50: the source is read
+    once, and every call is served, those past the limit waiting on that read as the others
+    do. The limit counts the reads sent to the source, not the callers."""
+    monkeypatch.delenv("MCP_CONTEXT_MAX_CONCURRENCY", raising=False)
+    settings = ContextSettings.from_config(config_module.Config.from_env())
+    callers = 50
+    assert settings.max_concurrency == 32 < callers
+    fake = Fake("one", known={ORDERS: TableContext(description="A")})
+    _gate(loop, fake)
+    chain = ContextChain([fake], settings, loop=loop)
+
+    async def burst():
+        deadline = time.monotonic() + settings.timeout_seconds
+        calls = [asyncio.ensure_future(chain._gather((ORDERS,), deadline)) for _ in range(callers)]
+        # The source answers once every call has started: they all find the read in flight.
+        while not fake.calls:
+            await asyncio.sleep(0)
+        await asyncio.sleep(0.05)
+        fake.gate.set()
+        return await asyncio.gather(*calls)
+
+    results = loop.submit(burst(), timeout=settings.timeout_seconds + 1)
+    assert fake.calls == [(ORDERS,)]
+    assert [r.statuses["one"] for r in results] == ["ok"] * callers
+    assert all(r.tables[ORDERS] == (("one", TableContext(description="A")),) for r in results)
+    assert chain._active["one"] == 0
+
+
+def test_a_caller_waiting_on_a_read_in_flight_keeps_its_own_deadline(loop):
+    """A call that waits on the read of another ends at its own deadline, unavailable; the
+    read it waited on goes on for the call that sent it, and is not sent again."""
+    fake = Fake("one", known={ORDERS: TableContext(description="A")})
+    _gate(loop, fake)
+    chain = _chain(loop, fake, clock=time.monotonic, max_concurrency=1)
+    with ThreadPoolExecutor(1) as pool:
+        first = pool.submit(chain.gather, [ORDERS], deadline=time.monotonic() + 5)
+        _until(lambda: len(fake.calls) == 1)
+        start = time.monotonic()
+        waiter = chain.gather([ORDERS], deadline=start + 0.2)
+        assert time.monotonic() - start < 0.2 + chain_module._GRACE_SECONDS
+        assert waiter.statuses["one"] == "unavailable" and waiter.tables[ORDERS] == ()
+        _release(loop, fake)
+        assert first.result().statuses["one"] == "ok"
+    assert fake.calls == [(ORDERS,)]
+    assert chain.gather([ORDERS], deadline=time.monotonic() + 5).statuses["one"] == "ok"
+    assert fake.calls == [(ORDERS,)]
+
+
+def test_a_waiter_sent_to_read_again_takes_a_slot_and_finds_none_left(loop, stubborn, caplog):
+    """The read a waiter waited on is cut and abandoned at its caller's deadline, but still
+    runs: it keeps its slot. The waiter, sent to read the table itself, finds the limit
+    reached and says unavailable at once, without opening a breaker or logging an error."""
+    chain = _chain(loop, stubborn, clock=time.monotonic, max_concurrency=1)
+    with ThreadPoolExecutor(1) as pool:
+        first = pool.submit(chain.gather, [ORDERS], deadline=time.monotonic() + 0.2)
+        _until(lambda: len(stubborn.calls) == 1)
+        waiter = chain.gather([ORDERS], deadline=time.monotonic() + 5)
+        assert first.result().statuses["stubborn"] == "unavailable"
+    assert waiter.statuses["stubborn"] == "unavailable" and len(stubborn.calls) == 1
+    assert chain._active["stubborn"] == 1 and chain._breakers == {}
+    assert "failed with" not in caplog.text
+    _set(loop, stubborn.hold)
+    _until(lambda: _tasks_left(loop) == 0)
+    assert chain._active["stubborn"] == 0
+    stubborn.delay = 0.0
+    assert chain.gather([CLIENTS], deadline=time.monotonic() + 5).statuses["stubborn"] == (
+        "not_found"
+    )
+    assert len(stubborn.calls) == 2
 
 
 def test_terms_are_read_once_by_source_and_key(loop):
