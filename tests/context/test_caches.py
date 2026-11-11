@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from akko_mcp_trino.context.caches import ByteCache, serialized_size
+from akko_mcp_trino.context.caches import ByteCache, ReadInFlightFailed, serialized_size
 from akko_mcp_trino.context.types import ColumnContext, Labelled, TableContext, TableRef
 
 
@@ -168,8 +168,11 @@ def test_a_failed_read_reaches_every_waiter_and_is_not_kept():
         gate.set()
         return await asyncio.gather(first, second, return_exceptions=True)
 
-    results = asyncio.run(run())
-    assert [type(r) for r in results] == [ValueError, ValueError]
+    first, second = asyncio.run(run())
+    # The caller that sent the read gets its error; the one that waited learns it failed.
+    assert type(first) is ValueError
+    assert type(second) is ReadInFlightFailed and second.cause is first
+    assert second.__cause__ is first and str(second) == "ValueError"
     assert cache.get("k") == (False, None)
 
 

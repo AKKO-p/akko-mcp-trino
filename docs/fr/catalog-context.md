@@ -158,18 +158,19 @@ Mesuré sur une machine avec Apache Atlas 2.4.0, sur une table de 2 000 colonnes
 décrite et portant un terme de glossaire, dans un glossaire de 50 000 termes :
 
 - **Budgets de temps.** Atlas a répondu à la lecture de cette table en 5,85 s. Avec les valeurs par
-  défaut, `MCP_CONTEXT_TIMEOUT_SECONDS=5` et `ATLAS_TIMEOUT_SECONDS=5`, les deux premiers appels de
-  `describe_table` sur la table, caches vides, n'ont servi aucun contexte (`unavailable`), et les
-  deux suivants une partie (`partial`). Avec les deux à 20 s, le premier appel a répondu en 12,35 s
-  avec le contexte, coupé à `MCP_CONTEXT_RESPONSE_CHARS`. Pour des tables aussi larges, montez les
-  deux réglages ensemble.
-- **Remplir un catalogue de test.** Atlas 2.4.0 compare chaque nouveau terme à tout le glossaire,
-  donc `POST /api/atlas/v2/glossary/terms` ralentit à mesure que le glossaire grandit : par lots de
-  500 termes, le premier lot a pris 15,1 s et le 51e 211,6 s. `POST /api/atlas/v2/entity/bulk` ne
-  ralentit pas : 50 000 termes de type `AtlasGlossaryTerm`, chacun avec sa relation `anchor` vers
-  le glossaire, par lots de 500, ont pris 734,8 s, environ 68 par seconde. Mettre à jour un
-  glossaire de 50 000 termes (`PUT /api/atlas/v2/glossary/{guid}/partial`) a pris 590 s. Pour
-  remplir un grand glossaire de test, écrivez ses termes par `entity/bulk`.
+  défaut, `MCP_CONTEXT_TIMEOUT_SECONDS=5` et `ATLAS_TIMEOUT_SECONDS=5`, quatre appels de
+  `describe_table` sur la table à la suite, caches vides au premier, n'ont servi aucun contexte deux
+  fois (`unavailable`), puis une partie deux fois (`partial`). Avec les deux à 20 s,
+  `TRINO_MAX_ROWS=2000` et `MCP_CONTEXT_RESPONSE_CHARS=60000`, le premier appel, caches vides, a
+  répondu en 12,35 s avec le contexte, coupé à cette longueur. Pour des tables aussi larges, montez
+  les deux réglages de temps ensemble.
+- **Remplir un catalogue de test.** Par `POST /api/atlas/v2/glossary/terms`, le temps par terme a
+  grandi avec le glossaire : par lots de 500 termes, le premier lot a pris 15,1 s et le 51e 211,6 s,
+  environ 2,4 termes par seconde. Par `POST /api/atlas/v2/entity/bulk`, 50 000 termes de type
+  `AtlasGlossaryTerm`, chacun avec sa relation `anchor` vers le glossaire, par lots de 500, ont pris
+  734,8 s en tout, environ 68 par seconde. Mettre à jour un glossaire de 50 000 termes
+  (`PUT /api/atlas/v2/glossary/{guid}/partial`) a pris 590 s. Pour remplir un grand glossaire de
+  test, écrivez ses termes par `entity/bulk`.
 - **Le moteur de policies.** Pendant une rafale de 50 appels de `describe_table` sur cette table,
   Trino a demandé à OPA de filtrer ses 2 000 colonnes pour chaque appel. Un OPA limité à 64 Mo a été
   tué faute de mémoire ; Trino a alors fait échouer chaque requête, et le serveur n'a servi aucun

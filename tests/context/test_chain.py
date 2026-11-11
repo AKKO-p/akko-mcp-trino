@@ -1,9 +1,12 @@
 """The chain: cache first, batches, deadlines, concurrency, breakers, statuses, metrics."""
 
+import ast
 import asyncio
 import inspect
 import logging
+import os
 import pathlib
+import textwrap
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -604,12 +607,41 @@ def test_more_calls_in_flight_than_the_limit_say_unavailable_at_once(loop):
     assert chain.gather([CLIENTS], deadline=clock.now + 5).statuses["one"] == "not_found"
 
 
-def test_callers_waiting_on_a_read_in_flight_do_not_count_against_the_limit(loop, monkeypatch):
+class _Waits:
+    """Counts the calls that wait on a read in flight, as the cache starts each wait."""
+
+    def __init__(self):
+        self.count = 0
+        self.seen = threading.Event()
+
+
+@pytest.fixture
+def waits(monkeypatch):
+    seen = _Waits()
+    real = asyncio.shield
+
+    def shield(future):
+        seen.count += 1
+        seen.seen.set()
+        return real(future)
+
+    monkeypatch.setattr(asyncio, "shield", shield)
+    return seen
+
+
+def _defaults(monkeypatch):
+    for name in [n for n in os.environ if n.startswith("MCP_CONTEXT_")]:
+        monkeypatch.delenv(name)
+    return ContextSettings.from_config(config_module.Config.from_env())
+
+
+def test_callers_waiting_on_a_read_in_flight_do_not_count_against_the_limit(
+    loop, monkeypatch, waits
+):
     """50 calls on one table at once, with the default limit, below 50: the source is read
     once, and every call is served, those past the limit waiting on that read as the others
     do. The limit counts the reads sent to the source, not the callers."""
-    monkeypatch.delenv("MCP_CONTEXT_MAX_CONCURRENCY", raising=False)
-    settings = ContextSettings.from_config(config_module.Config.from_env())
+    settings = _defaults(monkeypatch)
     callers = 50
     assert settings.max_concurrency == 32 < callers
     fake = Fake("one", known={ORDERS: TableContext(description="A")})
@@ -619,10 +651,9 @@ def test_callers_waiting_on_a_read_in_flight_do_not_count_against_the_limit(loop
     async def burst():
         deadline = time.monotonic() + settings.timeout_seconds
         calls = [asyncio.ensure_future(chain._gather((ORDERS,), deadline)) for _ in range(callers)]
-        # The source answers once every call has started: they all find the read in flight.
-        while not fake.calls:
+        # The source answers once every other call waits on its read or has already answered.
+        while waits.count + sum(call.done() for call in calls) < callers - 1:
             await asyncio.sleep(0)
-        await asyncio.sleep(0.05)
         fake.gate.set()
         return await asyncio.gather(*calls)
 
@@ -630,12 +661,14 @@ def test_callers_waiting_on_a_read_in_flight_do_not_count_against_the_limit(loop
     assert fake.calls == [(ORDERS,)]
     assert [r.statuses["one"] for r in results] == ["ok"] * callers
     assert all(r.tables[ORDERS] == (("one", TableContext(description="A")),) for r in results)
+    assert waits.count == callers - 1
     assert chain._active["one"] == 0
 
 
-def test_a_caller_waiting_on_a_read_in_flight_keeps_its_own_deadline(loop):
-    """A call that waits on the read of another ends at its own deadline, unavailable; the
-    read it waited on goes on for the call that sent it, and is not sent again."""
+def test_a_caller_waiting_on_a_read_in_flight_keeps_its_own_deadline(loop, waits):
+    """A call that waits on the read of another, at the limit, ends at its own deadline,
+    unavailable; the read it waited on goes on for the call that sent it, and is not sent
+    again."""
     fake = Fake("one", known={ORDERS: TableContext(description="A")})
     _gate(loop, fake)
     chain = _chain(loop, fake, clock=time.monotonic, max_concurrency=1)
@@ -645,6 +678,7 @@ def test_a_caller_waiting_on_a_read_in_flight_keeps_its_own_deadline(loop):
         start = time.monotonic()
         waiter = chain.gather([ORDERS], deadline=start + 0.2)
         assert time.monotonic() - start < 0.2 + chain_module._GRACE_SECONDS
+        assert waits.seen.is_set(), "the second call did not wait on the read in flight"
         assert waiter.statuses["one"] == "unavailable" and waiter.tables[ORDERS] == ()
         _release(loop, fake)
         assert first.result().statuses["one"] == "ok"
@@ -653,16 +687,19 @@ def test_a_caller_waiting_on_a_read_in_flight_keeps_its_own_deadline(loop):
     assert fake.calls == [(ORDERS,)]
 
 
-def test_a_waiter_sent_to_read_again_takes_a_slot_and_finds_none_left(loop, stubborn, caplog):
+def test_a_waiter_sent_to_read_again_takes_a_slot_and_finds_none_left(
+    loop, stubborn, caplog, waits
+):
     """The read a waiter waited on is cut and abandoned at its caller's deadline, but still
     runs: it keeps its slot. The waiter, sent to read the table itself, finds the limit
-    reached and says unavailable at once, without opening a breaker or logging an error."""
+    reached and says unavailable, without opening a breaker or logging an error."""
     chain = _chain(loop, stubborn, clock=time.monotonic, max_concurrency=1)
     with ThreadPoolExecutor(1) as pool:
         first = pool.submit(chain.gather, [ORDERS], deadline=time.monotonic() + 0.2)
         _until(lambda: len(stubborn.calls) == 1)
         waiter = chain.gather([ORDERS], deadline=time.monotonic() + 5)
         assert first.result().statuses["stubborn"] == "unavailable"
+    assert waits.seen.is_set(), "the second call did not wait on the read in flight"
     assert waiter.statuses["stubborn"] == "unavailable" and len(stubborn.calls) == 1
     assert chain._active["stubborn"] == 1 and chain._breakers == {}
     assert "failed with" not in caplog.text
@@ -674,6 +711,78 @@ def test_a_waiter_sent_to_read_again_takes_a_slot_and_finds_none_left(loop, stub
         "not_found"
     )
     assert len(stubborn.calls) == 2
+
+
+def _leader_and_waiter(loop, chain, fake, clock, waits):
+    """Two calls on ORDERS with the default settings, the second 0.2 s after the first: the
+    source fails as the first call's deadline is reached, the second's still ahead."""
+    first_deadline = clock.now + chain._settings.timeout_seconds
+
+    async def both():
+        first = asyncio.ensure_future(chain._gather((ORDERS,), first_deadline))
+        while not fake.calls:
+            await asyncio.sleep(0)
+        clock.now += 0.2
+        second = asyncio.ensure_future(chain._gather((ORDERS,), first_deadline + 0.2))
+        while not (waits.count or second.done()):
+            await asyncio.sleep(0)
+        clock.now = first_deadline
+        fake.gate.set()
+        return await first, await second
+
+    return loop.submit(both(), timeout=5)
+
+
+def test_a_waiter_never_takes_the_deadline_of_the_read_it_waited_on_for_an_outage(
+    loop, monkeypatch, waits
+):
+    """Only the call that sent a read judges the source. The read ends at its own call's
+    deadline, which the source reports as unavailable; a call that waited on it, its own
+    deadline still ahead, says unavailable too, and opens no breaker: a third call reads."""
+    clock = Clock()
+    fake = Fake("one", known={CLIENTS: TableContext(description="C")})
+    fake.fail = ProviderUnavailable("deadline")
+    _gate(loop, fake)
+    chain = ContextChain([fake], _defaults(monkeypatch), loop=loop, clock=clock)
+    first, second = _leader_and_waiter(loop, chain, fake, clock, waits)
+    assert waits.count == 1 and fake.calls == [(ORDERS,)]
+    assert first.statuses["one"] == second.statuses["one"] == "unavailable"
+    assert chain._breakers == {}
+    fake.fail = None
+    third = chain.gather([CLIENTS], deadline=clock.now + 5)
+    assert third.statuses["one"] == "ok" and fake.calls == [(ORDERS,), (CLIENTS,)]
+
+
+def test_a_failure_received_from_another_read_is_traced_and_judged_once(
+    loop, monkeypatch, waits, caplog
+):
+    """An unexpected error of the source says error to the call that sent the read and to the
+    call that waited on it, and is traced once, by the first."""
+    clock = Clock()
+    fake = Fake("one")
+    fake.fail = RuntimeError("secret text")
+    _gate(loop, fake)
+    chain = ContextChain([fake], _defaults(monkeypatch), loop=loop, clock=clock)
+    with caplog.at_level(logging.ERROR):
+        first, second = _leader_and_waiter(loop, chain, fake, clock, waits)
+    assert waits.count == 1
+    assert first.statuses["one"] == second.statuses["one"] == "error"
+    assert caplog.text.count("failed with RuntimeError") == 1
+    assert "secret text" not in caplog.text and chain._breakers == {}
+
+
+def test_the_limit_is_checked_before_the_first_await_of_a_read():
+    """No call can wait on keys whose read is refused for the limit: the read checks the limit
+    before anything in it yields, while the cache has just registered those keys."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(ContextChain._read)))
+    load = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef))
+    lines = [n.lineno for n in ast.walk(load) if isinstance(n, ast.Await)]
+    limit = [
+        n.lineno
+        for n in ast.walk(load)
+        if isinstance(n, ast.Raise) and getattr(n.exc, "id", None) == "_AtLimit"
+    ]
+    assert limit and lines and max(limit) < min(lines)
 
 
 def test_terms_are_read_once_by_source_and_key(loop):

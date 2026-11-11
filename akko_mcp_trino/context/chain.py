@@ -19,7 +19,7 @@ from typing import Any
 
 from ..config import Config
 from ..metrics import Metrics
-from .caches import ByteCache, serialized_size
+from .caches import ByteCache, ReadInFlightFailed, serialized_size
 from .loop import ContextLoop
 from .provider import ContextProvider
 from .status import (
@@ -390,7 +390,9 @@ class ContextChain:
 
         async def load(keys: Sequence[Hashable]) -> Mapping[Hashable, Any]:
             # Runs only for keys no other call is reading: the call is about to send a read.
-            # Its slot is taken at the first read sent and kept for its later batches.
+            # Its slot is taken at the first read sent and kept for its later batches. The
+            # check must stay before any await: the cache has just registered these keys as
+            # in flight, and no other call may start waiting on a read the limit refuses.
             nonlocal held
             if not held:
                 if self._active[name] >= self._settings.max_concurrency:
@@ -439,6 +441,11 @@ class ContextChain:
         if isinstance(exc, _AtLimit):
             # The source was not called: nothing opens, nothing is traced.
             return cut_short
+        if isinstance(exc, ReadInFlightFailed):
+            # Another call sent the read, with its own deadline, and judged the source: this
+            # one opens nothing and traces nothing. Only a refusal or an error is passed on.
+            received = status_of(exc.cause)
+            return received if received in (REFUSED, ERROR) else cut_short
         status = status_of(exc)
         if status == REFUSED:
             self._open(provider, stamp, REFUSED, self._settings.refused_retry_seconds)

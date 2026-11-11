@@ -148,15 +148,16 @@ Measured on one machine against Apache Atlas 2.4.0, with a table of 2,000 column
 described and holding one glossary term, in a glossary of 50,000 terms:
 
 - **Time budgets.** Atlas answered the read of that table in 5.85 s. With the defaults,
-  `MCP_CONTEXT_TIMEOUT_SECONDS=5` and `ATLAS_TIMEOUT_SECONDS=5`, the first two calls of
-  `describe_table` on the table, caches empty, served no context (`unavailable`), and the next two
-  a part of it (`partial`). With both at 20 s, the first call answered in 12.35 s with the context,
-  cut to `MCP_CONTEXT_RESPONSE_CHARS`. For tables that wide, raise the two settings together.
-- **Seeding a test catalog.** Atlas 2.4.0 checks each new term against the whole glossary, so
-  `POST /api/atlas/v2/glossary/terms` slows down as the glossary grows: in batches of 500 terms, the
-  first batch took 15.1 s and the 51st 211.6 s. `POST /api/atlas/v2/entity/bulk` does not slow
-  down: 50,000 terms of type `AtlasGlossaryTerm`, each with its `anchor` relationship to the
-  glossary, in batches of 500, took 734.8 s, about 68 a second. Updating a glossary of 50,000 terms
+  `MCP_CONTEXT_TIMEOUT_SECONDS=5` and `ATLAS_TIMEOUT_SECONDS=5`, four calls of `describe_table` on
+  the table in a row, caches empty at the first, served no context twice (`unavailable`), then a
+  part of it twice (`partial`). With both at 20 s, `TRINO_MAX_ROWS=2000` and
+  `MCP_CONTEXT_RESPONSE_CHARS=60000`, the first call, caches empty, answered in 12.35 s with the
+  context, cut to that length. For tables that wide, raise the two time settings together.
+- **Seeding a test catalog.** Through `POST /api/atlas/v2/glossary/terms`, the time per term grew
+  with the glossary: in batches of 500 terms, the first batch took 15.1 s and the 51st 211.6 s,
+  about 2.4 terms a second. Through `POST /api/atlas/v2/entity/bulk`, 50,000 terms of type
+  `AtlasGlossaryTerm`, each with its `anchor` relationship to the glossary, in batches of 500, took
+  734.8 s in all, about 68 a second. Updating a glossary of 50,000 terms
   (`PUT /api/atlas/v2/glossary/{guid}/partial`) took 590 s. To seed a large test glossary, write
   its terms through `entity/bulk`.
 - **The policy engine.** During a burst of 50 calls of `describe_table` on that table, Trino asked

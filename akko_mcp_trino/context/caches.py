@@ -51,6 +51,19 @@ def _fail(future: asyncio.Future, exc: BaseException) -> None:
     future.exception()
 
 
+class ReadInFlightFailed(Exception):
+    """The read another caller sent for a key failed; ``cause`` is its error, also ``__cause__``.
+
+    Only the caller that sent the read gets its error as raised, so that it alone judges the
+    source; a caller that waited on it learns that it failed, and why.
+    """
+
+    def __init__(self, cause: Exception) -> None:
+        """Keep the error of the read waited on."""
+        super().__init__(type(cause).__name__)
+        self.cause = cause
+
+
 class ByteCache:
     """Entries kept until their expiry or until the sum of their sizes passes ``max_bytes``.
 
@@ -146,7 +159,7 @@ class ByteCache:
 
         A key the loader leaves out is kept as a known absence (``None``); a key it
         adds is ignored. A key another caller is reading is awaited, and read again
-        if that read was cancelled.
+        if that read was cancelled; if that read failed, ``ReadInFlightFailed`` is raised.
         """
         found: dict[Hashable, Any] = {}
         todo = list(dict.fromkeys(keys))
@@ -171,6 +184,8 @@ class ByteCache:
                     if _being_cancelled():
                         raise
                     todo.append(key)
+                except Exception as exc:
+                    raise ReadInFlightFailed(exc) from exc
         return found
 
     async def _lead(
