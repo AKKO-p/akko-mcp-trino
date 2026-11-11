@@ -444,6 +444,9 @@ class ContextChain:
         if isinstance(exc, ReadInFlightFailed):
             # Another call sent the read, with its own deadline, and judged the source: this
             # one opens nothing and traces nothing. Only a refusal or an error is passed on.
+            if isinstance(exc.cause, _AtLimit):
+                # Unreachable while the limit is checked before the first await of a read.
+                return cut_short
             received = status_of(exc.cause)
             return received if received in (REFUSED, ERROR) else cut_short
         status = status_of(exc)

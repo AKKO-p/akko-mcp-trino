@@ -23,6 +23,7 @@ from akko_mcp_trino.context import (
     TermsResult,
 )
 from akko_mcp_trino.context import chain as chain_module
+from akko_mcp_trino.context.caches import ReadInFlightFailed
 from akko_mcp_trino.context.types import TableContext, TableRef, Term
 from akko_mcp_trino.metrics import Metrics
 
@@ -701,6 +702,11 @@ def test_a_waiter_sent_to_read_again_takes_a_slot_and_finds_none_left(
         # The sender is not the point here: under load its caller may stop waiting before
         # the chain's cut ends (the lag past the grace is documented), which ends it too.
         wait([first])
+    # Either documented outcome of the sender, and no other: its caller stopped waiting
+    # (TimeoutError, mapped to unavailable by the server) or the chain said unavailable.
+    assert isinstance(first.exception(), TimeoutError) or (
+        first.result().statuses["stubborn"] == "unavailable"
+    )
     assert waits.seen.is_set(), "the second call did not wait on the read in flight"
     assert waiter.statuses["stubborn"] == "unavailable" and len(stubborn.calls) == 1
     assert chain._active["stubborn"] == 1 and chain._breakers == {}
@@ -771,6 +777,43 @@ def test_a_failure_received_from_another_read_is_traced_and_judged_once(
     assert first.statuses["one"] == second.statuses["one"] == "error"
     assert caplog.text.count("failed with RuntimeError") == 1
     assert "secret text" not in caplog.text and chain._breakers == {}
+
+
+def test_a_refusal_received_from_another_read_is_passed_on_and_judged_once(
+    loop, monkeypatch, waits, caplog
+):
+    """A refusal of the source says refused to the call that sent the read and to the call
+    that waited on it; only the first opens the breaker and logs it."""
+    clock = Clock()
+    fake = Fake("one")
+    fake.fail = ProviderRefused("401")
+    _gate(loop, fake)
+    chain = ContextChain([fake], _defaults(monkeypatch), loop=loop, clock=clock)
+    with caplog.at_level(logging.WARNING):
+        first, second = _leader_and_waiter(loop, chain, fake, clock, waits)
+    assert waits.count == 1 and fake.calls == [(ORDERS,)]
+    assert first.statuses["one"] == second.statuses["one"] == "refused"
+    assert list(chain._breakers) == ["one"] and chain._breakers["one"].status == "refused"
+    assert caplog.text.count("refused the account") == 1
+
+
+def test_a_limit_received_from_another_read_degrades_to_cut_short(loop):
+    """Should the limit ever reach a call that waited on a read, it says unavailable, or
+    partial when tables were already served, as a call refused for the limit does."""
+
+    async def received():
+        async def read():
+            raise ReadInFlightFailed(chain_module._AtLimit())
+
+        task = asyncio.ensure_future(read())
+        await asyncio.wait([task])
+        return task
+
+    chain = _chain(loop, Fake("one"))
+    task = loop.submit(received(), timeout=5)
+    assert chain._outcome(Fake("one"), "s", task, True, {}, 0.0) == "unavailable"
+    assert chain._outcome(Fake("one"), "s", task, True, {ORDERS: 1}, 0.0) == "partial"
+    assert chain._breakers == {}
 
 
 def test_the_limit_is_checked_before_the_first_await_of_a_read():
