@@ -145,19 +145,22 @@ jamais son adresse : `atlas address 2 of 3 in ATLAS_URL did not answer in time` 
 affiche les adresses dans cet ordre). La ligne n'est pas redite pour cette adresse tant qu'elle
 n'a pas répondu ; les appels qui l'attendent ensemble écrivent une ligne à eux tous, et deux
 adresses bloquées écrivent deux lignes. Seule l'échéance de l'appel lui-même compte, et seulement
-contre une adresse qui a tenu l'attente au moins `ATLAS_CONNECT_TIMEOUT_SECONDS` : une attente
-plus courte coupée par l'échéance (le temps est parti sur une autre adresse, ou sur une lecture
-précédente du même appel d'outil), ou une lecture annulée pour une autre raison (une autre lecture
-du même appel refusée, le client parti, un arrêt) ne laisse aucune adresse et n'écrit rien.
-L'appel qui rencontre l'adresse bloquée reçoit
-encore son contexte ou non selon deux réglages :
+contre une adresse qui a tenu l'attente au moins `ATLAS_CONNECT_TIMEOUT_SECONDS`, ou qui n'a pas
+répondu depuis `ATLAS_TIMEOUT_SECONDS` avant le début de l'attente (une adresse bloquée est donc
+laissée même sous une échéance plus courte que le délai de connexion). Une attente plus courte
+coupée par l'échéance sur une adresse qui venait de répondre (le temps est parti sur une autre
+adresse, ou sur une lecture précédente du même appel d'outil), ou une lecture annulée pour une
+autre raison (une autre lecture du même appel refusée, le client parti, un arrêt), ne laisse
+aucune adresse et n'écrit rien. L'appel qui rencontre l'adresse bloquée reçoit encore son
+contexte ou non selon deux réglages :
 
 - avec `ATLAS_TIMEOUT_SECONDS` inférieur à `MCP_CONTEXT_TIMEOUT_SECONDS` d'au moins le temps que
   l'adresse suivante met à répondre, négociation Kerberos comprise, la requête à l'adresse
   bloquée expire d'abord, et l'adresse suivante répond dans le même appel ; avec une marge plus
   courte, ce que cet appel lit après l'adresse bloquée est perdu, et les appels suivants
   commencent par l'adresse suivante, sauf si l'échéance a aussi coupé sur elle une attente d'au
-  moins `ATLAS_CONNECT_TIMEOUT_SECONDS` ;
+  moins `ATLAS_CONNECT_TIMEOUT_SECONDS`, ou une attente alors qu'elle n'avait pas répondu depuis
+  `ATLAS_TIMEOUT_SECONDS` ;
 - avec des valeurs égales (les défauts, 5 s chacun), l'échéance de l'appel vient d'abord :
   l'appel qui rencontre l'adresse bloquée est perdu (`unavailable`), et les appels suivants
   commencent par l'adresse suivante.

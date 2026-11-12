@@ -831,3 +831,53 @@ def test_terms_cut_by_the_tool_calls_deadline_after_describe_leave_no_address(ca
     assert all(isinstance(read, dict) and read for _, read in out[1:])
     assert len(hung.accepted) == 1
     assert left_lines(caplog) == ["atlas address 1 of 2 in ATLAS_URL did not answer in time"]
+
+
+def test_a_deadline_below_the_connect_timeout_still_leaves_a_hung_address(network, caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    hung, a, _ = network
+    # The defaults (connect 1 s, read 5 s) and a call cut at 0.8 s: the wait is shorter than
+    # the connect timeout, but the hung address has never answered.
+    first, *later = calls(on_network(hung.url, a.url), count=3, seconds=0.8)
+    assert isinstance(first, ProviderUnavailable)
+    assert all(INVOICES in found for found in later)
+    assert len(hung.accepted) == 1 and a.requests > 0
+    assert left_lines(caplog) == ["atlas address 1 of 2 in ATLAS_URL did not answer in time"]
+
+
+def test_a_hung_active_server_behind_a_redirect_is_said_under_the_connect_timeout(network, caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    hung, passive, _ = network
+
+    def redirect(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(303, headers={"location": hung.url + request.url.raw_path.decode()})
+
+    passive.answer = redirect
+    # The defaults and a call cut at 0.8 s: the passive server answers, the active never does.
+    results = calls(on_network(passive.url, hung.url), count=3, seconds=0.8)
+    assert all(isinstance(r, ProviderUnavailable) for r in results)
+    assert len(hung.accepted) == 3
+    assert left_lines(caplog) == ["atlas address 2 of 2 in ATLAS_URL did not answer in time"]
+
+
+def test_an_address_that_answered_then_froze_is_left_after_the_connect_timeout(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    atlas = FakeAtlas("atlas-2.4")
+    seen: list[str] = []
+
+    async def froze_after_one(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host)
+        if request.url.host == "atlas-a" and seen.count("atlas-a") > 1:
+            await asyncio.sleep(30)  # answered a moment ago, frozen since
+        return atlas(request)
+
+    p = build(froze_after_one, ATLAS_TABLE_TYPES="hive_table")
+    first, second, third = calls(p, count=3, seconds=1.5)
+    assert INVOICES in first and isinstance(second, ProviderUnavailable) and INVOICES in third
+    # The second call waited 1.5 s on a, past the connect timeout: a recent answer does not
+    # spare it, and the third call starts at b.
+    assert seen == ["atlas-a", "atlas-a", "atlas-b"]
+    assert left_lines(caplog) == ["atlas address 1 of 2 in ATLAS_URL did not answer in time"]

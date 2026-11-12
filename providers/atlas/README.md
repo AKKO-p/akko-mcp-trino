@@ -144,17 +144,20 @@ call started with does not answer in time, the next calls start at the next addr
 that order). The line is not said again for that address until it answers; calls that wait on it
 together log one line between them, and two hung addresses log two lines. Only the call's own
 deadline counts, and only against an address that held the wait for at least
-`ATLAS_CONNECT_TIMEOUT_SECONDS`: a shorter wait cut by the deadline (the time went to another
-address, or to an earlier read of the same tool call), or a read cancelled for another reason
-(another read of the same call refused, the client gone, a shutdown) leaves no address and logs
-nothing. Whether the call that meets the hung
-address still gets its context depends on two settings:
+`ATLAS_CONNECT_TIMEOUT_SECONDS`, or that has not answered since `ATLAS_TIMEOUT_SECONDS` before
+the wait began (so a hung address is left even under a deadline shorter than the connect
+timeout). A shorter wait cut by the deadline on an address that had just answered (the time went
+to another address, or to an earlier read of the same tool call), or a read cancelled for
+another reason (another read of the same call refused, the client gone, a shutdown), leaves no
+address and logs nothing. Whether the call that meets the hung address still gets its context
+depends on two settings:
 
 - with `ATLAS_TIMEOUT_SECONDS` below `MCP_CONTEXT_TIMEOUT_SECONDS` by at least the time the next
   address needs to answer, Kerberos negotiation included, the request to the hung address times
   out first, and the next address answers within the same call; with a smaller margin, what that
   call reads after the hung address is lost, and the next calls start at the next address,
-  unless the deadline also cut a wait of at least `ATLAS_CONNECT_TIMEOUT_SECONDS` on it;
+  unless the deadline also cut a wait on it of at least `ATLAS_CONNECT_TIMEOUT_SECONDS`, or a
+  wait on it when it had not answered within `ATLAS_TIMEOUT_SECONDS` before;
 - with equal values (the defaults, 5 s each), the call's deadline comes first: the call that
   meets the hung address is lost (`unavailable`), and the next calls start at the next address.
 

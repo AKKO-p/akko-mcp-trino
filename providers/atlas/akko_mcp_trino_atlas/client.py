@@ -18,10 +18,12 @@ What an answer means:
   not be connected to is left for the next one in the calls that follow, and so is the
   address a call started with when it did not answer in time: a read or write timeout, or the
   call's own deadline reached after it waited on it for at least
-  ``ATLAS_CONNECT_TIMEOUT_SECONDS`` (``leave``, from the provider). Any other cancellation (a
-  sibling read cancelled by a failure, a client gone, a shutdown), a shorter wait and any
-  other transport error leave nothing. An address that did not answer in time, the only one
-  included, is logged once, by its position in ``ATLAS_URL``, until it answers again;
+  ``ATLAS_CONNECT_TIMEOUT_SECONDS``, or for any time when it had not answered since
+  ``ATLAS_TIMEOUT_SECONDS`` before the wait (``leave``, from the provider). Any other
+  cancellation (a sibling read cancelled by a failure, a client gone, a shutdown), a shorter
+  wait on an address that had just answered and any other transport error leave nothing. An
+  address that did not answer in time, the only one included, is logged once, by its
+  position in ``ATLAS_URL``, until it answers again;
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
 - Atlas's own "does not exist" answers, by status and error code, only those the read
@@ -170,6 +172,8 @@ class AtlasClient:
         self._first = 0
         # The addresses already said not to answer in time, until one answers again.
         self._said: set[int] = set()
+        # The monotonic time of the last HTTP answer from each address.
+        self._answered: dict[int, float] = {}
         self._kerberos = (
             SpnegoAuth(settings.principal, settings.keytab, settings.spn)
             if settings.auth == KERBEROS
@@ -216,14 +220,26 @@ class AtlasClient:
             _WATCH.reset(token)
 
     def leave(self, watch: Watch) -> None:
-        """The call's deadline passed: leave the addresses its first tries still waited on
-        for at least ``ATLAS_CONNECT_TIMEOUT_SECONDS``, the time an address is given to show
-        it is alive. A wait the deadline cut sooner says nothing of its address: the time had
-        gone on another address, or on another read of the same tool call."""
+        """The call's deadline passed: leave the addresses its first tries still waited on,
+        when the wait lasted at least ``ATLAS_CONNECT_TIMEOUT_SECONDS`` (the time an address
+        is given to show it is alive), or when the address has not answered since
+        ``ATLAS_TIMEOUT_SECONDS`` before the wait started. A shorter wait on an address that
+        answered just before says nothing of it: the time had gone on another address, or on
+        another read of the same tool call."""
         now, floor = time.monotonic(), self._settings.connect_timeout_seconds
-        late = {index for index, started in watch.waiting.values() if now - started >= floor}
+        late = {
+            index
+            for index, started in watch.waiting.values()
+            if now - started >= floor or not self._answered_since(index, started)
+        }
         for index in sorted(late):
             self._late(index)
+
+    def _answered_since(self, index: int, started: float) -> bool:
+        """Whether the address ``index`` answered within ``ATLAS_TIMEOUT_SECONDS`` before
+        ``started``, or after it."""
+        answered = self._answered.get(index)
+        return answered is not None and answered >= started - self._settings.timeout_seconds
 
     async def _send(
         self, url: str, params: Mapping[str, str] | None, index: int, first: bool
@@ -252,6 +268,7 @@ class AtlasClient:
                 self._http.cookies.clear()
                 raise ProviderRefused("the kerberos negotiation was refused") from None
             self._said.discard(at)
+            self._answered[at] = time.monotonic()
             if response.status_code >= 500:
                 raise _Outage
             location = response.headers.get("location")
