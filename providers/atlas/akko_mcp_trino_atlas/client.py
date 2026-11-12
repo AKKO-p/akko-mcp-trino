@@ -175,7 +175,12 @@ class AtlasClient:
         # The monotonic time of the last HTTP answer from each address.
         self._answered: dict[int, float] = {}
         self._kerberos = (
-            SpnegoAuth(settings.principal, settings.keytab, settings.spn)
+            SpnegoAuth(
+                settings.principal,
+                settings.keytab,
+                settings.spn,
+                workers=settings.max_concurrent_requests,
+            )
             if settings.auth == KERBEROS
             else None
         )
@@ -353,5 +358,7 @@ class AtlasClient:
         return ProviderUnavailable(why)
 
     async def aclose(self) -> None:
-        """Close the connections."""
+        """Close the connections, and the threads of Kerberos negotiations."""
         await self._http.aclose()
+        if self._kerberos is not None:
+            self._kerberos.close()

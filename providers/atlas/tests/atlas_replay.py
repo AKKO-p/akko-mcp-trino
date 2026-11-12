@@ -21,7 +21,7 @@ VERSIONS = ("atlas-2.1", "atlas-2.4")
 BULK = "/api/atlas/v2/entity/bulk/uniqueAttribute/type/"
 TERM = "/api/atlas/v2/glossary/term/"
 VERSION = "/api/atlas/admin/version"
-ATLAS = "http://atlas-a:21000"
+ATLAS = "https://atlas-a:21443"
 # The trap table of the recordings, by Trino schema and table: a quote, a dot, a space, accents.
 TRAP = ("o'brien", "été.l'année fiscale.v2")
 

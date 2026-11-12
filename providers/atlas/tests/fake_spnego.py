@@ -5,6 +5,7 @@ asks of ``spnego`` and what it sends to Atlas.
 """
 
 import sys
+import threading
 import types
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,6 +17,12 @@ class FakeSpnego:
 
     contexts: list[dict[str, Any]] = field(default_factory=list)
     fail: Exception | None = None
+    # A slow KDC: each step waits this long, or until ``release`` is set, then fails with
+    # ``late`` when it is set.
+    step_seconds: float = 0.0
+    late: Exception | None = None
+    release: threading.Event = field(default_factory=threading.Event)
+    threads: list[str] = field(default_factory=list)
 
     def module(self) -> types.ModuleType:
         module = types.ModuleType("spnego")
@@ -31,14 +38,20 @@ class FakeSpnego:
         if self.fail is not None:
             raise self.fail
         self.contexts.append(kwargs)
-        return _Context(len(self.contexts))
+        return _Context(len(self.contexts), self)
 
 
 class _Context:
-    def __init__(self, number: int) -> None:
+    def __init__(self, number: int, fake: FakeSpnego) -> None:
         self.number = number
+        self._fake = fake
 
     def step(self, in_token: bytes | None = None) -> bytes:
+        self._fake.threads.append(threading.current_thread().name)
+        if self._fake.step_seconds:
+            self._fake.release.wait(self._fake.step_seconds)
+        if self._fake.late is not None:
+            raise self._fake.late
         return f"token-{self.number}".encode()
 
 

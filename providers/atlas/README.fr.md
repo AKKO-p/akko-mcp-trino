@@ -11,9 +11,9 @@ de Trino. Il lit Atlas avec un compte à lui, par l'API REST v2 seulement, et n'
 > **État.** Les tables, les colonnes et les termes de glossaire se lisent, avec les listes
 > blanches et la haute disponibilité, par authentification Basic, jeton Knox ou Kerberos
 > (SPNEGO). Le fournisseur passe le contrat de contexte du serveur sur des réponses enregistrées
-> sur Apache Atlas 2.1, la version de référence. Kerberos n'est testé que contre une doublure
-> de sa bibliothèque, et le jeton Knox que contre un faux Atlas : ni l'un ni l'autre n'est encore
-> prouvé devant un vrai KDC ou une vraie passerelle Knox.
+> sur Apache Atlas 2.1, la version de référence. Kerberos (SPNEGO) est prouvé devant un vrai KDC,
+> avec des tickets de courte durée renouvelés depuis le keytab. Le jeton Knox n'est testé que
+> contre un faux Atlas : il n'est pas encore prouvé derrière une vraie passerelle Knox.
 
 ## Installation
 
@@ -21,6 +21,11 @@ de Trino. Il lit Atlas avec un compte à lui, par l'API REST v2 seulement, et n'
 pip install "akko-mcp-trino[atlas]"     # le cœur avec ce fournisseur et Kerberos
 export MCP_CONTEXT_PROVIDERS=atlas
 ```
+
+Sous Linux, l'extra `atlas` compile les liaisons Kerberos (`gssapi`, `krb5`) depuis les sources :
+il lui faut un compilateur C et les en-têtes MIT Kerberos (`libkrb5-dev` sous Debian et Ubuntu,
+`krb5-devel` sous Red Hat). Avec l'authentification Basic ou un jeton Knox, installer sans eux :
+`pip install akko-mcp-trino akko-mcp-trino-atlas`.
 
 Seul : `pip install akko-mcp-trino-atlas` (Basic et Knox), ou
 `pip install "akko-mcp-trino-atlas[kerberos]"` pour Kerberos, qui apporte `pyspnego` et ses
@@ -38,7 +43,7 @@ cite une adresse, un proxy ni un secret.
 
 | Variable | Rôle | Défaut |
 |---|---|---|
-| `ATLAS_URL` | adresse d'Atlas, `http` ou `https` ; plusieurs, séparées par des virgules, pour un Atlas en haute disponibilité. Jamais avec des identifiants dedans. | obligatoire |
+| `ATLAS_URL` | adresse d'Atlas, `http` ou `https` ; plusieurs, séparées par des virgules, pour un Atlas en haute disponibilité. Jamais avec des identifiants dedans. Un mot de passe ou un jeton Knox sur `http` refuse de démarrer (`ATLAS_PASSWORD or ATLAS_KNOX_TOKEN is set but an address of ATLAS_URL is not https`), comme le serveur refuse `TRINO_PASSWORD` sans https. Kerberos sur `http` démarre, avec un avertissement au démarrage et dans `--check` : le compte est authentifié, mais rien n'authentifie Atlas ni ne protège ses réponses. | obligatoire |
 | `ATLAS_AUTH` | `basic` (un utilisateur et un mot de passe, ou un jeton Knox) ou `kerberos` | `basic` |
 | `ATLAS_USER`, `ATLAS_PASSWORD` ou `ATLAS_PASSWORD_FILE` | authentification Basic, avec un compte en lecture seule ; le fichier passe en premier | vide |
 | `ATLAS_KNOX_TOKEN` ou `ATLAS_KNOX_TOKEN_FILE` | un jeton Knox, envoyé en `Authorization: Bearer`, pour un Atlas derrière une topologie Knox avec le rôle `ATLAS` ; pas avec `ATLAS_USER` | vide |
@@ -56,7 +61,7 @@ cite une adresse, un proxy ni un secret.
 | `ATLAS_PROXY` | proxy `http` ou `https` pour joindre Atlas ; les réglages de proxy de l'environnement ne sont jamais lus | aucun |
 | `ATLAS_TIMEOUT_SECONDS` | délai d'une requête à Atlas ; avec plusieurs adresses, voir plus bas son rapport à `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | délai pour ouvrir une connexion à une adresse, inférieur à `ATLAS_TIMEOUT_SECONDS`, pour qu'une adresse muette laisse la place à la suivante dans le temps de l'appel | `1` |
-| `ATLAS_MAX_CONCURRENT_REQUESTS` | lectures de termes de glossaire envoyées à la fois, de 1 à 32 | `4` |
+| `ATLAS_MAX_CONCURRENT_REQUESTS` | lectures de termes de glossaire envoyées à la fois, de 1 à 32 ; avec Kerberos, aussi les négociations menées à la fois | `4` |
 
 Un secret donné par fichier (`*_FILE`) est relu quand le fichier change.
 
@@ -73,7 +78,9 @@ Une table Trino `catalogue.schéma.table` est l'entité Atlas dont le nom qualif
 serveur, sous chaque type d'`ATLAS_TABLE_TYPES`. Seuls les noms que Trino a listés sont
 demandés ; rien n'est cherché. Le schéma et la table sont les noms de Trino, en minuscules ;
 le cluster est envoyé tel qu'`ATLAS_CLUSTERS` l'écrit, car Atlas compare un nom qualifié casse
-comprise.
+comprise. Une table dont le schéma ou le nom contient un point n'est jamais demandée et ne reçoit
+aucun contexte : le schéma `a` avec la table `b.c` et le schéma `a.b` avec la table `c` seraient
+la même entité.
 
 Un type dont Atlas dit qu'il n'existe pas (Atlas 2.4 répond 400 avec `ATLAS-400-00-014` pour
 `iceberg_table` sans le modèle Iceberg) ne donne rien et n'est plus demandé. **Un
@@ -134,8 +141,10 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 | 400 avec `ATLAS-400-00-014` (aucun type) | ne sait rien sous ce type, et s'en souvient jusqu'au `SIGHUP` |
 | tout autre 400 ou 404 (une page, un autre code, un code de l'autre lecture, un mauvais chemin derrière Knox) | se dit indisponible |
 
-Indisponible, il écrit au journal `atlas unreachable`, sans adresse, utilisateur ni nom
-d'objet ; un refus est écrit par le serveur, `atlas refused the account`. Ni le journal ni une
+Une panne que signale Atlas, ou aucune adresse qui répond, écrit au journal `atlas unreachable`,
+sans adresse, utilisateur ni nom d'objet ; une lecture coupée par l'échéance de l'appel n'écrit
+que la ligne d'adresse plus bas, quand l'adresse était en retard. Un refus est écrit par le
+serveur, `atlas refused the account`. Ni le journal ni une
 erreur ne portent le texte d'une réponse ou le secret.
 
 **Un serveur qui accepte la connexion puis ne répond plus** (figé) est laissé : quand l'adresse
@@ -184,11 +193,23 @@ aucune nouvelle négociation n'a lieu tant qu'Atlas n'en demande pas, et une red
 passif d'Atlas renégocie avec l'actif. L'authentification mutuelle d'Atlas est laissée à TLS
 (`https` et `ATLAS_CA_BUNDLE`).
 
+Une négociation tourne sur un fil d'exécution propre au fournisseur, jamais sur la boucle qui sert
+le contexte de chaque appel : un KDC lent ne retient jamais les autres lectures. Un KDC qui n'a
+pas répondu à l'échéance de l'appel (un port 88 filtré, des essais d'un KDC à l'autre) rend cet
+appel `unavailable` à son échéance ; aucune attente ne s'ouvre, puisque l'échéance a coupé
+l'appel, donc l'appel suivant renégocie et paie la même attente. Au plus
+`ATLAS_MAX_CONCURRENT_REQUESTS` négociations tournent à la fois ; une négociation qui attend encore
+un fil quand son appel est coupé ne commence jamais, et une négociation en cours s'achève quand le
+KDC répond, son résultat écarté. L'attente du KDC compte comme une attente de l'adresse par
+laquelle l'appel a commencé : la ligne d'adresse plus haut peut donc la nommer.
+
 Une négociation qui échoue est un refus du compte, comme un 401, sans essayer d'autre adresse : un
 keytab que le KDC refuse (un mot de passe changé dans l'annuaire, un mauvais principal, un keytab
 inutilisable) n'est plus essayé pendant `MCP_CONTEXT_REFUSED_RETRY_SECONDS`, pour que le
 fournisseur ne verrouille jamais le compte par des échecs de pré-authentification. Seul un KDC
-introuvable ou injoignable rend le fournisseur indisponible, réessayé comme une panne.
+introuvable ou injoignable rend le fournisseur indisponible : quand le KDC le dit avant
+l'échéance de l'appel, le fournisseur est réessayé comme une panne, après
+`MCP_CONTEXT_RETRY_AFTER_SECONDS`.
 `ATLAS_KEYTAB` doit être un fichier que le serveur peut lire au démarrage ; un keytab remplacé (son
 heure ou sa taille change) lève le refus, comme `SIGHUP`.
 

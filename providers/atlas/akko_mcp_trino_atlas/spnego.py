@@ -14,14 +14,23 @@ The service name is ``ATLAS_SPN`` when set (``HTTP@<host>``), else ``HTTP@<host 
 request>``. The token is SPNEGO (``protocol="negotiate"``), as ``curl --negotiate`` sends.
 No message, log or exception names the principal, the keytab or the token.
 
+The negotiation (the keytab read, the requests to the KDC, krb5's name lookups) blocks, so
+the provider's asynchronous client runs it on a thread pool of its own, at most
+``workers`` at once (``ATLAS_MAX_CONCURRENT_REQUESTS``): the event loop serves every other
+read meanwhile, and the call's deadline cuts the wait. A negotiation still running when its
+call is cut goes on in its thread until the KDC answers, and its result is dropped; one that
+waits for a thread when its call is cut never starts.
+
 A negotiation that fails is a refusal of the account (``NegotiationError`` with
 ``unreachable`` false), since a retry every few seconds with a keytab the KDC refuses would
 lock the account in a directory that counts failed pre-authentications; only a KDC that
 cannot be found or reached (the Kerberos codes of ``KDC_UNREACHABLE``) is an outage.
 """
 
+import asyncio
 import base64
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import httpx
@@ -94,16 +103,23 @@ def _challenge(response: httpx.Response) -> str | None:
 class SpnegoAuth(httpx.Auth):
     """``httpx.Auth`` that answers a ``Negotiate`` challenge from a keytab."""
 
-    def __init__(self, principal: str, keytab: str, spn: str) -> None:
-        """Keep the names; ``spnego`` is imported now, nothing is read from the keytab yet."""
+    def __init__(self, principal: str, keytab: str, spn: str, workers: int = 1) -> None:
+        """Keep the names; ``spnego`` is imported now, nothing is read from the keytab yet.
+        ``workers`` bounds the negotiations an asynchronous client runs at once."""
         self._spnego = load_spnego()
         self._principal = principal
         self._keytab = keytab
         self._spn = spn
+        # Threads start on the first negotiation only.
+        self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="atlas-kerberos")
 
     def __repr__(self) -> str:
         """Name the class only, never the principal or the keytab."""
         return "SpnegoAuth()"
+
+    def close(self) -> None:
+        """Drop the negotiations not started; one under way ends on its own, unwaited."""
+        self._pool.shutdown(wait=False, cancel_futures=True)
 
     def _service(self, request: httpx.Request) -> tuple[str, str]:
         service, at, host = self._spn.partition("@")
@@ -111,23 +127,37 @@ class SpnegoAuth(httpx.Auth):
             return service, host
         return "HTTP", request.url.host
 
-    def _context(self, request: httpx.Request) -> Any:
+    def _token(self, request: httpx.Request) -> bytes:
+        """Build a new security context and step it; this blocks on the KDC."""
         service, host = self._service(request)
-        credential = self._spnego.KerberosKeytab(keytab=self._keytab, principal=self._principal)
-        return self._spnego.client(
-            username=credential, hostname=host, service=service, protocol="negotiate"
-        )
+        try:
+            credential = self._spnego.KerberosKeytab(keytab=self._keytab, principal=self._principal)
+            context = self._spnego.client(
+                username=credential, hostname=host, service=service, protocol="negotiate"
+            )
+            token: bytes = context.step()
+        except Exception as exc:  # noqa: BLE001 - spnego's errors may name the principal
+            unreachable = bool(_codes(exc) & KDC_UNREACHABLE)
+            raise NegotiationError(unreachable) from None
+        return token
+
+    @staticmethod
+    def _answer(request: httpx.Request, token: bytes) -> httpx.Request:
+        request.headers["Authorization"] = "Negotiate " + base64.b64encode(token).decode()
+        return request
 
     def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         """Send the request; on a ``Negotiate`` challenge, send it again with a token."""
         response = yield request
-        if response.status_code != 401 or _challenge(response) is None:
-            return
-        try:
-            context = self._context(request)
-            token = context.step()
-        except Exception as exc:  # noqa: BLE001 - spnego's errors may name the principal
-            unreachable = bool(_codes(exc) & KDC_UNREACHABLE)
-            raise NegotiationError(unreachable) from None
-        request.headers["Authorization"] = "Negotiate " + base64.b64encode(token).decode()
-        yield request
+        if response.status_code == 401 and _challenge(response) is not None:
+            yield self._answer(request, self._token(request))
+
+    async def async_auth_flow(
+        self, request: httpx.Request
+    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        """As ``auth_flow``, the negotiation on the pool's threads, never on the event loop."""
+        response = yield request
+        if response.status_code == 401 and _challenge(response) is not None:
+            loop = asyncio.get_running_loop()
+            token = await loop.run_in_executor(self._pool, self._token, request)
+            yield self._answer(request, token)

@@ -11,11 +11,13 @@ authenticate or ``ATLAS_CLUSTERS``. Three ways to authenticate are accepted: Bas
 (``ATLAS_USER`` with ``ATLAS_PASSWORD`` or ``ATLAS_PASSWORD_FILE``), a Knox token
 (``ATLAS_KNOX_TOKEN`` or ``ATLAS_KNOX_TOKEN_FILE``) and Kerberos (``ATLAS_AUTH=kerberos``
 with ``ATLAS_PRINCIPAL`` and ``ATLAS_KEYTAB``). ``ATLAS_URL`` holds one address, or
-several separated by commas for Atlas in high availability. No message names an address
+several separated by commas for Atlas in high availability; a password or a token over plain
+``http`` is refused, and Kerberos over ``http`` is said once at start. No message names an address
 or a secret. Without ``ATLAS_GLOSSARIES``, ``ATLAS_CLASSIFICATIONS`` and
 ``ATLAS_BUSINESS_METADATA``, only descriptions are served.
 """
 
+import logging
 from collections.abc import Mapping
 
 from .provider import AtlasProvider
@@ -25,8 +27,13 @@ __version__ = "0.8.0"
 
 __all__ = ["BASIC", "KERBEROS", "KNOX", "AtlasProvider", "AtlasSettings", "from_env"]
 
+log = logging.getLogger(__name__)
+
 
 def from_env(env: Mapping[str, str]) -> AtlasProvider:
     """Build the provider from the ``ATLAS_*`` settings; raises ``ValueError`` when one is
     wrong or missing, so the server refuses to start."""
-    return AtlasProvider(read_settings(env))
+    settings = read_settings(env)
+    for warning in settings.warnings():
+        log.warning(warning)
+    return AtlasProvider(settings)

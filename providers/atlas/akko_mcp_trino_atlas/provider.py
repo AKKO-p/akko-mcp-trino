@@ -5,7 +5,9 @@ A Trino table ``catalog.schema.table`` is the Atlas entity whose qualified name 
 of ``ATLAS_TABLE_TYPES`` with ``GET /api/atlas/v2/entity/bulk/uniqueAttribute/type/{type}``,
 the names split in requests whose query stays under ``ATLAS_MAX_QUERY_CHARS``. Only names
 Trino listed are asked for, nothing is searched, and the cluster keeps the case
-``ATLAS_CLUSTERS`` gives it, since Atlas matches a qualified name exactly. A type Atlas
+``ATLAS_CLUSTERS`` gives it, since Atlas matches a qualified name exactly. A table whose
+schema or name holds a dot is never asked for: schema ``a`` with table ``b.c`` and schema
+``a.b`` with table ``c`` would be the same entity. A type Atlas
 says does not exist yields nothing, and is not asked again until ``reset()`` (the
 server's SIGHUP) or a change of the secret's file.
 
@@ -231,7 +233,8 @@ class AtlasProvider:
         wanted: dict[str, list[TableRef]] = {}
         for ref in refs:
             cluster = self.settings.clusters.get(ref.catalog.lower())
-            if cluster is not None:
+            # A dot in the schema or the table makes the qualified name ambiguous.
+            if cluster is not None and "." not in ref.schema + ref.table:
                 # Trino's names, already lower case, and the cluster as Atlas writes it.
                 wanted.setdefault(f"{ref.schema}.{ref.table}@{cluster}", []).append(ref)
         if not wanted:
@@ -298,6 +301,7 @@ class AtlasProvider:
             f"atlas: term status attribute: {s.term_status_attribute or 'none'}",
             "atlas: CA bundle: " + ("set" if s.verify is not True else "the system's"),
             "atlas: proxy: " + ("set" if s.proxy else "none"),
+            *(f"WARNING: {warning}" for warning in s.warnings()),
             *self._probe(),
         ]
 
