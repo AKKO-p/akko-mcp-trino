@@ -15,7 +15,10 @@ What an answer means:
 - a refused connection, a connection that does not open within
   ``ATLAS_CONNECT_TIMEOUT_SECONDS``, a timeout, a body that cannot be decoded or a 5xx: the
   next address is tried; when none answers, ``ProviderUnavailable``. An address that could
-  not be connected to is left for the next one in the calls that follow;
+  not be connected to is left for the next one in the calls that follow, and so is one that
+  accepted the connection and then did not answer: a timeout or another transport error, or
+  a call cancelled while it waited on it (its deadline). The move is logged once, naming the
+  address, by the call that makes it, so that a burst of calls logs one line;
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
 - Atlas's own "does not exist" answers, by status and error code, only those the read
@@ -32,6 +35,7 @@ address, user or object name; a refusal is logged by the server, as
 secret.
 """
 
+import asyncio
 import logging
 from collections.abc import Generator, Mapping
 from enum import Enum
@@ -169,7 +173,7 @@ class AtlasClient:
         for step in range(count):
             index = (start + step) % count
             try:
-                response = await self._send(self._urls[index] + path, params)
+                response = await self._send(self._urls[index] + path, params, index)
             except _Outage as outage:
                 if outage.connect:
                     # A silent or closed address is not tried first again.
@@ -180,15 +184,24 @@ class AtlasClient:
             return self._read(response, missing)
         raise self._unavailable("no address of ATLAS_URL answered")
 
-    async def _send(self, url: str, params: Mapping[str, str] | None) -> httpx.Response:
-        """One request to one address, following redirects among the addresses only."""
+    async def _send(self, url: str, params: Mapping[str, str] | None, index: int) -> httpx.Response:
+        """One request to one address, following redirects among the addresses only;
+        ``index`` is the position of that address in ``ATLAS_URL``."""
         for _ in range(_MAX_REDIRECTS + 1):
             try:
                 auth = _auth(self._settings, self._kerberos) or httpx.USE_CLIENT_DEFAULT
                 response = await self._http.get(url, params=params, auth=auth)
+            except asyncio.CancelledError:
+                # The deadline came while this address held the call: never swallowed.
+                self._leave(self._index(httpx.URL(url), index))
+                raise
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 raise _Outage(connect=True) from None
-            except (httpx.TransportError, httpx.DecodingError):
+            except (httpx.PoolTimeout, httpx.DecodingError):
+                raise _Outage from None
+            except httpx.TransportError:
+                # Connected, then no answer: a frozen server, or the active one stuck.
+                self._leave(self._index(httpx.URL(url), index))
                 raise _Outage from None
             except NegotiationError as failed:
                 # The same credentials fail on every address: none is tried.
@@ -207,6 +220,19 @@ class AtlasClient:
                 raise ProviderRefused("atlas redirected outside ATLAS_URL")
             url, params = str(target), None
         raise _Outage
+
+    def _leave(self, index: int) -> None:
+        """Start the next calls after the address ``index``, which accepted the connection
+        and did not answer. Only the call that moves the first address logs it, so that the
+        calls waiting on that address at the same time log one line between them."""
+        count = len(self._urls)
+        if count > 1 and self._first == index:
+            self._first = (index + 1) % count
+            log.warning(
+                "atlas at %s did not answer once connected; the next calls start at the next "
+                "address",
+                self._urls[index],
+            )
 
     def _ours(self, url: httpx.URL) -> bool:
         """Whether ``url`` lies under one of the addresses of ``ATLAS_URL``."""

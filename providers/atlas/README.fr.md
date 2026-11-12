@@ -54,7 +54,7 @@ cite une adresse, un proxy ni un secret.
 | `ATLAS_TERM_STATUS_ATTRIBUTE` | l'attribut du terme (dans `additionalAttributes`) qui porte son statut | vide |
 | `ATLAS_CA_BUNDLE` | autorités de certification contre lesquelles vérifier le certificat d'Atlas | celles du système |
 | `ATLAS_PROXY` | proxy `http` ou `https` pour joindre Atlas ; les réglages de proxy de l'environnement ne sont jamais lus | aucun |
-| `ATLAS_TIMEOUT_SECONDS` | délai d'une requête à Atlas | `5` |
+| `ATLAS_TIMEOUT_SECONDS` | délai d'une requête à Atlas ; avec plusieurs adresses, voir plus bas son rapport à `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | délai pour ouvrir une connexion à une adresse, inférieur à `ATLAS_TIMEOUT_SECONDS`, pour qu'une adresse muette laisse la place à la suivante dans le temps de l'appel | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | lectures de termes de glossaire envoyées à la fois, de 1 à 32 | `4` |
 
@@ -122,11 +122,12 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 | Atlas répond | Le fournisseur |
 |---|---|
 | une connexion refusée, ou aucune ouverte en `ATLAS_CONNECT_TIMEOUT_SECONDS` | essaie l'adresse suivante d'`ATLAS_URL`, et commence par elle aux appels suivants ; puis se dit indisponible |
-| un délai dépassé une fois connecté, un corps qui ne se décode pas, ou un 5xx | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible |
+| pas de réponse une fois connecté : un délai dépassé, une autre erreur de transport, ou l'échéance de l'appel atteinte pendant qu'il attend cette adresse | essaie l'adresse suivante d'`ATLAS_URL` s'il reste du temps à l'appel, et commence par elle aux appels suivants ; puis se dit indisponible |
+| un corps qui ne se décode pas, ou un 5xx | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible |
 | une redirection vers une adresse d'`ATLAS_URL` (le serveur passif d'Atlas HA) | la suit, et commence par cette adresse aux appels suivants |
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
 | 401, ou un 403 autre que celui d'en dessous | se dit refusé tout de suite ; le cookie de session est oublié |
-| 403 avec `ATLAS-403-00-001` (Atlas refuse au compte une partie des objets demandés) | ne sert rien de cette lecture (tout le lot de tables, ou ce terme), reste ouvert, et écrit une fois pour l'appel `atlas refused some objects to the account; an account with no read grant serves nothing` |
+| 403 avec `ATLAS-403-00-001` (Atlas refuse au compte une partie des objets demandés) | ne sert rien de cette lecture (tout le lot de tables, ou ce terme), reste ouvert, et écrit une fois pour l'appel `atlas refused some objects to the account; an account with no read grant serves nothing` ; les tables de ce lot reçoivent le statut `not_found`, exprès, le même qu'une table qu'Atlas ne connaît pas, pour qu'un agent ne puisse pas distinguer un objet refusé d'un objet absent |
 | un 200 qui n'est pas du JSON (une page de connexion Knox), un JSON illisible, un autre statut | se dit indisponible |
 | 404 avec `ATLAS-404-00-009` à une lecture de tables (aucune instance) | ne sait rien de ces tables |
 | 404 avec `ATLAS-404-00-005` à une lecture de terme (aucun GUID) | écarte ce terme |
@@ -136,6 +137,23 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 Indisponible, il écrit au journal `atlas unreachable`, sans adresse, utilisateur ni nom
 d'objet ; un refus est écrit par le serveur, `atlas refused the account`. Ni le journal ni une
 erreur ne portent le texte d'une réponse ou le secret.
+
+**Un serveur qui accepte la connexion puis ne répond plus** (figé, ou le serveur actif d'une
+paire en haute disponibilité bloqué) est laissé pour l'adresse suivante d'`ATLAS_URL`, et le
+fournisseur l'écrit une fois au journal, avec cette adresse (jamais un identifiant : `ATLAS_URL`
+n'en porte pas) :
+`atlas at <address> did not answer once connected; the next calls start at the next address`.
+Les appels qui l'attendent ensemble écrivent une ligne à eux tous. L'appel qui le rencontre
+reçoit encore son contexte ou non selon deux réglages :
+
+- avec `ATLAS_TIMEOUT_SECONDS` inférieur à `MCP_CONTEXT_TIMEOUT_SECONDS`, la requête à l'adresse
+  bloquée expire d'abord, et l'adresse suivante répond dans le même appel ;
+- avec des valeurs égales (les défauts, 5 s chacun), l'échéance de l'appel vient d'abord :
+  l'appel qui rencontre l'adresse bloquée est perdu (`unavailable`), et les appels suivants
+  commencent par l'adresse suivante.
+
+Avec une seule adresse, il n'y a pas d'autre endroit où aller : chaque appel l'attend jusqu'à son
+échéance.
 
 ## Kerberos (SPNEGO)
 
