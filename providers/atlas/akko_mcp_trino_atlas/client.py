@@ -17,10 +17,11 @@ What an answer means:
   next address is tried; when none answers, ``ProviderUnavailable``. An address that could
   not be connected to is left for the next one in the calls that follow, and so is the
   address a call started with when it did not answer in time: a read or write timeout, or the
-  call's own deadline reached while it waited on it (``leave``, from the provider). Any other
-  cancellation (a sibling read cancelled by a failure, a client gone, a shutdown) and any
-  other transport error leave nothing. An address that did not answer in time is logged
-  once, by its position in ``ATLAS_URL``, until it answers again;
+  call's own deadline reached after it waited on it for at least
+  ``ATLAS_CONNECT_TIMEOUT_SECONDS`` (``leave``, from the provider). Any other cancellation (a
+  sibling read cancelled by a failure, a client gone, a shutdown), a shorter wait and any
+  other transport error leave nothing. An address that did not answer in time, the only one
+  included, is logged once, by its position in ``ATLAS_URL``, until it answers again;
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
 - Atlas's own "does not exist" answers, by status and error code, only those the read
@@ -39,7 +40,7 @@ secret.
 
 import asyncio
 import logging
-from collections import Counter
+import time
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -95,12 +96,13 @@ class _Outage(Exception):
 
 
 class Watch:
-    """The addresses a call's first tries are waiting on, shared by the call's child tasks;
-    what is left in it when the call's deadline passes is what did not answer in time."""
+    """The first tries a call is waiting on, shared by the call's child tasks: each one's
+    address and the monotonic time it started. What is left in it when the call's deadline
+    passes is what may not have answered in time."""
 
     def __init__(self) -> None:
         """Start empty: no first try waiting."""
-        self.waiting: Counter[int] = Counter()
+        self.waiting: dict[object, tuple[int, float]] = {}
 
 
 _WATCH: ContextVar[Watch | None] = ContextVar("atlas_watch", default=None)
@@ -214,8 +216,13 @@ class AtlasClient:
             _WATCH.reset(token)
 
     def leave(self, watch: Watch) -> None:
-        """The call's deadline passed: leave the addresses its first tries still waited on."""
-        for index in list(watch.waiting):
+        """The call's deadline passed: leave the addresses its first tries still waited on
+        for at least ``ATLAS_CONNECT_TIMEOUT_SECONDS``, the time an address is given to show
+        it is alive. A wait the deadline cut sooner says nothing of its address: the time had
+        gone on another address, or on another read of the same tool call."""
+        now, floor = time.monotonic(), self._settings.connect_timeout_seconds
+        late = {index for index, started in watch.waiting.values() if now - started >= floor}
+        for index in sorted(late):
             self._late(index)
 
     async def _send(
@@ -265,24 +272,24 @@ class AtlasClient:
         watch = _WATCH.get()
         if at is None or watch is None:
             return await self._http.get(url, params=params, auth=auth)
-        watch.waiting[at] += 1
+        entry = object()
+        watch.waiting[entry] = (at, time.monotonic())
         try:
             response = await self._http.get(url, params=params, auth=auth)
         except asyncio.CancelledError:
             raise
         except BaseException:
-            watch.waiting -= Counter({at: 1})
+            del watch.waiting[entry]
             raise
-        watch.waiting -= Counter({at: 1})
+        del watch.waiting[entry]
         return response
 
     def _late(self, index: int) -> None:
         """The address ``index`` did not answer in time: the next calls start after it when
-        it is still the first, and it is said once until it answers again."""
+        it is still the first and another address exists, and it is said once until it
+        answers again."""
         count = len(self._urls)
-        if count == 1:
-            return
-        if self._first == index:
+        if count > 1 and self._first == index:
             self._first = (index + 1) % count
         if index not in self._said:
             self._said.add(index)

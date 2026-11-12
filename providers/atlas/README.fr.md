@@ -144,15 +144,20 @@ l'adresse suivante d'`ATLAS_URL`. Le fournisseur l'écrit une fois au journal, p
 jamais son adresse : `atlas address 2 of 3 in ATLAS_URL did not answer in time` (`--check`
 affiche les adresses dans cet ordre). La ligne n'est pas redite pour cette adresse tant qu'elle
 n'a pas répondu ; les appels qui l'attendent ensemble écrivent une ligne à eux tous, et deux
-adresses bloquées écrivent deux lignes. Seule l'échéance de l'appel lui-même compte : une lecture
-annulée pour une autre raison (une autre lecture du même appel refusée, le client parti, un
-arrêt) ne laisse aucune adresse et n'écrit rien. L'appel qui rencontre l'adresse bloquée reçoit
+adresses bloquées écrivent deux lignes. Seule l'échéance de l'appel lui-même compte, et seulement
+contre une adresse qui a tenu l'attente au moins `ATLAS_CONNECT_TIMEOUT_SECONDS` : une attente
+plus courte coupée par l'échéance (le temps est parti sur une autre adresse, ou sur une lecture
+précédente du même appel d'outil), ou une lecture annulée pour une autre raison (une autre lecture
+du même appel refusée, le client parti, un arrêt) ne laisse aucune adresse et n'écrit rien.
+L'appel qui rencontre l'adresse bloquée reçoit
 encore son contexte ou non selon deux réglages :
 
 - avec `ATLAS_TIMEOUT_SECONDS` inférieur à `MCP_CONTEXT_TIMEOUT_SECONDS` d'au moins le temps que
   l'adresse suivante met à répondre, négociation Kerberos comprise, la requête à l'adresse
   bloquée expire d'abord, et l'adresse suivante répond dans le même appel ; avec une marge plus
-  courte, cet appel est perdu et les appels suivants commencent par l'adresse suivante ;
+  courte, ce que cet appel lit après l'adresse bloquée est perdu, et les appels suivants
+  commencent par l'adresse suivante, sauf si l'échéance a aussi coupé sur elle une attente d'au
+  moins `ATLAS_CONNECT_TIMEOUT_SECONDS` ;
 - avec des valeurs égales (les défauts, 5 s chacun), l'échéance de l'appel vient d'abord :
   l'appel qui rencontre l'adresse bloquée est perdu (`unavailable`), et les appels suivants
   commencent par l'adresse suivante.
@@ -162,7 +167,9 @@ continue de lui envoyer les appels, et le fournisseur n'a pas de meilleure adres
 commencer. Chaque appel est perdu, et la ligne donne une fois la position du serveur actif.
 
 Avec une seule adresse, il n'y a pas d'autre endroit où aller : chaque appel l'attend jusqu'à
-`ATLAS_TIMEOUT_SECONDS` ou son échéance, au premier des deux termes, et aucune ligne n'est écrite.
+`ATLAS_TIMEOUT_SECONDS` ou son échéance, au premier des deux termes. La ligne est écrite tout de
+même, `atlas address 1 of 1 in ATLAS_URL did not answer in time`, une fois tant que l'adresse n'a
+pas répondu.
 
 ## Kerberos (SPNEGO)
 

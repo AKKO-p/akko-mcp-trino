@@ -595,14 +595,16 @@ def test_a_read_timeout_below_the_deadline_lets_the_next_address_answer(network,
 
 
 @pytest.mark.parametrize(
-    ("timeout", "seconds"), [("5", 0.5), ("1", 10.0)], ids=["cancelled", "read-timeout"]
+    ("timeout", "seconds", "connect"),
+    [("5", 0.5, "0.2"), ("1", 10.0, "0.5")],
+    ids=["cancelled", "read-timeout"],
 )
-def test_a_burst_on_a_hung_address_says_it_once(network, caplog, timeout, seconds):
+def test_a_burst_on_a_hung_address_says_it_once(network, caplog, timeout, seconds, connect):
     caplog.set_level(logging.INFO)
     caplog.set_level(logging.WARNING, logger="httpx")
     hung, a, b = network
     p = on_network(
-        hung.url, a.url, b.url, ATLAS_TIMEOUT_SECONDS=timeout, ATLAS_CONNECT_TIMEOUT_SECONDS="0.5"
+        hung.url, a.url, b.url, ATLAS_TIMEOUT_SECONDS=timeout, ATLAS_CONNECT_TIMEOUT_SECONDS=connect
     )
 
     async def burst() -> object:
@@ -625,10 +627,12 @@ def test_a_single_address_is_kept_after_a_cancelled_wait(network, caplog):
     caplog.set_level(logging.INFO)
     caplog.set_level(logging.WARNING, logger="httpx")
     hung, _, _ = network
-    first, second = calls(on_network(hung.url), count=2, seconds=0.3)
+    p = on_network(hung.url, ATLAS_CONNECT_TIMEOUT_SECONDS="0.1")
+    first, second = calls(p, count=2, seconds=0.3)
     assert isinstance(first, ProviderUnavailable) and isinstance(second, ProviderUnavailable)
     assert len(hung.accepted) == 2  # the same address, asked again
-    assert left_lines(caplog) == []
+    # Nowhere else to go, but the operator is told, once until it answers.
+    assert left_lines(caplog) == ["atlas address 1 of 1 in ATLAS_URL did not answer in time"]
 
 
 @pytest.mark.parametrize(
@@ -714,7 +718,8 @@ def test_a_passive_redirect_to_a_hung_active_server_is_said_once(network, caplog
         return httpx.Response(303, headers={"location": hung.url + request.url.raw_path.decode()})
 
     passive.answer = redirect
-    results = calls(on_network(passive.url, hung.url), count=3, seconds=0.5)
+    p = on_network(passive.url, hung.url, ATLAS_CONNECT_TIMEOUT_SECONDS="0.2")
+    results = calls(p, count=3, seconds=0.5)
     assert all(isinstance(r, ProviderUnavailable) for r in results)
     assert len(hung.accepted) == 3  # the passive server keeps sending the calls there
     assert left_lines(caplog) == ["atlas address 2 of 2 in ATLAS_URL did not answer in time"]
@@ -725,7 +730,8 @@ def test_two_hung_addresses_are_said_once_each(caplog):
     caplog.set_level(logging.WARNING, logger="httpx")
     one, two = _Hung(), _Hung()
     try:
-        results = calls(on_network(one.url, two.url), count=4, seconds=0.3)
+        p = on_network(one.url, two.url, ATLAS_CONNECT_TIMEOUT_SECONDS="0.1")
+        results = calls(p, count=4, seconds=0.3)
     finally:
         one.close()
         two.close()
@@ -777,3 +783,51 @@ def test_only_the_address_a_call_started_with_is_said_late(caplog):
     assert INVOICES in found
     # b timed out too, but the call reached it after leaving a: only a is said.
     assert left_lines(caplog) == ["atlas address 1 of 3 in ATLAS_URL did not answer in time"]
+
+
+def test_terms_cut_by_the_tool_calls_deadline_after_describe_leave_no_address(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+
+    def slow(request: httpx.Request) -> None:
+        time.sleep(0.2)  # a healthy Atlas
+
+    guids = sorted(FakeAtlas("atlas-2.4").terms)
+    hung, a = _Hung(), _Atlas(slow)
+    p = on_network(
+        hung.url,
+        a.url,
+        ATLAS_TIMEOUT_SECONDS="0.5",
+        ATLAS_CONNECT_TIMEOUT_SECONDS="0.4",
+        ATLAS_TABLE_TYPES="hive_table",
+        ATLAS_GLOSSARIES="finance",
+    )
+
+    async def tool_calls() -> list[tuple[bool, object]]:
+        # As a tool call does: describe, then the terms, on one deadline.
+        out: list[tuple[bool, object]] = []
+        try:
+            for _ in range(4):
+                deadline = time.monotonic() + 1.0
+                described = await p.describe([INVOICES], deadline=deadline)
+                try:
+                    read: object = await p.terms(guids, deadline=deadline)
+                except ProviderUnavailable as unavailable:
+                    read = unavailable
+                out.append((INVOICES in described, read))
+        finally:
+            await p.aclose()
+        return out
+
+    try:
+        out = asyncio.run(tool_calls())
+    finally:
+        hung.close()
+        a.close()
+    # The first tool call spends 0.5 s on the hung address and 0.2 s on a: its terms are cut
+    # after a short wait on a, which says nothing of a. From then on a serves everything.
+    assert all(described for described, _ in out)
+    assert isinstance(out[0][1], ProviderUnavailable)
+    assert all(isinstance(read, dict) and read for _, read in out[1:])
+    assert len(hung.accepted) == 1
+    assert left_lines(caplog) == ["atlas address 1 of 2 in ATLAS_URL did not answer in time"]
