@@ -105,8 +105,8 @@ version : l'étape finale les épingle toutes. Les lignes `Candidate` donnent 
 paquets qu'épingle l'étape de construction. Construisez ensuite l'image pour les deux plateformes
 (`docker buildx build --platform linux/amd64,linux/arm64 .`). La CI construit aussi l'image pour
 `linux/arm64`, sous QEMU, et y lance `--version` et le `--check` Kerberos, quand une pull request
-ou un push touche le Dockerfile, `requirements/`, `pyproject.toml` ou
-`providers/atlas/pyproject.toml`, et sur un lancement manuel (`workflow_dispatch`) : gssapi et krb5
+ou un push touche le Dockerfile, `requirements/`, `pyproject.toml`, `providers/atlas/pyproject.toml`
+ou `.github/workflows/ci.yml`, et sur un lancement manuel (`workflow_dispatch`) : gssapi et krb5
 s'y compilent sous émulation, ce qui prend plus d'une heure, d'où son absence sur chaque pull
 request.
 

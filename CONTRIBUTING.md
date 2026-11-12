@@ -114,8 +114,9 @@ versions of the three packages the build stage pins. Then build the image for bo
 platforms (`docker buildx build --platform linux/amd64,linux/arm64 .`). CI builds
 the image for `linux/arm64` too, under QEMU, and runs `--version` and the Kerberos
 `--check` in it, when a pull request or a push touches the Dockerfile,
-`requirements/`, `pyproject.toml` or `providers/atlas/pyproject.toml`, and on a
-manual run (`workflow_dispatch`): gssapi and krb5 compile under emulation, which
+`requirements/`, `pyproject.toml`, `providers/atlas/pyproject.toml` or
+`.github/workflows/ci.yml`, and on a manual run (`workflow_dispatch`): gssapi
+and krb5 compile under emulation, which
 takes over an hour, so it does not run on every pull request.
 
 `scripts/lock.sh` is the one place CI and the release read the versions from:

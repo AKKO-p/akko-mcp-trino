@@ -113,7 +113,7 @@ jobs:
         # ("MIT OR GPL-2.0-only") passes: the permissive one applies.
         run: |
           python -m venv /tmp/licenses
-          /tmp/licenses/bin/pip install --require-hashes -r requirements/image.txt
+          /tmp/licenses/bin/pip install --only-binary=:all: --require-hashes -r requirements/image.txt
           /tmp/licenses/bin/pip install --no-deps ./dist/*.whl
           if [ "${{ matrix.packages }}" = "core+atlas" ]; then
             /tmp/licenses/bin/pip install --no-deps ./dist-atlas/*.whl
@@ -183,8 +183,8 @@ jobs:
           echo "image glibc $glibc, scripts/lock.sh ${{ needs.versions.outputs.glibc }}"
           test "$glibc" = "${{ needs.versions.outputs.glibc }}"
   changes:
-    # Whether this push or pull request touches what the image is built from; the arm64 build
-    # runs only then.
+    # Whether this push or pull request touches what the image is built from, or this workflow;
+    # the arm64 build runs only then.
     name: changes
     runs-on: ubuntu-latest
     if: github.event_name != 'workflow_dispatch'
@@ -203,7 +203,7 @@ jobs:
             echo image=true >> "$GITHUB_OUTPUT"; exit 0
           fi
           files=$(git diff --name-only "$BASE" "$GITHUB_SHA")
-          if printf '%s\n' "$files" | grep -qE '^(Dockerfile|requirements/.*|pyproject\.toml|providers/atlas/pyproject\.toml)$'; then
+          if printf '%s\n' "$files" | grep -qE '^(Dockerfile|requirements/.*|pyproject\.toml|providers/atlas/pyproject\.toml|\.github/workflows/ci\.yml)$'; then
             echo image=true >> "$GITHUB_OUTPUT"
           else
             echo image=false >> "$GITHUB_OUTPUT"
@@ -216,9 +216,10 @@ jobs:
     name: container image builds (linux/arm64)
     runs-on: ubuntu-latest
     needs: changes
-    # A dispatch skips the changes job; always() lets this job run then.
+    # A dispatch skips the changes job; !cancelled() lets this job run then, and a cancelled run
+    # still cancels it.
     if: >-
-      always() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.image == 'true')
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.image == 'true')
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

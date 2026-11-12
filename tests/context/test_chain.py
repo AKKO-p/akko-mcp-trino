@@ -789,10 +789,19 @@ def test_a_refusal_received_from_another_read_is_passed_on_and_judged_once(
     fake.fail = ProviderRefused("401")
     _gate(loop, fake)
     chain = ContextChain([fake], _defaults(monkeypatch), loop=loop, clock=clock)
+    opened = []
+    real = chain._open
+
+    def record(*args):
+        opened.append(args[2])
+        return real(*args)
+
+    monkeypatch.setattr(chain, "_open", record)
     with caplog.at_level(logging.WARNING):
         first, second = _leader_and_waiter(loop, chain, fake, clock, waits)
     assert waits.count == 1 and fake.calls == [(ORDERS,)]
     assert first.statuses["one"] == second.statuses["one"] == "refused"
+    assert opened == ["refused"]
     assert list(chain._breakers) == ["one"] and chain._breakers["one"].status == "refused"
     assert caplog.text.count("refused the account") == 1
 
