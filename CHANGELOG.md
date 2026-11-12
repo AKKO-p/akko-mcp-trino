@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.8.0] - unreleased
+## [0.8.0] - 2026-11-12
 
 ### Added
 - The claims that name a token's client and hold its scopes are settings: `MCP_JWT_CLIENT_CLAIMS` (`azp,client_id` by default) and `MCP_JWT_SCOPE_CLAIMS` (`scope` by default), in order, the first one the token carries being read whatever it holds (an empty one included), so that Entra ID (`appid`, `scp`) and Okta (`cid`, `scp`) tokens are read. A client claim that is not text is no client. A scope claim is a space-delimited string or a list of strings; any other value, a list that holds anything but strings included, is no scope, where 0.7 converted the items of a list to text. `--check` prints both.
