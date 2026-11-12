@@ -13,9 +13,8 @@ deux agents, dont un sur l'API Agents de Mistral. Les MCP hosts suivent l'un des
 | [2. Votre propre Trino depuis votre poste](#2-votre-propre-trino-depuis-votre-poste-stdio-et-oauth2) | stdio, le MCP host lance le serveur | vous, connecté par la page de connexion de Trino (`oauth2`) | une personne, avec un Trino qui utilise OAuth2 |
 | [3. Un serveur partagé pour une équipe](#3-un-serveur-partagé-pour-une-équipe-streamable-http-et-un-token-par-utilisateur) | streamable HTTP en HTTPS | chaque utilisateur, d'après son propre bearer token (`jwt`, le mode par défaut) | une équipe, un seul serveur |
 
-**Versions.** Les commandes de cette page épinglent la 0.7.2, la release actuelle, qui liste huit
-tools. Cette page décrit `main`, qui en ajoute un neuvième, `profile_table`. Les versions
-épinglées passeront à la 0.8.0 à sa sortie.
+**Versions.** Les commandes de cette page épinglent la 0.8.0, la release actuelle, qui liste neuf
+tools.
 
 **Trouver votre MCP host.**
 
@@ -211,10 +210,9 @@ Dans une session Claude Code, `/mcp` montre l'état du serveur. Dans Cursor, le 
 dans **Customize**, ses tools sous *Available Tools*. Dans VS Code, lancez la commande
 **MCP: List Servers**.
 
-Avec la 0.7.2, la release épinglée dans cette page, vous devez voir huit tools :
-`search_columns`, `list_catalogs`, `list_schemas`, `list_tables`, `describe_schema`,
-`describe_table`, `explain_query` et `execute_query`. Un serveur construit depuis `main` en ajoute
-un neuvième, `profile_table`. Posez ensuite les deux questions du
+Avec la 0.8.0, la release épinglée dans cette page, vous devez voir neuf tools : `search_columns`,
+`list_catalogs`, `list_schemas`, `list_tables`, `describe_schema`, `describe_table`,
+`profile_table`, `explain_query` et `execute_query`. Posez ensuite les deux questions du
 [démarrage rapide](quickstart.md#poser-une-question).
 
 Pour changer d'utilisateur, donnez un autre token au MCP host et relancez le serveur. Dans Claude
@@ -247,7 +245,7 @@ Pour **Claude Desktop**, reprenez l'entrée ci-dessous sans `"type": "stdio"`
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.7.2"
+        "akko-mcp-trino==0.8.0"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -302,7 +300,7 @@ refuse en HTTP.
         "-e", "TRINO_CATALOG=iceberg",
         "-e", "MCP_AUTH_ENABLED=false",
         "-e", "MCP_AUTH_REQUIRED=false",
-        "akkoai/akko-mcp-trino:0.7.2"
+        "akkoai/akko-mcp-trino:0.8.0"
       ]
     }
   }
@@ -439,7 +437,7 @@ Desktop et Cursor :
     "trino": {
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.7.2"
+        "akko-mcp-trino==0.8.0"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -490,7 +488,7 @@ claude mcp add \
   --env TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \
   --env "MCP_USER_TOKEN=$MCP_USER_TOKEN" \
   --transport stdio trino \
-  -- uvx akko-mcp-trino==0.7.2
+  -- uvx akko-mcp-trino==0.8.0
 ```
 
 `claude mcp list` affiche ensuite `✔ Connected` dès que le serveur répond. Comme au chemin 1,
@@ -522,7 +520,7 @@ contient ni l'un ni l'autre
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.7.2"
+        "akko-mcp-trino==0.8.0"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -668,7 +666,7 @@ paquet : lancez-le depuis un clone de ce dépôt, avec Python 3.12 ou plus ré
 git clone https://github.com/AKKO-p/akko-mcp-trino.git
 cd akko-mcp-trino
 python3 -m venv .venv && . .venv/bin/activate
-pip install akko-mcp-trino==0.7.2
+pip install akko-mcp-trino==0.8.0
 python3 examples/check_host_config.py ~/.cursor/mcp.json --search email --describe demo.crm.customers
 ```
 
@@ -679,8 +677,8 @@ s'arrête si l'une d'elles n'est pas définie. Pour un fichier qui déclare plus
 nommez l'entrée avec `--server trino`.
 
 Cet essai a utilisé un serveur construit depuis `main`, sur le sandbox et son catalogue de données
-(le profil `catalogs`), avec le token de Carol. Un build de `main` annonce encore la 0.7.2 mais
-liste neuf tools ; un serveur 0.7.2 en liste huit. La sortie était :
+(le profil `catalogs`), avec le token de Carol. Ce build précédait le passage à la 0.8.0 : il
+annonce la 0.7.2 et liste les neuf tools de la 0.8.0. La sortie était :
 
 ```text
 entry: trino (streamable HTTP)
@@ -745,10 +743,10 @@ listé neuf tools, trouvé `demo.crm.customers.email` avec `search_columns("emai
 Pour les essais sur le sandbox, seules les valeurs à remplacer ont changé : le token, le nom de
 Trino dans le réseau du sandbox (`trino`), son catalog `demo`, les adresses de l'IdP et le
 certificat de son autorité de démonstration (`TRINO_VERIFY`, et `TRINO_TOKEN_EXCHANGE_VERIFY` pour
-les entrées stdio). `akko-mcp-trino==0.7.2` est devenu le wheel construit depuis `main`
-(`uvx --from <wheel> akko-mcp-trino`), et l'image Docker a été remplacée par celle construite
-depuis `main`. L'essai Docker avait en plus `--network` et un volume pour le certificat de
-l'autorité. Le script de vérification a rempli les valeurs de `inputs` de VS Code depuis les
+les entrées stdio). La version épinglée `akko-mcp-trino==<version>` est devenue le wheel construit
+depuis `main` (`uvx --from <wheel> akko-mcp-trino`), et l'image Docker a été remplacée par celle
+construite depuis `main`. L'essai Docker avait en plus `--network` et un volume pour le certificat
+de l'autorité. Le script de vérification a rempli les valeurs de `inputs` de VS Code depuis les
 variables d'environnement `INPUT_TRINO_TOKEN` et `INPUT_TRINO_CLIENT_SECRET`. L'authentificateur
 OAuth2 de Trino a été ajouté au sandbox pour ce seul essai : le sandbox lui-même authentifie par
 JWT.

@@ -28,7 +28,7 @@ GSSAPI bindings (MIT Kerberos libraries on the system).
 
 The provider is registered under the entry point group `akko_mcp_trino.context` as `atlas`.
 Nothing is loaded unless `MCP_CONTEXT_PROVIDERS` names it; the container image of
-akko-mcp-trino carries it, inactive, without the Kerberos libraries for now.
+akko-mcp-trino carries it, inactive, with its `kerberos` extra and the MIT Kerberos libraries.
 
 ## Settings
 

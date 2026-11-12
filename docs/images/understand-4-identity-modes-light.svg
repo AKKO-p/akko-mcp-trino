@@ -15,7 +15,7 @@ text{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
 <text x="440.0" y="90" font-size="15" text-anchor="middle" class="mu" xml:space="preserve">Answer in order. The four modes are drawn on the same grid, so you see what changes.</text>
 <rect x="32" y="116" width="816" height="46" rx="12" fill="#ffffff" stroke="#e3e6ec" stroke-width="1"/>
 <text x="50" y="144.0" font-size="15" class="bb fa" xml:space="preserve">1.</text>
-<text x="74" y="144.0" font-size="15" xml:space="preserve">Can your identity provider exchange tokens (RFC 8693, like Keycloak 26)?</text>
+<text x="74" y="144.0" font-size="15" xml:space="preserve">Can your identity provider exchange tokens (RFC 8693, like Keycloak)?</text>
 <rect x="735.6" y="125.0" width="94.39999999999999" height="28" rx="14" fill="#ecebfb"/>
 <text x="782.8000000000001" y="144.0" font-size="13.5" text-anchor="middle" class="ac" xml:space="preserve">Yes → <tspan class="m b">jwt</tspan></text>
 <path class="ln" d="M56 164V185"/>

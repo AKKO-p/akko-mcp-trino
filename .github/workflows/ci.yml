@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 # Read-only by default; no job of the checks writes.
 permissions:
   contents: read
@@ -65,9 +66,11 @@ jobs:
           pip install --no-deps --no-build-isolation -e .
       - name: install the Atlas provider
         if: matrix.packages == 'core+atlas'
-        # --no-deps until 0.8.0: the provider requires akko-mcp-trino>=0.8.0, newer than the
-        # core of this commit; its other dependency, httpx, comes with the core.
-        run: pip install --no-deps --no-build-isolation -e providers/atlas
+        # As the core: its dependencies come from the locks, and pip check proves they hold
+        # what it declares, the core of this commit included.
+        run: |
+          pip install --no-deps --no-build-isolation -e providers/atlas
+          pip check
       - name: lint and format (ruff)
         run: |
           ruff check akko_mcp_trino tests examples integration
@@ -110,16 +113,23 @@ jobs:
         # ("MIT OR GPL-2.0-only") passes: the permissive one applies.
         run: |
           python -m venv /tmp/licenses
-          /tmp/licenses/bin/pip install --require-hashes -r requirements/image.txt
+          /tmp/licenses/bin/pip install --only-binary=:all: --require-hashes -r requirements/image.txt
           /tmp/licenses/bin/pip install --no-deps ./dist/*.whl
           if [ "${{ matrix.packages }}" = "core+atlas" ]; then
             /tmp/licenses/bin/pip install --no-deps ./dist-atlas/*.whl
-            # The kerberos extra of the provider (pyspnego, gssapi, krb5), from its lock; gssapi
-            # and krb5 publish no Linux wheel and are built from their sdists, against the
-            # system's MIT Kerberos.
+            # The image lock holds the provider's dependencies, as it does the core's.
+            /tmp/licenses/bin/pip check
+            # The kerberos extra of the provider (pyspnego, gssapi, krb5), as the image installs
+            # it: wheels from its lock with their hashes, gssapi and krb5 built from their sdists
+            # without isolation by the locked build tools, against the system's MIT Kerberos,
+            # then installed from those wheels only.
             sudo apt-get update -qq
             sudo apt-get install -y --no-install-recommends libkrb5-dev
-            /tmp/licenses/bin/pip install --require-hashes -r requirements/kerberos.txt
+            pip wheel --no-deps --no-build-isolation --require-hashes \
+              -r requirements/kerberos.txt -w /tmp/kerberos
+            /tmp/licenses/bin/pip install --no-index --find-links /tmp/kerberos \
+              "akko-mcp-trino-atlas[kerberos]"
+            /tmp/licenses/bin/pip check
             pip-licenses --python /tmp/licenses/bin/python --packages pyspnego gssapi krb5
           fi
           pip-licenses --python /tmp/licenses/bin/python --partial-match --fail-on "GNU General Public License;GNU Affero General Public License;AGPL;Collate Community License"
@@ -172,3 +182,69 @@ jobs:
           glibc=$(docker run --rm akko-mcp-trino:ci ldd --version | head -1 | awk '{print $NF}')
           echo "image glibc $glibc, scripts/lock.sh ${{ needs.versions.outputs.glibc }}"
           test "$glibc" = "${{ needs.versions.outputs.glibc }}"
+  changes:
+    # Whether this push or pull request touches what the image is built from, or this workflow;
+    # the arm64 build runs only then.
+    name: changes
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
+    outputs:
+      image: ${{ steps.diff.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # A push with no previous commit (a new branch) counts as touching everything.
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            echo image=true >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "$BASE" "$GITHUB_SHA")
+          if printf '%s\n' "$files" | grep -qE '^(Dockerfile|requirements/.*|pyproject\.toml|providers/atlas/pyproject\.toml|\.github/workflows/ci\.yml)$'; then
+            echo image=true >> "$GITHUB_OUTPUT"
+          else
+            echo image=false >> "$GITHUB_OUTPUT"
+          fi
+  image-arm64:
+    # The image for linux/arm64, under QEMU, when what it is built from changes: gssapi and krb5
+    # are compiled from their sdists under emulation (about 80 minutes), and an apt pin may
+    # exist for one architecture and not the other. Then the version and the Kerberos check
+    # run inside it.
+    name: container image builds (linux/arm64)
+    runs-on: ubuntu-latest
+    needs: changes
+    # A dispatch skips the changes job; !cancelled() lets this job run then, and a cancelled run
+    # still cancels it.
+    if: >-
+      !cancelled() && (github.event_name == 'workflow_dispatch' || needs.changes.outputs.image == 'true')
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          load: true
+          tags: akko-mcp-trino:ci-arm64
+      - name: the image runs on arm64, prints its version and checks Kerberos
+        # --check without --strict: no Atlas answers here, the configuration and the Kerberos
+        # libraries are what is checked. The keytab is an empty file the server can read.
+        run: |
+          test "$(docker run --rm --platform linux/arm64 akko-mcp-trino:ci-arm64 uname -m)" = aarch64
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+          test "$(docker run --rm --platform linux/arm64 akko-mcp-trino:ci-arm64 akko-mcp-trino --version)" = \
+            "akko-mcp-trino $version"
+          keytab=$(mktemp) && chmod 644 "$keytab" && settings=$(mktemp)
+          printf '%s\n' TRINO_IDENTITY_MODE=service MCP_AUTH_ENABLED=false MCP_AUTH_REQUIRED=false \
+            MCP_CONTEXT_PROVIDERS=atlas 'ATLAS_CLUSTERS={"lake":"primary"}' \
+            ATLAS_URL=http://atlas.invalid:21000 ATLAS_AUTH=kerberos \
+            ATLAS_PRINCIPAL=mcp-reader@EXAMPLE.ORG ATLAS_KEYTAB=/tmp/mcp.keytab > "$settings"
+          docker run --rm --platform linux/arm64 -v "$keytab:/tmp/mcp.keytab:ro" --env-file="$settings" akko-mcp-trino:ci-arm64 akko-mcp-trino --check

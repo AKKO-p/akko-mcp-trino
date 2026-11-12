@@ -64,12 +64,78 @@ def test_the_checks_run_on_every_python_the_package_declares() -> None:
 def test_the_image_installs_the_lock_with_its_hashes_and_nothing_else() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text()
     lock = dockerfile.index("--only-binary=:all: --require-hashes -r /tmp/requirements/image.txt")
-    core = dockerfile.index("--no-deps /tmp/akko_mcp_trino-*.whl")
+    wheels = dockerfile.index("--no-deps /tmp/akko_mcp_trino-*.whl /tmp/akko_mcp_trino_atlas-*.whl")
+    kerberos = dockerfile.index(
+        '--no-index --find-links /tmp/kerberos "akko-mcp-trino-atlas[kerberos]"'
+    )
     check = dockerfile.index("&& pip check")
-    atlas = dockerfile.index("--no-deps /tmp/akko_mcp_trino_atlas-*.whl")
-    # The check sees the core and its lock only: the provider requires a newer core.
-    assert lock < core < check < atlas
-    assert dockerfile.count("pip install") == 4  # build, then the lock and the two wheels
+    # The check sees both packages and the extra over the lock: it proves the lock holds what
+    # each declares.
+    assert lock < wheels < kerberos < check
+    # build, then the lock, the two wheels and the kerberos extra
+    assert dockerfile.count("pip install") == 4
+
+
+def test_the_image_builds_the_kerberos_extra_from_its_lock_in_the_build_stage() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    first = dockerfile.index("\nFROM ")
+    build = dockerfile[first : dockerfile.index("\nFROM ", first + 1)]
+    final = dockerfile[dockerfile.index("\nFROM ", first + 1) :]
+    assert re.search(
+        r"pip wheel --no-cache-dir --no-deps --no-build-isolation --require-hashes \\\n"
+        r"\s+-r requirements/kerberos.txt -w /src/kerberos",
+        build,
+    )
+    # The final stage reads the wheels through a mount: no layer of the image holds them.
+    assert "--mount=type=bind,from=build,source=/src/kerberos,target=/tmp/kerberos" in final
+    assert "COPY --from=build /src/kerberos" not in dockerfile
+    # A range in the source, an exact pin with its hashes in the lock.
+    assert re.search(r"^cython>=[\d.]+,<\d+$", (ROOT / "requirements/build.in").read_text(), re.M)
+    assert re.search(r"^cython==\S+ \\$", (ROOT / "requirements/build.txt").read_text(), re.M)
+
+
+APT_PIN = re.compile(r"[a-z0-9][a-z0-9+.-]*=[0-9][A-Za-z0-9.+~:-]*")
+
+
+def _apt_problems(dockerfile: str) -> list[str]:
+    """What a RUN that installs apt packages misses: a version on each package (name=version),
+    --no-install-recommends, and the removal of the apt lists."""
+    problems = []
+    for run in re.findall(r"^RUN (.*)$", dockerfile.replace("\\\n", " "), re.M):
+        for install in re.findall(r"apt-get install ([^&]*)", run):
+            args = install.split()
+            if "--no-install-recommends" not in args:
+                problems.append("--no-install-recommends")
+            problems += [a for a in args if not a.startswith("-") and not APT_PIN.fullmatch(a)]
+            if "rm -rf /var/lib/apt/lists/*" not in run:
+                problems.append("apt lists kept")
+    return problems
+
+
+def test_every_apt_package_of_the_image_is_pinned() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    assert dockerfile.count("apt-get install") == 2  # the build stage, then the final stage
+    assert _apt_problems(dockerfile) == []
+
+
+def test_the_apt_check_catches_a_package_without_a_version() -> None:
+    run = "RUN apt-get update \\\n && apt-get install -y --no-install-recommends gcc=1 libx \\\n"
+    assert _apt_problems(run + " && rm -rf /var/lib/apt/lists/*\n") == ["libx"]
+    assert _apt_problems("RUN apt-get install -y gcc=1\n") == [
+        "--no-install-recommends",
+        "apt lists kept",
+    ]
+
+
+def test_the_image_lock_holds_the_dependencies_of_the_core_and_the_atlas_provider() -> None:
+    source = (ROOT / "requirements/image.in").read_text()
+    assert re.findall(r"^-e (\S+)$", source, re.M) == ["file:.", "file:providers/atlas"]
+    locked = _requirement_names(ROOT / "requirements/image.txt")
+    for pyproject in (ROOT / "pyproject.toml", ROOT / "providers/atlas/pyproject.toml"):
+        for line in tomllib.loads(pyproject.read_text())["project"]["dependencies"]:
+            name = re.match(r"[A-Za-z0-9_.-]+", line).group(0).lower()
+            if name not in _repository_packages():
+                assert name in locked, (pyproject.parent.name, line)
 
 
 def _release_image(tag: Path) -> subprocess.CompletedProcess[str]:
@@ -158,7 +224,9 @@ def test_every_pip_install_of_ci_the_release_and_the_image_is_locked() -> None:
                 continue  # the ranges job resolves the declared ranges, on purpose
             locked = "--require-hashes -r " in line
             local = "--no-deps" in line and re.search(r"(-e |\./|/tmp/akko|\s\.$)", line)
-            assert locked or local, f"{name}: {line.strip()}"
+            # The image's kerberos extra: the wheels its build stage checked against their lock.
+            built = "--no-index --find-links /tmp/kerberos " in line
+            assert locked or local or built, f"{name}: {line.strip()}"
     assert seen >= 10
 
 
@@ -186,6 +254,14 @@ def _installs_the_package(source: Path) -> bool:
     )
 
 
+def _repository_packages() -> list[str]:
+    """The packages of the repository, the core and each provider, which no lock pins."""
+    return [
+        tomllib.loads(path.read_text())["project"]["name"]
+        for path in (ROOT / "pyproject.toml", *sorted(ROOT.glob("providers/*/pyproject.toml")))
+    ]
+
+
 def _lock_problems(root: Path) -> list[str]:
     """What would make Dependabot compile a lock with --allow-unsafe on the package's directory:
     a lock that installs the package and pins pip, setuptools or the package, or whose command
@@ -203,7 +279,7 @@ def _lock_problems(root: Path) -> list[str]:
                 problems.append(f"{source}: pins pip, setuptools or the package")
             if "--allow-unsafe" in options:
                 problems.append(f"{source}: --allow-unsafe")
-            for package in ("pip", "setuptools"):
+            for package in (*_repository_packages(), "pip", "setuptools"):
                 if f"--unsafe-package={package}" not in options:
                     problems.append(f"{source}: no --unsafe-package={package}")
         elif "--allow-unsafe" not in options:
@@ -524,3 +600,14 @@ def test_the_tool_versions_live_in_the_dev_lock_only() -> None:
         assert re.search(rf"^{tool}$", dev, re.M), tool
         assert re.search(rf"^{tool}==\S+ \\$", lock, re.M), tool
     assert "==" not in "".join(line for line in dev.splitlines() if not line.startswith("#"))
+
+
+def test_the_release_builds_both_packages_from_the_tag_at_its_version() -> None:
+    workflow = (ROOT / ".github/workflows/release.yml").read_text()
+    dist = re.split(r"^  (?=[a-z-]+:$)", workflow.split("\njobs:\n", 1)[1], flags=re.M)
+    job = next(j for j in dist if j.startswith("dist:"))
+    assert "ref: ${{ needs.ref.outputs.sha }}" in job
+    assert "python -m build --no-isolation\n" in job
+    assert "python -m build --no-isolation --outdir dist providers/atlas" in job
+    for name in ("akko_mcp_trino", "akko_mcp_trino_atlas"):
+        assert f'"{name}-$v.tar.gz"' in job and f'"{name}-$v-py3-none-any.whl"' in job

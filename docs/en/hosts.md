@@ -13,9 +13,7 @@ agents uses the Mistral Agents API. The hosts follow one of three paths:
 | [2. Your own Trino, from your workstation](#2-your-own-trino-from-your-workstation-stdio-and-oauth2) | stdio, the host starts the server | you, signed in by Trino's own browser login (`oauth2`) | one person, with a Trino that uses OAuth2 |
 | [3. A shared server for a team](#3-a-shared-server-for-a-team-streamable-http-and-a-token-per-user) | streamable HTTP over HTTPS | each user, from their own bearer token (`jwt`, the default) | a team, one server |
 
-**Versions.** The commands on this page pin 0.7.2, the current release, which lists eight tools.
-This page describes `main`, which adds a ninth, `profile_table`. The pins move to 0.8.0 when it
-is released.
+**Versions.** The commands on this page pin 0.8.0, the current release, which lists nine tools.
 
 **Find your host.**
 
@@ -206,10 +204,10 @@ In a Claude Code session, `/mcp` shows the server's status. In Cursor, the serve
 **Customize**, with its tools under *Available Tools*. In VS Code, run the command
 **MCP: List Servers**.
 
-With 0.7.2, the release pinned on this page, you should see eight tools: `search_columns`,
+With 0.8.0, the release pinned on this page, you should see nine tools: `search_columns`,
 `list_catalogs`, `list_schemas`, `list_tables`, `describe_schema`, `describe_table`,
-`explain_query` and `execute_query`. A server built from `main` adds a ninth, `profile_table`.
-Then ask the two questions from the [quickstart](quickstart.md#ask-a-question).
+`profile_table`, `explain_query` and `execute_query`. Then ask the two questions from the
+[quickstart](quickstart.md#ask-a-question).
 
 To switch users, give the host another token and restart the server. In Claude Desktop, restart
 the application. In Claude Code, run `claude mcp remove trino`, then add it again with the new
@@ -239,7 +237,7 @@ For **Claude Desktop**, use the entry below without `"type": "stdio"`
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.7.2"
+        "akko-mcp-trino==0.8.0"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -293,7 +291,7 @@ network would let anyone query Trino through it. Never turn token verification o
         "-e", "TRINO_CATALOG=iceberg",
         "-e", "MCP_AUTH_ENABLED=false",
         "-e", "MCP_AUTH_REQUIRED=false",
-        "akkoai/akko-mcp-trino:0.7.2"
+        "akkoai/akko-mcp-trino:0.8.0"
       ]
     }
   }
@@ -427,7 +425,7 @@ and Cursor:
     "trino": {
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.7.2"
+        "akko-mcp-trino==0.8.0"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -474,7 +472,7 @@ claude mcp add \
   --env TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \
   --env "MCP_USER_TOKEN=$MCP_USER_TOKEN" \
   --transport stdio trino \
-  -- uvx akko-mcp-trino==0.7.2
+  -- uvx akko-mcp-trino==0.8.0
 ```
 
 `claude mcp list` then shows `✔ Connected` once the server answers. As in path 1, Claude Code
@@ -505,7 +503,7 @@ neither ([`examples/vscode-mcp-stdio.json`](../../examples/vscode-mcp-stdio.json
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.7.2"
+        "akko-mcp-trino==0.8.0"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -651,7 +649,7 @@ package: run it from a clone of this repository, with Python 3.12 or later.
 git clone https://github.com/AKKO-p/akko-mcp-trino.git
 cd akko-mcp-trino
 python3 -m venv .venv && . .venv/bin/activate
-pip install akko-mcp-trino==0.7.2
+pip install akko-mcp-trino==0.8.0
 python3 examples/check_host_config.py ~/.cursor/mcp.json --search email --describe demo.crm.customers
 ```
 
@@ -661,8 +659,8 @@ VS Code's `${input:ID}` from the variable `INPUT_<ID>`, for example `INPUT_TRINO
 a file that holds several servers, name the entry with `--server trino`.
 
 This run used a server built from `main`, against the sandbox with its data catalog (the
-`catalogs` profile), with Carol's token. A build of `main` still reports 0.7.2 but lists nine
-tools; a 0.7.2 server lists eight. The output was:
+`catalogs` profile), with Carol's token. That build came before the version moved to 0.8.0: it
+reports 0.7.2 and lists the nine tools of 0.8.0. The output was:
 
 ```text
 entry: trino (streamable HTTP)
@@ -725,13 +723,14 @@ nine tools, found `demo.crm.customers.email` with `search_columns("email")`, and
 | From an agent | `mistral-small-latest`, then `mistral-medium-latest`, Carol's token | did not complete: `429 - Rate limit exceeded` |
 
 For the sandbox runs, only the placeholders changed: the token, Trino's name inside the sandbox
-network (`trino`), its catalog `demo`, the identity provider's addresses and its demo CA
-certificate (`TRINO_VERIFY`, and `TRINO_TOKEN_EXCHANGE_VERIFY` for the stdio entries).
-`akko-mcp-trino==0.7.2` became the wheel built from `main` (`uvx --from <wheel> akko-mcp-trino`),
-and the Docker image became the image built from `main`. The Docker run also had `--network` and
-a volume for the CA certificate. The checker filled VS Code's inputs from the `INPUT_TRINO_TOKEN`
-and `INPUT_TRINO_CLIENT_SECRET` environment variables. The Trino OAuth2 authenticator was added
-to the sandbox for this test only: the sandbox itself authenticates with JWT.
+network (`trino`), its catalog `demo`, the identity provider's addresses and its demo CA certificate
+(`TRINO_VERIFY`, and `TRINO_TOKEN_EXCHANGE_VERIFY` for the stdio entries). The pinned
+`akko-mcp-trino==<version>` became the wheel built from `main`
+(`uvx --from <wheel> akko-mcp-trino`), and the Docker image became the image built from `main`. The
+Docker run also had `--network` and a volume for the CA certificate. The checker filled VS Code's
+inputs from the `INPUT_TRINO_TOKEN` and `INPUT_TRINO_CLIENT_SECRET` environment variables. The Trino
+OAuth2 authenticator was added to the sandbox for this test only: the sandbox itself authenticates
+with JWT.
 
 These did not run on `main`:
 

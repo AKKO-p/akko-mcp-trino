@@ -103,7 +103,7 @@ docker run -d --name akko-mcp-trino -p 3000:3000 -p 3001:3001 \
   -e TRINO_TOKEN_EXCHANGE_URL=https://idp.example.com/realms/data/protocol/openid-connect/token \
   -e TRINO_TOKEN_EXCHANGE_CLIENT_ID=akko-mcp -e TRINO_TOKEN_EXCHANGE_CLIENT_SECRET \
   -e TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \
-  akkoai/akko-mcp-trino:0.7
+  akkoai/akko-mcp-trino:0.8
 ```
 
 Without token exchange, use `-e TRINO_IDENTITY_MODE=impersonation -e TRINO_USER=mcp-service`, with
@@ -119,14 +119,14 @@ access token as `Authorization: Bearer <token>`. Then check the server:
 ```bash
 curl -s localhost:3001/health   # {"status":"ok"}
 curl -s localhost:3001/ready    # {"status":"ready"} once Trino responds
-docker run --rm akkoai/akko-mcp-trino:0.7 akko-mcp-trino --version
+docker run --rm akkoai/akko-mcp-trino:0.8 akko-mcp-trino --version
 ```
 
 `--check` works in a container too:
 
 ```bash
 docker run --rm -e TRINO_HOST=... -e TRINO_HTTP_SCHEME=https -e MCP_JWKS_URL=... \
-  akkoai/akko-mcp-trino:0.7 akko-mcp-trino --check
+  akkoai/akko-mcp-trino:0.8 akko-mcp-trino --check
 ```
 
 ## Kubernetes and OpenShift
@@ -211,8 +211,8 @@ Without a provider, no data catalog code is loaded and no data catalog is called
 
 The chart has no value of its own for the context: its variables go in `extraEnv`, a secret only
 through `valueFrom`, and the `file` provider's JSON file in `extraVolumes` and `extraVolumeMounts`.
-The published images (0.7.x) do not carry the Atlas provider. Build the image from `main`,
-which installs it inactive, without the Kerberos libraries. For Atlas with Basic authentication:
+The image carries the Atlas provider from 0.8.0, inactive, with the Kerberos libraries of its
+`kerberos` extra. For Atlas with Basic authentication:
 
 ```yaml
 extraEnv:

@@ -5,3 +5,7 @@
 build
 setuptools
 wheel
+# The backend of the sdists of gssapi and krb5, which the image's build stage builds without
+# isolation for the kerberos extra of the Atlas provider: from the version both require (their
+# [build-system] names cython 3.3.0), below the next major version. The lock pins it exactly.
+cython>=3.3.0,<4

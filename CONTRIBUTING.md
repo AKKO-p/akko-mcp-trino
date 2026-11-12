@@ -48,11 +48,11 @@ written by [pip-compile](https://pip-tools.readthedocs.io/) from its source:
 
 | Lock | Source | Installed by |
 |---|---|---|
-| `requirements/image.txt` | `requirements/image.in`: the dependencies the package declares | the container image, the license and vulnerability checks |
-| `requirements/build.txt` | `requirements/build.in`: the build frontend and the backend of `[build-system]` | the image's build stage, and the checks, with `dev.txt` |
+| `requirements/image.txt` | `requirements/image.in`: the dependencies the core and the Atlas provider declare | the container image, the license and vulnerability checks |
+| `requirements/build.txt` | `requirements/build.in`: the build frontend and the backend of `[build-system]`, and Cython for the sdists of the `kerberos` extra | the image's build stage, and the checks, with `dev.txt` |
 | `requirements/release.txt` | `requirements/release.in`: the build tools and twine | the release (sdist, wheel, upload) |
 | `requirements/dev.txt` | `requirements/dev.in`: the tools the checks run, unpinned in the source, resolved to the versions used by the image and the release | CI and the setup above, on every Python version |
-| `requirements/kerberos.txt` | its `.in`: the `kerberos` extra of the Atlas provider | the license check only |
+| `requirements/kerberos.txt` | its `.in`: the `kerberos` extra of the Atlas provider | the container image (its build stage builds the wheels), the license check |
 
 The versions of the tools (pytest, ruff, mypy and the others) live in
 `requirements/dev.txt` only: the `test` and `dev` extras of `pyproject.toml`
@@ -62,23 +62,26 @@ name them without a version, so that an update, by Dependabot or by
 The wheels and the sdist are built by the locked backend, without isolation
 (`python -m build --no-isolation`), so that no build tool is fetched unlocked.
 The image installs its lock with `pip install --only-binary=:all:
---require-hashes`, then the package without dependencies; `pip check` fails
-the build if the lock misses a dependency that the package or a locked package
-declares. It does not see a dependency that only an extra brings, such as the
-CLI of `mcp[cli]`. The Atlas provider will be added to the lock in the release
-that publishes both packages; until then, the image installs it without
-dependencies.
+--require-hashes`, then the core and the Atlas provider without dependencies;
+`pip check` fails the build if the lock misses a dependency that one of them or
+a locked package declares. It does not see a dependency that only an extra
+brings, such as the CLI of `mcp[cli]`.
 
-`dev.txt`, `image.txt` and `kerberos.txt` install the package from its
-directory (`-e` or `-r image.in`). They therefore leave out the package itself,
-pip and setuptools (`--unsafe-package`). Dependabot compiles any lock that pins
+`dev.txt`, `image.txt` and `kerberos.txt` install the packages from their
+directories (`-e` or `-r image.in`). They therefore leave out the packages of
+the repository (the core and the Atlas provider), pip and setuptools
+(`--unsafe-package`). Dependabot compiles any lock that pins
 pip or setuptools with `--allow-unsafe`, and that fails for a package installed
 from its directory. setuptools still gets pinned for the checks, because they
 install `build.txt` together with `dev.txt`. `build.txt` and `release.txt` pin
 pip and setuptools (`--allow-unsafe`). The `kerberos` lock builds gssapi and krb5 from their
-sdists (hashes checked) against the system's MIT Kerberos (`libkrb5-dev`); the
-build tools pip fetches for those two are not locked, and nothing of it enters
-the image.
+sdists (hashes checked) against the system's MIT Kerberos (`libkrb5-dev`). The
+image's build stage builds them without isolation, with the Cython of
+`build.txt`, into wheels that the final stage installs through a mount, with
+`--no-index`; the final stage adds the MIT Kerberos runtime libraries
+(`libgssapi-krb5-2`). The license check builds and installs them the same way,
+without isolation and from those wheels only, so that no build tool outside the
+locks is fetched.
 
 The Dockerfile names its base image once, pinned by digest, in both stages, so
 that the image is reproducible; Dependabot brings its security updates, a
@@ -88,6 +91,33 @@ version on the Dockerfile's `FROM` line (`LOCK_PYTHON`), and
 `tests/test_locks.py` checks that the locks were compiled on it. Moving to a new
 Python minor version is a manual step: the `FROM` line, then
 `bash scripts/lock.sh compile` on that Python.
+
+The Dockerfile installs a few Debian packages with apt: a compiler and the MIT
+Kerberos headers in the build stage, the MIT Kerberos libraries in the final
+stage. Each one is pinned to an exact version (`name=version`), with
+`--no-install-recommends`, and `tests/test_locks.py` fails on a package without
+a version. The versions are those of the Debian release of the base image, the
+same on `linux/amd64` and `linux/arm64`. When Dependabot moves the base image,
+or when the build fails because the Debian mirror no longer serves a pinned
+version (a security update replaces it), read the versions the new base offers
+and write them in the Dockerfile:
+
+```bash
+docker run --rm python:<version>-slim@sha256:<digest> sh -c 'apt-get update -qq &&
+  apt-get install -s --no-install-recommends libgssapi-krb5-2 | grep ^Inst &&
+  apt-cache policy gcc libc6-dev libkrb5-dev | grep -E "^[a-z]|Candidate"'
+```
+
+The `Inst` lines name `libgssapi-krb5-2` and every library it brings, each with
+its version: the final stage pins them all. The `Candidate` lines give the
+versions of the three packages the build stage pins. Then build the image for both
+platforms (`docker buildx build --platform linux/amd64,linux/arm64 .`). CI builds
+the image for `linux/arm64` too, under QEMU, and runs `--version` and the Kerberos
+`--check` in it, when a pull request or a push touches the Dockerfile,
+`requirements/`, `pyproject.toml`, `providers/atlas/pyproject.toml` or
+`.github/workflows/ci.yml`, and on a manual run (`workflow_dispatch`): gssapi
+and krb5 compile under emulation, which
+takes over an hour, so it does not run on every pull request.
 
 `scripts/lock.sh` is the one place CI and the release read the versions from:
 `LOCK_PYTHON`, the Python versions of the checks and of the Atlas provider

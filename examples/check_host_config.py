@@ -9,7 +9,7 @@ resolves them, and so are VS Code's ${input:ID}, from the variable INPUT_<ID>.
 
     git clone https://github.com/AKKO-p/akko-mcp-trino.git && cd akko-mcp-trino
     python3 -m venv .venv && . .venv/bin/activate      # Python 3.12 or later
-    pip install akko-mcp-trino==0.7.2
+    pip install akko-mcp-trino==0.8.0
     python3 examples/check_host_config.py ~/.cursor/mcp.json
     python3 examples/check_host_config.py claude_desktop_config.json --server trino --search email
     python3 examples/check_host_config.py .vscode/mcp.json --describe demo.crm.customers
