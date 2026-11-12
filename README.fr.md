@@ -26,11 +26,16 @@ jamais le serveur. Le contrôle d'accès de Trino (OPA, Ranger ou les règles de
 de ce que cet utilisateur peut lire. Les résultats sont limités en lignes et en durée, et chaque
 appel laisse une ligne d'audit.
 
-> **Vous venez de la 0.7.0 ?** La 0.7.1 et la 0.7.2 sont des versions de sécurité. `execute_query`
+> **Vous venez d'une 0.7.x ?** La 0.8.0 ajoute un neuvième tool, `profile_table`, et le contexte
+> d'un catalogue de données, éteint tant que `MCP_CONTEXT_PROVIDERS` ne nomme pas de fournisseur.
+> Sans rien activer, trois changements se voient : `search_columns` lit 8 catalogs à la fois
+> (`MCP_SEARCH_CONCURRENCY=1` pour la charge de la 0.7), un token dont l'`azp` est présent mais vide
+> ne nomme aucun client, et le serveur n'écrit le journal d'`httpx` qu'à partir de `WARNING`. Depuis
+> la 0.7.0, la 0.7.1 et la 0.7.2 sont des versions de sécurité : `execute_query`
 > refuse `SHOW STATS`, `EXPLAIN`, `SHOW CREATE` et les autres lectures listées dans
 > [Sécurité](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/security.md#les-instructions-quun-agent-peut-envoyer), et l'utilisateur est lu dans
 > `sub`. Avec Keycloak, posez `MCP_JWT_USER_CLAIM=preferred_username` avant la mise à jour. Voir
-> [MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md) (en anglais), et [Montée de version](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/operations.md#montée-de-version)
+> [MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md#from-07-to-08) (en anglais), et [Montée de version](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/operations.md#montée-de-version)
 > pour les autres versions.
 
 ## Comprendre en cinq étapes
@@ -119,6 +124,7 @@ avec les règles qu'il a déjà, ou, en mode `service`, pour l'identité unique 
 - **Une ligne d'audit par appel.** Elle est indexée par `X-Request-Id` et ne contient jamais le token ni le texte SQL : qui a appelé quel tool, avec quel résultat, pendant combien de temps.
 - **Neuf tools**, annotés selon ce qu'ils peuvent vraiment faire : `execute_query` n'est annoté en lecture seule que tant que `TRINO_READ_ONLY` est vrai.
 - **La vérification du token.** Les bearer tokens sont vérifiés avec le JWKS de n'importe quel identity provider OIDC (issuer, audience liée à ce serveur, expiration, tolérance d'horloge), un token émis pour Trino est refusé, les métadonnées de ressource protégée sont publiées (RFC 9728), et l'en-tête Host est filtré.
+- **Le contexte d'un catalogue de données, éteint par défaut.** Avec `MCP_CONTEXT_PROVIDERS`, `describe_table` et `describe_schema` ajoutent ce qu'un catalogue de données sait d'une table (descriptions, termes de glossaire, classifications, propriétaire), seulement pour les tables que Trino liste à l'appelant, et au-delà des descriptions seulement ce que nomment des listes blanches. Des fournisseurs pour Apache Atlas (`akko-mcp-trino-atlas`) et pour un fichier JSON : voir [Contexte d'un catalogue de données](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/catalog-context.md).
 - **Extensible sans fork.** Les plugins de tools et les extensions sont des paquets Python nommés au démarrage : modes d'identité, gardes, champs d'audit, routes, tools. Une extension peut seulement refuser ce que le cœur autorise, jamais l'élargir.
 - **N'importe quel MCP host, n'importe quel modèle.** Cursor, Claude Desktop, VS Code et le SDK Python ; et tout modèle, Mistral compris, par l'agent d'exemple.
 - **Les tests.** 100 % de couverture des lignes et des branches, dont des suites en processus sur le vrai SDK pour les trois transports, une exécution réelle contre Keycloak et Trino en CI ([`integration/`](https://github.com/AKKO-p/akko-mcp-trino/tree/main/integration)), et un contrôle que le paquet n'importe aucun code propre à un fournisseur.
