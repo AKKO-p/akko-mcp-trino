@@ -996,7 +996,11 @@ class ContextContract:
         )
 
     def test_trap_names_are_looked_up_as_trino_lists_them(self, harness: ContractHarness) -> None:
-        """A name with a quote, a dot, a space or an accent is found under that exact name."""
+        """A name with a quote, a dot, a space or an accent is found under that exact name.
+
+        A provider may decline a name it cannot map to its catalogue unambiguously (a dot in a
+        catalogue that joins schema and table with dots); its harness then gives a trap without
+        that character, or skips this check with the reason."""
         trap = harness.names.trap
         with _running(harness) as run:
             found = run.describe([trap], self.DEADLINE_SECONDS)

@@ -73,7 +73,8 @@ class AtlasSettings:
         if self.auth == KERBEROS and any(_plain(url) for url in self.urls):
             return [
                 "ATLAS_URL has an http address: Kerberos authenticates the account, "
-                "but nothing authenticates Atlas or protects its answers without https"
+                "but nothing authenticates Atlas or protects its answers and its session cookie "
+                "without https"
             ]
         return []
 
@@ -295,6 +296,7 @@ def read_settings(env: Mapping[str, str]) -> AtlasSettings:
     )
     if settings.auth in (BASIC, KNOX) and any(_plain(url) for url in urls):
         raise ValueError(
-            "ATLAS_PASSWORD or ATLAS_KNOX_TOKEN is set but an address of ATLAS_URL is not https"
+            "ATLAS_PASSWORD or ATLAS_KNOX_TOKEN (or its file) is set but an address of "
+            "ATLAS_URL is not https"
         )
     return settings

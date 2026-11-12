@@ -157,7 +157,8 @@ def test_a_password_or_a_token_is_never_sent_over_plain_http(secret, urls):
     with pytest.raises(ValueError) as raised:
         from_env(env)
     assert str(raised.value) == (
-        "ATLAS_PASSWORD or ATLAS_KNOX_TOKEN is set but an address of ATLAS_URL is not https"
+        "ATLAS_PASSWORD or ATLAS_KNOX_TOKEN (or its file) is set but an address of "
+        "ATLAS_URL is not https"
     )
     for leaked in ("atlas:21000", "atlas-b", PASSWORD, "knox-token", "reader"):
         assert leaked not in str(raised.value)
@@ -175,7 +176,8 @@ def test_kerberos_over_plain_http_starts_with_one_warning(tmp_path, monkeypatch,
     }
     warning = (
         "ATLAS_URL has an http address: Kerberos authenticates the account, "
-        "but nothing authenticates Atlas or protects its answers without https"
+        "but nothing authenticates Atlas or protects its answers and its session cookie "
+        "without https"
     )
     caplog.set_level(logging.INFO)
     for urls, said in ((PLAIN, [warning]), ("https://atlas-a:21443", [])):

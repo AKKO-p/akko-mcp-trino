@@ -78,8 +78,8 @@ MISSING_ROLES: Mapping[str, Mapping[str, str]] = {
             "the recorded catalogue holds one glossary only: none outside the allow list"
         ),
         "test_trap_names_are_looked_up_as_trino_lists_them": (
-            "the recorded trap table holds dots, and the provider never looks up a name with a "
-            "dot, since Atlas could not tell it from another table"
+            "the provider never looks up a dotted name, which Atlas could not tell from another "
+            "table; the recorded trap holds dots, and the seeded catalogue plays the role"
         ),
     },
 }

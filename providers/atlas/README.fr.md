@@ -43,7 +43,7 @@ cite une adresse, un proxy ni un secret.
 
 | Variable | Rôle | Défaut |
 |---|---|---|
-| `ATLAS_URL` | adresse d'Atlas, `http` ou `https` ; plusieurs, séparées par des virgules, pour un Atlas en haute disponibilité. Jamais avec des identifiants dedans. Un mot de passe ou un jeton Knox sur `http` refuse de démarrer (`ATLAS_PASSWORD or ATLAS_KNOX_TOKEN is set but an address of ATLAS_URL is not https`), comme le serveur refuse `TRINO_PASSWORD` sans https. Kerberos sur `http` démarre, avec un avertissement au démarrage et dans `--check` : le compte est authentifié, mais rien n'authentifie Atlas ni ne protège ses réponses. | obligatoire |
+| `ATLAS_URL` | adresse d'Atlas, `http` ou `https` ; plusieurs, séparées par des virgules, pour un Atlas en haute disponibilité. Jamais avec des identifiants dedans. Un mot de passe ou un jeton Knox sur `http` refuse de démarrer (`ATLAS_PASSWORD or ATLAS_KNOX_TOKEN (or its file) is set but an address of ATLAS_URL is not https`), comme le serveur refuse `TRINO_PASSWORD` sans https. Kerberos sur `http` démarre, avec un avertissement au démarrage et dans `--check` : le compte est authentifié, mais rien n'authentifie Atlas ni ne protège ses réponses et son cookie de session, qui pourrait être rejoué au nom du compte jusqu'à son expiration. | obligatoire |
 | `ATLAS_AUTH` | `basic` (un utilisateur et un mot de passe, ou un jeton Knox) ou `kerberos` | `basic` |
 | `ATLAS_USER`, `ATLAS_PASSWORD` ou `ATLAS_PASSWORD_FILE` | authentification Basic, avec un compte en lecture seule ; le fichier passe en premier | vide |
 | `ATLAS_KNOX_TOKEN` ou `ATLAS_KNOX_TOKEN_FILE` | un jeton Knox, envoyé en `Authorization: Bearer`, pour un Atlas derrière une topologie Knox avec le rôle `ATLAS` ; pas avec `ATLAS_USER` | vide |
@@ -196,12 +196,16 @@ passif d'Atlas renégocie avec l'actif. L'authentification mutuelle d'Atlas est 
 Une négociation tourne sur un fil d'exécution propre au fournisseur, jamais sur la boucle qui sert
 le contexte de chaque appel : un KDC lent ne retient jamais les autres lectures. Un KDC qui n'a
 pas répondu à l'échéance de l'appel (un port 88 filtré, des essais d'un KDC à l'autre) rend cet
-appel `unavailable` à son échéance ; aucune attente ne s'ouvre, puisque l'échéance a coupé
-l'appel, donc l'appel suivant renégocie et paie la même attente. Au plus
+appel `unavailable` à son échéance ; le fournisseur n'est pas écarté comme en panne (pas de
+pause `MCP_CONTEXT_RETRY_AFTER_SECONDS`), puisque l'échéance a coupé l'appel, donc l'appel suivant
+renégocie et paie la même attente. Au plus
 `ATLAS_MAX_CONCURRENT_REQUESTS` négociations tournent à la fois ; une négociation qui attend encore
 un fil quand son appel est coupé ne commence jamais, et une négociation en cours s'achève quand le
 KDC répond, son résultat écarté. L'attente du KDC compte comme une attente de l'adresse par
-laquelle l'appel a commencé : la ligne d'adresse plus haut peut donc la nommer.
+laquelle l'appel a commencé : la ligne d'adresse plus haut peut donc la nommer, et les appels
+suivants peuvent commencer par l'adresse suivante d'`ATLAS_URL`. Une négociation en cours retient
+aussi le processus quand il s'arrête : Python attend son fil, donc un arrêt pendant un KDC bloqué
+dure jusqu'à ce que krb5 abandonne, dans le délai de grâce du pod.
 
 Une négociation qui échoue est un refus du compte, comme un 401, sans essayer d'autre adresse : un
 keytab que le KDC refuse (un mot de passe changé dans l'annuaire, un mauvais principal, un keytab
@@ -219,8 +223,9 @@ Ce qu'il faut au conteneur :
 - un `krb5.conf` (`/etc/krb5.conf`, ou `KRB5_CONFIG`) qui nomme le royaume et son KDC, avec
   `rdns = false`, car une adresse derrière un répartiteur de charge ou un service Kubernetes n'a
   pas de nom inverse qui corresponde au principal de service d'Atlas (`ATLAS_SPN` le nomme) ;
-- une route vers le KDC (port 88) depuis le pod : les règles réseau de Kubernetes et d'OpenShift
-  doivent la laisser passer ;
+- une route vers le KDC (port 88, en UDP et en TCP, ou `udp_preference_limit = 1` dans
+  `krb5.conf`) depuis le pod : les règles réseau de Kubernetes et d'OpenShift doivent la laisser
+  passer ;
 - une horloge à l'heure du KDC (cinq minutes d'écart au plus, par défaut) ;
 - le keytab monté en lecture seule, comme un secret, jamais dans l'image.
 

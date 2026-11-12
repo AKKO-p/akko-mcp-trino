@@ -234,8 +234,9 @@ extraEnv:
 ```
 
 With `networkPolicy.enabled: true`, the pod reaches only DNS, Trino and the identity provider:
-add Atlas's addresses and ports, and port 88 of the KDC for Kerberos, in
-`networkPolicy.egress.extra`, or the context is always `unavailable`.
+add Atlas's addresses and ports, and port 88 of the KDC for Kerberos (UDP and TCP, or
+`udp_preference_limit = 1` in `krb5.conf`), in `networkPolicy.egress.extra`, or the context is
+always `unavailable`.
 
 For the `file` provider:
 

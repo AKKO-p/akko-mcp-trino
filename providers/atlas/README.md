@@ -43,7 +43,7 @@ secret.
 
 | Variable | Role | Default |
 |---|---|---|
-| `ATLAS_URL` | Atlas address, `http` or `https`; several, separated by commas, for Atlas in high availability. Never with credentials in it. A password or a Knox token over `http` refuses to start (`ATLAS_PASSWORD or ATLAS_KNOX_TOKEN is set but an address of ATLAS_URL is not https`), as the server refuses `TRINO_PASSWORD` without https. Kerberos over `http` starts, with one warning at start and in `--check`: the account is authenticated, but nothing authenticates Atlas or protects its answers. | required |
+| `ATLAS_URL` | Atlas address, `http` or `https`; several, separated by commas, for Atlas in high availability. Never with credentials in it. A password or a Knox token over `http` refuses to start (`ATLAS_PASSWORD or ATLAS_KNOX_TOKEN (or its file) is set but an address of ATLAS_URL is not https`), as the server refuses `TRINO_PASSWORD` without https. Kerberos over `http` starts, with one warning at start and in `--check`: the account is authenticated, but nothing authenticates Atlas or protects its answers and its session cookie, which could be replayed as the account until it expires. | required |
 | `ATLAS_AUTH` | `basic` (a user and a password, or a Knox token) or `kerberos` | `basic` |
 | `ATLAS_USER`, `ATLAS_PASSWORD` or `ATLAS_PASSWORD_FILE` | Basic authentication, with a read-only account; the file comes first | empty |
 | `ATLAS_KNOX_TOKEN` or `ATLAS_KNOX_TOKEN_FILE` | a Knox token, sent as `Authorization: Bearer`, for Atlas behind a Knox topology with the `ATLAS` role; not with `ATLAS_USER` | empty |
@@ -142,8 +142,8 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 
 An outage Atlas reports, or no address answering, logs `atlas unreachable`, with no address,
 user or object name; a read cut by the call's deadline logs only the address line below, when
-the address was late. A refusal is logged by the server as `atlas refused the account`. Neither the logs nor an error carry an
-answer's text or the secret.
+the address was late. A refusal is logged by the server as `atlas refused the account`. Neither
+the logs nor an error carry an answer's text or the secret.
 
 **A server that accepts the connection and then hangs** (frozen) is left: when the address a
 call started with does not answer in time, the next calls start at the next address of
@@ -189,19 +189,24 @@ Mutual authentication of Atlas is left to TLS (`https` and `ATLAS_CA_BUNDLE`).
 A negotiation runs on a thread of the provider's own, never on the loop that serves the context
 of every call, so a slow KDC never holds the other reads. A KDC that has not answered when the
 call's deadline passes (a filtered port 88, retries across KDCs) makes that call `unavailable`
-at its deadline; no wait opens, since the deadline cut the call, so the next call negotiates
-again and pays the same wait. At most `ATLAS_MAX_CONCURRENT_REQUESTS` negotiations run at once; a
+at its deadline; the provider is not set aside as down (no `MCP_CONTEXT_RETRY_AFTER_SECONDS`
+pause), since the deadline cut the call, so the next call negotiates again and pays the same
+wait. At most `ATLAS_MAX_CONCURRENT_REQUESTS` negotiations run at once; a
 negotiation still waiting for a thread when its call is cut never starts, and one under way ends
 when the KDC answers, its result dropped. The wait on the KDC counts as a wait on the address the
-call started with, so the address line above may name it.
+call started with, so the address line above may name it, and the next calls may start at the
+next address of `ATLAS_URL`. A negotiation under way also holds the process when it stops: Python
+waits for its thread, so a stop during a KDC hang lasts until krb5 gives up, within the pod's
+grace period.
 
 A negotiation that fails is a refusal of the account, as a 401 is, with no other address tried: a
 keytab the KDC refuses (a password reset in the directory, a wrong principal, a keytab that cannot
 be used) is not tried again for `MCP_CONTEXT_REFUSED_RETRY_SECONDS`, so that the provider never
 locks the account with failed pre-authentications. Only a KDC that cannot be found or reached makes
 the provider unavailable: when the KDC says so within the call's deadline, the provider is
-retried as an outage, after `MCP_CONTEXT_RETRY_AFTER_SECONDS`. `ATLAS_KEYTAB` must be a file the server can read
-at start; a rotated keytab (its time or size changes) lifts the refusal, as `SIGHUP` does.
+retried as an outage, after `MCP_CONTEXT_RETRY_AFTER_SECONDS`. `ATLAS_KEYTAB` must be a file the
+server can read at start; a rotated keytab (its time or size changes) lifts the refusal, as
+`SIGHUP` does.
 
 What the container needs:
 
@@ -209,8 +214,8 @@ What the container needs:
 - a `krb5.conf` (`/etc/krb5.conf`, or `KRB5_CONFIG`) that names the realm and its KDC, with
   `rdns = false`, since an address behind a load balancer or a Kubernetes service has no
   reverse name that matches Atlas's service principal (`ATLAS_SPN` names it);
-- a route to the KDC (port 88) from the pod: Kubernetes and OpenShift network policies must let
-  it through;
+- a route to the KDC (port 88, UDP and TCP, or `udp_preference_limit = 1` in `krb5.conf`) from
+  the pod: Kubernetes and OpenShift network policies must let it through;
 - a clock in step with the KDC (five minutes of skew at most, by default);
 - the keytab mounted read-only, as a secret, never in the image.
 
