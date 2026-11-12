@@ -39,7 +39,22 @@ SERVED = {
 INVOICES = TableRef("lake", "ledger", "invoices")
 PAYMENTS = TableRef("lake", "ledger", "payments")
 GHOSTS = TableRef("lake", "ledger", "ghosts")
-TRAP_REF = TableRef("lake", *TRAP)
+# The recorded trap table holds dots, which the provider never looks up (see the test of
+# dotted names); these tests look up the same entity under its name with spaces for dots: a
+# quote, spaces and accents still.
+TRAP_REF = TableRef("lake", TRAP[0], TRAP[1].replace(".", " "))
+
+
+def undotted(atlas: FakeAtlas) -> FakeAtlas:
+    """The recorded Atlas, its trap table under the name of ``TRAP_REF``."""
+    recorded = f"{TRAP[0]}.{TRAP[1]}@primary"
+    renamed = f"{TRAP_REF.schema}.{TRAP_REF.table}@primary"
+    for exchange in atlas.bulk.values():
+        body = exchange["response"]["body"]
+        for entity in body.get("entities", []) if isinstance(body, dict) else []:
+            if entity["attributes"]["qualifiedName"] == recorded:
+                entity["attributes"]["qualifiedName"] = renamed
+    return atlas
 
 
 def provider(atlas: FakeAtlas, **env: str) -> AtlasProvider:
@@ -68,7 +83,7 @@ def test_from_env_returns_the_provider():
 
 @pytest.mark.parametrize("version", VERSIONS)
 def test_tables_and_columns_are_read_in_one_batch_per_type(version):
-    atlas = FakeAtlas(version)
+    atlas = undotted(FakeAtlas(version))
     found = describe(provider(atlas), [INVOICES, TRAP_REF, GHOSTS])
     assert set(found) == {INVOICES, TRAP_REF}
     invoices = found[INVOICES]
@@ -79,7 +94,7 @@ def test_tables_and_columns_are_read_in_one_batch_per_type(version):
     assert [r.url.path.rsplit("/", 1)[1] for r in atlas.requests] == ["hive_table", "iceberg_table"]
     assert asked(atlas.requests[0]) == [
         "ledger.invoices@primary",
-        f"{TRAP[0]}.{TRAP[1]}@primary",
+        f"{TRAP_REF.schema}.{TRAP_REF.table}@primary",
         "ledger.ghosts@primary",
     ]
     # A table found under the first type is not asked again under the next one.
@@ -305,10 +320,10 @@ def test_a_malformed_answer_serves_what_it_can():
 
 
 def test_a_bulk_read_is_split_under_the_query_length():
-    atlas = FakeAtlas("atlas-2.4")
+    atlas = undotted(FakeAtlas("atlas-2.4"))
     ghosts = [TableRef("lake", "ledger", f"ghost_{i:03}") for i in range(40)]
     refs = [INVOICES, TRAP_REF, *ghosts, PAYMENTS]
-    whole = describe(provider(FakeAtlas("atlas-2.4")), refs)
+    whole = describe(provider(undotted(FakeAtlas("atlas-2.4"))), refs)
 
     split = describe(provider(atlas, ATLAS_MAX_QUERY_CHARS="300"), refs)
 
@@ -517,3 +532,21 @@ def test_the_check_says_when_atlas_does_not_answer_its_version():
     assert answering(0, error=RuntimeError("a bug")) == (
         "UNREACHABLE: the atlas check failed (RuntimeError)"
     )
+
+
+@pytest.mark.parametrize("version", VERSIONS)
+def test_a_name_with_a_dot_is_never_looked_up(version):
+    # Atlas names a Hive table <schema>.<table>@<cluster>: schema "a" with table "b.c" and
+    # schema "a.b" with table "c" would be the same entity, so one table could be served
+    # another's description. A schema or a table whose name holds a dot is skipped.
+    atlas = FakeAtlas(version)
+    dotted = [
+        TableRef("lake", *TRAP),
+        TableRef("lake", "ledger.archive", "invoices"),
+        TableRef("lake", "ledger", "invoices.v2"),
+    ]
+    assert describe(provider(atlas), dotted) == {}
+    assert atlas.requests == []
+    found = describe(provider(atlas), [*dotted, INVOICES])
+    assert set(found) == {INVOICES}
+    assert {name for r in atlas.requests for name in asked(r)} == {"ledger.invoices@primary"}

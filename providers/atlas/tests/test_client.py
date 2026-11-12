@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import dataclasses
 import http.server
 import logging
 import socket
@@ -21,7 +22,7 @@ from akko_mcp_trino_atlas import AtlasProvider
 from akko_mcp_trino_atlas.client import SESSION_COOKIE, USER_AGENT, client_options
 from akko_mcp_trino_atlas.settings import read_settings
 
-OTHER = "http://atlas-b:21000"
+OTHER = "https://atlas-b:21443"
 PASSWORD = 'reader-"pass\\é'
 BASE = {
     "ATLAS_URL": f"{ATLAS},{OTHER}",
@@ -125,7 +126,7 @@ def test_a_passive_redirect_is_followed_only_to_an_address_of_atlas_url():
     assert [r.url.host for r in atlas.requests] == ["atlas-b"]  # found under hive_table
 
     # Under a path: the redirect must stay under the address, its path included.
-    gateway = "https://knox:8443/gateway/cdp/atlas"
+    gateway = "https://knox:8443/gateway/default/atlas"
 
     def elsewhere(request: httpx.Request) -> httpx.Response:
         return httpx.Response(307, headers={"location": "https://knox:8443/gateway/other/x"})
@@ -140,14 +141,14 @@ def test_a_passive_redirect_is_followed_only_to_an_address_of_atlas_url():
     assert isinstance(error, ProviderUnavailable)
 
     def to_gateway(request: httpx.Request) -> httpx.Response:
-        if "/gateway/cdp/atlas/api/" in request.url.path:
-            path = request.url.path.removeprefix("/gateway/cdp/atlas")
+        if "/gateway/default/atlas/api/" in request.url.path:
+            path = request.url.path.removeprefix("/gateway/default/atlas")
             return atlas(httpx.Request("GET", request.url.copy_with(path=path)))
         # Atlas's passive server keeps the query string in the address it redirects to.
         location = gateway + request.url.raw_path.decode()
         return httpx.Response(307, headers={"location": location})
 
-    (found,) = calls(build(to_gateway, ATLAS_URL=f"http://atlas-a:21000,{gateway}"))
+    (found,) = calls(build(to_gateway, ATLAS_URL=f"https://atlas-a:21443,{gateway}"))
     assert INVOICES in found
 
 
@@ -203,13 +204,13 @@ def test_only_atlas_instance_not_found_is_nothing(caplog):
 
 def test_a_default_port_written_or_not_is_the_same_address():
     atlas = FakeAtlas("atlas-2.4")
-    gateway = "https://knox/gateway/cdp/atlas"
+    gateway = "https://knox/gateway/default/atlas"
 
     def explicit_port(request: httpx.Request) -> httpx.Response:
         if request.url.host == "atlas-a":
-            path = "https://knox:443/gateway/cdp/atlas" + request.url.raw_path.decode()
+            path = "https://knox:443/gateway/default/atlas" + request.url.raw_path.decode()
             return httpx.Response(307, headers={"location": path})
-        path = request.url.path.removeprefix("/gateway/cdp/atlas")
+        path = request.url.path.removeprefix("/gateway/default/atlas")
         return atlas(httpx.Request("GET", request.url.copy_with(path=path)))
 
     (found,) = calls(build(explicit_port, ATLAS_URL=f"{ATLAS},{gateway}"))
@@ -234,7 +235,7 @@ def test_no_url_reaches_the_log_at_info(caplog):
         calls(build(handler))
     messages = [record.getMessage() for record in caplog.records]
     assert messages == ["atlas unreachable"]
-    for forbidden in ("atlas-a", "atlas-b", "21000", "http", "reader", "ledger", "invoices"):
+    for forbidden in ("atlas-a", "atlas-b", "21443", "http", "reader", "ledger", "invoices"):
         assert forbidden not in caplog.text
 
 
@@ -556,7 +557,10 @@ def network():
 
 
 def on_network(*urls: str, **env: str) -> AtlasProvider:
-    return AtlasProvider(read_settings({**BASE, "ATLAS_URL": ",".join(urls), **env}))
+    # Plain sockets, plain http: a password over http is refused at start, so the settings
+    # are read with the https addresses of BASE, then given the local ones.
+    settings = read_settings({**BASE, **env})
+    return AtlasProvider(dataclasses.replace(settings, urls=urls))
 
 
 def left_lines(caplog) -> list[str]:
@@ -778,7 +782,7 @@ def test_only_the_address_a_call_started_with_is_said_late(caplog):
             "atlas-c": "replay",
         }
     )
-    urls = f"{ATLAS},{OTHER},http://atlas-c:21000"
+    urls = f"{ATLAS},{OTHER},https://atlas-c:21443"
     (found,) = calls(build(handler, ATLAS_URL=urls, ATLAS_TABLE_TYPES="hive_table"))
     assert INVOICES in found
     # b timed out too, but the call reached it after leaving a: only a is said.

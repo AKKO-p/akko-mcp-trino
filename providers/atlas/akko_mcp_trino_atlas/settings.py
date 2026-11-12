@@ -1,7 +1,9 @@
 """The provider's settings, read from the environment and checked once, at start.
 
 Every check raises ``ValueError``, so the server refuses to start; no message names an
-address, a proxy or a secret.
+address, a proxy or a secret. A password or a Knox token is refused over plain ``http``, as
+the server refuses ``TRINO_PASSWORD`` without https; Kerberos over ``http`` starts, with the
+warning of ``AtlasSettings.warnings``.
 """
 
 import json
@@ -66,6 +68,16 @@ class AtlasSettings:
     proxy: str = field(default="", repr=False)
     _secret: FileSecret | str = field(default="", repr=False)
 
+    def warnings(self) -> list[str]:
+        """What these settings leave open, said at start and in ``--check``."""
+        if self.auth == KERBEROS and any(_plain(url) for url in self.urls):
+            return [
+                "ATLAS_URL has an http address: Kerberos authenticates the account, "
+                "but nothing authenticates Atlas or protects its answers and its session cookie "
+                "without https"
+            ]
+        return []
+
     def secret(self) -> str:
         """Return the password or the Knox token, read again when its file was rotated."""
         return self._secret.value() if isinstance(self._secret, FileSecret) else self._secret
@@ -107,6 +119,10 @@ def _urls(env: Mapping[str, str]) -> tuple[str, ...]:
                 "ATLAS_URL: an address has a port that is not a valid number"
             ) from None
     return urls
+
+
+def _plain(url: str) -> bool:
+    return urlsplit(url).scheme == "http"
 
 
 def _names(env: Mapping[str, str], name: str) -> frozenset[str]:
@@ -261,7 +277,7 @@ def read_settings(env: Mapping[str, str]) -> AtlasSettings:
     )
     if not types:
         raise ValueError("ATLAS_TABLE_TYPES names no entity type")
-    return AtlasSettings(
+    settings = AtlasSettings(
         urls,
         clusters=_clusters(env),
         table_types=types,
@@ -278,3 +294,9 @@ def read_settings(env: Mapping[str, str]) -> AtlasSettings:
         proxy=_proxy(env),
         **auth,
     )
+    if settings.auth in (BASIC, KNOX) and any(_plain(url) for url in urls):
+        raise ValueError(
+            "ATLAS_PASSWORD or ATLAS_KNOX_TOKEN (or its file) is set but an address of "
+            "ATLAS_URL is not https"
+        )
+    return settings

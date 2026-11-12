@@ -26,11 +26,15 @@ identity provider (OAuth 2.0 Token Exchange). The user's own token never leaves 
 Trino's access control (OPA, Ranger, or Trino's own rules) then decides what that user may read.
 Results are limited in rows and in time, and every call leaves one audit line.
 
-> **Upgrading from 0.7.0?** 0.7.1 and 0.7.2 are security releases. `execute_query` refuses
+> **Upgrading from 0.7.x?** 0.8.0 adds a ninth tool, `profile_table`, and context from a data
+> catalog, off until `MCP_CONTEXT_PROVIDERS` names a provider. Without opting in, you meet three
+> changes: `search_columns` reads 8 catalogs at once (`MCP_SEARCH_CONCURRENCY=1` for the load of
+> 0.7), a token whose `azp` is present but empty names no client, and the server logs `httpx` at
+> `WARNING` only. From 0.7.0, 0.7.1 and 0.7.2 are security releases: `execute_query` refuses
 > `SHOW STATS`, `EXPLAIN`, `SHOW CREATE` and the other reads listed in
 > [Security](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/security.md#the-statements-an-agent-may-send), and the user is read from `sub`.
 > With Keycloak, set `MCP_JWT_USER_CLAIM=preferred_username` before upgrading. See
-> [MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md), and [Upgrading](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/operations.md#upgrading) for other versions.
+> [MIGRATING.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/MIGRATING.md#from-07-to-08), and [Upgrading](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/operations.md#upgrading) for other versions.
 
 ## Understand in five steps
 
@@ -115,6 +119,7 @@ in `service` mode, for the one identity you give it.
 - **One audit line per call.** Keyed by `X-Request-Id`, never holding the token or the SQL text: who called which tool, with which outcome, for how long.
 - **Nine tools,** annotated with what they can really do: `execute_query` is annotated read-only only while `TRINO_READ_ONLY` is true.
 - **Token verification.** Bearer tokens are verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino is refused, the protected resource metadata is published (RFC 9728), and the Host header is filtered.
+- **Context from a data catalog, off by default.** With `MCP_CONTEXT_PROVIDERS`, `describe_table` and `describe_schema` add what a data catalog holds about a table (descriptions, glossary terms, classifications, owner), only for the tables Trino lists to the caller, and beyond descriptions only what allow lists name. Providers for Apache Atlas (`akko-mcp-trino-atlas`) and for a JSON file: see [Context from a data catalog](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/catalog-context.md).
 - **Extensible without forking.** Tool plugins and extensions are Python packages named at start: identity modes, guards, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code and the Python SDK; and any model, Mistral included, through the example agent.
 - **Tests.** 100% line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](https://github.com/AKKO-p/akko-mcp-trino/tree/main/integration)), and a check that the package imports no vendor-specific code.

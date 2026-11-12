@@ -1,7 +1,10 @@
 """The package as the core finds it: its entry point and the settings its factory demands."""
 
+import asyncio
+import logging
 from importlib.metadata import entry_points, version
 
+import httpx
 import pytest
 from fake_spnego import install
 
@@ -21,7 +24,7 @@ def test_the_package_registers_its_entry_point():
 
 
 CLUSTERS = {"ATLAS_CLUSTERS": '{"lake": "primary"}'}
-GOOD = {"ATLAS_URL": "http://atlas:21000", "ATLAS_USER": "r", "ATLAS_PASSWORD": "p", **CLUSTERS}
+GOOD = {"ATLAS_URL": "https://atlas:21443", "ATLAS_USER": "r", "ATLAS_PASSWORD": "p", **CLUSTERS}
 
 # Settings the factory refuses, and what its message says; none of them names the address.
 REFUSED = [
@@ -101,18 +104,18 @@ def test_from_env_requires_the_url_a_way_to_authenticate_and_the_clusters(tmp_pa
     for env, says in REFUSED:
         with pytest.raises(ValueError, match=says) as raised:
             from_env(env)
-        assert "secret" not in str(raised.value) and "atlas:21000" not in str(raised.value)
+        assert "secret" not in str(raised.value) and "atlas:21" not in str(raised.value)
 
     password = tmp_path / "password"
     password.write_text(PASSWORD + "\n", encoding="utf-8")
     token = tmp_path / "token"
     token.write_text("knox-token\n", encoding="utf-8")
-    url = {"ATLAS_URL": "https://atlas-a:21443/, http://atlas-b:21000", **CLUSTERS}
+    url = {"ATLAS_URL": "https://atlas-a:21443/, https://atlas-b:21443", **CLUSTERS}
 
     provider = from_env({**url, "ATLAS_USER": " reader ", "ATLAS_PASSWORD_FILE": str(password)})
     assert isinstance(provider, AtlasProvider)
     basic = provider.settings
-    assert basic.urls == ("https://atlas-a:21443", "http://atlas-b:21000")
+    assert basic.urls == ("https://atlas-a:21443", "https://atlas-b:21443")
     assert (basic.auth, basic.user, basic.secret()) == ("basic", "reader", PASSWORD)
     plain = read_settings({**url, "ATLAS_AUTH": "Basic", "ATLAS_USER": "r", "ATLAS_PASSWORD": "p"})
     assert (plain.auth, plain.secret()) == ("basic", "p")
@@ -135,6 +138,62 @@ def test_from_env_requires_the_url_a_way_to_authenticate_and_the_clusters(tmp_pa
         "",
     )
     assert isinstance(kerberos, AtlasSettings) and PASSWORD not in repr(basic)
+
+
+PLAIN = "https://atlas-a:21443,http://atlas-b:21000"
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        {"ATLAS_USER": "reader", "ATLAS_PASSWORD": PASSWORD},
+        {"ATLAS_AUTH": "basic", "ATLAS_KNOX_TOKEN": "knox-token"},
+    ],
+    ids=["basic", "knox"],
+)
+@pytest.mark.parametrize("urls", ["http://atlas:21000", PLAIN])
+def test_a_password_or_a_token_is_never_sent_over_plain_http(secret, urls):
+    env = {"ATLAS_URL": urls, **CLUSTERS, **secret}
+    with pytest.raises(ValueError) as raised:
+        from_env(env)
+    assert str(raised.value) == (
+        "ATLAS_PASSWORD or ATLAS_KNOX_TOKEN (or its file) is set but an address of "
+        "ATLAS_URL is not https"
+    )
+    for leaked in ("atlas:21000", "atlas-b", PASSWORD, "knox-token", "reader"):
+        assert leaked not in str(raised.value)
+
+
+def test_kerberos_over_plain_http_starts_with_one_warning(tmp_path, monkeypatch, caplog):
+    install(monkeypatch)
+    keytab = tmp_path / "reader.keytab"
+    keytab.write_bytes(b"keytab")
+    kerberos = {
+        **CLUSTERS,
+        "ATLAS_AUTH": "kerberos",
+        "ATLAS_PRINCIPAL": "reader@EXAMPLE",
+        "ATLAS_KEYTAB": str(keytab),
+    }
+    warning = (
+        "ATLAS_URL has an http address: Kerberos authenticates the account, "
+        "but nothing authenticates Atlas or protects its answers and its session cookie "
+        "without https"
+    )
+    caplog.set_level(logging.INFO)
+    for urls, said in ((PLAIN, [warning]), ("https://atlas-a:21443", [])):
+        caplog.clear()
+        env = {**kerberos, "ATLAS_URL": urls}
+        asyncio.run(from_env(env).aclose())
+        assert [r.getMessage() for r in caplog.records if r.levelname == "WARNING"] == said
+        # --check says it too, with Atlas out of reach here.
+        provider = AtlasProvider(read_settings(env), transport=httpx.MockTransport(down))
+        lines = provider.check_lines()
+        asyncio.run(provider.aclose())
+        assert [line for line in lines if "WARNING" in line] == [f"WARNING: {w}" for w in said]
+
+
+def down(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(503)
 
 
 def test_the_settings_have_their_defaults_and_fold_the_catalogs():

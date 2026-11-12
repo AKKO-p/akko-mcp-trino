@@ -239,6 +239,11 @@ extraEnv:
         key: password
 ```
 
+Avec `networkPolicy.enabled: true`, le pod ne joint que le DNS, Trino et l'identity provider :
+ajoutez les adresses et les ports d'Atlas, et le port 88 du KDC pour Kerberos (en UDP et en TCP,
+ou `udp_preference_limit = 1` dans `krb5.conf`), dans `networkPolicy.egress.extra`, sinon le
+contexte est toujours `unavailable`.
+
 Pour le fournisseur `file` :
 
 ```yaml
