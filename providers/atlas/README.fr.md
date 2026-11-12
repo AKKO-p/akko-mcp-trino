@@ -122,8 +122,8 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 | Atlas répond | Le fournisseur |
 |---|---|
 | une connexion refusée, ou aucune ouverte en `ATLAS_CONNECT_TIMEOUT_SECONDS` | essaie l'adresse suivante d'`ATLAS_URL`, et commence par elle aux appels suivants ; puis se dit indisponible |
-| pas de réponse une fois connecté : un délai dépassé, une autre erreur de transport, ou l'échéance de l'appel atteinte pendant qu'il attend cette adresse | essaie l'adresse suivante d'`ATLAS_URL` s'il reste du temps à l'appel, et commence par elle aux appels suivants ; puis se dit indisponible |
-| un corps qui ne se décode pas, ou un 5xx | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible |
+| pas de réponse à temps de l'adresse par laquelle l'appel a commencé : un délai de lecture ou d'écriture dépassé, ou l'échéance de l'appel lui-même atteinte pendant qu'il l'attend | essaie l'adresse suivante d'`ATLAS_URL` s'il reste du temps à l'appel, commence par elle aux appels suivants, et l'écrit une fois au journal (plus bas) ; puis se dit indisponible |
+| une autre erreur de transport (une connexion fermée sous l'appel, une erreur du proxy), un corps qui ne se décode pas, ou un 5xx | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible ; les appels suivants commencent là où ils commençaient |
 | une redirection vers une adresse d'`ATLAS_URL` (le serveur passif d'Atlas HA) | la suit, et commence par cette adresse aux appels suivants |
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
 | 401, ou un 403 autre que celui d'en dessous | se dit refusé tout de suite ; le cookie de session est oublié |
@@ -138,22 +138,31 @@ Indisponible, il écrit au journal `atlas unreachable`, sans adresse, utilisateu
 d'objet ; un refus est écrit par le serveur, `atlas refused the account`. Ni le journal ni une
 erreur ne portent le texte d'une réponse ou le secret.
 
-**Un serveur qui accepte la connexion puis ne répond plus** (figé, ou le serveur actif d'une
-paire en haute disponibilité bloqué) est laissé pour l'adresse suivante d'`ATLAS_URL`, et le
-fournisseur l'écrit une fois au journal, avec cette adresse (jamais un identifiant : `ATLAS_URL`
-n'en porte pas) :
-`atlas at <address> did not answer once connected; the next calls start at the next address`.
-Les appels qui l'attendent ensemble écrivent une ligne à eux tous. L'appel qui le rencontre
-reçoit encore son contexte ou non selon deux réglages :
+**Un serveur qui accepte la connexion puis ne répond plus** (figé) est laissé : quand l'adresse
+par laquelle un appel a commencé ne répond pas à temps, les appels suivants commencent par
+l'adresse suivante d'`ATLAS_URL`. Le fournisseur l'écrit une fois au journal, par sa position,
+jamais son adresse : `atlas address 2 of 3 in ATLAS_URL did not answer in time` (`--check`
+affiche les adresses dans cet ordre). La ligne n'est pas redite pour cette adresse tant qu'elle
+n'a pas répondu ; les appels qui l'attendent ensemble écrivent une ligne à eux tous, et deux
+adresses bloquées écrivent deux lignes. Seule l'échéance de l'appel lui-même compte : une lecture
+annulée pour une autre raison (une autre lecture du même appel refusée, le client parti, un
+arrêt) ne laisse aucune adresse et n'écrit rien. L'appel qui rencontre l'adresse bloquée reçoit
+encore son contexte ou non selon deux réglages :
 
-- avec `ATLAS_TIMEOUT_SECONDS` inférieur à `MCP_CONTEXT_TIMEOUT_SECONDS`, la requête à l'adresse
-  bloquée expire d'abord, et l'adresse suivante répond dans le même appel ;
+- avec `ATLAS_TIMEOUT_SECONDS` inférieur à `MCP_CONTEXT_TIMEOUT_SECONDS` d'au moins le temps que
+  l'adresse suivante met à répondre, négociation Kerberos comprise, la requête à l'adresse
+  bloquée expire d'abord, et l'adresse suivante répond dans le même appel ; avec une marge plus
+  courte, cet appel est perdu et les appels suivants commencent par l'adresse suivante ;
 - avec des valeurs égales (les défauts, 5 s chacun), l'échéance de l'appel vient d'abord :
   l'appel qui rencontre l'adresse bloquée est perdu (`unavailable`), et les appels suivants
   commencent par l'adresse suivante.
 
-Avec une seule adresse, il n'y a pas d'autre endroit où aller : chaque appel l'attend jusqu'à son
-échéance.
+Derrière la redirection d'un serveur passif, le serveur bloqué est l'actif : le serveur passif
+continue de lui envoyer les appels, et le fournisseur n'a pas de meilleure adresse par laquelle
+commencer. Chaque appel est perdu, et la ligne donne une fois la position du serveur actif.
+
+Avec une seule adresse, il n'y a pas d'autre endroit où aller : chaque appel l'attend jusqu'à
+`ATLAS_TIMEOUT_SECONDS` ou son échéance, au premier des deux termes, et aucune ligne n'est écrite.
 
 ## Kerberos (SPNEGO)
 

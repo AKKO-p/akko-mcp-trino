@@ -121,8 +121,8 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 | Atlas answers | The provider |
 |---|---|
 | a refused connection, or none opened within `ATLAS_CONNECT_TIMEOUT_SECONDS` | tries the next address of `ATLAS_URL`, and starts the next calls there; then is unavailable |
-| no answer once connected: a timeout, another transport error, or the call's deadline reached while it waits on that address | tries the next address of `ATLAS_URL` while the call has time left, and starts the next calls there; then is unavailable |
-| a body that cannot be decoded, or a 5xx | tries the next address of `ATLAS_URL`, then is unavailable |
+| no answer in time from the address the call started with: a read or write timeout, or the call's own deadline reached while it waits on it | tries the next address of `ATLAS_URL` while the call has time left, starts the next calls there, and logs it once (below); then is unavailable |
+| another transport error (a connection closed under the call, a proxy error), a body that cannot be decoded, or a 5xx | tries the next address of `ATLAS_URL`, then is unavailable; the next calls start where they did |
 | a redirect to an address of `ATLAS_URL` (the passive server of Atlas HA) | follows it, and starts the next calls at that address |
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
 | 401, or a 403 other than below | is refused at once; the session cookie is dropped |
@@ -137,19 +137,29 @@ When unavailable, it logs `atlas unreachable`, with no address, user or object n
 is logged by the server as `atlas refused the account`. Neither the logs nor an error carry an
 answer's text or the secret.
 
-**A server that accepts the connection and then hangs** (frozen, or the active server of a high
-availability pair stuck) is left for the next address of `ATLAS_URL`, and the provider logs it
-once, with that address (never a credential: `ATLAS_URL` holds none):
-`atlas at <address> did not answer once connected; the next calls start at the next address`.
-Calls that wait on it together log one line between them. Whether the call that meets it still
-gets its context depends on two settings:
+**A server that accepts the connection and then hangs** (frozen) is left: when the address a
+call started with does not answer in time, the next calls start at the next address of
+`ATLAS_URL`. The provider logs it once, by its position, never its address:
+`atlas address 2 of 3 in ATLAS_URL did not answer in time` (`--check` prints the addresses in
+that order). The line is not said again for that address until it answers; calls that wait on it
+together log one line between them, and two hung addresses log two lines. Only the call's own
+deadline counts: a read cancelled for another reason (another read of the same call refused, the
+client gone, a shutdown) leaves no address and logs nothing. Whether the call that meets the hung
+address still gets its context depends on two settings:
 
-- with `ATLAS_TIMEOUT_SECONDS` below `MCP_CONTEXT_TIMEOUT_SECONDS`, the request to the hung
-  address times out first, and the next address answers within the same call;
+- with `ATLAS_TIMEOUT_SECONDS` below `MCP_CONTEXT_TIMEOUT_SECONDS` by at least the time the next
+  address needs to answer, Kerberos negotiation included, the request to the hung address times
+  out first, and the next address answers within the same call; with a smaller margin, that call
+  is lost and the next calls start at the next address;
 - with equal values (the defaults, 5 s each), the call's deadline comes first: the call that
   meets the hung address is lost (`unavailable`), and the next calls start at the next address.
 
-With a single address, there is nowhere else to go: each call waits on it until its deadline.
+Behind a passive server's redirect, the hung server is the active one: the passive server keeps
+sending the calls to it, so the provider has no better address to start at. Each call is lost,
+and the line names the active server's position once.
+
+With a single address, there is nowhere else to go: each call waits on it until
+`ATLAS_TIMEOUT_SECONDS` or its deadline, whichever comes first, and no line is logged.
 
 ## Kerberos (SPNEGO)
 
