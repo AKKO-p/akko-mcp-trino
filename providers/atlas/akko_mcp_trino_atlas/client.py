@@ -15,7 +15,15 @@ What an answer means:
 - a refused connection, a connection that does not open within
   ``ATLAS_CONNECT_TIMEOUT_SECONDS``, a timeout, a body that cannot be decoded or a 5xx: the
   next address is tried; when none answers, ``ProviderUnavailable``. An address that could
-  not be connected to is left for the next one in the calls that follow;
+  not be connected to is left for the next one in the calls that follow, and so is the
+  address a call started with when it did not answer in time: a read or write timeout, or the
+  call's own deadline reached after it waited on it for at least
+  ``ATLAS_CONNECT_TIMEOUT_SECONDS``, or for any time when it had not answered since
+  ``ATLAS_TIMEOUT_SECONDS`` before the wait (``leave``, from the provider). Any other
+  cancellation (a sibling read cancelled by a failure, a client gone, a shutdown), a shorter
+  wait on an address that had just answered and any other transport error leave nothing. An
+  address that did not answer in time, the only one included, is logged once, by its
+  position in ``ATLAS_URL``, until it answers again;
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
 - Atlas's own "does not exist" answers, by status and error code, only those the read
@@ -32,8 +40,12 @@ address, user or object name; a refusal is logged by the server, as
 secret.
 """
 
+import asyncio
 import logging
-from collections.abc import Generator, Mapping
+import time
+from collections.abc import Generator, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
 from importlib.metadata import version
 from types import MappingProxyType
@@ -83,6 +95,19 @@ class _Outage(Exception):
     def __init__(self, connect: bool = False) -> None:
         super().__init__("outage")
         self.connect = connect
+
+
+class Watch:
+    """The first tries a call is waiting on, shared by the call's child tasks: each one's
+    address and the monotonic time it started. What is left in it when the call's deadline
+    passes is what may not have answered in time."""
+
+    def __init__(self) -> None:
+        """Start empty: no first try waiting."""
+        self.waiting: dict[object, tuple[int, float]] = {}
+
+
+_WATCH: ContextVar[Watch | None] = ContextVar("atlas_watch", default=None)
 
 
 class _BearerAuth(httpx.Auth):
@@ -145,6 +170,10 @@ class AtlasClient:
         self._settings = settings
         self._urls = settings.urls
         self._first = 0
+        # The addresses already said not to answer in time, until one answers again.
+        self._said: set[int] = set()
+        # The monotonic time of the last HTTP answer from each address.
+        self._answered: dict[int, float] = {}
         self._kerberos = (
             SpnegoAuth(settings.principal, settings.keytab, settings.spn)
             if settings.auth == KERBEROS
@@ -169,7 +198,7 @@ class AtlasClient:
         for step in range(count):
             index = (start + step) % count
             try:
-                response = await self._send(self._urls[index] + path, params)
+                response = await self._send(self._urls[index] + path, params, index, step == 0)
             except _Outage as outage:
                 if outage.connect:
                     # A silent or closed address is not tried first again.
@@ -180,14 +209,56 @@ class AtlasClient:
             return self._read(response, missing)
         raise self._unavailable("no address of ATLAS_URL answered")
 
-    async def _send(self, url: str, params: Mapping[str, str] | None) -> httpx.Response:
-        """One request to one address, following redirects among the addresses only."""
+    @contextmanager
+    def watch(self) -> Iterator[Watch]:
+        """Note, for the call made inside, the addresses its first tries wait on."""
+        watch = Watch()
+        token = _WATCH.set(watch)
+        try:
+            yield watch
+        finally:
+            _WATCH.reset(token)
+
+    def leave(self, watch: Watch) -> None:
+        """The call's deadline passed: leave the addresses its first tries still waited on,
+        when the wait lasted at least ``ATLAS_CONNECT_TIMEOUT_SECONDS`` (the time an address
+        is given to show it is alive), or when the address has not answered since
+        ``ATLAS_TIMEOUT_SECONDS`` before the wait started. A shorter wait on an address that
+        answered just before says nothing of it: the time had gone on another address, or on
+        another read of the same tool call."""
+        now, floor = time.monotonic(), self._settings.connect_timeout_seconds
+        late = {
+            index
+            for index, started in watch.waiting.values()
+            if now - started >= floor or not self._answered_since(index, started)
+        }
+        for index in sorted(late):
+            self._late(index)
+
+    def _answered_since(self, index: int, started: float) -> bool:
+        """Whether the address ``index`` answered within ``ATLAS_TIMEOUT_SECONDS`` before
+        ``started``, or after it."""
+        answered = self._answered.get(index)
+        return answered is not None and answered >= started - self._settings.timeout_seconds
+
+    async def _send(
+        self, url: str, params: Mapping[str, str] | None, index: int, first: bool
+    ) -> httpx.Response:
+        """One request to one address, following redirects among the addresses only;
+        ``index`` is the position of that address in ``ATLAS_URL``, ``first`` whether it is
+        the address the call started with."""
         for _ in range(_MAX_REDIRECTS + 1):
+            at = self._index(httpx.URL(url), index)
             try:
                 auth = _auth(self._settings, self._kerberos) or httpx.USE_CLIENT_DEFAULT
-                response = await self._http.get(url, params=params, auth=auth)
+                response = await self._wait(at if first else None, url, params, auth)
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 raise _Outage(connect=True) from None
+            except (httpx.ReadTimeout, httpx.WriteTimeout):
+                # Connected, then no answer in time: a frozen server, or the active one stuck.
+                if first:
+                    self._late(at)
+                raise _Outage from None
             except (httpx.TransportError, httpx.DecodingError):
                 raise _Outage from None
             except NegotiationError as failed:
@@ -196,6 +267,8 @@ class AtlasClient:
                     raise self._unavailable("the kerberos KDC could not be reached") from None
                 self._http.cookies.clear()
                 raise ProviderRefused("the kerberos negotiation was refused") from None
+            self._said.discard(at)
+            self._answered[at] = time.monotonic()
             if response.status_code >= 500:
                 raise _Outage
             location = response.headers.get("location")
@@ -207,6 +280,39 @@ class AtlasClient:
                 raise ProviderRefused("atlas redirected outside ATLAS_URL")
             url, params = str(target), None
         raise _Outage
+
+    async def _wait(
+        self, at: int | None, url: str, params: Mapping[str, str] | None, auth: Any
+    ) -> httpx.Response:
+        """The request; while it waits, ``at`` (a first try's address) is in the call's
+        watch, and stays there when the wait is cancelled, for ``leave`` to read."""
+        watch = _WATCH.get()
+        if at is None or watch is None:
+            return await self._http.get(url, params=params, auth=auth)
+        entry = object()
+        watch.waiting[entry] = (at, time.monotonic())
+        try:
+            response = await self._http.get(url, params=params, auth=auth)
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            del watch.waiting[entry]
+            raise
+        del watch.waiting[entry]
+        return response
+
+    def _late(self, index: int) -> None:
+        """The address ``index`` did not answer in time: the next calls start after it when
+        it is still the first and another address exists, and it is said once until it
+        answers again."""
+        count = len(self._urls)
+        if count > 1 and self._first == index:
+            self._first = (index + 1) % count
+        if index not in self._said:
+            self._said.add(index)
+            log.warning(
+                "atlas address %d of %d in ATLAS_URL did not answer in time", index + 1, count
+            )
 
     def _ours(self, url: httpx.URL) -> bool:
         """Whether ``url`` lies under one of the addresses of ``ATLAS_URL``."""

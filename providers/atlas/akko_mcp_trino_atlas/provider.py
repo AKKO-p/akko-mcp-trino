@@ -236,11 +236,13 @@ class AtlasProvider:
                 wanted.setdefault(f"{ref.schema}.{ref.table}@{cluster}", []).append(ref)
         if not wanted:
             return {}
-        try:
-            async with asyncio.timeout(deadline - time.monotonic()):
-                found = await self._entities(list(wanted))
-        except TimeoutError:
-            raise ProviderUnavailable("the deadline passed before atlas answered") from None
+        with self._client.watch() as watch:
+            try:
+                async with asyncio.timeout(deadline - time.monotonic()):
+                    found = await self._entities(list(wanted))
+            except TimeoutError:
+                self._client.leave(watch)
+                raise ProviderUnavailable("the deadline passed before atlas answered") from None
         return {
             ref: self._table(entity, referred)
             for name, (entity, referred) in found.items()
@@ -253,12 +255,14 @@ class AtlasProvider:
         if not unique:
             return {}
         refused: list[str] = []
-        try:
-            async with asyncio.timeout(deadline - time.monotonic()):
-                first = await self._term(unique[0], refused)
-                rest = await self._parallel(unique[1:], refused)
-        except TimeoutError:
-            raise ProviderUnavailable("the deadline passed before atlas answered") from None
+        with self._client.watch() as watch:
+            try:
+                async with asyncio.timeout(deadline - time.monotonic()):
+                    first = await self._term(unique[0], refused)
+                    rest = await self._parallel(unique[1:], refused)
+            except TimeoutError:
+                self._client.leave(watch)
+                raise ProviderUnavailable("the deadline passed before atlas answered") from None
         _said_refused(refused)
         return {term.key: term for term in (first, *rest) if term is not None}
 

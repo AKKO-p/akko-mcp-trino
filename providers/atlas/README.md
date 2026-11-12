@@ -54,7 +54,7 @@ secret.
 | `ATLAS_TERM_STATUS_ATTRIBUTE` | the term attribute (in `additionalAttributes`) that holds its status | empty |
 | `ATLAS_CA_BUNDLE` | CA bundle to check Atlas's certificate against | the system's |
 | `ATLAS_PROXY` | `http` or `https` proxy to reach Atlas; the environment's proxy settings are never read | none |
-| `ATLAS_TIMEOUT_SECONDS` | timeout of one request to Atlas | `5` |
+| `ATLAS_TIMEOUT_SECONDS` | timeout of one request to Atlas; with several addresses, see below how it relates to `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | time to open a connection to one address, below `ATLAS_TIMEOUT_SECONDS`, so that a silent address gives way to the next one within the call | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | glossary term reads sent at once, from 1 to 32 | `4` |
 
@@ -121,11 +121,12 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 | Atlas answers | The provider |
 |---|---|
 | a refused connection, or none opened within `ATLAS_CONNECT_TIMEOUT_SECONDS` | tries the next address of `ATLAS_URL`, and starts the next calls there; then is unavailable |
-| a timeout once connected, a body that cannot be decoded, or a 5xx | tries the next address of `ATLAS_URL`, then is unavailable |
+| no answer in time from the address the call started with: a read or write timeout, or the call's own deadline reached while it waits on it | tries the next address of `ATLAS_URL` while the call has time left, starts the next calls there, and logs it once (below); then is unavailable |
+| another transport error (a connection closed under the call, a proxy error), a body that cannot be decoded, or a 5xx | tries the next address of `ATLAS_URL`, then is unavailable; the next calls start where they did |
 | a redirect to an address of `ATLAS_URL` (the passive server of Atlas HA) | follows it, and starts the next calls at that address |
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
 | 401, or a 403 other than below | is refused at once; the session cookie is dropped |
-| 403 with `ATLAS-403-00-001` (Atlas refuses the account some of the objects asked) | serves nothing of that read (the whole batch of tables, or that term), stays open, and logs `atlas refused some objects to the account; an account with no read grant serves nothing` once for the call |
+| 403 with `ATLAS-403-00-001` (Atlas refuses the account some of the objects asked) | serves nothing of that read (the whole batch of tables, or that term), stays open, and logs `atlas refused some objects to the account; an account with no read grant serves nothing` once for the call; the tables of that batch get the status `not_found`, on purpose, the same as a table Atlas does not hold, so that an agent cannot tell a refused object from an absent one |
 | a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
 | 404 with `ATLAS-404-00-009` to a table read (no such instance) | knows nothing of these tables |
 | 404 with `ATLAS-404-00-005` to a term read (no such GUID) | leaves that term out |
@@ -135,6 +136,38 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 When unavailable, it logs `atlas unreachable`, with no address, user or object name; a refusal
 is logged by the server as `atlas refused the account`. Neither the logs nor an error carry an
 answer's text or the secret.
+
+**A server that accepts the connection and then hangs** (frozen) is left: when the address a
+call started with does not answer in time, the next calls start at the next address of
+`ATLAS_URL`. The provider logs it once, by its position, never its address:
+`atlas address 2 of 3 in ATLAS_URL did not answer in time` (`--check` prints the addresses in
+that order). The line is not said again for that address until it answers; calls that wait on it
+together log one line between them, and two hung addresses log two lines. Only the call's own
+deadline counts, and only against an address that held the wait for at least
+`ATLAS_CONNECT_TIMEOUT_SECONDS`, or that has not answered since `ATLAS_TIMEOUT_SECONDS` before
+the wait began (so a hung address is left even under a deadline shorter than the connect
+timeout). A shorter wait cut by the deadline on an address that had just answered (the time went
+to another address, or to an earlier read of the same tool call), or a read cancelled for
+another reason (another read of the same call refused, the client gone, a shutdown), leaves no
+address and logs nothing. Whether the call that meets the hung address still gets its context
+depends on two settings:
+
+- with `ATLAS_TIMEOUT_SECONDS` below `MCP_CONTEXT_TIMEOUT_SECONDS` by at least the time the next
+  address needs to answer, Kerberos negotiation included, the request to the hung address times
+  out first, and the next address answers within the same call; with a smaller margin, what that
+  call reads after the hung address is lost, and the next calls start at the next address,
+  unless the deadline also cut a wait on it of at least `ATLAS_CONNECT_TIMEOUT_SECONDS`, or a
+  wait on it when it had not answered within `ATLAS_TIMEOUT_SECONDS` before;
+- with equal values (the defaults, 5 s each), the call's deadline comes first: the call that
+  meets the hung address is lost (`unavailable`), and the next calls start at the next address.
+
+Behind a passive server's redirect, the hung server is the active one: the passive server keeps
+sending the calls to it, so the provider has no better address to start at. Each call is lost,
+and the line names the active server's position once.
+
+With a single address, there is nowhere else to go: each call waits on it until
+`ATLAS_TIMEOUT_SECONDS` or its deadline, whichever comes first. The line is logged all the same,
+`atlas address 1 of 1 in ATLAS_URL did not answer in time`, once until the address answers.
 
 ## Kerberos (SPNEGO)
 
