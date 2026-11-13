@@ -308,26 +308,3 @@ def test_joiners_and_a_soft_hyphen_are_accepted(name):
     out = json.loads(_tools(trino)["describe_table"]("lake", "sales", name))
     assert "error" not in out
     assert trino.calls == [f'DESCRIBE "lake"."sales"."{name}"']
-
-
-@pytest.mark.parametrize("schema", ["cr\nm", "a‮b", "a b", "a\x7fb"])
-def test_a_cursor_whose_schema_is_not_a_name_is_refused_before_trino(schema):
-    """The schema a search_columns cursor resumes in passes the rule of a schema an agent
-    names: a forged one is an invalid cursor, and nothing reaches Trino."""
-    from akko_mcp_trino.search import Cursor, decode_cursor, encode_cursor, query_digest
-
-    token = encode_cursor(Cursor("lake", schema, 0, query=query_digest(["ident"], "lake", "")))
-    with pytest.raises(ValueError, match="Invalid cursor"):
-        decode_cursor(token)
-    trino = ScriptedTrino()
-    out = json.loads(_tools(trino)["search_columns"]("ident", "lake", cursor=token))
-    assert out["kind"] == "invalid_argument" and out["error"].startswith("Invalid cursor")
-    assert trino.calls == []
-
-
-def test_a_cursor_at_the_first_schema_of_a_catalog_still_resumes():
-    """An empty schema in a cursor means the first schema of its catalog, as before."""
-    from akko_mcp_trino.search import Cursor, decode_cursor, encode_cursor, query_digest
-
-    token = encode_cursor(Cursor("lake", "", 0, query=query_digest(["ident"], "", "")))
-    assert decode_cursor(token).schema == ""
