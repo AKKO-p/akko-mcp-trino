@@ -96,7 +96,8 @@ def main() -> int:
     snapshots = sql('SELECT count(*) FROM lake.sales."orders$snapshots"')[0][0]
     check("profile_table on orders$snapshots", out.get("rows") == snapshots, out)
     out = call("describe_table", "LAKE", "Ventes_Été", "Données_Café$snapshots")
-    check("describe_table on a mixed-case accented $snapshots", "rows" in out, out)
+    names = [r[0] for r in out.get("rows", [])]
+    check("describe_table on a mixed-case accented $snapshots", "snapshot_id" in names, out)
     out = call("list_tables", "lake", "Ventes_Été")
     check("list_tables on a mixed-case accented schema", out.get("tables") == ["données_café"], out)
     out = call("list_tables", "lake", "ventes_été")

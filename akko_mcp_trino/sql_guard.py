@@ -23,8 +23,14 @@ from sqlglot.tokens import TokenType
 # The longest name of a catalog, a schema or a table an agent may give.
 MAX_NAME_LENGTH = 1024
 # What a name may not hold: a control character (Unicode category Cc, NUL and line breaks
-# included) or half of a surrogate pair, which no client can send to Trino.
-_NOT_IN_A_NAME = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
+# included); a bidirectional control (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to
+# U+2069) or a line or paragraph separator (U+2028, U+2029), which make a text that shows the
+# name read in another order or on another line; or half of a surrogate pair, which no client
+# can send to Trino. The zero-width joiner and non-joiner stay: scripts need them.
+_NOT_IN_A_NAME = re.compile(
+    r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029"
+    r"\ud800-\udfff]"
+)
 # The characters of a refused name an error message quotes, at most.
 _SHOWN_NAME_CHARS = 100
 
@@ -316,7 +322,8 @@ def validate_identifier(name: str, label: str = "identifier") -> str:
 
     Any name Trino can hold is accepted, as written: ``orders$snapshots``, ``2024_sales``,
     ``données``, a quote or a dot included. It is text of 1 to ``MAX_NAME_LENGTH``
-    characters without a control character. It is never written in SQL as it is:
+    characters without a control character, a bidirectional control or a line or paragraph
+    separator. It is never written in SQL as it is:
     ``quote_identifier`` puts it in double quotes, ``sql_literal`` in a string literal.
     """
     if (
@@ -328,7 +335,7 @@ def validate_identifier(name: str, label: str = "identifier") -> str:
         shown = repr(_cut_name(name)) if isinstance(name, str) else type(name).__name__
         raise ValueError(
             f"Invalid {label}: {shown}. A name is text of 1 to {MAX_NAME_LENGTH} characters, "
-            "without control characters."
+            "without control characters, bidirectional controls or line separators."
         )
     return name
 
@@ -342,7 +349,7 @@ def _cut_name(name: str) -> str:
 
 def shown_name(name: str) -> str:
     """``name`` as a message shows it: as it is when every character prints, in repr
-    otherwise (a format character such as a right-to-left mark is then written as its
+    otherwise (a format character such as a zero-width joiner is then written as its
     escape), cut at ``_SHOWN_NAME_CHARS`` characters."""
     cut = _cut_name(name)
     return cut if cut.isprintable() else repr(cut)

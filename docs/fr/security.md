@@ -59,8 +59,11 @@ identité des droits en lecture seule, et seulement sur les données que tout ap
 Un nom de catalogue, de schéma ou de table donné à un tool est pris tel qu'il est écrit : tout
 texte de 1 à 1024 caractères sans caractère de contrôle, comme `orders$snapshots`, `2024_sales`
 ou `données`. Il n'entre dans le SQL que comme identifiant entre guillemets doubles, chaque
-guillemet double doublé, ou comme littéral de chaîne ; un nom qui porte un caractère de contrôle
-est refusé avant que Trino ne soit interrogé.
+guillemet double doublé, ou comme littéral de chaîne. Un nom qui porte un caractère de contrôle,
+un contrôle bidirectionnel (U+061C, U+200E, U+200F, U+202A à U+202E, U+2066 à U+2069) ou un
+séparateur de ligne ou de paragraphe (U+2028, U+2029) est refusé avant que Trino ne soit
+interrogé, et le refus le montre échappé ; l'antiliant et le liant sans chasse, dont certaines
+écritures ont besoin, sont acceptés.
 `execute_query` accepte tout SQL que Trino accepte, **pourvu que ce soit une lecture**.
 
 - **Les commandes passent par une liste blanche** : `SELECT`, `DESCRIBE` d'une table,

@@ -25,7 +25,8 @@ to retry.
 A `catalog`, `schema` or `table` argument is one bare name, taken as written: an Iceberg metadata
 table such as `orders$snapshots`, a name with accents, spaces or a dot, or one that starts with a
 digit is read as that one name, and Trino folds it to lower case. A name is 1 to 1024 characters
-without a control character; any other is refused with `"kind": "invalid_argument"` before Trino
+without a control character, a bidirectional control or a line separator (see
+[Security](security.md#the-statements-an-agent-may-send)); any other is refused with `"kind": "invalid_argument"` before Trino
 is asked.
 
 ## The path an agent follows

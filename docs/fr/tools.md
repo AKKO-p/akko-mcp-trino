@@ -25,7 +25,8 @@ policy d'accès, pas une erreur à retenter.
 Un argument `catalog`, `schema` ou `table` est un seul nom nu, pris tel qu'il est écrit : une table
 de métadonnées Iceberg comme `orders$snapshots`, un nom avec des accents, des espaces ou un point,
 ou qui commence par un chiffre est lu comme ce seul nom, et Trino le met en minuscules. Un nom
-fait de 1 à 1024 caractères sans caractère de contrôle ; tout autre est refusé avec
+fait de 1 à 1024 caractères sans caractère de contrôle, contrôle bidirectionnel ni séparateur de
+ligne (voir [Sécurité](security.md#les-instructions-quun-agent-peut-envoyer)) ; tout autre est refusé avec
 `"kind": "invalid_argument"` avant que Trino ne soit interrogé.
 
 ## Le parcours d'un agent

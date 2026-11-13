@@ -235,7 +235,7 @@ def test_every_sql_built_from_a_name_quotes_it(fragment):
 
 def test_a_not_found_schema_is_named_as_it_prints_or_escaped():
     """A name that prints is shown as it is; one with a format character, such as a
-    right-to-left override, is shown escaped."""
+    zero-width non-joiner, is shown escaped."""
 
     class Empty(ScriptedTrino):
         def query(self, sql, user=None, params=None, **keywords):
@@ -245,7 +245,66 @@ def test_a_not_found_schema_is_named_as_it_prints_or_escaped():
     tools = _tools(Empty())
     out = json.loads(tools["list_tables"]("lake", "Ventes d'été"))
     assert out["error"] == "Schema lake.Ventes d'été not found or not visible"
-    out = json.loads(tools["describe_schema"]("lake", "a\u202eb"))
-    assert out["error"] == "Schema lake.'a\\u202eb' not found or not visible"
-    out = json.loads(tools["search_columns"]("ident", "lake", "a\u202eb"))
-    assert out["error"] == "Schema lake.'a\\u202eb' not found or not visible"
+    out = json.loads(tools["describe_schema"]("lake", "a\u200cb"))
+    assert out["error"] == "Schema lake.'a\\u200cb' not found or not visible"
+    out = json.loads(tools["search_columns"]("ident", "lake", "a\u200cb"))
+    assert out["error"] == "Schema lake.'a\\u200cb' not found or not visible"
+
+
+# The bidirectional controls and the line and paragraph separators: never in a name an agent
+# gives, since a text that shows it could read in another order or on another line.
+_DIRECTION = [
+    "؜",
+    "‎",
+    "‏",
+    "‪",
+    "‫",
+    "‬",
+    "‭",
+    "‮",
+    "⁦",
+    "⁧",
+    "⁨",
+    "⁩",
+    " ",
+    " ",
+]
+
+
+@pytest.mark.parametrize("mark", _DIRECTION, ids=lambda c: f"U+{ord(c):04X}")
+def test_a_bidirectional_control_or_a_separator_is_refused_before_trino(mark):
+    """Each refused code point, on a catalog, a schema and a table name: the refusal shows it
+    escaped and no statement reaches Trino."""
+    trino = ScriptedTrino()
+    tools = _tools(trino)
+    name = f"a{mark}b"
+    for tool, args in (
+        ("list_tables", ("lake", name)),
+        ("describe_table", ("lake", "sales", name)),
+        ("profile_table", (name, "sales", "orders")),
+        ("search_columns", ("ident", "lake", name)),
+    ):
+        out = json.loads(tools[tool](*args))
+        assert out["kind"] == "invalid_argument" and out["error"].startswith("Invalid "), tool
+        assert mark not in out["error"] and f"\\u{ord(mark):04x}" in out["error"], tool
+    with pytest.raises(ValueError, match="Invalid table"):
+        sql_guard.validate_identifier(name, "table")
+    assert trino.calls == []
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "می‌خواهم",  # Persian, with a ZWNJ
+        "क्‍ष",  # Devanagari, with a ZWJ
+        "\U0001f469‍\U0001f4bb",  # an emoji sequence joined by a ZWJ
+        "co­op",  # a soft hyphen
+    ],
+)
+def test_joiners_and_a_soft_hyphen_are_accepted(name):
+    """The scripts that need a zero-width joiner or non-joiner keep their names."""
+    assert sql_guard.validate_identifier(name, "table") == name
+    trino = ScriptedTrino("sales", name)
+    out = json.loads(_tools(trino)["describe_table"]("lake", "sales", name))
+    assert "error" not in out
+    assert trino.calls == [f'DESCRIBE "lake"."sales"."{name}"']

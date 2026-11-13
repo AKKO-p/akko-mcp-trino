@@ -56,7 +56,10 @@ read-only rights, and only on data every caller may read (see
 A catalog, schema or table name given to a tool is taken as written: any text of 1 to 1024
 characters without a control character, such as `orders$snapshots`, `2024_sales` or `données`.
 It enters SQL only as a quoted identifier, each double quote in it doubled, or as a string
-literal; a name with a control character is refused before Trino is asked.
+literal. A name with a control character, a bidirectional control (U+061C, U+200E, U+200F,
+U+202A to U+202E, U+2066 to U+2069) or a line or paragraph separator (U+2028, U+2029) is refused
+before Trino is asked, and the refusal shows it escaped; the zero-width joiner and non-joiner,
+which some scripts need, are accepted.
 `execute_query` accepts any SQL Trino accepts, **as long as it is a read**.
 
 - **Commands go through an allow list**: `SELECT`, `DESCRIBE` of a table, `SHOW CATALOGS`,
