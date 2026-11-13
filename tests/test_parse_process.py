@@ -1,5 +1,5 @@
-"""The parse workers with the real server process: over stdio a statement that would keep
-the parser busy for minutes leaves the session valid, and no worker outlives its server.
+"""The parse workers with the real server process: over stdio a statement whose parse
+outlasts the deadline leaves the session valid, and no worker outlives its server.
 
 Each line the server writes on stdout is read as JSON-RPC: a single stray byte from a
 worker would fail the test. The stdio test runs on Linux, macOS and Windows; the tests of

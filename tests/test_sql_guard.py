@@ -634,9 +634,8 @@ def test_a_parsed_statement_is_read_by_every_reader_without_parsing_again(monkey
         "EXPLAIN " * 2000 + "SELECT 1",
     ],
 )
-def test_an_explain_of_an_explain_is_refused_in_linear_time(sql, monkeypatch):
-    """A chain of EXPLAIN was read once per link: 900 links took 3 s on one CPU, 2000
-    raised RecursionError. Now the statement and the one it explains are read, no more."""
+def test_an_explain_of_an_explain_is_refused(sql, monkeypatch):
+    """The statement and the one it explains are read, no more."""
     real, texts = sql_guard.sqlglot.parse, []
 
     def counting(text, *args, **kwargs):

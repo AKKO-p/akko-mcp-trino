@@ -6,8 +6,8 @@ wraps a write, and side-effecting commands. Anything that cannot be parsed is
 refused. Fail closed.
 
 An agent's statement is bounded before it is parsed (``check_sql_bounds``), then parsed
-once (``ParsedSQL``): the parser's time grows exponentially with the nesting of some
-brackets, so a short statement could otherwise hold a thread for minutes.
+once (``ParsedSQL``); the parse time grows with some nesting and repetition, and the parse
+workers' deadline bounds it (``akko_mcp_trino.parse_pool``).
 """
 
 from __future__ import annotations
@@ -408,8 +408,7 @@ def _is_read_only(
     if isinstance(st, exp.Command):  # SHOW and EXPLAIN, unstructured
         s = s[tokens[0].start :]
         if head == "EXPLAIN":
-            # An EXPLAIN never explains an EXPLAIN: a chain of them would be read once per
-            # link, in a time that grows with the square of its length.
+            # An EXPLAIN never explains an EXPLAIN.
             if explained or "EXPLAIN" not in extra_reads:
                 return False
             m = _EXPLAIN_RE.match(s)

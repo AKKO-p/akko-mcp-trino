@@ -57,8 +57,14 @@ def read_frame(stream: BinaryIO, limit: int = MAX_FRAME_BYTES) -> Optional[bytes
 
 
 def write_frame(stream: BinaryIO, payload: bytes) -> None:
-    """Write ``payload`` to ``stream`` as one frame, at once."""
-    stream.write(_HEADER.pack(len(payload)) + payload)
+    """Write ``payload`` to ``stream`` as one frame, every byte: a raw write may take fewer
+    bytes than it is given, so the rest is written again until none is left."""
+    left = memoryview(_HEADER.pack(len(payload)) + payload)
+    while left:
+        written = stream.write(left)
+        if not written:  # None from a stream that would block; ours never do
+            raise BlockingIOError("the frame could not be written")
+        left = left[written:]
     stream.flush()
 
 

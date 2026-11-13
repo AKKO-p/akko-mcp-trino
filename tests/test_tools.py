@@ -1911,8 +1911,8 @@ def test_a_statement_the_workers_refuse_is_never_run():
 
 
 def test_parse_bound_keeps_other_calls_responsive():
-    """A statement the parser would take minutes on holds one worker until the deadline,
-    then is refused; another caller's statement, sent meanwhile, is served before that."""
+    """A statement whose parse outlasts the deadline holds one worker until the deadline,
+    then is refused; another caller's statement, sent meanwhile, is served at once."""
     import threading
 
     from akko_mcp_trino.auth import Principal
@@ -1937,9 +1937,11 @@ def test_parse_bound_keeps_other_calls_responsive():
     heavy.start()
     while "alice" not in pool._callers:
         time.sleep(0.01)
+    bob_started = time.monotonic()
     call("bob", "SELECT 1")
     heavy.join(10)
     assert answers["bob"][0]["rows"] == [[1]]
+    assert answers["bob"][1] - bob_started < 1.0, "bob never waited for alice's worker"
     assert answers["bob"][1] < answers["alice"][1], "bob was served while alice's parse ran"
     assert answers["alice"][0]["kind"] == "time_budget"
     assert answers["alice"][1] - started < 2.0 + 0.5

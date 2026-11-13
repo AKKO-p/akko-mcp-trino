@@ -1,12 +1,13 @@
 """akko_mcp_trino.parse_pool and parse_worker: an agent's SQL is parsed in worker
 processes, within a deadline, one statement at a time per caller.
 
-The slow statements are real: an ARRAY nested 24 deep keeps sqlglot busy for minutes, so
-the deadline, not the statement, ends each test that sends one.
+``STUCK`` is a statement whose parse outlasts every deadline here, so the deadline, not the
+statement, ends each test that sends it.
 """
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -258,18 +259,26 @@ class _Process:
 
     def __init__(self, written=b"", end=False):
         read_fd, self._write_fd = os.pipe()
+        self._ending = threading.Lock()
         self.stdout = os.fdopen(read_fd, "rb", buffering=0)
         self.stdin = io.BytesIO()
         self.killed = False
+        # Written by a thread: a pipe holds a few kilobytes until its reader takes them.
+        self._writer = threading.Thread(target=self._write, args=(written, end), daemon=True)
+        self._writer.start()
+
+    def _write(self, written, end):
         if written:
-            os.write(self._write_fd, written)
+            with contextlib.suppress(OSError):
+                os.write(self._write_fd, written)
         if end:
             self.end()
 
     def end(self):
-        if self._write_fd is not None:
-            os.close(self._write_fd)
-            self._write_fd = None
+        with self._ending:
+            if self._write_fd is not None:
+                os.close(self._write_fd)
+                self._write_fd = None
 
     def poll(self):
         return 0 if self.killed else None
@@ -445,3 +454,93 @@ def test_the_metric_names_a_reason_never_a_statement():
         "deadline",
         "worker_failed",
     }
+
+
+def test_a_launch_that_failed_is_tried_again_by_the_next_call():
+    """A passing failure to start a worker (memory, a process limit) never leaves the pool
+    short for good: the next call starts the missing workers."""
+    attempts = []
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise OSError("no process for now")
+        return _Process(READY + _frame(json.dumps(["ok", [True, [], [True, []]]]).encode()))
+
+    pool = ParsePool(1, 0.2, launch=flaky)
+    with pytest.raises(ParseRefused) as refused:
+        _analyze(pool, "SELECT 1")
+    assert refused.value.code == "parse_no_worker" and pool._all == set()
+    assert _analyze(pool, "SELECT 1").read_only is True
+    assert len(pool._all) == 1 and len(attempts) == 2
+
+
+def test_an_idle_worker_that_died_is_replaced_before_any_call_uses_it():
+    good = _frame(json.dumps(["ok", [True, ["c.s.t"], [True, []]]]).encode())
+    dead, fresh = _Process(READY), _Process(READY + good)
+    pool = ParsePool(1, 1.0, launch=_fake(dead, fresh))
+    with pool._lock:
+        pool._start()
+        pool._refill()
+    dead.kill()  # it ended while it waited: its process gone, its pipe closed
+    assert _analyze(pool, "SELECT 1").tables == ("c.s.t",)
+    assert [w.process for w in pool._all] == [fresh]
+
+
+def test_an_answer_that_cannot_even_be_read_replaces_the_worker():
+    deep = b"[" * 200_000 + b"]" * 200_000  # json.loads raises RecursionError
+    worker = _Process(READY + _frame(deep))
+    pool = ParsePool(1, 1.0, launch=_fake(worker, _Process()))
+    with pytest.raises(ParseRefused) as refused:
+        _analyze(pool, "SELECT 1")
+    assert refused.value.code == "parse_failed"
+    assert worker.killed and worker not in [w.process for w in pool._all]
+
+
+def test_an_unexpected_exception_while_asking_replaces_the_worker(monkeypatch):
+    class _Stop(BaseException):
+        pass
+
+    def stop(raw):
+        raise _Stop
+
+    worker = _Process(READY + _frame(b'["error", null]'))
+    pool = ParsePool(1, 1.0, launch=_fake(worker, _Process()))
+    monkeypatch.setattr(parse_pool, "_analysis", stop)
+    with pytest.raises(_Stop):
+        _analyze(pool, "SELECT 1")
+    assert worker.killed and worker not in [w.process for w in pool._all]
+    assert len(pool._all) == 1 and pool._callers == set()
+
+
+def test_a_frame_is_written_whole_even_when_the_stream_takes_a_few_bytes_at_a_time():
+    class _Trickle(io.BytesIO):
+        def write(self, data):
+            return super().write(bytes(data[:3]))
+
+    out = _Trickle()
+    parse_worker.write_frame(out, b"a longer payload")
+    assert out.getvalue() == _frame(b"a longer payload")
+
+    class _WouldBlock(io.BytesIO):
+        def write(self, data):
+            return None
+
+    with pytest.raises(BlockingIOError):
+        parse_worker.write_frame(_WouldBlock(), b"x")
+
+
+def test_a_worker_starts_without_a_console_window_on_windows(monkeypatch):
+    seen = {}
+
+    def popen(args, **kwargs):
+        seen.update(kwargs)
+        raise OSError("not started")
+
+    monkeypatch.setattr(parse_pool.subprocess, "Popen", popen)
+    monkeypatch.setattr(parse_pool.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    with pytest.raises(OSError):
+        parse_pool.launch_worker()
+    assert seen["creationflags"] == 0x08000000
+    assert seen["stdin"] == seen["stdout"] == parse_pool.subprocess.PIPE
+    assert seen["stderr"] == parse_pool.subprocess.DEVNULL and seen["close_fds"] is True

@@ -97,9 +97,8 @@ MAX_PROFILE_MAX_CONCURRENT = 64
 _CLIENT_TAG_RE = re.compile(r"[A-Za-z0-9_.:=/-]{1,100}")
 # The longest statement an agent may send, and the deepest its brackets may nest, both checked
 # before the statement is parsed, and the least each may be set to: a cheap early refusal. The
-# parser's time doubles with each level of some brackets (a type name followed by a bracket,
-# such as ARRAY[ or ROW(), and grows with their repetition too, so what bounds it is the
-# deadline of the parse workers (MCP_SQL_PARSE_SECONDS, MCP_SQL_PARSE_WORKERS).
+# parse time grows with some nesting and repetition; the parse deadline bounds it
+# (MCP_SQL_PARSE_SECONDS, MCP_SQL_PARSE_WORKERS).
 DEFAULT_MAX_SQL_CHARS = 100000
 MIN_MAX_SQL_CHARS = 1000
 DEFAULT_MAX_SQL_NESTING = 32

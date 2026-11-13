@@ -1,10 +1,10 @@
 """Parse workers: an agent's SQL is parsed in other processes, within a deadline.
 
-The parser's time grows exponentially with some nesting, and with the repetition of what
-it allows, so no bound on the text alone bounds it. A thread cannot be stopped; a process
-can. Each statement an agent sends is parsed, and classified, in one of a few persistent
-worker processes (see ``akko_mcp_trino.parse_worker``), which answer plain values: the
-server's own process never parses an agent's SQL.
+The parse time grows with some nesting and repetition, so no bound on the text alone bounds
+it. A thread cannot be stopped; a process can. Each statement an agent sends is parsed, and
+classified, in one of a few persistent worker processes (see
+``akko_mcp_trino.parse_worker``), which answer plain values: the server's own process never
+parses an agent's SQL.
 
 * A worker is a fresh interpreter started by exec, never a fork of the server (which runs
   threads and an event loop). The workers start on first use. The protocol runs on the
@@ -82,6 +82,8 @@ def launch_worker() -> subprocess.Popen:
     env.update({name: os.environ[name] for name in _WINDOWS_ENV if name in os.environ})
     return subprocess.Popen(
         [sys.executable, "-m", "akko_mcp_trino.parse_worker"],
+        # On Windows, a worker of a server started without a console opens no window.
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -153,7 +155,7 @@ def _analysis(raw: bytes) -> Optional[Analysis]:
         names = tuple(str(t) for t in tables)
         scope = tuple((tuple(str(p) for p in parts), str(alias)) for parts, alias in scoped)
         return Analysis(read_only, names, ColumnScope(bare, scope))
-    except (TypeError, ValueError):
+    except Exception:  # noqa: BLE001 - any answer that cannot be read breaks the worker
         return None
 
 
@@ -252,26 +254,43 @@ class ParsePool:
         )
 
     def _start(self) -> None:
-        """Start the workers, the lock held; one that cannot start is left out."""
+        """Mark the pool started, the lock held; ``_refill`` starts the workers."""
         self._started = True
         atexit.register(self.close)
-        for _ in range(self.workers):
-            self._add()
 
-    def _add(self) -> None:
+    def _refill(self) -> None:
+        """Start workers, the lock held, until there are ``workers`` of them or one cannot
+        start: a launch that failed is tried again by the next call, so a passing failure
+        (memory, a process limit) never leaves the pool short for good."""
+        while not self._closed and len(self._all) < self.workers:
+            if not self._add():
+                return
+
+    def _drop_dead(self) -> None:
+        """Take out of the pool, the lock held, every idle worker whose process has ended,
+        so that no call is refused for a worker that died while it waited."""
+        for worker in [w for w in self._idle if w.process.poll() is not None]:
+            self._idle.remove(worker)
+            self._all.discard(worker)
+            worker.stop()
+
+    def _add(self) -> bool:
         try:
             worker = _Worker(self._launch)
-        except Exception:  # noqa: BLE001 - fewer workers: calls wait, or are refused
-            return
+        except Exception:  # noqa: BLE001 - fewer workers: the next call tries again
+            return False
         self._all.add(worker)
         self._idle.append(worker)
         self._lock.notify()
+        return True
 
     def _take(self, deadline: float) -> _Worker:
         """A free worker, ready, before ``deadline``; raises ``ParseRefused``."""
         with self._lock:
             if not self._started and not self._closed:
                 self._start()
+            self._drop_dead()
+            self._refill()
             while not self._idle:
                 left = deadline - time.monotonic()
                 if self._closed or left <= 0:
@@ -293,24 +312,29 @@ class ParsePool:
         return worker
 
     def _ask(self, worker: _Worker, request: bytes) -> Analysis:
+        """The worker's analysis of ``request``. On any way out but a well-formed answer,
+        an unexpected exception included, the worker is replaced: it never goes back to the
+        pool, nor stays counted in it."""
         try:
-            worker.send(request)
-            raw = worker.get(self.seconds)
-        except queue.Empty:
+            try:
+                worker.send(request)
+                raw = worker.get(self.seconds)
+            except queue.Empty:
+                raise self._refuse(
+                    "deadline",
+                    "parse_deadline",
+                    TIME_BUDGET,
+                    f"The statement took more than {self.seconds:g} s to check and was not "
+                    "run. Write a simpler statement: fewer nested or repeated expressions.",
+                ) from None
+            except (OSError, ValueError):
+                raw = None
+            found = _analysis(raw) if raw is not None else None
+            if found is None:
+                raise self._failed()
+        except BaseException:
             self._replace(worker)
-            raise self._refuse(
-                "deadline",
-                "parse_deadline",
-                TIME_BUDGET,
-                f"The statement took more than {self.seconds:g} s to check and was not "
-                "run. Write a simpler statement: fewer nested or repeated expressions.",
-            ) from None
-        except (OSError, ValueError):
-            raw = None
-        found = _analysis(raw) if raw is not None else None
-        if found is None:
-            self._replace(worker)
-            raise self._failed()
+            raise
         self._release(worker)
         return found
 
