@@ -1596,8 +1596,8 @@ def register_query_tools(
     def agent_sql(sql: str) -> Union[tuple[str, Analysis], str]:
         """The agent's statement, normalized, with its analysis by a parse worker; or the
         refusal, audited by its code, never its text: past the bounds, before any parse;
-        past the parse deadline, or with a statement of the same caller still checked
-        (see ``akko_mcp_trino.parse_pool``)."""
+        past the parse deadline, or with a statement of the same caller still checked when
+        its turn should have come (see ``akko_mcp_trino.parse_pool``)."""
         try:
             check_sql_bounds(sql, max_chars=max_sql_chars, max_nesting=max_sql_nesting)
         except SQLBoundError as e:

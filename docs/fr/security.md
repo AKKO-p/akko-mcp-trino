@@ -82,10 +82,11 @@ interrogé, et le refus le montre échappé ; l'antiliant et le liant sans chass
   répondu dans `MCP_SQL_PARSE_SECONDS` (2 par défaut) est tué et remplacé, et l'appel est refusé
   (`time_budget`) ; de même pour un appel qui ne trouve aucun processus libre dans ce délai, et un
   processus en échec fait refuser son appel. Un SQL très imbriqué ou répété n'occupe donc plus le
-  serveur. Un appelant fait analyser une instruction à la fois : un second appel pendant
-  l'analyse du premier est refusé aussitôt (`busy`). Les appels sans appelant vérifié comptent
-  pour le compte Trino configuré et partagent une seule place. Un appel attend au plus deux fois
-  `MCP_SQL_PARSE_SECONDS` : un processus, puis sa réponse. Les processus démarrent au premier
+  serveur. Un appelant fait analyser une instruction à la fois, si bien qu'il n'occupe qu'un
+  processus au plus : un second appel pendant l'analyse du premier attend son tour, et il est
+  refusé (`busy`) si son tour n'est pas venu dans `MCP_SQL_PARSE_SECONDS`. Les appels sans
+  appelant vérifié comptent pour le compte Trino configuré et partagent ce même tour. Un appel
+  attend au plus deux fois `MCP_SQL_PARSE_SECONDS` : son tour et un processus, puis sa réponse. Les processus démarrent au premier
   usage, sous Linux, macOS et Windows, n'écrivent nulle part (leurs flux standard sont le
   périphérique nul, et le protocole passe par des tubes qui leur sont propres), ne reçoivent
   aucun réglage du serveur et s'arrêtent avec lui. Le risque qui reste : un appelant authentifié peut occuper un processus pendant le

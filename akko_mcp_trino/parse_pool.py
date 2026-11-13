@@ -17,10 +17,13 @@ parses an agent's SQL.
 * A worker that has not answered within ``seconds`` is killed and replaced, and the call
   is refused (``time_budget``). A worker that died, or answered a frame too long or not a
   well-formed answer, is replaced and refuses the call too: never allowed.
-* One statement at a time per caller: a second call of the same caller while the first is
-  checked is refused at once (``busy``), so one caller holds one worker at most.
-* A call that finds no worker free within ``seconds`` is refused (``time_budget``), so a
-  call waits at most twice ``seconds``: for a worker, then for its answer.
+* One statement at a time per caller, so one caller holds one worker at most: a second call
+  of the same caller (an agent sends several tool calls at once; without a verified caller,
+  every user shares one turn) waits until the first is answered. A call that has not had
+  its turn within ``seconds`` is refused (``busy``).
+* A call that has not had its turn and a free worker within ``seconds`` is refused
+  (``time_budget``), so a call waits at most twice ``seconds``: for its turn and a worker,
+  then for its answer.
 * ``close`` (at exit, at the server's shutdown, and by ``close_all``) kills every worker. A
   worker whose server is gone sees its request pipe close and ends at once, mid-parse
   included.
@@ -181,7 +184,11 @@ class ParsePool:
         """Nothing starts until the first statement."""
         self.workers, self.seconds = workers, seconds
         self._metrics, self._launch = metrics, launch
-        self._lock = threading.Condition()
+        # One lock, two conditions: a worker comes free (``_lock``), a caller's turn comes
+        # (``_turn``).
+        mutex = threading.RLock()
+        self._lock = threading.Condition(mutex)
+        self._turn = threading.Condition(mutex)
         self._idle: list[_Worker] = []
         self._all: set[_Worker] = set()
         self._callers: set[str] = set()
@@ -210,16 +217,25 @@ class ParsePool:
         caller: str,
     ) -> Analysis:
         """The ``Analysis`` of ``sql``, from a worker, for ``caller`` (a verified subject, or
-        "" for the configured account); raises ``ParseRefused``."""
+        "" for the configured account); raises ``ParseRefused``. The wait for the caller's
+        turn and for a worker share one deadline."""
+        deadline = time.monotonic() + self.seconds
         with self._lock:
-            if caller in self._callers:
-                raise self._refuse(
-                    "caller_busy",
-                    "parse_busy",
-                    BUSY,
-                    "A statement of yours is still being checked: wait for its answer, "
-                    "then call again.",
-                )
+            # An exception while waiting (none is expected in a worker thread) leaves the
+            # turns as they were: this call has not taken one yet.
+            while caller in self._callers:
+                left = deadline - time.monotonic()
+                if self._closed:
+                    raise self._no_worker()
+                if left <= 0:
+                    raise self._refuse(
+                        "caller_busy",
+                        "parse_busy",
+                        BUSY,
+                        f"A statement of yours was still being checked after {self.seconds:g} "
+                        "s: wait for its answer, then call again.",
+                    )
+                self._turn.wait(left)
             self._callers.add(caller)
         try:
             request = json.dumps([sql, session_catalog, sorted(extra_reads)]).encode()
@@ -231,10 +247,11 @@ class ParsePool:
                     "The statement is too long for this server to check. Write a shorter "
                     "statement.",
                 )
-            return self._ask(self._take(time.monotonic() + self.seconds), request)
+            return self._ask(self._take(deadline), request)
         finally:
             with self._lock:
                 self._callers.discard(caller)
+                self._turn.notify_all()
 
     def _no_worker(self) -> ParseRefused:
         return self._refuse(
@@ -305,6 +322,9 @@ class ParsePool:
             except queue.Empty:
                 self._release(worker)  # still starting: kept for the next call
                 raise self._no_worker() from None
+            except BaseException:
+                self._release(worker)  # never lost to the pool
+                raise
             if not _is_ready(hello):
                 self._replace(worker)
                 raise self._failed()
@@ -361,6 +381,7 @@ class ParsePool:
             self._all.clear()
             self._idle.clear()
             self._lock.notify_all()
+            self._turn.notify_all()
         for worker in workers:
             worker.stop()
 

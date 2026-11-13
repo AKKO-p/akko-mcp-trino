@@ -113,22 +113,143 @@ def test_a_worker_that_dies_refuses_the_call_and_never_allows_it():
 
 
 def test_one_statement_at_a_time_per_caller_and_other_callers_still_served():
-    """alice holds a worker with a statement that never ends: her second call is refused
-    at once, and bob's statement is served on the other worker meanwhile."""
+    """alice holds a worker with a statement that never ends: her second call waits its
+    turn, within the budget, and bob's statement is served on the other worker meanwhile."""
     metrics = Metrics()
     pool = ParsePool(2, 3.0, metrics=metrics)
     _analyze(pool, "SELECT 1", "bob")  # the workers are started
     held, out = _in_thread(lambda: _analyze(pool, STUCK, "alice"))
     _until(lambda: "alice" in pool._callers)
-    with pytest.raises(ParseRefused) as again:
-        _analyze(pool, "SELECT 1", "alice")
-    assert (again.value.kind, again.value.code) == ("busy", "parse_busy")
+    started = time.monotonic()
+    waiting, again = _in_thread(lambda: _analyze(pool, "SELECT 1", "alice"))
     assert _analyze(pool, "SELECT b FROM c.s.t", "bob").tables == ("c.s.t",)
     assert held.is_alive(), "bob was served while alice's statement still held its worker"
+    assert waiting.is_alive(), "alice's second statement waits its turn, it is not refused"
+    assert len(pool.pids()) == 2, "alice holds one worker, never two"
     held.join(10)
+    waiting.join(10)
     assert out["refused"].code == "parse_deadline"
-    assert _refusals(metrics, "caller_busy") == 1
+    # Her turn comes as the first is cut: served, or refused busy if it came a moment late;
+    # never past twice the deadline.
+    assert again["at"] - started < 2 * 3.0 + 0.5
+    if "refused" in again:
+        assert (again["refused"].kind, again["refused"].code) == ("busy", "parse_busy")
+    else:
+        assert again["value"].read_only is True
     assert _analyze(pool, "SELECT 1", "alice").read_only, "her slot is free again"
+
+
+@pytest.mark.parametrize("caller", ["alice", ""])
+def test_two_statements_of_one_caller_sent_together_are_both_analysed(caller):
+    """An agent sends several tool calls at once; with no verified caller, every user shares
+    the configured account (""). The second statement waits for the first, then is served."""
+    metrics = Metrics()
+    gate = threading.Event()
+    worker = _Gated(READY, OK + OK, gate)
+    pool = ParsePool(1, 5.0, launch=_fake(worker), metrics=metrics)
+    first, out1 = _in_thread(lambda: _analyze(pool, "SELECT 1", caller))
+    _until(lambda: caller in pool._callers)
+    second, out2 = _in_thread(lambda: _analyze(pool, "SELECT 2", caller))
+    time.sleep(0.2)
+    assert second.is_alive(), "the second statement waits its turn, it is not refused"
+    gate.set()
+    first.join(10)
+    second.join(10)
+    assert out1["value"].tables == out2["value"].tables == ("c.s.t",)
+    assert _refusals(metrics, "caller_busy") is None
+    assert pool._callers == set()
+
+
+@pytest.mark.parametrize("caller", ["alice", ""])
+def test_statements_of_one_caller_sent_together_on_a_cold_pool_are_all_analysed(caller):
+    """The workers start on the first call: its siblings wait for the start, then are served."""
+    pool = ParsePool(2, 10.0)
+    start = threading.Barrier(4)
+
+    def call(i):
+        start.wait()
+        return _analyze(pool, f"SELECT a FROM c.s.t{i}", caller)
+
+    calls = [_in_thread(lambda i=i: call(i)) for i in range(4)]
+    for thread, _ in calls:
+        thread.join(30)
+    assert [out.get("value") and out["value"].tables for _, out in calls] == [
+        (f"c.s.t{i}",) for i in range(4)
+    ]
+    pool.close()
+
+
+def test_a_second_statement_whose_turn_does_not_come_within_the_deadline_is_refused_busy():
+    """alice's first statement waits for its worker, then for its answer: her second one
+    waits its turn for the deadline, no longer, then is refused busy."""
+    metrics = Metrics()
+    gate = threading.Event()
+    slow = _Gated(b"", READY, gate)  # ready once the gate opens, then never answers
+    pool = ParsePool(1, 1.0, launch=_fake(slow, _Process()), metrics=metrics)
+    first, out1 = _in_thread(lambda: _analyze(pool, "SELECT 1"))
+    _until(lambda: "alice" in pool._callers)
+    started = time.monotonic()
+    second, out2 = _in_thread(lambda: _analyze(pool, "SELECT 2"))
+    time.sleep(0.6)
+    gate.set()  # the first statement is sent now, and cut 1 s later
+    second.join(10)
+    first.join(10)
+    assert (out2["refused"].kind, out2["refused"].code) == ("busy", "parse_busy")
+    assert "1 s" in str(out2["refused"])
+    assert 1.0 - 0.1 <= out2["at"] - started < 1.0 + 0.5
+    assert out1["refused"].code == "parse_deadline"
+    assert _refusals(metrics, "caller_busy") == 1
+
+
+def test_an_exception_while_a_caller_waits_its_turn_leaves_the_turns_as_they_were(monkeypatch):
+    class _Stop(BaseException):
+        pass
+
+    def stop(timeout=None):
+        raise _Stop
+
+    gate = threading.Event()
+    pool = ParsePool(1, 5.0, launch=_fake(_Gated(READY, OK, gate)))
+    first, out = _in_thread(lambda: _analyze(pool, "SELECT 1"))
+    _until(lambda: "alice" in pool._callers)
+    monkeypatch.setattr(pool._turn, "wait", stop)
+    with pytest.raises(_Stop):
+        _analyze(pool, "SELECT 2")
+    assert pool._callers == {"alice"}, "the first statement keeps its turn"
+    gate.set()
+    first.join(10)
+    assert out["value"].tables == ("c.s.t",) and pool._callers == set()
+
+
+def test_an_exception_while_a_worker_starts_keeps_the_worker_and_frees_the_caller(monkeypatch):
+    class _Stop(BaseException):
+        pass
+
+    def stop(self, timeout):
+        raise _Stop
+
+    starting = _Process()  # never ready
+    pool = ParsePool(1, 5.0, launch=_fake(starting))
+    monkeypatch.setattr(parse_pool._Worker, "get", stop)
+    with pytest.raises(_Stop):
+        _analyze(pool, "SELECT 1")
+    assert [w.process for w in pool._idle] == [starting] and pool._callers == set()
+
+
+def test_close_while_a_caller_waits_its_turn_refuses_both_statements():
+    pool = ParsePool(1, 30.0)
+    _analyze(pool, "SELECT 1")
+    held, out1 = _in_thread(lambda: _analyze(pool, STUCK))
+    _until(lambda: pool._callers)
+    waiting, out2 = _in_thread(lambda: _analyze(pool, "SELECT 1"))
+    time.sleep(0.2)
+    assert waiting.is_alive()
+    started = time.monotonic()
+    pool.close()
+    held.join(10)
+    waiting.join(10)
+    assert out1["refused"].code == "parse_failed"
+    assert out2["refused"].code == "parse_no_worker" and out2["at"] - started < 1.0
 
 
 def test_a_call_that_finds_no_worker_free_within_the_deadline_is_refused():
@@ -294,6 +415,23 @@ class _Process:
 def _fake(*processes):
     made = iter(processes)
     return lambda: next(made)
+
+
+OK = _frame(json.dumps(["ok", [True, ["c.s.t"], [True, []]]]).encode())
+
+
+class _Gated(_Process):
+    """A worker that writes ``written`` at once and ``later`` once ``gate`` is set."""
+
+    def __init__(self, written, later, gate):
+        self._later, self._gate = later, gate
+        super().__init__(written)
+
+    def _write(self, written, end):
+        super()._write(written, end)
+        self._gate.wait()
+        with contextlib.suppress(OSError, TypeError):
+            os.write(self._write_fd, self._later)
 
 
 def test_a_worker_not_ready_within_the_deadline_is_kept_and_the_call_refused():

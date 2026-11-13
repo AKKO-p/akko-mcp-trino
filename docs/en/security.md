@@ -77,10 +77,11 @@ which some scripts need, are accepted.
   not answered within `MCP_SQL_PARSE_SECONDS` (2 by default) is killed and replaced, and the call
   is refused (`time_budget`); so is a call that finds no worker free within that time, and a
   worker that fails refuses its call too. Deeply nested or repeated SQL therefore no longer ties
-  up the server. A caller has one statement checked at a time: a second call while the first is
-  checked is refused at once (`busy`). Calls without a verified caller count as the configured
-  Trino account and share one such slot. A call waits at most twice `MCP_SQL_PARSE_SECONDS`: for
-  a worker, then for its answer. The workers start on first use, on Linux, macOS and Windows
+  up the server. A caller has one statement checked at a time, so it holds one worker at most: a
+  second call while the first is checked waits its turn, and is refused (`busy`) if its turn has
+  not come within `MCP_SQL_PARSE_SECONDS`. Calls without a verified caller count as the
+  configured Trino account and share one such turn. A call waits at most twice
+  `MCP_SQL_PARSE_SECONDS`: for its turn and a worker, then for its answer. The workers start on first use, on Linux, macOS and Windows
   alike, write nowhere (their standard streams are the null device, and the protocol runs on
   pipes of their own), get none of the server's settings, and end with the server.
   The remaining risk: an authenticated caller can keep one worker busy for the deadline at a
