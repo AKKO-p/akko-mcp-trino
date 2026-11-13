@@ -314,15 +314,18 @@ class AtlasClient:
 
     @contextmanager
     def _aside(self) -> Iterator[None]:
-        """A Kerberos negotiation waits on the KDC, not on the address: the first try's entry
-        leaves the watch while it runs, and comes back, its wait started anew, once the KDC
+        """A Kerberos negotiation waits on the KDC, not on the address: the address answered its
+        challenge (an HTTP answer, noted as such), and the first try's entry leaves the watch
+        while the negotiation runs, and comes back, its wait started anew, once the KDC
         answered. A negotiation cut by the deadline leaves no entry, so no address is left."""
         waiting = _WAITING.get()
         if waiting is None:
             yield
             return
         watch, entry = waiting
-        at, _ = watch.waiting.pop(entry)
+        at, _ = watch.waiting[entry]
+        self._answered[at] = time.monotonic()
+        del watch.waiting[entry]
         yield
         watch.waiting[entry] = (at, time.monotonic())
 

@@ -192,11 +192,11 @@ call's deadline passes (a filtered port 88, retries across KDCs) makes that call
 at its deadline; that alone does not set the provider aside as down, since the deadline cut the
 call, so the next call negotiates again. At most `ATLAS_MAX_CONCURRENT_REQUESTS` negotiations
 run at once; a negotiation still waiting for a thread when its call is cut never starts, and one
-under way ends when the KDC answers, its result dropped. When every one of those threads holds a
-negotiation whose call was cut, the KDC has stopped answering: the next call does not wait for
-it, it is `unavailable` at once, within its deadline, and the provider is retried as an outage,
-after `MCP_CONTEXT_RETRY_AFTER_SECONDS`. While one thread is free, a slow KDC that still answers
-is waited for, up to the call's deadline. The wait on the KDC is not a wait on Atlas: the
+under way ends when the KDC answers, its result dropped. When every one of those threads is held
+by a negotiation whose call was cut, which is taken as a KDC that stopped answering, the next
+call does not wait for it: it is `unavailable` at once, within its deadline, and the provider is
+retried as an outage, after `MCP_CONTEXT_RETRY_AFTER_SECONDS`. While one thread is free, a slow
+KDC that still answers is waited for, up to the call's deadline. The wait on the KDC is not a wait on Atlas: the
 address answered its challenge, so the address line above never names it for that wait, and the
 next calls still start at the same address of `ATLAS_URL`. A negotiation under way also holds
 the process when it stops: Python waits for its thread, so a stop during a KDC hang lasts until

@@ -19,9 +19,10 @@ the provider's asynchronous client runs it on a thread pool of its own, at most
 ``workers`` at once (``ATLAS_MAX_CONCURRENT_REQUESTS``): the event loop serves every other
 read meanwhile, and the call's deadline cuts the wait. A negotiation still running when its
 call is cut goes on in its thread until the KDC answers, and its result is dropped; one that
-waits for a thread when its call is cut never starts. When every thread holds a negotiation
-whose call is gone, the KDC has stopped answering: a new negotiation does not wait for a
-thread, it fails at once as a KDC that cannot be reached, within its call's deadline. The
+waits for a thread when its call is cut never starts. When every thread is held by a
+negotiation whose call was cut, which is taken as a KDC that stopped answering, a new
+negotiation does not wait for a thread: it fails at once as a KDC that cannot be reached,
+within its call's deadline. The
 client sets the address's wait aside while a negotiation runs (``aside``): the time spent on
 the KDC is not a wait on Atlas.
 

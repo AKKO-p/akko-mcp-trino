@@ -200,11 +200,11 @@ appel `unavailable` à son échéance ; cela seul n'écarte pas le fournisseur c
 puisque l'échéance a coupé l'appel, donc l'appel suivant renégocie. Au plus
 `ATLAS_MAX_CONCURRENT_REQUESTS` négociations tournent à la fois ; une négociation qui attend encore
 un fil quand son appel est coupé ne commence jamais, et une négociation en cours s'achève quand le
-KDC répond, son résultat écarté. Quand chacun de ces fils tient une négociation dont l'appel a
-été coupé, le KDC ne répond plus : l'appel suivant ne l'attend pas, il est `unavailable` tout de
-suite, avant son échéance, et le fournisseur est réessayé comme une panne, après
-`MCP_CONTEXT_RETRY_AFTER_SECONDS`. Tant qu'un fil est libre, un KDC lent qui répond encore est
-attendu, jusqu'à l'échéance de l'appel. L'attente du KDC n'est pas une attente d'Atlas :
+KDC répond, son résultat écarté. Quand chacun de ces fils est tenu par une négociation dont
+l'appel a été coupé, ce qui est pris pour un KDC qui ne répond plus, l'appel suivant ne l'attend
+pas : il est `unavailable` tout de suite, avant son échéance, et le fournisseur est réessayé
+comme une panne, après `MCP_CONTEXT_RETRY_AFTER_SECONDS`. Tant qu'un fil est libre, un KDC lent
+qui répond encore est attendu, jusqu'à l'échéance de l'appel. L'attente du KDC n'est pas une attente d'Atlas :
 l'adresse a répondu à son défi, donc la ligne d'adresse plus haut ne la nomme jamais pour cette
 attente, et les appels suivants commencent toujours par la même adresse d'`ATLAS_URL`. Une
 négociation en cours retient aussi le processus quand il s'arrête : Python attend son fil, donc
