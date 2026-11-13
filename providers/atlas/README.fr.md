@@ -62,7 +62,7 @@ cite une adresse, un proxy ni un secret.
 | `ATLAS_TIMEOUT_SECONDS` | délai d'une requête à Atlas ; avec plusieurs adresses, voir plus bas son rapport à `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | délai pour ouvrir une connexion à une adresse, inférieur à `ATLAS_TIMEOUT_SECONDS`, pour qu'une adresse muette laisse la place à la suivante dans le temps de l'appel | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | lectures de termes de glossaire envoyées à la fois, de 1 à 32 ; avec Kerberos, aussi les négociations menées à la fois | `4` |
-| `ATLAS_MAX_RESPONSE_BYTES` | taille maximale du corps d'une réponse d'Atlas une fois décodé, au moins `1048576` ; la lecture s'arrête au-delà, avec ou sans `Content-Length`, et l'appel est `unavailable` pour lui seul : aucune autre adresse n'est essayée et aucune pause de réessai ne s'ouvre. Un avertissement par appel conseille de baisser `MCP_CONTEXT_BATCH` | `67108864` |
+| `ATLAS_MAX_RESPONSE_BYTES` | taille maximale du corps d'une réponse d'Atlas une fois décodé, au moins `1048576` ; la borne vaut par lecture, pas par appel, et un appel peut tenir plusieurs lectures à la fois (lectures par lot, puis jusqu'à `ATLAS_MAX_CONCURRENT_REQUESTS` lectures de termes) ; la lecture s'arrête au-delà, avec ou sans `Content-Length`, et l'appel est `unavailable` pour lui seul : aucune autre adresse n'est essayée et aucune pause de réessai ne s'ouvre. Un avertissement par appel conseille de baisser `MCP_CONTEXT_BATCH` | `67108864` |
 
 Un secret donné par fichier (`*_FILE`) est relu quand le fichier change.
 
@@ -131,12 +131,13 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 |---|---|
 | une connexion refusée, ou aucune ouverte en `ATLAS_CONNECT_TIMEOUT_SECONDS` | essaie l'adresse suivante d'`ATLAS_URL`, et commence par elle aux appels suivants ; puis se dit indisponible |
 | pas de réponse à temps de l'adresse par laquelle l'appel a commencé : un délai de lecture ou d'écriture dépassé, ou l'échéance de l'appel lui-même atteinte pendant qu'il l'attend | essaie l'adresse suivante d'`ATLAS_URL` s'il reste du temps à l'appel, commence par elle aux appels suivants, et l'écrit une fois au journal (plus bas) ; puis se dit indisponible |
-| une autre erreur de transport (une connexion fermée sous l'appel, une erreur du proxy), un corps qui ne se décode pas, ou un 5xx | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible ; les appels suivants commencent là où ils commençaient |
+| une autre erreur de transport (une connexion fermée sous l'appel, une erreur du proxy), un corps qui ne se décode pas, ou un 5xx (son corps non lu) | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible ; les appels suivants commencent là où ils commençaient |
 | une redirection vers une adresse d'`ATLAS_URL` (le serveur passif d'Atlas HA) | la suit, et commence par cette adresse aux appels suivants |
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
 | 401, ou un 403 autre que celui d'en dessous | se dit refusé tout de suite ; le cookie de session est oublié |
 | 403 avec `ATLAS-403-00-001` (Atlas refuse au compte une partie des objets demandés) | ne sert rien de cette lecture (tout le lot de tables, ou ce terme), reste ouvert, et écrit une fois pour l'appel `atlas refused some objects to the account; an account with no read grant serves nothing` ; les tables de ce lot reçoivent le statut `not_found`, exprès, le même qu'une table qu'Atlas ne connaît pas, pour qu'un agent ne puisse pas distinguer un objet refusé d'un objet absent |
 | un 200 qui n'est pas du JSON (une page de connexion Knox), un JSON illisible, un autre statut | se dit indisponible |
+| un corps dans un codage de contenu autre qu'aucun, `identity`, `gzip` ou `deflate`, ou dans plusieurs (le client demande `Accept-Encoding: gzip, deflate`) | n'en lit rien, et se dit indisponible pour cet appel seul, comme ci-dessous ; écrit une fois pour l'appel `atlas answered in a content coding other than gzip or deflate` |
 | un corps plus long qu'`ATLAS_MAX_RESPONSE_BYTES` une fois décodé | cesse de le lire, et se dit indisponible pour cet appel seul : aucune autre adresse n'est essayée, les appels suivants commencent là où ils commençaient, aucune pause de réessai ne s'ouvre ; écrit une fois pour l'appel `atlas answered more than ATLAS_MAX_RESPONSE_BYTES for one read; lower MCP_CONTEXT_BATCH` |
 | 404 avec `ATLAS-404-00-009` à une lecture de tables (aucune instance) | ne sait rien de ces tables |
 | 404 avec `ATLAS-404-00-005` à une lecture de terme (aucun GUID) | écarte ce terme |

@@ -10,6 +10,8 @@ import socket
 import ssl
 import threading
 import time
+import tracemalloc
+import zlib
 
 import certifi
 import httpx
@@ -24,7 +26,7 @@ from akko_mcp_trino.context import (
     ProviderUnavailable,
     TableRef,
 )
-from atlas_replay import ATLAS, FakeAtlas, transport
+from atlas_replay import ATLAS, Counted, FakeAtlas, transport
 from fake_spnego import install
 
 import akko_mcp_trino_atlas
@@ -1038,4 +1040,126 @@ def test_body_over_cap_in_the_check_is_said():
     p = build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP))
     lines = p.check_lines()
     asyncio.run(p.aclose())
-    assert lines[-1].startswith("UNREACHABLE")
+    assert lines[-1] == "UNREACHABLE: atlas answered more than ATLAS_MAX_RESPONSE_BYTES"
+
+
+def _gzip_spaces(size: int) -> bytes:
+    """``size`` spaces, gzip-compressed a block at a time: about a thousandth of the size."""
+    packer = zlib.compressobj(9, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
+    block = b" " * 1_048_576
+    return b"".join(packer.compress(block) for _ in range(size // len(block))) + packer.flush()
+
+
+def test_a_gzip_bomb_holds_at_most_the_cap_and_one_step():
+    # 64 MiB of spaces in about 64 KiB on the wire, read as a network transport hands it.
+    bomb = Counted(_gzip_spaces(64 * CAP))
+    headers = {"content-type": "application/json", "content-encoding": "gzip"}
+    handler = by_host({"atlas-a": httpx.Response(200, headers=headers, stream=bomb)})
+    p = build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP), ATLAS_TABLE_TYPES="hive_table")
+    tracemalloc.start()
+    try:
+        (error,) = calls(p)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert isinstance(error, ProviderAnswerTooLarge)
+    # The body up to the cap (a bytearray grows by an eighth), one step of 64 KiB, and the
+    # call's own objects: never the 64 MiB.
+    assert peak < CAP + CAP // 4 + 512 * 1024, f"peak {peak} bytes"
+    assert bomb.closed
+
+
+@pytest.mark.parametrize("coding", ["gzip, gzip", "gzip, gzip, gzip", "br", "x-unknown"])
+def test_a_stacked_or_unknown_coding_is_refused_unread(coding, caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    payload = gzip.compress(gzip.compress(b"{}")) if coding.startswith("gzip") else b"{}"
+    body = Counted(payload)
+    headers = {"content-type": "application/json", "content-encoding": coding}
+    handler = by_host(
+        {"atlas-a": httpx.Response(200, headers=headers, stream=body), "atlas-b": "replay"}
+    )
+    (error,) = calls(build(handler, ATLAS_TABLE_TYPES="hive_table"))
+    assert isinstance(error, ProviderAnswerTooLarge)
+    # Refused before a byte is read; the address answered, so no other one is tried.
+    assert body.sent == 0 and body.closed
+    assert [r.url.host for r in handler.seen] == ["atlas-a"]
+    assert [r.getMessage() for r in caplog.records] == [
+        "atlas answered in a content coding other than gzip or deflate"
+    ]
+
+
+def test_gzip_and_deflate_with_or_without_a_zlib_header_are_read():
+    atlas = FakeAtlas("atlas-2.4")
+
+    def raw_deflate(data: bytes) -> bytes:
+        packer = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+        return packer.compress(data) + packer.flush()
+
+    encodings = {
+        "gzip": ("gzip", gzip.compress),
+        "zlib": ("deflate", zlib.compress),
+        "raw": ("deflate", raw_deflate),
+        "identity": ("identity", bytes),
+    }
+    for header, encode in encodings.values():
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request, header=header, encode=encode) -> httpx.Response:
+            seen.append(request)
+            plain = atlas(request)
+            headers = {"content-type": plain.headers["content-type"], "content-encoding": header}
+            return httpx.Response(
+                plain.status_code, headers=headers, stream=Counted(encode(plain.content))
+            )
+
+        (found,) = calls(build(handler))
+        assert INVOICES in found, header
+        assert {r.headers["accept-encoding"] for r in seen} == {"gzip, deflate"}
+
+    # A body of several decoding steps, under the cap, in each form of deflate.
+    padded = b" " * 200_000 + b"{}"
+    for encode in (zlib.compress, raw_deflate):
+        body = Counted(encode(padded))
+        headers = {"content-type": "application/json", "content-encoding": "deflate"}
+        handler = by_host({"atlas-a": httpx.Response(200, headers=headers, stream=body)})
+        (found,) = calls(build(handler, ATLAS_TABLE_TYPES="hive_table"))
+        assert found == {} and body.closed
+
+
+def test_a_body_that_cannot_be_decoded_is_an_outage_of_the_address():
+    headers = {"content-type": "application/json", "content-encoding": "gzip"}
+    broken = httpx.Response(200, headers=headers, stream=Counted(b"\x1f\x8b not gzip"))
+    handler = by_host({"atlas-a": broken, "atlas-b": "replay"})
+    (found,) = calls(build(handler, ATLAS_TABLE_TYPES="hive_table"))
+    assert INVOICES in found
+    assert [r.url.host for r in handler.seen] == ["atlas-a", "atlas-b"]
+
+
+def test_a_5xx_a_redirect_or_a_refusal_is_closed_unread():
+    bodies: list[Counted] = []
+
+    def unread(status: int, **headers: str) -> httpx.Response:
+        bodies.append(Counted(b" " * (4 * CAP)))
+        return httpx.Response(status, headers=headers, stream=bodies[-1])
+
+    env = {"ATLAS_MAX_RESPONSE_BYTES": str(CAP), "ATLAS_TABLE_TYPES": "hive_table"}
+    # A 5xx stays an outage of the address: the next one answers.
+    handler = by_host({"atlas-a": unread(503), "atlas-b": "replay"})
+    (found,) = calls(build(handler, **env))
+    assert INVOICES in found and [r.url.host for r in handler.seen] == ["atlas-a", "atlas-b"]
+    # A redirect to the other address is followed, its body unread.
+    atlas = FakeAtlas("atlas-2.4")
+
+    def redirect(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "atlas-a":
+            return unread(307, location=str(request.url.copy_with(host="atlas-b")))
+        return atlas(request)
+
+    (found,) = calls(build(redirect, **env))
+    assert INVOICES in found
+    # A refusal of the account.
+    handler = by_host({"atlas-a": unread(401), "atlas-b": "replay"})
+    (refused,) = calls(build(handler, **env))
+    assert isinstance(refused, ProviderRefused)
+    assert all(body.sent == 0 and body.closed for body in bodies), [b.sent for b in bodies]

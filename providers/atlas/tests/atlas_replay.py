@@ -116,6 +116,25 @@ class FakeAtlas:
         return httpx.Response(200, json=answer)
 
 
+class Counted(httpx.AsyncByteStream):
+    """A body sent as it is read, by chunks of 64 KiB, as a network transport hands it:
+    ``sent`` counts the bytes taken from it, ``closed`` says it was closed."""
+
+    def __init__(self, payload: bytes, chunk: int = 65_536) -> None:
+        self.payload, self.chunk = payload, chunk
+        self.sent = 0
+        self.closed = False
+
+    async def __aiter__(self):
+        while self.sent < len(self.payload):
+            piece = self.payload[self.sent : self.sent + self.chunk]
+            self.sent += len(piece)
+            yield piece
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
 def transport(handler: Callable[[httpx.Request], Any]) -> httpx.MockTransport:
     """A transport that answers with ``handler``, sync or async."""
     return httpx.MockTransport(handler)

@@ -1,14 +1,15 @@
 """Kerberos (SPNEGO) for Atlas, from a keytab, with ``pyspnego`` (the ``kerberos`` extra).
 
 The provider answers a ``401`` that carries ``WWW-Authenticate: Negotiate`` with an
-``Authorization: Negotiate`` token. Each negotiation builds a new security context from
-``spnego.KerberosKeytab``: ``pyspnego`` gets a new ticket from the keytab and keeps it in a
-cache of its own in memory (``MEMORY:``), so an expired ticket is never used and no
-process of its own renews one; each negotiation is thus one request to the KDC. A
-redirect of Atlas's passive server to the active one is a new request, so the negotiation
-starts again on the new host. Once Atlas has opened a session, its ``ATLASSESSIONID``
-cookie is sent and no new negotiation happens until Atlas asks for one. Atlas's own
-mutual authentication token is not checked: TLS authenticates Atlas.
+``Authorization: Negotiate`` token. The client closes that ``401`` without reading its body
+(``challenged``), then sends the request again with the token (``answer``). Each negotiation
+builds a new security context from ``spnego.KerberosKeytab``: ``pyspnego`` gets a new ticket
+from the keytab and keeps it in a cache of its own in memory (``MEMORY:``), so an expired
+ticket is never used and no process of its own renews one; each negotiation is thus one
+request to the KDC. A redirect of Atlas's passive server to the active one is a new request,
+so the negotiation starts again on the new host. Once Atlas has opened a session, its
+``ATLASSESSIONID`` cookie is sent and no new negotiation happens until Atlas asks for one.
+Atlas's own mutual authentication token is not checked: TLS authenticates Atlas.
 
 The service name is ``ATLAS_SPN`` when set (``HTTP@<host>``), else ``HTTP@<host of the
 request>``. The token is SPNEGO (``protocol="negotiate"``), as ``curl --negotiate`` sends.
@@ -175,12 +176,24 @@ class SpnegoAuth(httpx.Auth):
     async def async_auth_flow(
         self, request: httpx.Request
     ) -> AsyncGenerator[httpx.Request, httpx.Response]:
-        """As ``auth_flow``, the negotiation on the pool's threads, never on the event loop."""
+        """As ``auth_flow``, the negotiation on the pool's threads, never on the event loop.
+        httpx reads the challenge's body before it sends the request again: the provider's
+        client does not use this flow, it calls ``challenged`` and ``answer`` itself."""
         response = yield request
-        if response.status_code == 401 and _challenge(response) is not None:
-            with self._aside():
-                token = await self._negotiate(request)
-            yield self._answer(request, token)
+        if self.challenged(response):
+            yield await self.answer(request)
+
+    @staticmethod
+    def challenged(response: httpx.Response) -> bool:
+        """Whether ``response`` is a ``401`` that carries a ``Negotiate`` challenge."""
+        return response.status_code == 401 and _challenge(response) is not None
+
+    async def answer(self, request: httpx.Request) -> httpx.Request:
+        """``request`` with the token of a new negotiation, run on the pool's threads inside
+        ``aside()``."""
+        with self._aside():
+            token = await self._negotiate(request)
+        return self._answer(request, token)
 
     async def _negotiate(self, request: httpx.Request) -> bytes:
         """Run ``_token`` on the pool; fail at once when every thread holds a negotiation whose

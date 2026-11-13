@@ -62,7 +62,7 @@ secret.
 | `ATLAS_TIMEOUT_SECONDS` | timeout of one request to Atlas; with several addresses, see below how it relates to `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | time to open a connection to one address, below `ATLAS_TIMEOUT_SECONDS`, so that a silent address gives way to the next one within the call | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | glossary term reads sent at once, from 1 to 32; with Kerberos, also the negotiations run at once | `4` |
-| `ATLAS_MAX_RESPONSE_BYTES` | longest body of one Atlas answer once decoded, at least `1048576`; the read stops past it, with or without `Content-Length`, and the call is `unavailable` for itself alone: no other address is tried and no retry pause opens. One warning per call says to lower `MCP_CONTEXT_BATCH` | `67108864` |
+| `ATLAS_MAX_RESPONSE_BYTES` | longest body of one Atlas answer once decoded, at least `1048576`; the bound is per read, not per call, and a call may hold several reads at once (bulk reads, then up to `ATLAS_MAX_CONCURRENT_REQUESTS` term reads); the read stops past it, with or without `Content-Length`, and the call is `unavailable` for itself alone: no other address is tried and no retry pause opens. One warning per call says to lower `MCP_CONTEXT_BATCH` | `67108864` |
 
 A secret given as a file (`*_FILE`) is read again when the file changes.
 
@@ -130,12 +130,13 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 |---|---|
 | a refused connection, or none opened within `ATLAS_CONNECT_TIMEOUT_SECONDS` | tries the next address of `ATLAS_URL`, and starts the next calls there; then is unavailable |
 | no answer in time from the address the call started with: a read or write timeout, or the call's own deadline reached while it waits on it | tries the next address of `ATLAS_URL` while the call has time left, starts the next calls there, and logs it once (below); then is unavailable |
-| another transport error (a connection closed under the call, a proxy error), a body that cannot be decoded, or a 5xx | tries the next address of `ATLAS_URL`, then is unavailable; the next calls start where they did |
+| another transport error (a connection closed under the call, a proxy error), a body that cannot be decoded, or a 5xx (its body unread) | tries the next address of `ATLAS_URL`, then is unavailable; the next calls start where they did |
 | a redirect to an address of `ATLAS_URL` (the passive server of Atlas HA) | follows it, and starts the next calls at that address |
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
 | 401, or a 403 other than below | is refused at once; the session cookie is dropped |
 | 403 with `ATLAS-403-00-001` (Atlas refuses the account some of the objects asked) | serves nothing of that read (the whole batch of tables, or that term), stays open, and logs `atlas refused some objects to the account; an account with no read grant serves nothing` once for the call; the tables of that batch get the status `not_found`, on purpose, the same as a table Atlas does not hold, so that an agent cannot tell a refused object from an absent one |
 | a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
+| a body in a content coding other than none, `identity`, `gzip` or `deflate`, or in more than one (the client asks for `Accept-Encoding: gzip, deflate`) | reads none of it, and is unavailable for that call alone, as below; logs `atlas answered in a content coding other than gzip or deflate` once for the call |
 | a body longer than `ATLAS_MAX_RESPONSE_BYTES` once decoded | stops reading it, and is unavailable for that call alone: no other address is tried, the next calls start where they did, no retry pause opens; logs `atlas answered more than ATLAS_MAX_RESPONSE_BYTES for one read; lower MCP_CONTEXT_BATCH` once for the call |
 | 404 with `ATLAS-404-00-009` to a table read (no such instance) | knows nothing of these tables |
 | 404 with `ATLAS-404-00-005` to a term read (no such GUID) | leaves that term out |

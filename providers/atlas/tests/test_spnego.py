@@ -18,7 +18,7 @@ from akko_mcp_trino.context import (
     ProviderUnavailable,
     TableRef,
 )
-from atlas_replay import ATLAS, FakeAtlas, transport
+from atlas_replay import ATLAS, Counted, FakeAtlas, transport
 from fake_spnego import install
 
 from akko_mcp_trino_atlas import AtlasProvider, from_env
@@ -735,6 +735,55 @@ def test_a_synchronous_client_negotiates_too(monkeypatch):
         with httpx.Client(transport=httpx.MockTransport(handler), auth=auth) as client:
             assert client.get(f"{ATLAS}/api/atlas/admin/version").status_code == 200
             assert client.get(f"{ATLAS}/open").status_code == 200  # no challenge, no token
+    finally:
+        auth.close()
+    assert auths == ["", "Negotiate " + base64.b64encode(b"token-1").decode(), ""]
+
+
+def test_a_challenge_body_is_never_read(monkeypatch):
+    install(monkeypatch)
+    atlas = FakeAtlas("atlas-2.4")
+    bodies: list[Counted] = []
+    # Four times the cap in plain bytes, and a stacked coding no client should decode.
+    payloads = {"identity": b" " * (4 * 1_048_576), "gzip, gzip": b"\x1f\x8b not gzip"}
+
+    for coding, payload in payloads.items():
+
+        def handler(request: httpx.Request, coding=coding, payload=payload) -> httpx.Response:
+            if not request.headers.get("authorization"):
+                bodies.append(Counted(payload))
+                headers = {**CHALLENGE, "content-encoding": coding}
+                return httpx.Response(401, headers=headers, stream=bodies[-1])
+            return atlas(request)
+
+        p = build(handler, ATLAS_TABLE_TYPES="hive_table", ATLAS_MAX_RESPONSE_BYTES="1048576")
+        (found,) = calls(p)
+        assert INVOICES in found, coding
+    assert len(bodies) == 2
+    assert all(body.sent == 0 and body.closed for body in bodies), [b.sent for b in bodies]
+
+
+def test_an_asynchronous_httpx_client_negotiates_too(monkeypatch):
+    install(monkeypatch)
+    auths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        auths.append(request.headers.get("authorization", ""))
+        if not auths[-1] and request.url.path != "/open":
+            return httpx.Response(401, headers=CHALLENGE)
+        return httpx.Response(200, json={})
+
+    auth = SpnegoAuth(PRINCIPAL, KEYTAB, "")
+
+    async def run() -> list[int]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, auth=auth) as client:
+            first = await client.get(f"{ATLAS}/api/atlas/admin/version")
+            second = await client.get(f"{ATLAS}/open")  # no challenge, no token
+            return [first.status_code, second.status_code]
+
+    try:
+        assert asyncio.run(run()) == [200, 200]
     finally:
         auth.close()
     assert auths == ["", "Negotiate " + base64.b64encode(b"token-1").decode(), ""]

@@ -27,10 +27,14 @@ What an answer means:
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
 - a body longer than ``ATLAS_MAX_RESPONSE_BYTES`` once decoded, with a ``Content-Length``
-  or without one: the read stops there and the call is ``ProviderAnswerTooLarge``, for it
-  alone. The address answered: no other address is tried, none is left, and the core opens
-  no retry pause. One line per call, ``atlas answered more than ATLAS_MAX_RESPONSE_BYTES
-  for one read; lower MCP_CONTEXT_BATCH``, names no table and no address;
+  or without one, or in a content coding other than none, ``identity``, ``gzip`` or
+  ``deflate``, or in more than one: the read stops there (or never starts) and the call is
+  ``ProviderAnswerTooLarge``, for it alone. The address answered: no other address is tried,
+  none is left, and the core opens no retry pause. One line per call, ``atlas answered more
+  than ATLAS_MAX_RESPONSE_BYTES for one read; lower MCP_CONTEXT_BATCH`` or ``atlas answered
+  in a content coding other than gzip or deflate``, names no table and no address. Only the
+  body of a 200, 400, 403 or 404 is read: a 5xx, a redirect, a 401 and a Kerberos challenge
+  are closed unread;
 - Atlas's own "does not exist" answers, by status and error code, only those the read
   names as its own (``missing``): ``INSTANCE_BY_ATTRIBUTE``, a 404 with
   ``ATLAS-404-00-009`` (no instance has that unique attribute); ``INSTANCE_BY_GUID``, a
@@ -49,6 +53,7 @@ import asyncio
 import json
 import logging
 import time
+import zlib
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -70,6 +75,15 @@ SESSION_COOKIE = "ATLASSESSIONID"
 # The passive server of Atlas in high availability redirects once to the active one.
 _MAX_REDIRECTS = 3
 _REFUSED = (401, 403)
+# The statuses whose body ``_read`` looks at; any other answer is closed unread.
+_READ_BODY = frozenset({200, 400, 403, 404})
+# The content codings the client asks for, and the only ones it reads, one at most.
+ACCEPT_ENCODING = "gzip, deflate"
+# The most bytes one decoding step gives: the body is held, plus at most this much.
+_STEP = 65_536
+# The fixed texts of an answer refused for its call alone; ``--check`` prints them.
+TOO_LARGE = "atlas answered more than ATLAS_MAX_RESPONSE_BYTES"
+UNREAD_CODING = "atlas answered in a content coding other than gzip or deflate"
 
 
 class Missing(Enum):
@@ -107,16 +121,65 @@ class _TooLarge(Exception):
     """The body of an answer is longer than ``ATLAS_MAX_RESPONSE_BYTES``."""
 
 
+class _Coding(Exception):
+    """The body of an answer is in a content coding the client does not read."""
+
+
+class _Identity:
+    """No content coding: the bytes as they come."""
+
+    unconsumed_tail = b""
+
+    @staticmethod
+    def decompress(data: bytes, max_length: int) -> bytes:
+        return data
+
+
+class _Deflate:
+    """``deflate``: zlib data, or raw deflate data as some servers send it."""
+
+    def __init__(self) -> None:
+        self._zlib = zlib.decompressobj()
+        self._first = True
+
+    @property
+    def unconsumed_tail(self) -> bytes:
+        return self._zlib.unconsumed_tail
+
+    def decompress(self, data: bytes, max_length: int) -> bytes:
+        if self._first:
+            self._first = False
+            try:
+                return self._zlib.decompress(data, max_length)
+            except zlib.error:
+                self._zlib = zlib.decompressobj(-zlib.MAX_WBITS)
+        return self._zlib.decompress(data, max_length)
+
+
+def _decoder(response: httpx.Response) -> Any:
+    """The decoder of the answer's ``Content-Encoding``: none, ``identity``, or exactly one
+    of ``gzip`` and ``deflate``; any other coding, or more than one, raises ``_Coding``."""
+    codings = [c.strip().lower() for c in response.headers.get("content-encoding", "").split(",")]
+    codings = [c for c in codings if c and c != "identity"]
+    if not codings:
+        return _Identity()
+    if codings == ["gzip"]:
+        return zlib.decompressobj(16 + zlib.MAX_WBITS)
+    if codings == ["deflate"]:
+        return _Deflate()
+    raise _Coding
+
+
 class Watch:
     """The first tries a call is waiting on, shared by the call's child tasks: each one's
     address and the monotonic time it started. What is left in it when the call's deadline
-    passes is what may not have answered in time. ``too_large`` says whether the call has
-    already logged an answer too large."""
+    passes is what may not have answered in time. ``said`` holds the lines about an answer
+    refused for this call alone (too large, or in a coding not read) the call has logged."""
 
     def __init__(self) -> None:
         """Start empty: no first try waiting, nothing said."""
         self.waiting: dict[object, tuple[int, float]] = {}
-        self.too_large = False
+        self.said: set[str] = set()
 
 
 _WATCH: ContextVar[Watch | None] = ContextVar("atlas_watch", default=None)
@@ -135,12 +198,13 @@ class _BearerAuth(httpx.Auth):
         yield request
 
 
-def _auth(settings: AtlasSettings, kerberos: SpnegoAuth | None) -> httpx.Auth | None:
+def _auth(settings: AtlasSettings) -> httpx.Auth | None:
+    """Basic or Knox, sent with the request; Kerberos is negotiated by the client itself."""
     if settings.auth == BASIC:
         return httpx.BasicAuth(settings.user, settings.secret())
     if settings.auth == KNOX:
         return _BearerAuth(settings)
-    return kerberos
+    return None
 
 
 def client_options(settings: AtlasSettings) -> dict[str, Any]:
@@ -153,11 +217,16 @@ def client_options(settings: AtlasSettings) -> dict[str, Any]:
             settings.timeout_seconds, connect=settings.connect_timeout_seconds
         ),
         "follow_redirects": False,
-        "headers": {"X-XSRF-HEADER": "", "User-Agent": USER_AGENT, "Accept": "application/json"},
+        "headers": {
+            "X-XSRF-HEADER": "",
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+            "Accept-Encoding": ACCEPT_ENCODING,
+        },
     }
 
 
-def _error_code(response: httpx.Response, body: bytes) -> str:
+def _error_code(response: httpx.Response, body: bytearray) -> str:
     """The ``errorCode`` of an Atlas error answer, or an empty string."""
     if not _is_json(response):
         return ""
@@ -228,7 +297,11 @@ class AtlasClient:
                 continue
             except _TooLarge:
                 # The address answered, too much for one read: the call alone fails.
-                raise self._too_large() from None
+                raise self._refused_for_call(
+                    TOO_LARGE, " for one read; lower MCP_CONTEXT_BATCH"
+                ) from None
+            except _Coding:
+                raise self._refused_for_call(UNREAD_CODING) from None
             # The address that answered, after a passive server's redirect included.
             self._first = self._index(response.url, index)
             return self._read(response, body, missing)
@@ -268,15 +341,14 @@ class AtlasClient:
 
     async def _send(
         self, url: str, params: Mapping[str, str] | None, index: int, first: bool
-    ) -> tuple[httpx.Response, bytes]:
+    ) -> tuple[httpx.Response, bytearray]:
         """One request to one address, following redirects among the addresses only;
         ``index`` is the position of that address in ``ATLAS_URL``, ``first`` whether it is
         the address the call started with."""
         for _ in range(_MAX_REDIRECTS + 1):
             at = self._index(httpx.URL(url), index)
             try:
-                auth = _auth(self._settings, self._kerberos) or httpx.USE_CLIENT_DEFAULT
-                response, body = await self._wait(at if first else None, url, params, auth)
+                response, body = await self._wait(at if first else None, url, params)
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 raise _Outage(connect=True) from None
             except (httpx.ReadTimeout, httpx.WriteTimeout):
@@ -307,18 +379,18 @@ class AtlasClient:
         raise _Outage
 
     async def _wait(
-        self, at: int | None, url: str, params: Mapping[str, str] | None, auth: Any
-    ) -> tuple[httpx.Response, bytes]:
+        self, at: int | None, url: str, params: Mapping[str, str] | None
+    ) -> tuple[httpx.Response, bytearray]:
         """The request and its body; while it waits, ``at`` (a first try's address) is in the
         call's watch, and stays there when the wait is cancelled, for ``leave`` to read."""
         watch = _WATCH.get()
         if at is None or watch is None:
-            return await self._fetch(url, params, auth)
+            return await self._fetch(url, params)
         entry = object()
         watch.waiting[entry] = (at, time.monotonic())
         token = _WAITING.set((watch, entry))
         try:
-            answer = await self._fetch(url, params, auth)
+            answer = await self._fetch(url, params)
         except asyncio.CancelledError:
             raise
         except BaseException:
@@ -330,22 +402,54 @@ class AtlasClient:
         return answer
 
     async def _fetch(
-        self, url: str, params: Mapping[str, str] | None, auth: Any
-    ) -> tuple[httpx.Response, bytes]:
-        """Send the request and read its body as it arrives, decoded, up to
-        ``ATLAS_MAX_RESPONSE_BYTES``: one byte more raises ``_TooLarge`` and closes the
-        connection, whatever ``Content-Length`` says, or without one."""
+        self, url: str, params: Mapping[str, str] | None
+    ) -> tuple[httpx.Response, bytearray]:
+        """Send the request, and with Kerberos answer a ``Negotiate`` challenge: the challenge
+        is closed unread, and the request is sent again with a token. The body of the answer
+        is read only when ``_read`` looks at it (see ``_body``); any other is closed unread."""
         request = self._http.build_request("GET", url, params=params)
+        auth = _auth(self._settings)
         response = await self._http.send(request, auth=auth, stream=True)
+        if self._kerberos is not None and self._kerberos.challenged(response):
+            await response.aclose()
+            request = await self._kerberos.answer(request)
+            response = await self._http.send(request, auth=None, stream=True)
         try:
-            cap, body = self._settings.max_response_bytes, bytearray()
-            async for chunk in response.aiter_bytes():
-                body += chunk
-                if len(body) > cap:
-                    raise _TooLarge
-            return response, bytes(body)
+            body = bytearray()
+            if response.status_code in _READ_BODY:
+                body = await self._body(response)
+            return response, body
         finally:
             await response.aclose()
+
+    async def _body(self, response: httpx.Response) -> bytearray:
+        """Read the body as it arrives and decode it in steps of at most 64 KiB, never more
+        than the bytes left under ``ATLAS_MAX_RESPONSE_BYTES`` plus one: one byte more raises
+        ``_TooLarge``, whatever ``Content-Length`` says, or without one. A coding the client
+        does not read raises ``_Coding`` before anything is read."""
+        decoder = _decoder(response)
+        cap, body = self._settings.max_response_bytes, bytearray()
+        if response.is_stream_consumed:
+            # An in-memory transport handed the body already read, and httpx decoded it.
+            body += response.content
+            if len(body) > cap:
+                raise _TooLarge
+            return body
+        try:
+            async for data in response.aiter_raw():
+                while True:
+                    step = min(cap - len(body) + 1, _STEP)
+                    out = decoder.decompress(data, step)
+                    body += out
+                    if len(body) > cap:
+                        raise _TooLarge
+                    data = decoder.unconsumed_tail
+                    # A full step may leave output in the decoder, even with no input left.
+                    if not data and len(out) < step:
+                        break
+        except zlib.error:
+            raise httpx.DecodingError("atlas answered a body that cannot be decoded") from None
+        return body
 
     @contextmanager
     def _aside(self) -> Iterator[None]:
@@ -391,7 +495,7 @@ class AtlasClient:
                 return index
         return default
 
-    def _read(self, response: httpx.Response, body: bytes, missing: MissingCodes) -> Any:
+    def _read(self, response: httpx.Response, body: bytearray, missing: MissingCodes) -> Any:
         status = response.status_code
         if status == 403 and _error_code(response, body) == OBJECTS_REFUSED:
             return Missing.FORBIDDEN
@@ -411,17 +515,16 @@ class AtlasClient:
             raise self._unavailable("atlas answered JSON that cannot be read") from None
 
     @staticmethod
-    def _too_large() -> ProviderAnswerTooLarge:
-        """The call's error for an answer too large, said once per call."""
+    def _refused_for_call(why: str, advice: str = "") -> ProviderAnswerTooLarge:
+        """The call's error for an answer refused for this call alone, said once per call
+        with ``advice``: the address answered, it is not an outage, and no retry pause
+        opens."""
         watch = _WATCH.get()
-        if watch is None or not watch.too_large:
+        if watch is None or why not in watch.said:
             if watch is not None:
-                watch.too_large = True
-            log.warning(
-                "atlas answered more than ATLAS_MAX_RESPONSE_BYTES for one read; "
-                "lower MCP_CONTEXT_BATCH"
-            )
-        return ProviderAnswerTooLarge("atlas answered more than ATLAS_MAX_RESPONSE_BYTES")
+                watch.said.add(why)
+            log.warning("%s%s", why, advice)
+        return ProviderAnswerTooLarge(why)
 
     @staticmethod
     def _unavailable(why: str) -> ProviderUnavailable:
