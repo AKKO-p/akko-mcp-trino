@@ -52,8 +52,10 @@ contract = ["pytest>=8,<10"]
 # (CONTRIBUTING.md), and the build and release tools (build, twine) in requirements/release.txt.
 test = ["pytest", "pytest-cov"]
 dev = ["pytest", "pytest-cov", "ruff", "mypy", "pip-audit"]
-# The Apache Atlas context provider (providers/atlas), with Kerberos; released with the core.
-atlas = ["akko-mcp-trino-atlas[kerberos]==0.8.0"]
+# The Apache Atlas context provider (providers/atlas), released with the core. `atlas` needs no
+# compiler (Basic and Knox); `atlas-kerberos` adds the Kerberos bindings, built from source.
+atlas = ["akko-mcp-trino-atlas==0.8.0"]
+atlas-kerberos = ["akko-mcp-trino-atlas[kerberos]==0.8.0"]
 
 [project.scripts]
 akko-mcp-trino = "akko_mcp_trino.__main__:main"

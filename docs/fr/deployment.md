@@ -218,7 +218,7 @@ fournisseur.
 La chart n'a pas de valeur à elle pour le contexte : ses variables vont dans `extraEnv`, un secret
 seulement par `valueFrom`, et le fichier JSON du fournisseur `file` dans `extraVolumes` et
 `extraVolumeMounts`. L'image porte le fournisseur Atlas depuis la 0.8.0, inactif, avec les
-bibliothèques Kerberos de son extra `kerberos`. Pour Atlas avec une authentification Basic :
+liaisons et bibliothèques Kerberos de son extra `atlas-kerberos`. Pour Atlas avec une authentification Basic :
 
 ```yaml
 extraEnv:

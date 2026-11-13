@@ -84,17 +84,17 @@ def _codes(error: BaseException) -> set[int]:
 
 def load_spnego() -> Any:
     """Import ``spnego`` and the Kerberos bindings it needs (``gssapi``, and ``krb5`` to read
-    a keytab); raises ``ValueError`` when the ``kerberos`` extra is missing. ``pyspnego``
-    installed alone imports, but cannot speak Kerberos: that is refused at start, not taken
-    for an outage on every call."""
+    a keytab); raises ``ValueError`` naming the ``atlas-kerberos`` extra when they are
+    missing. ``pyspnego`` installed alone imports, but cannot speak Kerberos: that is refused at
+    start, not taken for an outage on every call."""
     try:
         import gssapi  # noqa: F401
         import krb5  # noqa: F401
         import spnego
     except ImportError:
         raise ValueError(
-            "ATLAS_AUTH=kerberos needs the kerberos extra: "
-            'pip install "akko-mcp-trino-atlas[kerberos]"'
+            "ATLAS_AUTH=kerberos needs the Kerberos bindings: "
+            "install akko-mcp-trino[atlas-kerberos]"
         ) from None
     return spnego
 

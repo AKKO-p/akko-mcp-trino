@@ -26,7 +26,7 @@ Deux fournisseurs viennent avec ce dépôt :
 - `file`, dans le cœur, la référence du contrat : un catalogue de données tenu dans un fichier
   JSON ;
 - `atlas`, pour Apache Atlas, un paquet à part (`akko-mcp-trino-atlas`, installé par l'extra
-  `atlas`). Ses réglages, sa mise en place de Kerberos et le compte qu'il lui faut sont dans
+  `atlas`, ou `atlas-kerberos` pour Kerberos). Ses réglages, sa mise en place de Kerberos et le compte qu'il lui faut sont dans
   [son README](../../providers/atlas/README.fr.md).
 
 Le contexte suit ce que Trino liste pour l'appelant : [Sécurité](security.md#les-droits-du-contexte)

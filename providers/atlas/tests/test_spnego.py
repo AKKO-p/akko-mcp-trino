@@ -127,7 +127,7 @@ def negotiating(atlas: FakeAtlas, *, session: bool = False):
 
 def test_kerberos_without_pyspnego_refuses_to_start(monkeypatch):
     monkeypatch.setitem(sys.modules, "spnego", None)  # the kerberos extra is not installed
-    with pytest.raises(ValueError, match=r"needs the kerberos extra") as raised:
+    with pytest.raises(ValueError, match=r"needs the Kerberos bindings") as raised:
         from_env(KERBEROS)
     assert KEYTAB not in str(raised.value) and PRINCIPAL not in str(raised.value)
     # Without a principal or a keytab, it refuses to start too, extra or not.
@@ -137,12 +137,21 @@ def test_kerberos_without_pyspnego_refuses_to_start(monkeypatch):
             from_env({k: v for k, v in KERBEROS.items() if k != name})
 
 
+def test_kerberos_without_bindings_names_the_extra(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spnego", None)
+    with pytest.raises(ValueError) as raised:
+        from_env(KERBEROS)
+    assert str(raised.value) == (
+        "ATLAS_AUTH=kerberos needs the Kerberos bindings: install akko-mcp-trino[atlas-kerberos]"
+    )
+
+
 @pytest.mark.parametrize("binding", ["gssapi", "krb5"])
 def test_kerberos_without_its_bindings_refuses_to_start(monkeypatch, binding):
     # pyspnego installed alone imports, but cannot speak Kerberos without its bindings.
     install(monkeypatch)
     monkeypatch.setitem(sys.modules, binding, None)
-    with pytest.raises(ValueError, match=r"needs the kerberos extra"):
+    with pytest.raises(ValueError, match=r"needs the Kerberos bindings"):
         from_env(KERBEROS)
 
 

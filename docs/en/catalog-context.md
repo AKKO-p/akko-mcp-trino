@@ -23,7 +23,7 @@ Two providers come with this repository:
 
 - `file`, in the core, the reference for the contract: a data catalog kept in one JSON file;
 - `atlas`, for Apache Atlas, a package of its own (`akko-mcp-trino-atlas`, installed by the
-  `atlas` extra). Its settings, its Kerberos setup and the account it needs are in
+  `atlas` extra, or by `atlas-kerberos` for Kerberos). Its settings, its Kerberos setup and the account it needs are in
   [its README](../../providers/atlas/README.md).
 
 The context follows what Trino lists for the caller: [Security](security.md#the-rights-of-the-context)

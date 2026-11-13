@@ -18,14 +18,15 @@ de Trino. Il lit Atlas avec un compte à lui, par l'API REST v2 seulement, et n'
 ## Installation
 
 ```bash
-pip install "akko-mcp-trino[atlas]"     # le cœur avec ce fournisseur et Kerberos
+pip install "akko-mcp-trino[atlas]"     # le cœur avec ce fournisseur : Basic et Knox
 export MCP_CONTEXT_PROVIDERS=atlas
 ```
 
-Sous Linux, l'extra `atlas` compile les liaisons Kerberos (`gssapi`, `krb5`) depuis les sources :
-il lui faut un compilateur C et les en-têtes MIT Kerberos (`libkrb5-dev` sous Debian et Ubuntu,
-`krb5-devel` sous Red Hat). Avec l'authentification Basic ou un jeton Knox, installer sans eux :
-`pip install akko-mcp-trino akko-mcp-trino-atlas`.
+Cette installation n'a besoin d'aucun compilateur. Pour Kerberos, installer plutôt l'extra
+`atlas-kerberos` : `pip install "akko-mcp-trino[atlas-kerberos]"`. Sous Linux, il compile les
+liaisons Kerberos (`gssapi`, `krb5`) depuis les sources : il lui faut un compilateur C et les
+en-têtes MIT Kerberos (`libkrb5-dev` sous Debian et Ubuntu, `krb5-devel` sous Red Hat).
+`ATLAS_AUTH=kerberos` sans les liaisons arrête le serveur au démarrage et nomme cet extra.
 
 Seul : `pip install akko-mcp-trino-atlas` (Basic et Knox), ou
 `pip install "akko-mcp-trino-atlas[kerberos]"` pour Kerberos, qui apporte `pyspnego` et ses
@@ -33,7 +34,7 @@ liaisons GSSAPI (bibliothèques MIT Kerberos sur le système).
 
 Le fournisseur s'enregistre sous le groupe de points d'entrée `akko_mcp_trino.context`, sous le nom
 `atlas`. Rien n'est chargé tant que `MCP_CONTEXT_PROVIDERS` ne le nomme pas ; l'image de conteneur
-d'akko-mcp-trino l'embarque, inactif, avec son extra `kerberos` et les bibliothèques MIT Kerberos.
+d'akko-mcp-trino l'embarque, inactif, avec ses liaisons Kerberos et les bibliothèques MIT Kerberos.
 
 ## Réglages
 

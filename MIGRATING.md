@@ -23,6 +23,11 @@ Nothing is removed or renamed in the answers of the tools; some answers are now 
   refusal now says `A name is text of 1 to 1024 characters, without control characters,
   bidirectional controls or line separators.` The statements the metadata tools send quote
   every name, which Trino's query history and a policy engine that reads the SQL text now see.
+- **The `atlas` extra.** `pip install "akko-mcp-trino[atlas]"` no longer builds the Kerberos
+  bindings: it installs the Atlas provider for Basic authentication and a Knox token, with no
+  compiler. For `ATLAS_AUTH=kerberos`, install `akko-mcp-trino[atlas-kerberos]` instead (it
+  needs a C compiler and the MIT Kerberos headers); without the bindings the server stops at
+  start and names that extra. The container image is unchanged and still carries them.
 
 ## From 0.7 to 0.8
 
