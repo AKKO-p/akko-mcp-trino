@@ -189,15 +189,18 @@ Mutual authentication of Atlas is left to TLS (`https` and `ATLAS_CA_BUNDLE`).
 A negotiation runs on a thread of the provider's own, never on the loop that serves the context
 of every call, so a slow KDC never holds the other reads. A KDC that has not answered when the
 call's deadline passes (a filtered port 88, retries across KDCs) makes that call `unavailable`
-at its deadline; the provider is not set aside as down (no `MCP_CONTEXT_RETRY_AFTER_SECONDS`
-pause), since the deadline cut the call, so the next call negotiates again and pays the same
-wait. At most `ATLAS_MAX_CONCURRENT_REQUESTS` negotiations run at once; a
-negotiation still waiting for a thread when its call is cut never starts, and one under way ends
-when the KDC answers, its result dropped. The wait on the KDC counts as a wait on the address the
-call started with, so the address line above may name it, and the next calls may start at the
-next address of `ATLAS_URL`. A negotiation under way also holds the process when it stops: Python
-waits for its thread, so a stop during a KDC hang lasts until krb5 gives up, within the pod's
-grace period.
+at its deadline; that alone does not set the provider aside as down, since the deadline cut the
+call, so the next call negotiates again. At most `ATLAS_MAX_CONCURRENT_REQUESTS` negotiations
+run at once; a negotiation still waiting for a thread when its call is cut never starts, and one
+under way ends when the KDC answers, its result dropped. When every one of those threads holds a
+negotiation whose call was cut, the KDC has stopped answering: the next call does not wait for
+it, it is `unavailable` at once, within its deadline, and the provider is retried as an outage,
+after `MCP_CONTEXT_RETRY_AFTER_SECONDS`. While one thread is free, a slow KDC that still answers
+is waited for, up to the call's deadline. The wait on the KDC is not a wait on Atlas: the
+address answered its challenge, so the address line above never names it for that wait, and the
+next calls still start at the same address of `ATLAS_URL`. A negotiation under way also holds
+the process when it stops: Python waits for its thread, so a stop during a KDC hang lasts until
+krb5 gives up, within the pod's grace period.
 
 A negotiation that fails is a refusal of the account, as a 401 is, with no other address tried: a
 keytab the KDC refuses (a password reset in the directory, a wrong principal, a keytab that cannot

@@ -108,6 +108,8 @@ class Watch:
 
 
 _WATCH: ContextVar[Watch | None] = ContextVar("atlas_watch", default=None)
+# The watch and the entry of the first try the current request waits on, if any.
+_WAITING: ContextVar[tuple[Watch, object] | None] = ContextVar("atlas_waiting", default=None)
 
 
 class _BearerAuth(httpx.Auth):
@@ -180,6 +182,7 @@ class AtlasClient:
                 settings.keytab,
                 settings.spn,
                 workers=settings.max_concurrent_requests,
+                aside=self._aside,
             )
             if settings.auth == KERBEROS
             else None
@@ -296,15 +299,32 @@ class AtlasClient:
             return await self._http.get(url, params=params, auth=auth)
         entry = object()
         watch.waiting[entry] = (at, time.monotonic())
+        token = _WAITING.set((watch, entry))
         try:
             response = await self._http.get(url, params=params, auth=auth)
         except asyncio.CancelledError:
             raise
         except BaseException:
-            del watch.waiting[entry]
+            watch.waiting.pop(entry, None)
             raise
-        del watch.waiting[entry]
+        finally:
+            _WAITING.reset(token)
+        watch.waiting.pop(entry, None)
         return response
+
+    @contextmanager
+    def _aside(self) -> Iterator[None]:
+        """A Kerberos negotiation waits on the KDC, not on the address: the first try's entry
+        leaves the watch while it runs, and comes back, its wait started anew, once the KDC
+        answered. A negotiation cut by the deadline leaves no entry, so no address is left."""
+        waiting = _WAITING.get()
+        if waiting is None:
+            yield
+            return
+        watch, entry = waiting
+        at, _ = watch.waiting.pop(entry)
+        yield
+        watch.waiting[entry] = (at, time.monotonic())
 
     def _late(self, index: int) -> None:
         """The address ``index`` did not answer in time: the next calls start after it when

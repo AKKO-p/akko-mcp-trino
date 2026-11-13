@@ -196,16 +196,19 @@ passif d'Atlas renégocie avec l'actif. L'authentification mutuelle d'Atlas est 
 Une négociation tourne sur un fil d'exécution propre au fournisseur, jamais sur la boucle qui sert
 le contexte de chaque appel : un KDC lent ne retient jamais les autres lectures. Un KDC qui n'a
 pas répondu à l'échéance de l'appel (un port 88 filtré, des essais d'un KDC à l'autre) rend cet
-appel `unavailable` à son échéance ; le fournisseur n'est pas écarté comme en panne (pas de
-pause `MCP_CONTEXT_RETRY_AFTER_SECONDS`), puisque l'échéance a coupé l'appel, donc l'appel suivant
-renégocie et paie la même attente. Au plus
+appel `unavailable` à son échéance ; cela seul n'écarte pas le fournisseur comme en panne,
+puisque l'échéance a coupé l'appel, donc l'appel suivant renégocie. Au plus
 `ATLAS_MAX_CONCURRENT_REQUESTS` négociations tournent à la fois ; une négociation qui attend encore
 un fil quand son appel est coupé ne commence jamais, et une négociation en cours s'achève quand le
-KDC répond, son résultat écarté. L'attente du KDC compte comme une attente de l'adresse par
-laquelle l'appel a commencé : la ligne d'adresse plus haut peut donc la nommer, et les appels
-suivants peuvent commencer par l'adresse suivante d'`ATLAS_URL`. Une négociation en cours retient
-aussi le processus quand il s'arrête : Python attend son fil, donc un arrêt pendant un KDC bloqué
-dure jusqu'à ce que krb5 abandonne, dans le délai de grâce du pod.
+KDC répond, son résultat écarté. Quand chacun de ces fils tient une négociation dont l'appel a
+été coupé, le KDC ne répond plus : l'appel suivant ne l'attend pas, il est `unavailable` tout de
+suite, avant son échéance, et le fournisseur est réessayé comme une panne, après
+`MCP_CONTEXT_RETRY_AFTER_SECONDS`. Tant qu'un fil est libre, un KDC lent qui répond encore est
+attendu, jusqu'à l'échéance de l'appel. L'attente du KDC n'est pas une attente d'Atlas :
+l'adresse a répondu à son défi, donc la ligne d'adresse plus haut ne la nomme jamais pour cette
+attente, et les appels suivants commencent toujours par la même adresse d'`ATLAS_URL`. Une
+négociation en cours retient aussi le processus quand il s'arrête : Python attend son fil, donc
+un arrêt pendant un KDC bloqué dure jusqu'à ce que krb5 abandonne, dans le délai de grâce du pod.
 
 Une négociation qui échoue est un refus du compte, comme un 401, sans essayer d'autre adresse : un
 keytab que le KDC refuse (un mot de passe changé dans l'annuaire, un mauvais principal, un keytab

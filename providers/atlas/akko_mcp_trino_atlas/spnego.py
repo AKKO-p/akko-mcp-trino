@@ -19,7 +19,11 @@ the provider's asynchronous client runs it on a thread pool of its own, at most
 ``workers`` at once (``ATLAS_MAX_CONCURRENT_REQUESTS``): the event loop serves every other
 read meanwhile, and the call's deadline cuts the wait. A negotiation still running when its
 call is cut goes on in its thread until the KDC answers, and its result is dropped; one that
-waits for a thread when its call is cut never starts.
+waits for a thread when its call is cut never starts. When every thread holds a negotiation
+whose call is gone, the KDC has stopped answering: a new negotiation does not wait for a
+thread, it fails at once as a KDC that cannot be reached, within its call's deadline. The
+client sets the address's wait aside while a negotiation runs (``aside``): the time spent on
+the KDC is not a wait on Atlas.
 
 A negotiation that fails is a refusal of the account (``NegotiationError`` with
 ``unreachable`` false), since a retry every few seconds with a keytab the KDC refuses would
@@ -29,8 +33,10 @@ cannot be found or reached (the Kerberos codes of ``KDC_UNREACHABLE``) is an out
 
 import asyncio
 import base64
-from collections.abc import AsyncGenerator, Generator
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from collections.abc import AsyncGenerator, Callable, Generator
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 import httpx
@@ -103,15 +109,28 @@ def _challenge(response: httpx.Response) -> str | None:
 class SpnegoAuth(httpx.Auth):
     """``httpx.Auth`` that answers a ``Negotiate`` challenge from a keytab."""
 
-    def __init__(self, principal: str, keytab: str, spn: str, workers: int = 1) -> None:
+    def __init__(
+        self,
+        principal: str,
+        keytab: str,
+        spn: str,
+        workers: int = 1,
+        aside: Callable[[], AbstractContextManager[None]] = nullcontext,
+    ) -> None:
         """Keep the names; ``spnego`` is imported now, nothing is read from the keytab yet.
-        ``workers`` bounds the negotiations an asynchronous client runs at once."""
+        ``workers`` bounds the negotiations an asynchronous client runs at once; each runs
+        inside ``aside()``."""
         self._spnego = load_spnego()
         self._principal = principal
         self._keytab = keytab
         self._spn = spn
+        self._workers = workers
+        self._aside = aside
         # Threads start on the first negotiation only.
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="atlas-kerberos")
+        # The negotiations under way whose call is gone; their threads end when the KDC answers.
+        self._stale: set[Future[bytes]] = set()
+        self._lock = threading.Lock()
 
     def __repr__(self) -> str:
         """Name the class only, never the principal or the keytab."""
@@ -158,6 +177,27 @@ class SpnegoAuth(httpx.Auth):
         """As ``auth_flow``, the negotiation on the pool's threads, never on the event loop."""
         response = yield request
         if response.status_code == 401 and _challenge(response) is not None:
-            loop = asyncio.get_running_loop()
-            token = await loop.run_in_executor(self._pool, self._token, request)
+            with self._aside():
+                token = await self._negotiate(request)
             yield self._answer(request, token)
+
+    async def _negotiate(self, request: httpx.Request) -> bytes:
+        """Run ``_token`` on the pool; fail at once when every thread holds a negotiation whose
+        call is gone, since the next one would wait for the KDC that holds them."""
+        with self._lock:
+            if len(self._stale) >= self._workers:
+                raise NegotiationError(unreachable=True)
+        future = self._pool.submit(self._token, request)
+        try:
+            return await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+            # Not started: it never will. Under way: its thread stays held until the KDC answers.
+            if not future.cancel():
+                with self._lock:
+                    self._stale.add(future)
+                future.add_done_callback(self._ended)
+            raise
+
+    def _ended(self, future: Future[bytes]) -> None:
+        with self._lock:
+            self._stale.discard(future)
