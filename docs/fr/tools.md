@@ -24,7 +24,10 @@ policy d'accès, pas une erreur à retenter.
 
 Chaque réponse est le JSON montré plus haut, envoyé une seule fois, comme texte de la réponse
 (`content[0].text`). Les tools ne déclarent pas d'`outputSchema` et n'envoient pas de
-`structuredContent` : une réponse pèse ce que pèse son contenu.
+`structuredContent` : une réponse pèse ce que pèse son contenu. Un tool enregistré par
+`tools.tool()` répond une seule fois, comme les tools intégrés ; un tool ajouté par `mcp.tool()` ou
+`mcp.add_tool()` garde le défaut du SDK et peut passer `structured_output=False` (voir
+[Développeurs](developers.md)).
 
 Un argument `catalog`, `schema` ou `table` est un seul nom nu, pris tel qu'il est écrit : une table
 de métadonnées Iceberg comme `orders$snapshots`, un nom avec des accents, des espaces ou un point,

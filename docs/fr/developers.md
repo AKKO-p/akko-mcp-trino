@@ -103,7 +103,10 @@ même chose depuis Python.
 
 Une fonction d'enregistrement à trois arguments reçoit le `ToolContext` :
 
-- `tools.tool(title, governed=..., open_world=...)` enregistre un tool avec ses annotations MCP ;
+- `tools.tool(title, governed=..., open_world=...)` enregistre un tool avec ses annotations MCP.
+  Un tool enregistré par `tools.tool()` répond une seule fois, comme les tools intégrés ; un tool
+  ajouté par `mcp.tool()` ou `mcp.add_tool()` garde le défaut du SDK et peut passer
+  `structured_output=False` ;
 - `tools.run(sql)` interroge Trino par le mode d'identité ;
 - `tools.note(...)` enregistre ce qu'a fait l'appel (le SQL lancé, les tables, les lignes, si elles
   ont été coupées) ;

@@ -31,9 +31,9 @@ Nothing is removed or renamed in the answers of the tools; some answers are now 
 - **Replies carry the answer once.** A reply of a built-in tool no longer repeats the JSON in
   `structuredContent`, and the built-in tools no longer declare an `outputSchema`. The text of the
   reply, `content[0].text`, is unchanged. A program that read `structuredContent["result"]` reads
-  `content[0].text` instead, the same JSON text. The tools of a tool plugin are unchanged: they
-  keep the SDK's default, and a plugin may pass `structured_output=False` to `mcp.tool()` or
-  `mcp.add_tool()` to send its answers once.
+  `content[0].text` instead, the same JSON text. A tool registered with `tools.tool()` answers
+  once, like the built-in tools; a tool added with `mcp.tool()` or `mcp.add_tool()` keeps the
+  SDK's default and may pass `structured_output=False`.
 
 ## From 0.7 to 0.8
 

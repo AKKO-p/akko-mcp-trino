@@ -24,7 +24,9 @@ to retry.
 
 Each answer is the JSON shown above, sent once, as the text of the reply (`content[0].text`). The
 tools declare no `outputSchema` and send no `structuredContent`, so a reply weighs what its answer
-weighs.
+weighs. A tool registered with `tools.tool()` answers once, like the built-in tools; a tool added
+with `mcp.tool()` or `mcp.add_tool()` keeps the SDK's default and may pass
+`structured_output=False` (see [Developers](developers.md)).
 
 A `catalog`, `schema` or `table` argument is one bare name, taken as written: an Iceberg metadata
 table such as `orders$snapshots`, a name with accents, spaces or a dot, or one that starts with a

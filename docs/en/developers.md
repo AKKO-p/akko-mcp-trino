@@ -99,7 +99,10 @@ change to the plugin. `build_server(extra_tool_registrars=...)` does the same fr
 
 A registrar with a third argument receives the `ToolContext`:
 
-- `tools.tool(title, governed=..., open_world=...)` registers a tool with its MCP annotations;
+- `tools.tool(title, governed=..., open_world=...)` registers a tool with its MCP annotations.
+  A tool registered with `tools.tool()` answers once, like the built-in tools; a tool added with
+  `mcp.tool()` or `mcp.add_tool()` keeps the SDK's default and may pass
+  `structured_output=False`;
 - `tools.run(sql)` queries Trino through the identity mode;
 - `tools.note(...)` records what the call did (the SQL it ran, the tables, the rows, whether they
   were cut);

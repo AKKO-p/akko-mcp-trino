@@ -7,9 +7,9 @@ Registrars add tools; extensions (below) add the rest, never in place of the cor
 A registrar is ``(mcp, client)`` or ``(mcp, client, tools)``. Either way, every
 tool it adds through ``mcp.tool()`` or ``mcp.add_tool()`` is audited like a
 built-in one; the three-argument form also receives the `ToolContext` (audit,
-a governed ``run``, describers of ``describe_table``). Its tools keep the SDK's
-default for structured output; a plugin may pass ``structured_output=False`` to send
-its answers once, as text, like the built-in ones.
+a governed ``run``, describers of ``describe_table``). A tool registered with
+``tools.tool()`` answers once, like the built-in tools; a tool added with ``mcp.tool()``
+or ``mcp.add_tool()`` keeps the SDK's default and may pass ``structured_output=False``.
 
 Extensions (see `akko_mcp_trino.extensions`) are applied here too: their
 identity modes, the audit they wrap, the client tags of the queries, and their

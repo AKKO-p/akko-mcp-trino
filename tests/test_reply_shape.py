@@ -183,3 +183,33 @@ def test_a_plugin_tool_keeps_the_sdk_default_unless_it_passes_the_flag(monkeypat
     assert replies["once"].structured_content is None
     assert replies["added_once"].structured_content is None
     assert replies["once"].content[0].text == '{"a": 1}'
+
+
+def test_a_tool_registered_with_tools_tool_answers_once(monkeypatch):
+    """A tool registered through the ``ToolContext`` answers once, like the built-in tools, even
+    when it returns a structure."""
+
+    def registrar(mcp, client, tools):
+        @tools.tool("Context tool")
+        def through_context() -> str:
+            """Answer as text, through the tool context."""
+            return json.dumps({"a": 1})
+
+        @tools.tool("Context tool with a structure")
+        def shaped_through_context() -> dict[str, int]:
+            """Answer with a structure, through the tool context."""
+            return {"a": 1}
+
+    mcp = _server(monkeypatch, [registrar])
+
+    async def scenario():
+        tools = {t.name: t for t in await mcp.list_tools()}
+        names = ("through_context", "shaped_through_context")
+        replies = {n: await mcp.call_tool(n, {}) for n in names}
+        return tools, replies
+
+    tools, replies = anyio.run(scenario)
+    for name in ("through_context", "shaped_through_context"):
+        assert tools[name].output_schema is None
+        assert replies[name].structured_content is None
+    assert replies["through_context"].content[0].text == '{"a": 1}'
