@@ -7,16 +7,23 @@ worker processes (see ``akko_mcp_trino.parse_worker``), which answer plain value
 server's own process never parses an agent's SQL.
 
 * A worker is a fresh interpreter started by exec, never a fork of the server (which runs
-  threads and an event loop). The workers start on first use. Their standard input, output
-  and error are the null device, and they get no setting of the server's environment.
+  threads and an event loop). The workers start on first use. The protocol runs on the
+  worker's standard input and output, two pipes of the server's; the worker takes them for
+  itself at once and points its standard streams at the null device, so nothing it prints
+  reaches the protocol or, over stdio, the server's own channel, which it never inherits.
+  It gets no setting of the server's environment. Each message is a length-prefixed JSON
+  frame of ``MAX_FRAME_BYTES`` at most, read by one thread per worker, so a deadline holds
+  on Linux, macOS and Windows alike.
 * A worker that has not answered within ``seconds`` is killed and replaced, and the call
-  is refused (``time_budget``). A worker that died or answered nonsense refuses the call
-  too: never allowed.
+  is refused (``time_budget``). A worker that died, or answered a frame too long or not a
+  well-formed answer, is replaced and refuses the call too: never allowed.
 * One statement at a time per caller: a second call of the same caller while the first is
   checked is refused at once (``busy``), so one caller holds one worker at most.
-* A call that finds no worker free within ``seconds`` is refused (``time_budget``).
+* A call that finds no worker free within ``seconds`` is refused (``time_budget``), so a
+  call waits at most twice ``seconds``: for a worker, then for its answer.
 * ``close`` (at exit, at the server's shutdown, and by ``close_all``) kills every worker. A
-  worker whose server is gone ends on its own, within half a second, mid-parse included.
+  worker whose server is gone sees its request pipe close and ends at once, mid-parse
+  included.
 
 Neither a refusal nor a metric carries the statement or a name.
 """
@@ -26,15 +33,17 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import queue
 import subprocess
 import sys
 import threading
 import time
 import weakref
-from multiprocessing.connection import Connection
+from contextlib import suppress
 from typing import Any, Callable, Optional
 
-from .errors import BUSY, TIME_BUDGET, UNAVAILABLE
+from .errors import BUSY, INVALID_ARGUMENT, TIME_BUDGET, UNAVAILABLE
+from .parse_worker import MAX_FRAME_BYTES, read_frame, write_frame
 from .sql_guard import Analysis, ColumnScope
 
 DEFAULT_PARSE_SECONDS = 2.0
@@ -44,8 +53,10 @@ _STOP_SECONDS = 1.0
 # The reasons a statement is refused before Trino, as the metric counts them.
 REASONS = ("too_long", "too_nested", "caller_busy", "no_worker", "deadline", "worker_failed")
 _NOTHING = Analysis(False, (), ColumnScope(False, ()))
+# What a Windows interpreter needs from the environment to start at all.
+_WINDOWS_ENV = ("SYSTEMROOT",)
 
-Launcher = Callable[[], tuple[Any, Connection, Connection]]
+Launcher = Callable[[], Any]
 
 
 class ParseRefused(Exception):
@@ -62,71 +73,96 @@ def _package_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def launch_worker() -> tuple[Any, Connection, Connection]:
-    """Start one worker: its process, the pipe its requests go into, the pipe its answers
-    come from. Its environment holds the path to this package, nothing else."""
-    request_r, request_w = os.pipe()
-    answer_r, answer_w = os.pipe()
+def launch_worker() -> subprocess.Popen:
+    """Start one worker, its standard input and output on pipes of this process, its
+    standard error on the null device, no other descriptor inherited. Its environment holds
+    the path to this package, and on Windows ``SYSTEMROOT``, nothing else."""
     root = _package_root()
-    try:
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "akko_mcp_trino.parse_worker",
-                str(request_r),
-                str(answer_w),
-                str(os.getpid()),
-            ],
-            pass_fds=(request_r, answer_w),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            cwd=root,
-            env={"PYTHONPATH": root},
-        )
-    except BaseException:
-        os.close(request_w)
-        os.close(answer_r)
-        raise
-    finally:
-        os.close(request_r)
-        os.close(answer_w)
-    return process, Connection(request_w, readable=False), Connection(answer_r, writable=False)
+    env = {"PYTHONPATH": root}
+    env.update({name: os.environ[name] for name in _WINDOWS_ENV if name in os.environ})
+    return subprocess.Popen(
+        [sys.executable, "-m", "akko_mcp_trino.parse_worker"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        bufsize=0,
+        cwd=root,
+        env=env,
+    )
 
 
 class _Worker:
+    """One worker process, and the thread that reads its frames into ``inbox``; None ends
+    them: the worker ended, or wrote what is not a frame."""
+
     def __init__(self, launch: Launcher) -> None:
-        self.process, self.requests, self.answers = launch()
+        self.process = launch()
         self.ready = False
+        self.inbox: queue.Queue[Optional[bytes]] = queue.Queue()
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+
+    def _read(self) -> None:
+        with suppress(OSError, ValueError):
+            while (frame := read_frame(self.process.stdout, MAX_FRAME_BYTES)) is not None:
+                self.inbox.put(frame)
+        self.inbox.put(None)
+
+    def send(self, payload: bytes) -> None:
+        """Send one frame; raises OSError or ValueError once the worker is gone."""
+        write_frame(self.process.stdin, payload)
+
+    def get(self, timeout: float) -> Optional[bytes]:
+        """The next frame within ``timeout`` (raises ``queue.Empty`` past it), or None once
+        the worker is broken; a broken worker stays broken."""
+        frame = self.inbox.get(timeout=max(timeout, 0))
+        if frame is None:
+            self.inbox.put(None)
+        return frame
 
     def stop(self) -> None:
         """Kill the process and close both pipes; once is enough, twice is harmless."""
-        for conn in (self.requests, self.answers):
-            conn.close()
+        with suppress(OSError, ValueError):
+            self.process.stdin.close()
         if self.process.poll() is None:
-            self.process.kill()
+            with suppress(OSError):
+                self.process.kill()
         try:
             self.process.wait(_STOP_SECONDS)
         except subprocess.TimeoutExpired:  # pragma: no cover - a killed process ends
             pass
+        self.reader.join(_STOP_SECONDS)
+        with suppress(OSError, ValueError):
+            self.process.stdout.close()
 
 
-def _analysis(raw: bytes) -> Analysis:
-    """The worker's answer as an ``Analysis``, every field checked; anything else is the
-    analysis of a statement that names nothing and is no read."""
+def _analysis(raw: bytes) -> Optional[Analysis]:
+    """The worker's answer as an ``Analysis``, every field checked: ``["error", null]`` is
+    the analysis of a statement that names nothing and is no read; anything else that is
+    not a well-formed answer is None, and breaks the worker."""
     try:
         status, value = json.loads(raw)
-        if status != "ok":
+        if status == "error" and value is None:
             return _NOTHING
+        if status != "ok":
+            return None
         read_only, tables, (bare, scoped) = value
         if not (isinstance(read_only, bool) and isinstance(bare, bool)):
-            return _NOTHING
+            return None
         names = tuple(str(t) for t in tables)
         scope = tuple((tuple(str(p) for p in parts), str(alias)) for parts, alias in scoped)
         return Analysis(read_only, names, ColumnScope(bare, scope))
     except (TypeError, ValueError):
-        return _NOTHING
+        return None
+
+
+def _is_ready(frame: Optional[bytes]) -> bool:
+    """Whether ``frame`` is a worker's ``["ready", pid]``."""
+    try:
+        return frame is not None and json.loads(frame)[0] == "ready"
+    except (ValueError, TypeError, IndexError, KeyError):
+        return False
 
 
 class ParsePool:
@@ -184,9 +220,16 @@ class ParsePool:
                 )
             self._callers.add(caller)
         try:
-            worker = self._take(time.monotonic() + self.seconds)
             request = json.dumps([sql, session_catalog, sorted(extra_reads)]).encode()
-            return self._ask(worker, request)
+            if len(request) > MAX_FRAME_BYTES:
+                raise self._refuse(
+                    "too_long",
+                    "sql_too_long",
+                    INVALID_ARGUMENT,
+                    "The statement is too long for this server to check. Write a shorter "
+                    "statement.",
+                )
+            return self._ask(self._take(time.monotonic() + self.seconds), request)
         finally:
             with self._lock:
                 self._callers.discard(caller)
@@ -239,34 +282,37 @@ class ParsePool:
             self._idle.remove(worker)
         if not worker.ready:
             try:
-                if not worker.answers.poll(max(deadline - time.monotonic(), 0)):
-                    self._release(worker)
-                    raise self._no_worker()
-                worker.answers.recv_bytes()
-            except (EOFError, OSError):
+                hello = worker.get(deadline - time.monotonic())
+            except queue.Empty:
+                self._release(worker)  # still starting: kept for the next call
+                raise self._no_worker() from None
+            if not _is_ready(hello):
                 self._replace(worker)
-                raise self._failed() from None
+                raise self._failed()
             worker.ready = True
         return worker
 
     def _ask(self, worker: _Worker, request: bytes) -> Analysis:
         try:
-            worker.requests.send_bytes(request)
-            if not worker.answers.poll(self.seconds):
-                self._replace(worker)
-                raise self._refuse(
-                    "deadline",
-                    "parse_deadline",
-                    TIME_BUDGET,
-                    f"The statement took more than {self.seconds:g} s to check and was not "
-                    "run. Write a simpler statement: fewer nested or repeated expressions.",
-                )
-            raw = worker.answers.recv_bytes()
-        except (EOFError, OSError):
+            worker.send(request)
+            raw = worker.get(self.seconds)
+        except queue.Empty:
             self._replace(worker)
-            raise self._failed() from None
+            raise self._refuse(
+                "deadline",
+                "parse_deadline",
+                TIME_BUDGET,
+                f"The statement took more than {self.seconds:g} s to check and was not "
+                "run. Write a simpler statement: fewer nested or repeated expressions.",
+            ) from None
+        except (OSError, ValueError):
+            raw = None
+        found = _analysis(raw) if raw is not None else None
+        if found is None:
+            self._replace(worker)
+            raise self._failed()
         self._release(worker)
-        return _analysis(raw)
+        return found
 
     def _release(self, worker: _Worker) -> None:
         with self._lock:

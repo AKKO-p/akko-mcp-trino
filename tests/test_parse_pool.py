@@ -7,12 +7,14 @@ the deadline, not the statement, ends each test that sends one.
 
 from __future__ import annotations
 
+import io
 import json
 import os
-import signal
+import struct
+import subprocess
+import sys
 import threading
 import time
-from multiprocessing import Pipe
 
 import pytest
 
@@ -48,6 +50,12 @@ def _in_thread(fn):
     return thread, out
 
 
+def _processes(pool):
+    """The process objects of the pool's workers, to see them end on any platform."""
+    with pool._lock:
+        return [w.process for w in pool._all]
+
+
 def _until(condition, seconds=10.0):
     end = time.monotonic() + seconds
     while not condition():
@@ -75,6 +83,7 @@ def test_a_parse_past_the_deadline_is_killed_replaced_and_refused():
     pool = ParsePool(1, 1.0, metrics=metrics)
     _analyze(pool, "SELECT 1")  # the worker is started and ready
     (first,) = pool.pids()
+    (old,) = _processes(pool)
     started = time.monotonic()
     with pytest.raises(ParseRefused) as refused:
         _analyze(pool, STUCK)
@@ -82,8 +91,7 @@ def test_a_parse_past_the_deadline_is_killed_replaced_and_refused():
     assert (refused.value.kind, refused.value.code) == ("time_budget", "parse_deadline")
     assert "ARRAY" not in str(refused.value) and "1 s" in str(refused.value)
     _until(lambda: pool.pids() and pool.pids() != [first])
-    with pytest.raises(ProcessLookupError):
-        os.kill(first, 0)
+    assert old.poll() is not None, "the worker past the deadline was killed"
     assert _analyze(pool, "SELECT 1").read_only is True, "the replacement serves"
     assert _refusals(metrics, "deadline") == 1
 
@@ -92,10 +100,10 @@ def test_a_worker_that_dies_refuses_the_call_and_never_allows_it():
     metrics = Metrics()
     pool = ParsePool(1, 30.0, metrics=metrics)
     _analyze(pool, "SELECT 1")
-    (pid,) = pool.pids()
+    (process,) = _processes(pool)
     thread, out = _in_thread(lambda: _analyze(pool, STUCK))
     time.sleep(0.3)  # the worker is parsing
-    os.kill(pid, signal.SIGKILL)
+    process.kill()
     thread.join(10)
     assert "value" not in out
     assert (out["refused"].kind, out["refused"].code) == ("unavailable", "parse_failed")
@@ -140,13 +148,11 @@ def test_a_call_that_finds_no_worker_free_within_the_deadline_is_refused():
 def test_close_kills_every_worker_and_refuses_what_comes_after():
     pool = ParsePool(2, 5.0)
     _analyze(pool, "SELECT 1")
-    pids = pool.pids()
-    assert len(pids) == 2
+    processes = _processes(pool)
+    assert len(processes) == 2
     pool.close()
     pool.close()  # twice is harmless
-    for pid in pids:
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+    assert all(process.poll() is not None for process in processes)
     with pytest.raises(ParseRefused) as refused:
         _analyze(pool, "SELECT 1")
     assert refused.value.code == "parse_no_worker"
@@ -200,141 +206,230 @@ def test_a_worker_that_cannot_start_leaves_the_call_refused():
     assert refused.value.code == "parse_no_worker" and pool.pids() == []
 
 
-def test_launch_worker_closes_its_pipes_when_the_process_cannot_start(monkeypatch):
-    def refuse(*args, **kwargs):
-        raise OSError("no exec")
+def test_a_worker_ends_as_soon_as_its_server_is_gone_even_mid_parse():
+    """The server gone, its end of the request pipe is closed: the worker ends at once,
+    though its parse would last minutes."""
+    pool = ParsePool(1, 60.0)
+    _analyze(pool, "SELECT 1")
+    (process,) = _processes(pool)
+    thread, out = _in_thread(lambda: _analyze(pool, STUCK))
+    time.sleep(0.3)  # the worker is parsing
+    process.stdin.close()  # what the end of the server does
+    assert process.wait(5) == 0
+    thread.join(10)
+    assert out["refused"].code == "parse_failed"
 
-    monkeypatch.setattr(parse_pool.subprocess, "Popen", refuse)
-    before = len(os.listdir("/dev/fd"))
-    with pytest.raises(OSError):
-        parse_pool.launch_worker()
-    assert len(os.listdir("/dev/fd")) == before
+
+def test_nothing_a_worker_prints_reaches_the_protocol_or_the_terminal():
+    """The worker's first instructions: whatever is printed after them, by ``print``, on
+    descriptor 1 or on descriptor 2, goes to the null device; only frames reach the pipe."""
+    noisy = (
+        "import os, sys\n"
+        "from akko_mcp_trino import parse_worker as w\n"
+        "requests, answers = w.isolate_streams()\n"
+        "print('noise'); sys.stdout.flush(); print('noise', file=sys.stderr)\n"
+        "os.write(1, b'noise'); os.write(2, b'noise')\n"
+        "w.write_frame(answers, w.read_frame(requests))\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", noisy],
+        input=struct.pack(">I", 2) + b"hi",
+        capture_output=True,
+        timeout=60,
+        env={**os.environ, "PYTHONPATH": parse_pool._package_root()},
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == struct.pack(">I", 2) + b"hi"
+    assert done.stderr == b""
+
+
+def _frame(payload):
+    return struct.pack(">I", len(payload)) + payload
+
+
+READY = _frame(b'["ready", 4242]')
 
 
 class _Process:
+    """A worker that never runs: what it answers is written in advance to its stdout pipe;
+    ``before_read`` runs as the server waits for it."""
+
     pid = 4242
 
-    def __init__(self):
+    def __init__(self, written=b"", end=False):
+        read_fd, self._write_fd = os.pipe()
+        self.stdout = os.fdopen(read_fd, "rb", buffering=0)
+        self.stdin = io.BytesIO()
         self.killed = False
+        if written:
+            os.write(self._write_fd, written)
+        if end:
+            self.end()
+
+    def end(self):
+        if self._write_fd is not None:
+            os.close(self._write_fd)
+            self._write_fd = None
 
     def poll(self):
         return 0 if self.killed else None
 
     def kill(self):
         self.killed = True
+        self.end()
 
     def wait(self, timeout=None):
         return 0
 
 
-class _Requests:
-    def send_bytes(self, data):
-        pass
-
-    def close(self):
-        pass
-
-
-class _Answers:
-    """Answers ``replies`` in turn; ``before`` runs as a poll starts."""
-
-    def __init__(self, replies, ready=True, before=None):
-        self.replies, self.before = list(replies), before
-        if ready:
-            self.replies.insert(0, b'["ready", 4242]')
-
-    def poll(self, timeout):
-        if self.before:
-            self.before()
-        return bool(self.replies)
-
-    def recv_bytes(self):
-        reply = self.replies.pop(0)
-        if isinstance(reply, BaseException):
-            raise reply
-        return reply
-
-    def close(self):
-        pass
-
-
-def _fake(answers):
-    return lambda: (_Process(), _Requests(), answers)
+def _fake(*processes):
+    made = iter(processes)
+    return lambda: next(made)
 
 
 def test_a_worker_not_ready_within_the_deadline_is_kept_and_the_call_refused():
-    pool = ParsePool(1, 0.1, launch=_fake(_Answers([], ready=False)))
+    pool = ParsePool(1, 0.1, launch=_fake(_Process()))
     with pytest.raises(ParseRefused) as refused:
         _analyze(pool, "SELECT 1")
     assert refused.value.code == "parse_no_worker"
     assert len(pool._idle) == 1, "the worker still starting is kept for the next call"
 
 
-def test_a_worker_that_dies_while_starting_is_replaced():
-    pool = ParsePool(1, 1.0, launch=_fake(_Answers([EOFError()], ready=False)))
+@pytest.mark.parametrize("first", [b"", _frame(b'["hello"]'), _frame(b"{}")])
+def test_a_worker_that_ends_or_says_anything_but_ready_is_replaced(first):
+    pool = ParsePool(1, 1.0, launch=_fake(_Process(first, end=True), _Process()))
+    with pytest.raises(ParseRefused) as refused:
+        _analyze(pool, "SELECT 1")
+    assert refused.value.code == "parse_failed"
+    assert len(pool._all) == 1, "a new worker took its place"
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        _frame(b"not json"),
+        _frame(b'["ok", ["yes", [], [true, []]]]'),
+        _frame(b'["ok", [true, [], ["yes", []]]]'),
+        _frame(b'["ok", [true, [], [true, [[["a"]]]]]]'),
+        _frame(b'["ok", 7]'),
+        _frame(b'["maybe", null]'),
+        struct.pack(">I", parse_pool.MAX_FRAME_BYTES + 1) + b"x",  # too long: not read
+        b"\x00\x00",  # a short frame, then the end
+    ],
+)
+def test_a_malformed_or_oversized_answer_refuses_the_call_and_replaces_the_worker(written):
+    metrics = Metrics()
+    broken = _Process(READY + written, end=written == b"\x00\x00")
+    pool = ParsePool(1, 1.0, launch=_fake(broken, _Process()), metrics=metrics)
+    with pytest.raises(ParseRefused) as refused:
+        _analyze(pool, "SELECT 1")
+    assert (refused.value.kind, refused.value.code) == ("unavailable", "parse_failed")
+    assert broken.killed and broken not in [w.process for w in pool._all]
+    assert _refusals(metrics, "worker_failed") == 1
+
+
+def test_an_analysis_that_failed_in_the_worker_is_no_read_and_keeps_the_worker():
+    worker = _Process(READY + _frame(b'["error", null]'))
+    pool = ParsePool(1, 1.0, launch=_fake(worker))
+    assert _analyze(pool, "SELECT 1") == Analysis(False, (), ColumnScope(False, ()))
+    assert [w.process for w in pool._idle] == [worker]
+
+
+def test_a_request_too_long_for_a_frame_is_refused_before_any_worker(monkeypatch):
+    monkeypatch.setattr(parse_pool, "MAX_FRAME_BYTES", 100)
+    pool = ParsePool(1, 1.0, launch=_fake())
+    with pytest.raises(ParseRefused) as refused:
+        _analyze(pool, "SELECT '" + "x" * 200 + "'")
+    assert (refused.value.kind, refused.value.code) == ("invalid_argument", "sql_too_long")
+    assert pool._all == set()
+
+
+def test_a_worker_that_cannot_be_written_to_is_replaced():
+    class _Closed(io.BytesIO):
+        def write(self, data):
+            raise BrokenPipeError
+
+    worker = _Process(READY)
+    worker.stdin = _Closed()
+    pool = ParsePool(1, 1.0, launch=_fake(worker, _Process()))
     with pytest.raises(ParseRefused) as refused:
         _analyze(pool, "SELECT 1")
     assert refused.value.code == "parse_failed"
 
 
 def test_an_answer_after_close_stops_the_worker_instead_of_keeping_it():
+    good = _frame(json.dumps(["ok", [True, ["c.s.t"], [True, []]]]).encode())
     holder = {}
-    good = json.dumps(["ok", [True, ["c.s.t"], [True, []]]]).encode()
-    answers = _Answers([good], before=lambda: holder["pool"].close())
-    pool = holder["pool"] = ParsePool(1, 1.0, launch=_fake(answers))
-    with pool._lock:
-        pool._start()
-    pool._idle[0].ready = True
-    answers.replies.pop(0)  # the ready line, already read
+
+    class _Late(_Process):
+        def __init__(self):
+            super().__init__(READY)
+
+    late = _Late()
+    pool = holder["pool"] = ParsePool(1, 1.0, launch=_fake(late))
+    _analyze_started = []
+
+    class _Stdin(io.BytesIO):
+        def write(self, data):  # the request leaves; the pool closes; then the answer comes
+            _analyze_started.append(True)
+            holder["pool"]._closed = True
+            os.write(late._write_fd, good)
+            return len(data)
+
+    late.stdin = _Stdin()
     assert _analyze(pool, "SELECT 1").tables == ("c.s.t",)
-    assert pool._idle == []
+    assert late.killed and pool._idle == []
 
 
 @pytest.mark.parametrize(
     "raw",
     [
         b"not json",
-        b'["error", null]',
+        b'["error", 1]',
         b'["ok", ["yes", [], [true, []]]]',
         b'["ok", [true, [], ["yes", []]]]',
         b'["ok", [true, [], [true, [[["a"]]]]]]',
         b'["ok", 7]',
     ],
 )
-def test_anything_but_a_well_formed_answer_is_no_read(raw):
-    assert parse_pool._analysis(raw) == Analysis(False, (), ColumnScope(False, ()))
+def test_anything_but_a_well_formed_answer_is_none(raw):
+    assert parse_pool._analysis(raw) is None
+    assert parse_pool._analysis(b'["error", null]') == Analysis(False, (), ColumnScope(False, ()))
 
 
 def test_the_worker_answers_on_its_pipes_and_ends_with_them():
-    requests_r, requests_w = Pipe(duplex=False)
-    answers_r, answers_w = Pipe(duplex=False)
+    request_r, request_w = os.pipe()
+    answer_r, answer_w = os.pipe()
+    requests = os.fdopen(request_r, "rb", buffering=0)
+    answers, replies = os.fdopen(answer_w, "wb", buffering=0), os.fdopen(answer_r, "rb")
+    ended = []
     thread = threading.Thread(
-        target=parse_worker.serve, args=(requests_r, answers_w, os.getppid()), daemon=True
+        target=parse_worker.serve, args=(requests, answers, ended.append), daemon=True
     )
     thread.start()
-    assert json.loads(answers_r.recv_bytes()) == ["ready", os.getpid()]
-    requests_w.send_bytes(json.dumps(["SELECT a FROM c.s.t", "c", []]).encode())
-    assert json.loads(answers_r.recv_bytes()) == [
+    assert json.loads(parse_worker.read_frame(replies)) == ["ready", os.getpid()]
+    os.write(request_w, _frame(json.dumps(["SELECT a FROM c.s.t", "c", []]).encode()))
+    assert json.loads(parse_worker.read_frame(replies)) == [
         "ok",
         [True, ["c.s.t"], [True, [[["c", "s", "t"], ""]]]],
     ]
-    requests_w.send_bytes(b"[1, 2]")  # a request it cannot read: an error, no crash
-    assert json.loads(answers_r.recv_bytes()) == ["error", None]
-    requests_w.close()
+    os.write(request_w, _frame(b"[1, 2]"))  # a request it cannot read: an error, no crash
+    assert json.loads(parse_worker.read_frame(replies)) == ["error", None]
+    os.close(request_w)  # the server is gone
     thread.join(5)
-    assert not thread.is_alive()
+    assert not thread.is_alive() and ended == [0]
+    answers.close()
+    assert parse_worker.read_frame(replies) is None
 
 
-def test_a_worker_ends_once_its_server_is_gone():
-    stop, ended = threading.Event(), []
-    parents = iter([10, 10, 1])
-    parse_worker.watch_parent(
-        10, stop, exit=ended.append, every=0.001, getppid=lambda: next(parents)
-    )
-    assert ended == [0]
-    stop.set()
-    parse_worker.watch_parent(10, stop, exit=ended.append, every=0.001, getppid=lambda: 10)
-    assert ended == [0], "a stopped watch returns without ending the process"
+def test_a_worker_whose_answer_pipe_is_closed_ends_quietly():
+    class _Gone(io.BytesIO):
+        def write(self, data):
+            raise BrokenPipeError
+
+    ended = []
+    parse_worker.serve(io.BytesIO(), _Gone(), ended.append)
+    _until(lambda: ended == [0])
 
 
 def test_the_metric_names_a_reason_never_a_statement():

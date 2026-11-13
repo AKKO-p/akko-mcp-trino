@@ -76,10 +76,12 @@ Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans l
   (`time_budget`) ; de même pour un appel qui ne trouve aucun processus libre dans ce délai, et un
   processus en échec fait refuser son appel. Un SQL très imbriqué ou répété n'occupe donc plus le
   serveur. Un appelant fait analyser une instruction à la fois : un second appel pendant
-  l'analyse du premier est refusé aussitôt (`busy`). Un appel sans appelant vérifié compte pour le
-  compte Trino configuré. Les processus démarrent au premier usage, n'écrivent nulle part (leurs
-  flux standard sont le périphérique nul), ne reçoivent aucun réglage du serveur et s'arrêtent
-  avec lui. Le risque qui reste : un appelant authentifié peut occuper un processus pendant le
+  l'analyse du premier est refusé aussitôt (`busy`). Les appels sans appelant vérifié comptent
+  pour le compte Trino configuré et partagent une seule place. Un appel attend au plus deux fois
+  `MCP_SQL_PARSE_SECONDS` : un processus, puis sa réponse. Les processus démarrent au premier
+  usage, sous Linux, macOS et Windows, n'écrivent nulle part (leurs flux standard sont le
+  périphérique nul, et le protocole passe par des tubes qui leur sont propres), ne reçoivent
+  aucun réglage du serveur et s'arrêtent avec lui. Le risque qui reste : un appelant authentifié peut occuper un processus pendant le
   délai, une fois à la fois, si bien qu'autant d'appelants qu'il y a de processus peuvent retarder
   les autres ; des quotas par utilisateur sont prévus.
 - **Les écritures sont refusées n'importe où dans l'arbre.** L'instruction est analysée en arbre.

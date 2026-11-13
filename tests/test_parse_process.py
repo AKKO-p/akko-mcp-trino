@@ -2,7 +2,8 @@
 the parser busy for minutes leaves the session valid, and no worker outlives its server.
 
 Each line the server writes on stdout is read as JSON-RPC: a single stray byte from a
-worker would fail the test. Linux only: a worker's state is read in /proc.
+worker would fail the test. The stdio test runs on Linux, macOS and Windows; the tests of
+SIGTERM are POSIX only.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ _SERVER = os.path.join(os.path.dirname(__file__), "parse_server.py")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STUCK = "SELECT " + "ARRAY[" * 24 + "1" + "]" * 24
 
-pytestmark = pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="reads /proc")
+_POSIX_SIGNALS = pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
 
 
 def _env(tmp_path, transport, **extra):
@@ -55,12 +56,29 @@ def _pids(tmp_path):
 
 
 def _gone(pid):
-    """Ended: no such process, or a zombie nobody reaped yet."""
+    """Ended: no such process, or one that exited and nobody reaped yet."""
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE, QUERY
+        if not handle:
+            return True
+        try:
+            return kernel32.WaitForSingleObject(handle, 0) == 0  # signalled: it exited
+        finally:
+            kernel32.CloseHandle(handle)
+    if os.path.isdir("/proc/self"):
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
+                return stat.read().rsplit(")", 1)[1].split()[0] == "Z"
+        except FileNotFoundError:
+            return True
     try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
-            return stat.read().rsplit(")", 1)[1].split()[0] == "Z"
-    except FileNotFoundError:
+        os.kill(pid, 0)
+    except ProcessLookupError:
         return True
+    return False
 
 
 def _until(condition, seconds=30.0):
@@ -145,6 +163,7 @@ def test_a_statement_past_the_deadline_over_stdio_leaves_the_session_valid(tmp_p
     _until(lambda: all(_gone(pid) for pid in pids), 5)
 
 
+@_POSIX_SIGNALS
 def test_sigterm_over_stdio_leaves_no_worker(tmp_path):
     proc = subprocess.Popen(
         [sys.executable, _SERVER],
@@ -166,6 +185,7 @@ def _free_port():
         return s.getsockname()[1]
 
 
+@_POSIX_SIGNALS
 def test_sigterm_over_http_closes_the_workers_at_shutdown(tmp_path):
     port, health = _free_port(), _free_port()
     proc = subprocess.Popen(

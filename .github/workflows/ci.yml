@@ -152,6 +152,28 @@ jobs:
       - run: uv venv && uv pip install --resolution ${{ matrix.resolution }} -e . $(bash scripts/lock.sh pins pytest pytest-cov)
       - name: tests at the ${{ matrix.resolution }} versions of every dependency
         run: .venv/bin/python -m pytest -q
+  windows:
+    # The parse workers on Windows, where hosts such as Claude Desktop and Cursor start the
+    # server over stdio: the pool's tests and the stdio end-to-end test only. The locks are
+    # compiled on Linux, so they leave out what a package needs on Windows alone (colorama for
+    # pytest's colours, pywin32 for the SDK's client): --no-deps installs the lock as it is,
+    # and neither is needed here.
+    name: parse workers (windows)
+    runs-on: windows-latest
+    needs: versions
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
+      - run: |
+          pip install --no-deps --require-hashes -r requirements/build.txt -r requirements/dev.txt
+          pip install --no-deps --no-build-isolation -e .
+      - name: the parse pool and the stdio end-to-end test
+        run: python -m pytest -q -p no:cacheprovider -o addopts="" tests/test_parse_pool.py tests/test_parse_process.py
   integration:
     # The identity modes, live: a disposable Keycloak (token exchange) and Trino (JWT and
     # client certificates), three servers built from this commit, every check of
