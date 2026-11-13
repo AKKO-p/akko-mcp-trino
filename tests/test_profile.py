@@ -20,6 +20,8 @@ from akko_mcp_trino.tools import register_query_tools
 from tests.tool_doubles import FakeMCP, YearToMonth, core_config, in_request
 
 ORDERS = "tpch.tiny.orders"
+# The table as the statements name it: each part quoted.
+ORDERS_SQL = '"tpch"."tiny"."orders"'
 DESCRIBED = {
     "columns": ["Column", "Type", "Extra", "Comment"],
     "rows": [["id", "bigint", "", ""], ["name", "varchar(25)", "", ""]],
@@ -79,11 +81,11 @@ def test_profile_table_sends_one_aggregate_query_and_never_show_stats():
     tool, trino = _profile(DESCRIBED, _aggregates(3, 3, 3, 1, 9, 2, 2, "ann", "zoe"))
     out = _call(tool, "tpch", "tiny", "orders")
     assert trino.calls == [
-        f"DESCRIBE {ORDERS}",
+        f"DESCRIBE {ORDERS_SQL}",
         'SELECT count(*), count("id"), approx_distinct("id"), min("id"), max("id"), '
         'count("name"), approx_distinct("name"), min(substr("name", 1, 201)), '
         'max(substr("name", 1, 201)) '
-        f'FROM (SELECT "id", "name" FROM {ORDERS} LIMIT 100000)',
+        f'FROM (SELECT "id", "name" FROM {ORDERS_SQL} LIMIT 100000)',
     ]
     assert not [s for s in trino.calls if s.lstrip().upper().startswith(("SHOW", "EXPLAIN"))]
     assert out == {
@@ -123,7 +125,7 @@ def test_a_column_describe_did_not_list_is_refused_before_any_aggregate(columns)
     tool, trino = _profile(DESCRIBED)
     out = _call(tool, "tpch", "tiny", "orders", columns=columns)
     assert out["kind"] == "invalid_argument"
-    assert trino.calls == [f"DESCRIBE {ORDERS}"], "no aggregate is sent"
+    assert trino.calls == [f"DESCRIBE {ORDERS_SQL}"], "no aggregate is sent"
 
 
 def test_the_named_columns_are_profiled_in_the_order_given():
@@ -132,7 +134,7 @@ def test_the_named_columns_are_profiled_in_the_order_given():
     assert trino.calls[1] == (
         'SELECT count(*), count("name"), approx_distinct("name"), '
         'min(substr("name", 1, 201)), max(substr("name", 1, 201)) '
-        f'FROM (SELECT "name" FROM {ORDERS} LIMIT 100000)'
+        f'FROM (SELECT "name" FROM {ORDERS_SQL} LIMIT 100000)'
     )
     assert [c["column"] for c in out["columns"]] == ["name"]
 
@@ -142,7 +144,7 @@ def test_by_default_the_first_columns_describe_lists_are_profiled_up_to_the_limi
     tool, trino = _profile(three, _aggregates(0, 0, 0, None, None, 0, 0, None, None), max_columns=2)
     out = _call(tool, "tpch", "tiny", "orders")
     assert [c["column"] for c in out["columns"]] == ["a", "b"]
-    assert f'FROM (SELECT "a", "b" FROM {ORDERS} LIMIT' in trino.calls[1]
+    assert f'FROM (SELECT "a", "b" FROM {ORDERS_SQL} LIMIT' in trino.calls[1]
 
 
 def test_more_columns_than_the_limit_are_refused_before_any_aggregate():
@@ -150,20 +152,20 @@ def test_more_columns_than_the_limit_are_refused_before_any_aggregate():
     tool, trino = _profile(three, max_columns=2)
     out = _call(tool, "tpch", "tiny", "orders", columns=["a", "b", "c"])
     assert out["kind"] == "invalid_argument" and "2" in out["error"]
-    assert trino.calls == [f"DESCRIBE {ORDERS}"]
+    assert trino.calls == [f"DESCRIBE {ORDERS_SQL}"]
 
 
 def test_sample_mode_reads_the_first_rows_and_says_so():
     tool, trino = _profile(DESCRIBED, _aggregates(5, 5, 5, 1, 5, 5, 5, "a", "e"), sample_rows=5)
     out = _call(tool, "tpch", "tiny", "orders", mode="sample")
-    assert trino.calls[1].endswith(f'FROM (SELECT "id", "name" FROM {ORDERS} LIMIT 5)')
+    assert trino.calls[1].endswith(f'FROM (SELECT "id", "name" FROM {ORDERS_SQL} LIMIT 5)')
     assert out["scope"] == "first_rows"
 
 
 def test_bernoulli_mode_reads_a_random_sample_and_says_so():
     tool, trino = _profile(DESCRIBED, _aggregates(2, 2, 2, 1, 2, 2, 2, "a", "b"))
     out = _call(tool, "tpch", "tiny", "orders", mode="bernoulli", percent=12.5)
-    assert trino.calls[1].endswith(f"FROM {ORDERS} TABLESAMPLE BERNOULLI (12.5)")
+    assert trino.calls[1].endswith(f"FROM {ORDERS_SQL} TABLESAMPLE BERNOULLI (12.5)")
     assert out["scope"] == "random_sample"
     tool, trino = _profile(DESCRIBED, _aggregates(2, 2, 2, 1, 2, 2, 2, "a", "b"))
     _call(tool, "tpch", "tiny", "orders", mode="bernoulli", percent=100)
@@ -196,7 +198,7 @@ def test_an_unknown_mode_is_refused():
 
 @pytest.mark.parametrize(
     "catalog, schema, table",
-    [("system", "runtime", "queries"), ("tpch", "bad;name", "orders"), ("tpch", "tiny", "")],
+    [("system", "runtime", "queries"), ("tpch", "bad\nname", "orders"), ("tpch", "tiny", "")],
 )
 def test_a_name_the_tools_refuse_reaches_no_query(catalog, schema, table):
     tool, trino = _profile(DESCRIBED)
@@ -207,7 +209,7 @@ def test_a_name_the_tools_refuse_reaches_no_query(catalog, schema, table):
 def test_full_mode_reads_every_visible_row_and_says_so():
     tool, trino = _profile(DESCRIBED, _aggregates(2, 2, 2, 1, 2, 2, 2, "a", "b"))
     out = _call(tool, "tpch", "tiny", "orders", mode="full")
-    assert trino.calls[1].endswith(f'max(substr("name", 1, 201)) FROM {ORDERS}')
+    assert trino.calls[1].endswith(f'max(substr("name", 1, 201)) FROM {ORDERS_SQL}')
     assert out["scope"] == "visible_rows"
 
 
@@ -229,7 +231,7 @@ def test_non_comparable_types_get_count_only_and_say_so(kind):
     tool, trino = _profile(_described(("x", kind)), _aggregates(4, 3))
     out = _call(tool, "tpch", "tiny", "orders")
     assert trino.calls[1] == (
-        f'SELECT count(*), count("x") FROM (SELECT "x" FROM {ORDERS} LIMIT 100000)'
+        f'SELECT count(*), count("x") FROM (SELECT "x" FROM {ORDERS_SQL} LIMIT 100000)'
     )
     assert out["columns"] == [
         {
@@ -338,7 +340,7 @@ def test_a_column_name_with_a_double_quote_is_quoted_by_doubling():
     tool, trino = _profile(_described(('we"ird', "json")), _aggregates(1, 1))
     _call(tool, "tpch", "tiny", "orders")
     assert trino.calls[1] == (
-        f'SELECT count(*), count("we""ird") FROM (SELECT "we""ird" FROM {ORDERS} LIMIT 100000)'
+        f'SELECT count(*), count("we""ird") FROM (SELECT "we""ird" FROM {ORDERS_SQL} LIMIT 100000)'
     )
 
 
@@ -353,7 +355,7 @@ def test_the_aggregate_query_goes_through_the_read_only_guard(monkeypatch):
     tool, trino = _profile(DESCRIBED)
     out = _call(tool, "tpch", "tiny", "orders")
     assert out["kind"] == "read_only"
-    assert trino.calls == [f"DESCRIBE {ORDERS}"] and seen[0].startswith("SELECT count(*)")
+    assert trino.calls == [f"DESCRIBE {ORDERS_SQL}"] and seen[0].startswith("SELECT count(*)")
 
 
 def test_nothing_but_the_aggregates_comes_back():
@@ -427,7 +429,7 @@ def test_the_server_bounds_the_profile_by_its_settings(monkeypatch):
     mcp, _ = build_server(config, mcp_factory=lambda name, **_: FakeMCP())
     out = _call(mcp.tools["profile_table"], "tpch", "tiny", "orders")
     assert [c["column"] for c in out["columns"]] == ["a"]
-    assert sent[1].endswith(f'FROM (SELECT "a" FROM {ORDERS} LIMIT 7)')
+    assert sent[1].endswith(f'FROM (SELECT "a" FROM {ORDERS_SQL} LIMIT 7)')
 
 
 # ---- the settings: modes, value length, DESCRIBE rows, client tag, time budget
@@ -682,7 +684,7 @@ def test_a_table_with_no_column_listed_is_refused_without_an_aggregate():
     tool, trino = _profile(_described())
     out = _call(tool, "tpch", "tiny", "orders")
     assert out["kind"] == "invalid_argument" and "no column" in out["error"]
-    assert trino.calls == [f"DESCRIBE {ORDERS}"]
+    assert trino.calls == [f"DESCRIBE {ORDERS_SQL}"]
 
 
 def test_too_many_columns_are_refused_before_their_names_are_read():

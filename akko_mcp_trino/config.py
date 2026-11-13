@@ -139,8 +139,8 @@ def profile_mode_names(value: str) -> tuple[str, ...]:
 
 
 def _is_table_name(text: str) -> bool:
-    """Whether ``text`` is ``catalog.schema.table``: three valid identifiers, the first
-    outside the ``system`` catalog."""
+    """Whether ``text`` is ``catalog.schema.table``: three names ``validate_identifier``
+    accepts, the first outside the ``system`` catalog."""
     parts = text.split(".")
     if len(parts) != 3:
         return False
@@ -609,7 +609,7 @@ class Config:
         if self.context_canary and not _is_table_name(self.context_canary):
             found.append(
                 f"MCP_CONTEXT_CANARY={self.context_canary!r}: name one table as "
-                "catalog.schema.table, three identifiers (letters, digits, _ and -), "
+                "catalog.schema.table, three names without a dot or a control character, "
                 "outside the system catalog"
             )
         return found

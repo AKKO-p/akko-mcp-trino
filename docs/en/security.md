@@ -53,7 +53,10 @@ read-only rights, and only on data every caller may read (see
 
 ## The statements an agent may send
 
-Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed in SQL.
+A catalog, schema or table name given to a tool is taken as written: any text of 1 to 1024
+characters without a control character, such as `orders$snapshots`, `2024_sales` or `données`.
+It enters SQL only as a quoted identifier, each double quote in it doubled, or as a string
+literal; a name with a control character is refused before Trino is asked.
 `execute_query` accepts any SQL Trino accepts, **as long as it is a read**.
 
 - **Commands go through an allow list**: `SELECT`, `DESCRIBE` of a table, `SHOW CATALOGS`,

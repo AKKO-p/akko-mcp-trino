@@ -596,7 +596,8 @@ def test_a_bound_below_one_is_refused(monkeypatch, name):
 
 
 @pytest.mark.parametrize(
-    "canary", ["orders", "a.b", "a.b.c.d", "a..c", "a.b.c d", "a.b;c.d", "system.runtime.queries"]
+    "canary",
+    ["orders", "a.b", "a.b.c.d", "a..c", "a.b.c\nd", "a.b.c\x1bd", "system.runtime.queries"],
 )
 def test_a_canary_must_name_one_table(monkeypatch, canary):
     monkeypatch.setenv("MCP_CONTEXT_CANARY", canary)

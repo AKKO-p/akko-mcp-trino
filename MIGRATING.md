@@ -16,6 +16,12 @@ Nothing is removed or renamed in the answers of the tools; some answers are now 
   The entry says `"cut": ["comment"]` (`describe_table`: `comments_cut` lists the columns). A
   client that relied on the raw text of a very long comment, or on control characters in it,
   reads the cleaned and cut one.
+- **Names.** A catalog, schema or table name is no longer limited to letters, digits, `_` and
+  `-`: it is any text of 1 to 1024 characters without a control character, written in SQL
+  between double quotes. A name the server refused before, such as `orders$snapshots` or
+  `2024_sales`, now reaches Trino. A refusal now says `A name is text of 1 to 1024 characters,
+  without control characters.` The statements the metadata tools send quote every name, which
+  Trino's query history and a policy engine that reads the SQL text now see.
 
 ## From 0.7 to 0.8
 

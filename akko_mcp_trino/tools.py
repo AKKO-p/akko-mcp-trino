@@ -103,6 +103,9 @@ from .sql_guard import (
     governed_catalog,
     is_read_only_sql,
     normalize_sql,
+    quote_identifier,
+    quoted_name,
+    shown_name,
     sql_literal,
     tables_for_column,
     validate_identifier,
@@ -615,11 +618,6 @@ def _cut(value: Any, size: int) -> tuple[Any, bool]:
     return value, False
 
 
-def _quoted(name: str) -> str:
-    """A column name as a quoted identifier, a double quote in it doubled."""
-    return '"' + name.replace('"', '""') + '"'
-
-
 def _sample_percent(mode: str, percent: Any) -> float:
     """The percent of ``mode``, checked: in bernoulli, a finite number with
     ``0 < percent <= 100``; in any other mode, 0 (not given). Raises ValueError."""
@@ -837,7 +835,7 @@ class ToolContext:
         shows neither a schema that does not exist nor one the policy hides: false for both.
         A catalog that does not exist or that the caller may not access raises Trino's error."""
         res = self.run(
-            f"SELECT schema_name FROM {catalog}.information_schema.schemata "
+            f"SELECT schema_name FROM {quote_identifier(catalog)}.information_schema.schemata "
             f"WHERE schema_name = {sql_literal(folded)}",
             timeout=timeout,
         )
@@ -1042,7 +1040,8 @@ def register_query_tools(
             timeout = min(left - ADVICE_RESERVE_SECONDS, ADVICE_LOOKUP_SECONDS)
         try:
             res = run(
-                f"SELECT table_name FROM {governed_catalog(catalog)}.information_schema.tables "
+                "SELECT table_name FROM "
+                f"{quote_identifier(governed_catalog(catalog))}.information_schema.tables "
                 f"WHERE table_schema = {sql_literal(schema)} "
                 f"AND table_name = {sql_literal(table)}",
                 timeout=timeout,
@@ -1162,7 +1161,8 @@ def register_query_tools(
             cat = governed_catalog(catalog)
             start = check_offset(offset)
             names, more = page_of(
-                f"SELECT schema_name FROM {cat}.information_schema.schemata ORDER BY schema_name",
+                f"SELECT schema_name FROM {quote_identifier(cat)}.information_schema.schemata "
+                "ORDER BY schema_name",
                 start,
             )
             return listing_reply("schemas", names, _next_offset(start, names, more))
@@ -1186,12 +1186,12 @@ def register_query_tools(
             cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
             start = check_offset(offset)
-            # A validated name carries no quote. Trino folds an unquoted name to lower
-            # case, as SHOW TABLES FROM did: the schema is compared folded the same way.
+            # Trino folds a name to lower case, as SHOW TABLES FROM did: the schema is
+            # compared folded the same way, as a string literal.
             folded = sch.lower()
             names, more = page_of(
-                f"SELECT table_name FROM {cat}.information_schema.tables "
-                f"WHERE table_schema = '{folded}' ORDER BY table_name",
+                f"SELECT table_name FROM {quote_identifier(cat)}.information_schema.tables "
+                f"WHERE table_schema = {sql_literal(folded)} ORDER BY table_name",
                 start,
             )
             # information_schema shows no row for a schema that does not exist or that the
@@ -1200,7 +1200,7 @@ def register_query_tools(
             if not names and not schema_visible(cat, folded):
                 return refusal_reply(
                     "schema_not_found",
-                    f"Schema {cat}.{sch} not found or not visible",
+                    f"Schema {shown_name(cat)}.{shown_name(sch)} not found or not visible",
                     kind="schema",
                 )
             return listing_reply("tables", names, _next_offset(start, names, more))
@@ -1234,14 +1234,15 @@ def register_query_tools(
             if not schema_visible(cat, folded):
                 return refusal_reply(
                     "schema_not_found",
-                    f"Schema {cat}.{sch} not found or not visible",
+                    f"Schema {shown_name(cat)}.{shown_name(sch)} not found or not visible",
                     kind="schema",
                 )
             # One table more than a page tells whether more follow; row_limit, not the row
             # cap, bounds the read, so no table of the page is lost to the cap.
             size = describe_schema_tables
             res = run(
-                f"SELECT table_name, table_type FROM {cat}.information_schema.tables "
+                "SELECT table_name, table_type FROM "
+                f"{quote_identifier(cat)}.information_schema.tables "
                 f"WHERE table_schema = {sql_literal(folded)} ORDER BY table_name "
                 f"OFFSET {start} LIMIT {size + 1}",
                 row_limit=size + 1,
@@ -1383,12 +1384,12 @@ def register_query_tools(
                 raise ValueError(
                     "Invalid sample_rows: sample rows come with the first page, column_offset 0."
                 )
-            fqn = f"{cat}.{sch}.{tbl}"
+            fqn, target = f"{cat}.{sch}.{tbl}", quoted_name(cat, sch, tbl)
             note(tables=[fqn])
             # DESCRIBE has no offset: it is read from the first column to the end of the
             # page, one row more telling whether more follow, never past the server's bound.
             end = min(start + tools.page_size, describe_max_columns)
-            described = run(f"DESCRIBE {fqn}", row_limit=end)
+            described = run(f"DESCRIBE {target}", row_limit=end)
             listed = described["rows"][:end]
             more = was_cut(described) or len(described["rows"]) > end
             rows, comments_cut = [], []
@@ -1426,7 +1427,7 @@ def register_query_tools(
                 out["describer_errors"] = failed
             if n:
                 # Rows of data are read: the audit line names that statement and its rows.
-                statement = f"SELECT * FROM {fqn} LIMIT {n}"
+                statement = f"SELECT * FROM {target} LIMIT {n}"
                 note(sql=statement)
                 sample = run(statement)
                 note(rows=len(sample["rows"]))
@@ -1459,13 +1460,15 @@ def register_query_tools(
     # of the threads every tool shares, so past the bound a call answers busy at once.
     profile_slots = threading.BoundedSemaphore(profile_max_concurrent)
 
-    def profile_of(fqn: str, columns: Optional[list[str]], mode: str, share: float) -> str:
-        """The profile of the table ``fqn``, a name already checked: DESCRIBE, then one
-        aggregate query, both as the caller."""
+    def profile_of(
+        fqn: str, target: str, columns: Optional[list[str]], mode: str, share: float
+    ) -> str:
+        """The profile of the table ``fqn``, whose parts were checked and quoted in
+        ``target``: DESCRIBE, then one aggregate query, both as the caller."""
         try:
             # One row more than the bound, past the server's row cap, tells whether DESCRIBE
             # listed more columns than are read.
-            listing = run(f"DESCRIBE {fqn}", row_limit=profile_describe_rows + 1)
+            listing = run(f"DESCRIBE {target}", row_limit=profile_describe_rows + 1)
             listed = listing["rows"]
             columns_cut = was_cut(listing) or len(listed) > profile_describe_rows
             described = {str(r[0]): str(r[1]) for r in listed[:profile_describe_rows]}
@@ -1474,7 +1477,7 @@ def register_query_tools(
             prefix = profile_value_chars + 1
             aggregates = ["count(*)"]
             for c in chosen:
-                name = _quoted(c)
+                name = quote_identifier(c)
                 aggregates.append(f"count({name})")
                 if not ordered[c]:
                     continue
@@ -1484,13 +1487,13 @@ def register_query_tools(
                 aggregates += [f"min({end})", f"max({end})"]
             if mode == "sample":
                 source = (
-                    f"(SELECT {', '.join(_quoted(c) for c in chosen)} FROM {fqn} "
+                    f"(SELECT {', '.join(quote_identifier(c) for c in chosen)} FROM {target} "
                     f"LIMIT {profile_sample_rows})"
                 )
             elif mode == "bernoulli":
-                source = f"{fqn} TABLESAMPLE BERNOULLI ({share!r})"
+                source = f"{target} TABLESAMPLE BERNOULLI ({share!r})"
             else:
-                source = fqn
+                source = target
             statement = f"SELECT {', '.join(aggregates)} FROM {source}"
             # The same refusal as execute_query: a statement it would refuse is refused here.
             if not is_read_only_sql(statement, session_catalog, extra_reads):
@@ -1564,7 +1567,7 @@ def register_query_tools(
             tbl = validate_identifier(table, "table")
         except Exception as e:  # noqa: BLE001
             return error_reply(e)
-        fqn = f"{cat}.{sch}.{tbl}"
+        fqn, target = f"{cat}.{sch}.{tbl}", quoted_name(cat, sch, tbl)
         note(tables=[fqn])
         if not profile_slots.acquire(blocking=False):
             note(error=BUSY)
@@ -1576,7 +1579,7 @@ def register_query_tools(
                 }
             )
         try:
-            return profile_of(fqn, columns, mode, share)
+            return profile_of(fqn, target, columns, mode, share)
         finally:
             profile_slots.release()
 

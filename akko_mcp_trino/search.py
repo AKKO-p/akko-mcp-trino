@@ -50,8 +50,11 @@ from .context.text import clean_comment
 from .errors import INVALID_ARGUMENT, TIME_BUDGET, VIEW_REFUSED, explain_error, metadata_view_error
 from .sql_guard import (
     JDBC_COLUMNS,
+    MAX_NAME_LENGTH,
     TABLE_COMMENTS,
     governed_catalog,
+    quote_identifier,
+    shown_name,
     sql_literal,
     validate_identifier,
 )
@@ -88,9 +91,8 @@ PER_WORD_HINT = (
     "column or table name, then call describe_table on the table."
 )
 _WORD = re.compile(r"\w+")
-# What a cursor may hold: a schema name of this many characters at most, a row offset Trino
-# reads as a bigint.
-MAX_NAME_LENGTH = 1024
+# What a cursor may hold: a schema name of MAX_NAME_LENGTH characters at most, a row offset
+# Trino reads as a bigint.
 MAX_ROW_OFFSET = 2**63 - 1
 _INVALID_CURSOR = (
     "Invalid cursor: pass back next_cursor unchanged, or start the search again without a cursor"
@@ -336,7 +338,7 @@ def search(
     def schemas_of(cat: str, first: str, cancel: Optional[Cancellation] = None) -> list[str]:
         """The schemas of ``cat`` from ``first`` on, sorted, without information_schema."""
         sql = (
-            f"SELECT schema_name FROM {cat}.information_schema.schemata "
+            f"SELECT schema_name FROM {quote_identifier(cat)}.information_schema.schemata "
             f"WHERE schema_name >= {sql_literal(first)} "
             "AND schema_name <> 'information_schema' ORDER BY schema_name"
         )
@@ -348,7 +350,8 @@ def search(
         # no error: without this check the search would say it searched it, completely.
         note(error="schema_not_found")
         return {
-            "error": f"Schema {catalog}.{schema} not found or not visible",
+            "error": f"Schema {shown_name(catalog or '')}.{shown_name(schema or '')} "
+            "not found or not visible",
             "kind": "schema",
         }
 

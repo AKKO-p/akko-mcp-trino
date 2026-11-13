@@ -160,10 +160,10 @@ def test_list_schemas_validates_identifier():
         "truncated": False,
     }
     assert client.calls[-1][0] == (
-        "SELECT schema_name FROM iceberg.information_schema.schemata "
+        'SELECT schema_name FROM "iceberg".information_schema.schemata '
         "ORDER BY schema_name OFFSET 0 LIMIT 101"
     )
-    out = json.loads(mcp.tools["list_schemas"]("bad;name"))
+    out = json.loads(mcp.tools["list_schemas"]("bad\nname"))
     assert "Invalid catalog" in out["error"] and len(client.calls) == 1, "nothing must reach Trino"
 
 
@@ -177,10 +177,10 @@ def test_list_tables_validates_both_identifiers():
         "truncated": False,
     }
     assert client.calls[-1][0] == (
-        "SELECT table_name FROM iceberg.information_schema.tables "
+        'SELECT table_name FROM "iceberg".information_schema.tables '
         "WHERE table_schema = 'fraud' ORDER BY table_name OFFSET 0 LIMIT 101"
     )
-    out = json.loads(mcp.tools["list_tables"]("iceberg", "bad schema"))
+    out = json.loads(mcp.tools["list_tables"]("iceberg", "bad\tschema"))
     assert "Invalid schema" in out["error"] and len(client.calls) == 1
 
 
@@ -232,7 +232,7 @@ def test_list_tables_on_a_missing_or_hidden_schema_says_so_never_an_empty_list()
     out = json.loads(mcp.tools["list_tables"]("demo", "CRMM"))
     assert out == {"error": "Schema demo.CRMM not found or not visible", "kind": "schema"}
     assert client.calls[-1][0] == (
-        "SELECT schema_name FROM demo.information_schema.schemata WHERE schema_name = 'crmm'"
+        "SELECT schema_name FROM \"demo\".information_schema.schemata WHERE schema_name = 'crmm'"
     )
 
 
@@ -362,7 +362,7 @@ def test_describe_table_builds_qualified_name():
     )
     out = json.loads(mcp.tools["describe_table"]("iceberg", "fraud", "scores"))
     assert out["columns"] == ["Column", "Type"]
-    assert "DESCRIBE iceberg.fraud.scores" in client.calls[-1][0]
+    assert 'DESCRIBE "iceberg"."fraud"."scores"' in client.calls[-1][0]
 
 
 def test_execute_query_read_only_blocks_writes():
@@ -489,7 +489,7 @@ def test_trino_error_is_audited_as_failure():
 def test_invalid_identifier_is_audited_as_a_failure():
     """An agent gets {"error": …} it can act on, and the audit line says it failed."""
     mcp, _, audit = _registered_with_audit()
-    out = json.loads(in_request(lambda: mcp.tools["list_schemas"]("bad;name")))
+    out = json.loads(in_request(lambda: mcp.tools["list_schemas"]("bad\nname")))
     assert "Invalid catalog" in out["error"]
     assert audit.events[0].ok is False and audit.events[0].tool == "list_schemas"
 
@@ -546,7 +546,7 @@ def test_describe_table_can_add_a_governed_sample():
     mcp, client = _registered()
     out = json.loads(in_request(lambda: mcp.tools["describe_table"]("c", "s", "t", sample_rows=5)))
     assert out["sample"]["rows"] == [["v"]]
-    assert client.calls[-1] == ("SELECT * FROM c.s.t LIMIT 5", "alice_admin")
+    assert client.calls[-1] == ('SELECT * FROM "c"."s"."t" LIMIT 5', "alice_admin")
 
 
 def test_describe_table_sample_is_capped_and_never_negative():
@@ -813,7 +813,7 @@ def test_a_refused_write_has_kind_read_only():
 
 def test_an_invalid_identifier_has_kind_invalid_argument():
     mcp, _ = _registered()
-    out = json.loads(mcp.tools["list_schemas"]("bad;name"))
+    out = json.loads(mcp.tools["list_schemas"]("bad\nname"))
     assert out["kind"] == "invalid_argument" and "Invalid catalog" in out["error"]
 
 
@@ -888,8 +888,8 @@ def test_describe_schema_returns_whole_tables_with_comments():
         "shortened": False,
     }
     assert [sql for sql, _ in client.calls] == [
-        "SELECT schema_name FROM demo.information_schema.schemata WHERE schema_name = 'crm'",
-        "SELECT table_name, table_type FROM demo.information_schema.tables "
+        "SELECT schema_name FROM \"demo\".information_schema.schemata WHERE schema_name = 'crm'",
+        'SELECT table_name, table_type FROM "demo".information_schema.tables '
         "WHERE table_schema = 'crm' ORDER BY table_name OFFSET 0 LIMIT 21",
         "SELECT * FROM ("
         "SELECT table_name, column_name, type_name, remarks, ordinal_position "
@@ -1041,7 +1041,7 @@ def test_describe_schema_refuses_the_system_catalog():
     for catalog in ("system", "SYSTEM"):
         out = json.loads(mcp.tools["describe_schema"](catalog, "jdbc"))
         assert out["kind"] == "invalid_argument" and "system catalog" in out["error"]
-    out = json.loads(mcp.tools["describe_schema"]("demo", "crm'--"))
+    out = json.loads(mcp.tools["describe_schema"]("demo", "crm\n--"))
     assert "Invalid schema" in out["error"] and client.calls == []
 
 
@@ -1328,7 +1328,7 @@ def test_a_refused_describe_calls_no_provider_and_serves_nothing(setups):
     out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert out == {"error": str(denied), "kind": "other"}
     assert provider.calls == [] and [sql for sql, _, _ in client.calls] == [
-        "DESCRIBE demo.sales.orders"
+        'DESCRIBE "demo"."sales"."orders"'
     ]
 
 
@@ -1382,7 +1382,7 @@ def test_the_gate_runs_tagged_and_as_the_effective_subject(setups):
     )
     in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
     (describe, *gate) = client.calls
-    assert describe == ("DESCRIBE demo.sales.orders", "alice_admin", ())
+    assert describe == ('DESCRIBE "demo"."sales"."orders"', "alice_admin", ())
     assert gate and all(
         user == "alice_admin" and trino_client.GATE_TAG in tags for _, user, tags in gate
     )
@@ -1494,7 +1494,7 @@ def test_no_filter_statement_starts_with_less_than_the_reserve_left(setups):
     )
     out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert "error" not in out and out["context_sources"] == {"catalog": "not_checked"}
-    assert [sql for sql, _, _ in client.calls] == ["DESCRIBE demo.sales.orders"]
+    assert [sql for sql, _, _ in client.calls] == ['DESCRIBE "demo"."sales"."orders"']
 
 
 def test_join_targets_past_the_deadline_are_not_proven_and_never_asked(setups, monkeypatch):

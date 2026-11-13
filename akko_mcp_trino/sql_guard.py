@@ -1,4 +1,4 @@
-"""SQL guards: literal escaping, identifier validation, bounds, read-only classification.
+"""SQL guards: literal escaping, name quoting, bounds, read-only classification.
 
 Pure logic, no I/O. Read-only classification is done on the AST (sqlglot), not
 by looking at the first keyword: it rejects multi-statement input, a WITH that
@@ -20,8 +20,13 @@ from sqlglot import exp
 from sqlglot.dialects.trino import Trino
 from sqlglot.tokens import TokenType
 
-# A Trino identifier: alphanumerics, underscore and hyphen only.
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+# The longest name of a catalog, a schema or a table an agent may give.
+MAX_NAME_LENGTH = 1024
+# What a name may not hold: a control character (Unicode category Cc, NUL and line breaks
+# included) or half of a surrogate pair, which no client can send to Trino.
+_NOT_IN_A_NAME = re.compile(r"[\x00-\x1f\x7f-\x9f\ud800-\udfff]")
+# The characters of a refused name an error message quotes, at most.
+_SHOWN_NAME_CHARS = 100
 
 # sqlglot expression types that are purely READS: a SELECT, a set operation of reads
 # (UNION, EXCEPT, INTERSECT), a parenthesized read and VALUES. DESCRIBE goes by its words
@@ -307,17 +312,52 @@ def normalize_sql(sql: str) -> str:
 
 
 def validate_identifier(name: str, label: str = "identifier") -> str:
-    """Validate and return a Trino SQL identifier, or raise ValueError.
+    """``name``, a catalog, schema or table name an agent gives, checked; or raise ValueError.
 
-    Only alphanumerics, underscores and hyphens are accepted, so a catalog,
-    schema or table name can never carry an injection.
+    Any name Trino can hold is accepted, as written: ``orders$snapshots``, ``2024_sales``,
+    ``données``, a quote or a dot included. It is text of 1 to ``MAX_NAME_LENGTH``
+    characters without a control character. It is never written in SQL as it is:
+    ``quote_identifier`` puts it in double quotes, ``sql_literal`` in a string literal.
     """
-    if not name or not _IDENTIFIER_RE.match(name):
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(name) > MAX_NAME_LENGTH
+        or _NOT_IN_A_NAME.search(name)
+    ):
+        shown = repr(_cut_name(name)) if isinstance(name, str) else type(name).__name__
         raise ValueError(
-            f"Invalid {label}: {name!r}. "
-            "Only alphanumeric characters, underscores, and hyphens are allowed."
+            f"Invalid {label}: {shown}. A name is text of 1 to {MAX_NAME_LENGTH} characters, "
+            "without control characters."
         )
     return name
+
+
+def _cut_name(name: str) -> str:
+    """``name`` cut at ``_SHOWN_NAME_CHARS`` characters, "…" said."""
+    if len(name) > _SHOWN_NAME_CHARS:
+        return name[:_SHOWN_NAME_CHARS] + "\u2026"
+    return name
+
+
+def shown_name(name: str) -> str:
+    """``name`` as a message shows it: as it is when every character prints, in repr
+    otherwise (a format character such as a right-to-left mark is then written as its
+    escape), cut at ``_SHOWN_NAME_CHARS`` characters."""
+    cut = _cut_name(name)
+    return cut if cut.isprintable() else repr(cut)
+
+
+def quote_identifier(name: str) -> str:
+    """``name`` as one Trino delimited identifier: in double quotes, each double quote in it
+    doubled, so it can never close its quotes. Trino folds it to lower case as it folds an
+    unquoted name."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def quoted_name(*parts: str) -> str:
+    """A qualified name, such as ``catalog.schema.table``, each part quoted."""
+    return ".".join(quote_identifier(part) for part in parts)
 
 
 def governed_catalog(name: str) -> str:

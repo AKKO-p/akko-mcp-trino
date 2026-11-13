@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ..config import Config
-from ..sql_guard import sql_literal
+from ..sql_guard import quote_identifier, quoted_name, sql_literal
 from .caches import ByteCache, serialized_size
 from .types import TableRef
 
@@ -48,10 +48,6 @@ def key_for(config: Config, catalog: str, subject: str) -> VisibilityKey:
     The core sends no role to Trino, so ``roles`` is empty.
     """
     return VisibilityKey(config.trino_identity_mode, subject, (), catalog)
-
-
-def _ident(name: str) -> str:
-    return '"' + name.replace('"', '""') + '"'
 
 
 def _size(value: Any) -> int:
@@ -126,7 +122,7 @@ class Visibility:
         if key.catalog not in self.catalogs(key):
             return frozenset()
         names, _ = self._names(
-            f"SELECT schema_name FROM {_ident(key.catalog)}.information_schema.schemata"
+            f"SELECT schema_name FROM {quote_identifier(key.catalog)}.information_schema.schemata"
         )
         self._put(entry, names)
         return names
@@ -143,7 +139,7 @@ class Visibility:
         if schema not in self.schemas(key):
             return frozenset()
         names, cut = self._names(
-            f"SELECT table_name FROM {_ident(key.catalog)}.information_schema.tables "
+            f"SELECT table_name FROM {quote_identifier(key.catalog)}.information_schema.tables "
             f"WHERE table_schema = {sql_literal(schema)}"
         )
         found = None if cut else names
@@ -183,7 +179,7 @@ class Visibility:
         hit, value = self._get(entry)
         if hit:
             return value
-        table = ".".join(_ident(n) for n in (ref.catalog, ref.schema, ref.table))
+        table = quoted_name(ref.catalog, ref.schema, ref.table)
         try:
             names, cut = self._names(f"DESCRIBE {table}")
         except Exception as exc:
@@ -213,7 +209,7 @@ class Visibility:
                 clear = True
             else:
                 res = self._run(
-                    f"SELECT table_name FROM {_ident(catalog)}.information_schema.tables "
+                    f"SELECT table_name FROM {quote_identifier(catalog)}.information_schema.tables "
                     f"WHERE table_schema = {sql_literal(schema)} "
                     f"AND table_name = {sql_literal(table)}",
                     row_limit=1,
@@ -255,8 +251,8 @@ class Visibility:
         hit, value = self._get(entry)
         if hit:
             return value
-        names = ", ".join(_ident(c) for c in validated)
-        table = ".".join(_ident(n) for n in (ref.catalog, ref.schema, ref.table))
+        names = ", ".join(quote_identifier(c) for c in validated)
+        table = quoted_name(ref.catalog, ref.schema, ref.table)
         try:
             self._run(f"EXPLAIN (TYPE VALIDATE) SELECT {names} FROM {table}")
         except Exception as exc:

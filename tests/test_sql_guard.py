@@ -25,12 +25,14 @@ def test_the_metadata_views_are_trinos_own_names():
     assert sql_guard.TABLE_COMMENTS == "system.metadata.table_comments"
 
 
-@pytest.mark.parametrize("name", ["iceberg", "fraud_scores", "a-b", "_x", "A1"])
+@pytest.mark.parametrize(
+    "name", ["iceberg", "fraud_scores", "a-b", "_x", "A1", "1abc", "a.b", "a b", "a;b", "a'b"]
+)
 def test_validate_identifier_accepts_valid(name):
     assert sql_guard.validate_identifier(name) == name
 
 
-@pytest.mark.parametrize("bad", ["", "1abc", "a.b", "a b", "a;b", "a'b", "drop table"])
+@pytest.mark.parametrize("bad", ["", "a\0b", "a\nb", "a\x7fb", "x" * 1025])
 def test_validate_identifier_rejects_invalid(bad):
     with pytest.raises(ValueError):
         sql_guard.validate_identifier(bad, "catalog")
@@ -42,7 +44,7 @@ def test_governed_catalog_refuses_system_whatever_its_case():
         with pytest.raises(ValueError, match="system catalog"):
             sql_guard.governed_catalog(name)
     with pytest.raises(ValueError, match="Invalid catalog"):
-        sql_guard.governed_catalog("a;b")
+        sql_guard.governed_catalog("a\nb")
 
 
 @pytest.mark.parametrize(

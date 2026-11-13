@@ -62,6 +62,7 @@ bash scripts/lock.sh check    # the locks match their sources (CONTRIBUTING.md, 
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
 pytest                        # line or branch coverage below 100% fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
+integration/names/run.sh      # live: the metadata tools on names such as orders$snapshots, then removed
 python -m build --no-isolation && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start
 ```

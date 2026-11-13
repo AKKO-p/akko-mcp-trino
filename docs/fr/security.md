@@ -56,7 +56,11 @@ identité des droits en lecture seule, et seulement sur les données que tout ap
 
 ## Les instructions qu'un agent peut envoyer
 
-Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans le SQL.
+Un nom de catalogue, de schéma ou de table donné à un tool est pris tel qu'il est écrit : tout
+texte de 1 à 1024 caractères sans caractère de contrôle, comme `orders$snapshots`, `2024_sales`
+ou `données`. Il n'entre dans le SQL que comme identifiant entre guillemets doubles, chaque
+guillemet double doublé, ou comme littéral de chaîne ; un nom qui porte un caractère de contrôle
+est refusé avant que Trino ne soit interrogé.
 `execute_query` accepte tout SQL que Trino accepte, **pourvu que ce soit une lecture**.
 
 - **Les commandes passent par une liste blanche** : `SELECT`, `DESCRIBE` d'une table,

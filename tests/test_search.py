@@ -70,6 +70,16 @@ class _InternalError(Exception):
 
 
 _LITERAL = r"'((?:[^']|'')*)'"
+# The catalog whose schemata a statement reads, as the server writes it: a quoted name.
+_SCHEMATA = re.compile(r'FROM ("(?:[^"]|"")*")\.information_schema\.schemata')
+
+
+def _unquoted(name):
+    """A quoted name read back as Trino reads it: its quotes off, each doubled quote one."""
+    assert name.startswith('"') and name.endswith('"'), name
+    return name[1:-1].replace('""', '"')
+
+
 _COLUMN_FIELDS = ("c.column_name", "c.remarks", "c.table_name", "t.comment")
 _TABLE_FIELDS = ("s.table_name", "s.comment")
 _OWN_FIELDS = ("c.column_name", "c.remarks")
@@ -215,9 +225,9 @@ class Trino:
             rows = [[c] for c in self.catalogs]
             limit = kw.get("row_limit", 100)
             return {"rows": rows[:limit], "row_count": len(rows), "truncated": len(rows) > limit}
-        found = re.search(r"FROM (\S+)\.information_schema\.schemata", sql)
+        found = _SCHEMATA.search(sql)
         if found:
-            cat = found.group(1)
+            cat = _unquoted(found.group(1))
             self._spend(cat, timeout)
             self._fail(cat)
             only = re.search(r"schema_name = '([^']*)'", sql)
@@ -788,7 +798,7 @@ def test_the_system_catalog_is_never_searched_even_from_a_cursor(clock):
     out = _ask(trino, clock, "email")
     assert all("system" not in (m["catalog"]) for m in out["matches"])
     assert all("table_cat = 'system'" not in sql for sql, _ in trino.calls)
-    assert all("system.information_schema" not in sql for sql, _ in trino.calls)
+    assert all('"system".information_schema' not in sql for sql, _ in trino.calls)
     forged = _forge(
         {
             "c": "system",
@@ -908,7 +918,7 @@ def _query_of(trino, clock):
         ),
         _forge(
             {
-                "c": "de'mo",
+                "c": "de\nmo",
                 "s": "crm",
                 "p": "columns",
                 "o": 0,
@@ -1740,13 +1750,24 @@ def test_a_catalog_whose_schemas_cannot_be_listed_is_named_with_a_null_schema(cl
     assert [m["catalog"] for m in out["matches"]] == ["lake"] and out["complete"] is False
 
 
-def test_a_catalog_name_that_is_not_an_identifier_is_named_never_queried(clock):
-    trino = Trino({"lake": ["raw"]}, _COLUMNS, catalogs=["lake", "we'ird"])
+def test_a_catalog_name_with_a_quote_is_searched_as_that_one_catalog(clock):
+    """Trino lists a catalog named we"ird: its schemata are read by its quoted name, and
+    its schemas by string literals, so it is searched like any other."""
+    columns = {**_COLUMNS, ('we"ird', "raw"): [("t", "email", "varchar", None)]}
+    trino = Trino({"lake": ["raw"], 'we"ird': ["raw"]}, columns, catalogs=["lake", 'we"ird'])
+    out = _ask(trino, clock, "email")
+    assert [m["catalog"] for m in out["matches"]] == ["lake", 'we"ird']
+    assert out["complete"] is True and out["not_searched"] == []
+    assert any(sql.startswith('SELECT schema_name FROM "we""ird".') for sql, _ in trino.calls)
+
+
+def test_a_catalog_name_with_a_control_character_is_named_never_queried(clock):
+    trino = Trino({"lake": ["raw"]}, _COLUMNS, catalogs=["lake", "we\nird"])
     out = _ask(trino, clock, "email")
     assert out["not_searched"] == [
-        {"catalog": "we'ird", "schema": None, "reason": "invalid_argument"}
+        {"catalog": "we\nird", "schema": None, "reason": "invalid_argument"}
     ]
-    assert all("we'ird" not in sql for sql, _ in trino.calls)
+    assert all("we\nird" not in sql for sql, _ in trino.calls)
 
 
 def test_a_refused_metadata_view_answers_the_error_that_names_what_to_allow(clock):
@@ -1994,13 +2015,17 @@ _RECORDED_0_7 = {
 @pytest.mark.parametrize("text, rows", list(_RECORDED_0_7))
 def test_one_catalog_at_a_time_sends_the_statements_of_0_7_in_their_order(clock, text, rows):
     """MCP_SEARCH_CONCURRENCY=1 is the search of 0.7: the same statements in the same order,
-    and the same answer, byte for byte."""
+    and the same answer, byte for byte; only the catalog of a read of schemata is now quoted,
+    so it is read back unquoted to compare."""
     import hashlib
 
     trino = Trino(*_many(4, 2))
     clock["trino"] = trino
     out = _server(trino, budget=100000, max_rows=rows, concurrency=1)(text)
-    statements = [sql for sql, _ in trino.calls]
+    statements = [
+        _SCHEMATA.sub(lambda m: f"FROM {_unquoted(m.group(1))}.information_schema.schemata", sql)
+        for sql, _ in trino.calls
+    ]
     count, sent, answer = _RECORDED_0_7[(text, rows)]
     assert len(statements) == count
     assert hashlib.sha256("\n".join(statements).encode()).hexdigest() == sent
@@ -2046,11 +2071,11 @@ class _Slow(Trino):
         self.lock = threading.Lock()
 
     def query(self, sql, user=None, params=None, **kw):
-        found = re.search(r"FROM (\S+)\.information_schema\.schemata", sql)
+        found = _SCHEMATA.search(sql)
         if found:
             with self.lock:
-                self.opened.append(found.group(1))
-            if found.group(1) != "c00":
+                self.opened.append(_unquoted(found.group(1)))
+            if _unquoted(found.group(1)) != "c00":
                 time.sleep(self.pause)
         return super().query(sql, user, params, **kw)
 
@@ -2096,9 +2121,9 @@ class _Paced(Trino):
         """No simulated time: this fake waits for real."""
 
     def query(self, sql, user=None, params=None, **kw):
-        found = re.search(r"FROM (\S+)\.information_schema\.schemata", sql)
+        found = _SCHEMATA.search(sql)
         if found:
-            cat = found.group(1)
+            cat = _unquoted(found.group(1))
             with self.lock:
                 self.opened.append(cat)
                 self.threads.append(threading.current_thread().name)

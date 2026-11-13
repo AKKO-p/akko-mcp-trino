@@ -127,7 +127,7 @@ class GateTrino:
         answer = self.answer(sql)
         if answer is not None:
             return answer
-        if sql == "DESCRIBE demo.sales.orders":
+        if sql == 'DESCRIBE "demo"."sales"."orders"':
             if self.describe_error is not None:
                 raise self.describe_error
             rows = [[c, "bigint", "", ""] for c in self.columns]
@@ -139,7 +139,7 @@ class GateTrino:
             return {"columns": ["x"], "rows": [[n] for n in self.schemas], "truncated": False}
         if sql.startswith(("SELECT table_name FROM", "EXPLAIN (TYPE VALIDATE)")):
             return {"columns": ["x"], "rows": [], "truncated": False}
-        if sql.startswith("SELECT * FROM demo.sales.orders LIMIT"):
+        if sql.startswith('SELECT * FROM "demo"."sales"."orders" LIMIT'):
             return {"columns": ["id"], "rows": [[1]], "row_count": 1}
         raise AssertionError(f"unexpected statement: {sql}")
 
@@ -168,7 +168,7 @@ class SchemaTrino(GateTrino):
 
     def answer(self, sql):
         names = sorted(re.findall(r"table_name = '([^']*)'", sql))
-        if sql.startswith("SELECT table_name, table_type FROM demo.information_schema.tables"):
+        if sql.startswith('SELECT table_name, table_type FROM "demo".information_schema.tables'):
             start, limit = map(int, re.search(r"OFFSET (\d+) LIMIT (\d+)$", sql).groups())
             rows = [[t, "BASE TABLE"] for t in self.tables][start : start + limit]
         elif "system.jdbc.columns" in sql:

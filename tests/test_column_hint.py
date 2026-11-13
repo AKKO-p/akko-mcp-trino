@@ -96,7 +96,7 @@ def test_a_part_with_a_dot_is_looked_up_exactly_or_gives_no_advice():
     out = json.loads(tools["execute_query"](sql='SELECT nope FROM "x.y".t'))
     lookups = [c for c, _ in _client_of(tools).calls if "information_schema.tables" in c]
     assert lookups == [
-        "SELECT table_name FROM demo.information_schema.tables "
+        'SELECT table_name FROM "demo".information_schema.tables '
         "WHERE table_schema = 'x.y' AND table_name = 't'"
     ], "the schema x.y of the session catalog, never the catalog x"
     assert out["hint"].startswith('Read the columns of "x.y".t with describe_table')
@@ -104,8 +104,13 @@ def test_a_part_with_a_dot_is_looked_up_exactly_or_gives_no_advice():
     out = json.loads(tools["execute_query"](sql='SELECT nope FROM "a.b"'))
     assert "hint" not in out
     assert not [c for c, _ in _client_of(tools).calls if "information_schema.tables" in c]
-    out = json.loads(_tools(_column("nope"))["execute_query"](sql='SELECT nope FROM "c.d".s.t'))
-    assert "hint" not in out, "a catalog with a dot cannot be carried: no lookup, no advice"
+    tools = _tools(_column("nope"))
+    out = json.loads(tools["execute_query"](sql='SELECT nope FROM "c.d".s.t'))
+    assert "hint" not in out, "a catalog with a dot is looked up by its quoted name: not seen"
+    assert [c for c, _ in _client_of(tools).calls if "information_schema.tables" in c] == [
+        'SELECT table_name FROM "c.d".information_schema.tables '
+        "WHERE table_schema = 's' AND table_name = 't'"
+    ]
 
 
 _SEEN = ("demo.crm.accounts", "demo.crm.customers", "tpch.tiny.nation")
@@ -122,7 +127,7 @@ class _Client(FakeClient):
     def query(self, sql, user=None, params=None, **keywords):
         self.calls.append((sql, user))
         found = re.fullmatch(
-            r"SELECT table_name FROM (\w+)\.information_schema\.tables "
+            r'SELECT table_name FROM "(\w+)"\.information_schema\.tables '
             r"WHERE table_schema = '([^']*)' AND table_name = '([^']*)'",
             sql,
         )
@@ -179,9 +184,9 @@ def test_each_candidate_is_looked_up_by_equality_in_its_catalog():
     client = _client_of(tools)
     lookups = [sql for sql, _ in client.calls if "information_schema.tables" in sql]
     assert lookups == [
-        "SELECT table_name FROM demo.information_schema.tables "
+        'SELECT table_name FROM "demo".information_schema.tables '
         "WHERE table_schema = 'crm' AND table_name = 'accounts'",
-        "SELECT table_name FROM demo.information_schema.tables "
+        'SELECT table_name FROM "demo".information_schema.tables '
         "WHERE table_schema = 'crm' AND table_name = 'customers'",
     ]
 
@@ -203,9 +208,9 @@ def test_a_lookup_that_fails_gives_no_advice_and_keeps_the_error(lookup):
 @pytest.mark.parametrize(
     ("sql", "looked_up"),
     [
-        ("SELECT nope FROM crm.accounts", ["demo.information_schema.tables"]),
+        ("SELECT nope FROM crm.accounts", ['"demo".information_schema.tables']),
         ("SELECT nope FROM accounts", []),
-        ('SELECT nope FROM "we\'ird".crm.accounts', []),
+        ('SELECT nope FROM "we\'ird".crm.accounts', ['"we\'ird".information_schema.tables']),
         ("SELECT nope FROM system.runtime.queries", []),
     ],
 )

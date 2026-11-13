@@ -64,6 +64,7 @@ bash scripts/lock.sh check    # les verrous suivent leurs sources (CONTRIBUTING.
 bash lint-vendor-neutral.sh   # échoue si le paquet importe quoi que ce soit de propre à un produit
 pytest                        # une couverture des lignes ou des branches sous 100 % fait échouer l'exécution
 integration/run.sh            # en conditions réelles : Keycloak, Trino et trois serveurs dans Docker, puis supprimés
+integration/names/run.sh      # en conditions réelles : les tools de métadonnées sur des noms comme orders$snapshots, puis supprimés
 python -m build --no-isolation && twine check dist/*
 akko-mcp-trino --check        # la configuration effective, sans secret ; code 2 si le serveur ne démarrerait pas
 ```
