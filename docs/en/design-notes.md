@@ -56,12 +56,36 @@ it, and the read-only check applies whatever they return.
 
 **The server does not decide access.** See [Trino first](security.md#trino-first).
 
+**One MCP server per job.** This server queries Trino as the verified user and lets Trino decide
+access; a data catalog such as Atlas, OpenMetadata or DataHub has its own job, the meaning of the
+data, its lineage and its glossaries, and when it has an MCP server of its own, the agent plugs
+in both side by side and combines them. Five rules follow.
+
+- The server never calls another MCP server: a catalog adapter talks to the catalog's API, so
+  every call keeps one known caller and two sets of rights never contradict each other.
+- An adapter is thin and optional: it reads, by key, the context of objects Trino has already
+  listed to the user, and it neither searches, nor copies the catalog's lineage or search, nor
+  writes to the catalog.
+- The core depends on no catalog: without an adapter it answers the same, and a catalog that is
+  down never blocks a query, because the context is missing and the answer says so.
+- Trino comes first: no name from a catalog is served before Trino has listed it to the user, so
+  context enriches what Trino shows and never proposes an object.
+- Names are shared: every answer gives the full Trino name (`catalog.schema.table`), so an agent
+  can match our answers with those of the catalog's server without the two servers knowing each
+  other.
+
+The catalog's own server keeps rich business search, lineage, glossary editing and stewards' work.
+This server keeps the context that helps to write a query, served under Trino's rights.
+
 ## Questions
 
 ### What if the data catalog already has its own MCP server?
 
-The [first mode of deployment](deployment.md#with-a-data-catalog) runs the server next to it:
-nothing in this server blocks or replaces it.
+The agent plugs in both servers. This server never calls the catalog's server: its adapter talks
+to the catalog's API, and the full name `catalog.schema.table` that every answer carries lets the
+agent match the answers of the two. The [first mode of deployment](deployment.md#with-a-data-catalog)
+runs this server next to the catalog's: nothing here blocks or replaces it. See
+[One MCP server per job](#notes) above.
 
 ### Can a user still write in Trino?
 

@@ -4,6 +4,9 @@
 
 ## Context providers
 
+This server and a data catalog's own MCP server do different jobs and are plugged in side by side;
+[One MCP server per job](design-notes.md#notes) says why.
+
 In these pages, a *catalog* is a Trino catalog, and a *data catalog* is a metadata service such as
 Apache Atlas or OpenMetadata.
 

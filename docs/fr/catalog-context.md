@@ -4,6 +4,9 @@
 
 ## Les fournisseurs de contexte
 
+Ce serveur et le serveur MCP d'un catalogue de données ont des métiers différents et se branchent
+côte à côte ; [Un serveur MCP par métier](design-notes.md#notes) dit pourquoi.
+
 Dans ces pages, un *catalog* est un catalog Trino, et un *catalogue de données* est un service de
 métadonnées comme Apache Atlas ou OpenMetadata.
 
