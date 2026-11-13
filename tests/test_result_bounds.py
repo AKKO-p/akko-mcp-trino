@@ -249,7 +249,7 @@ def test_bound_result_is_the_whole_contract():
 
 # ---- comments
 
-NASTY = "ok\x00\x07 text‮ rtl​ zero  line\ttab\nnew"
+NASTY = "ok\x00\x07 text\u202e rtl\u200b zero\u2028 line\ttab\nnew"
 CLEAN = "ok text rtl zero line\ttab\nnew"
 
 
@@ -357,7 +357,7 @@ def test_a_comment_that_is_not_text_is_served_as_it_is():
 
     assert clean_comment(None, 5) == (None, False)
     assert clean_comment(7, 5) == (7, False)
-    assert clean_comment("abcdefgh​", 5) == ("abcde", True)
+    assert clean_comment("abcdefgh\u200b", 5) == ("abcde", True)
 
 
 # ---- settings

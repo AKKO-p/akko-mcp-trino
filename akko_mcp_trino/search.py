@@ -50,7 +50,6 @@ from .context.text import clean_comment
 from .errors import INVALID_ARGUMENT, TIME_BUDGET, VIEW_REFUSED, explain_error, metadata_view_error
 from .sql_guard import (
     JDBC_COLUMNS,
-    MAX_NAME_LENGTH,
     TABLE_COMMENTS,
     governed_catalog,
     quote_identifier,
@@ -91,8 +90,7 @@ PER_WORD_HINT = (
     "column or table name, then call describe_table on the table."
 )
 _WORD = re.compile(r"\w+")
-# What a cursor may hold: a schema name of MAX_NAME_LENGTH characters at most, a row offset
-# Trino reads as a bigint.
+# What a cursor may hold: a row offset Trino reads as a bigint.
 MAX_ROW_OFFSET = 2**63 - 1
 _INVALID_CURSOR = (
     "Invalid cursor: pass back next_cursor unchanged, or start the search again without a cursor"
@@ -194,9 +192,9 @@ def decode_cursor(token: str) -> Cursor:
 
     The catalog passes ``governed_catalog`` (never ``system``); the search then requires it
     to be one the caller sees. The schema, empty for a catalog's first, comes from Trino's
-    own listing and only ever enters a string literal: any lower-case name without NUL, up to
-    ``MAX_NAME_LENGTH`` characters, so every cursor the server gives resumes, a Hive schema
-    such as ``2024_sales`` included. The mode is ``every_word`` or ``per_word``, the phase
+    own listing and only ever enters a string literal: a lower-case name that
+    ``validate_identifier`` accepts, as a schema an agent names, a Hive schema such as
+    ``2024_sales`` included. The mode is ``every_word`` or ``per_word``, the phase
     ``tables`` or ``columns``, the offset a
     whole number from 0 to ``MAX_ROW_OFFSET``."""
     try:
@@ -216,8 +214,10 @@ def decode_cursor(token: str) -> Cursor:
             raise ValueError(_INVALID_CURSOR)
         if phase not in _PHASES or mode not in _MODES:
             raise ValueError(_INVALID_CURSOR)
-        if len(schema) > MAX_NAME_LENGTH or "\0" in schema or schema != schema.lower():
+        if schema != schema.lower():
             raise ValueError(_INVALID_CURSOR)
+        if schema:
+            validate_identifier(schema, "schema")
         governed_catalog(catalog)
     except (ValueError, KeyError, binascii.Error) as exc:
         raise ValueError(_INVALID_CURSOR) from exc

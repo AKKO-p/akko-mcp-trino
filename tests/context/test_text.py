@@ -6,7 +6,7 @@ from akko_mcp_trino.context.text import NAME_CHARS, clean_name, clean_text
 
 
 def test_zero_width_and_bidi_characters_are_removed():
-    assert clean_text("a​b‮c", 10) == ("abc", False)
+    assert clean_text("a\u200bb\u202ec", 10) == ("abc", False)
 
 
 def test_control_characters_are_removed_but_newline_and_tab_stay():
@@ -22,7 +22,7 @@ def test_a_text_of_exactly_the_limit_is_not_cut():
 
 
 def test_the_limit_applies_after_cleaning():
-    assert clean_text("a​​bc", 3) == ("abc", False)
+    assert clean_text("a\u200b\u200bbc", 3) == ("abc", False)
 
 
 def test_line_and_paragraph_separators_are_removed():
