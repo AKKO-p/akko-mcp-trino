@@ -126,9 +126,10 @@ class _Coding(Exception):
 
 
 class _Identity:
-    """No content coding: the bytes as they come."""
+    """No content coding: the bytes as they come; it ends where the body ends."""
 
-    unconsumed_tail = b""
+    unconsumed_tail = unused_data = b""
+    eof = True
 
     @staticmethod
     def decompress(data: bytes, max_length: int) -> bytes:
@@ -145,6 +146,14 @@ class _Deflate:
     @property
     def unconsumed_tail(self) -> bytes:
         return self._zlib.unconsumed_tail
+
+    @property
+    def unused_data(self) -> bytes:
+        return self._zlib.unused_data
+
+    @property
+    def eof(self) -> bool:
+        return self._zlib.eof
 
     def decompress(self, data: bytes, max_length: int) -> bytes:
         if self._first:
@@ -426,7 +435,9 @@ class AtlasClient:
         """Read the body as it arrives and decode it in steps of at most 64 KiB, never more
         than the bytes left under ``ATLAS_MAX_RESPONSE_BYTES`` plus one: one byte more raises
         ``_TooLarge``, whatever ``Content-Length`` says, or without one. A coding the client
-        does not read raises ``_Coding`` before anything is read."""
+        does not read raises ``_Coding`` before anything is read. A compressed body that
+        cannot be decoded, stops before its end or holds anything after it raises
+        ``httpx.DecodingError``, as an outage of the address."""
         decoder = _decoder(response)
         cap, body = self._settings.max_response_bytes, bytearray()
         if response.is_stream_consumed:
@@ -449,6 +460,10 @@ class AtlasClient:
                         break
         except zlib.error:
             raise httpx.DecodingError("atlas answered a body that cannot be decoded") from None
+        if not decoder.eof or decoder.unused_data:
+            # Cut before its end, or more after it (another gzip member, any bytes): the
+            # document read may not be the one Atlas sent.
+            raise httpx.DecodingError("atlas answered a body that does not end cleanly")
         return body
 
     @contextmanager

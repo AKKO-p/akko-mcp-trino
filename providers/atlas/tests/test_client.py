@@ -1136,6 +1136,27 @@ def test_a_body_that_cannot_be_decoded_is_an_outage_of_the_address():
     assert [r.url.host for r in handler.seen] == ["atlas-a", "atlas-b"]
 
 
+@pytest.mark.parametrize(
+    ("coding", "payload"),
+    [
+        ("gzip", gzip.compress(b"{}") + gzip.compress(b'{"entities": []}')),  # two members
+        ("gzip", gzip.compress(b"{}")[:-8]),  # no trailer
+        ("gzip", gzip.compress(b"{}") + b"trailing bytes"),
+        ("deflate", zlib.compress(b"{}")[:-4]),  # no checksum
+        ("deflate", zlib.compress(b"{}") + b"trailing bytes"),
+    ],
+    ids=["gzip-two-members", "gzip-no-trailer", "gzip-trailing", "deflate-cut", "deflate-trailing"],
+)
+def test_a_compressed_body_that_does_not_end_cleanly_is_not_served(coding, payload):
+    headers = {"content-type": "application/json", "content-encoding": coding}
+    cut = httpx.Response(200, headers=headers, stream=Counted(payload))
+    handler = by_host({"atlas-a": cut, "atlas-b": "replay"})
+    (found,) = calls(build(handler, ATLAS_TABLE_TYPES="hive_table"))
+    # Not the first document: an outage of the address, as a body that cannot be decoded.
+    assert INVOICES in found
+    assert [r.url.host for r in handler.seen] == ["atlas-a", "atlas-b"]
+
+
 def test_a_5xx_a_redirect_or_a_refusal_is_closed_unread():
     bodies: list[Counted] = []
 

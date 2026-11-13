@@ -130,7 +130,7 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 |---|---|
 | a refused connection, or none opened within `ATLAS_CONNECT_TIMEOUT_SECONDS` | tries the next address of `ATLAS_URL`, and starts the next calls there; then is unavailable |
 | no answer in time from the address the call started with: a read or write timeout, or the call's own deadline reached while it waits on it | tries the next address of `ATLAS_URL` while the call has time left, starts the next calls there, and logs it once (below); then is unavailable |
-| another transport error (a connection closed under the call, a proxy error), a body that cannot be decoded, or a 5xx (its body unread) | tries the next address of `ATLAS_URL`, then is unavailable; the next calls start where they did |
+| another transport error (a connection closed under the call, a proxy error), a compressed body that cannot be decoded, stops before its end or holds anything after it (a second gzip member, other bytes), or a 5xx (its body unread) | tries the next address of `ATLAS_URL`, then is unavailable; the next calls start where they did |
 | a redirect to an address of `ATLAS_URL` (the passive server of Atlas HA) | follows it, and starts the next calls at that address |
 | a redirect anywhere else (a Knox login on another host) | is refused at once, no other address tried, so no loop of attempts locks the account |
 | 401, or a 403 other than below | is refused at once; the session cookie is dropped |

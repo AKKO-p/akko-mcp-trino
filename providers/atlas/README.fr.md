@@ -131,7 +131,7 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 |---|---|
 | une connexion refusée, ou aucune ouverte en `ATLAS_CONNECT_TIMEOUT_SECONDS` | essaie l'adresse suivante d'`ATLAS_URL`, et commence par elle aux appels suivants ; puis se dit indisponible |
 | pas de réponse à temps de l'adresse par laquelle l'appel a commencé : un délai de lecture ou d'écriture dépassé, ou l'échéance de l'appel lui-même atteinte pendant qu'il l'attend | essaie l'adresse suivante d'`ATLAS_URL` s'il reste du temps à l'appel, commence par elle aux appels suivants, et l'écrit une fois au journal (plus bas) ; puis se dit indisponible |
-| une autre erreur de transport (une connexion fermée sous l'appel, une erreur du proxy), un corps qui ne se décode pas, ou un 5xx (son corps non lu) | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible ; les appels suivants commencent là où ils commençaient |
+| une autre erreur de transport (une connexion fermée sous l'appel, une erreur du proxy), un corps compressé qui ne se décode pas, s'arrête avant sa fin ou contient quoi que ce soit après elle (un second membre gzip, d'autres octets), ou un 5xx (son corps non lu) | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible ; les appels suivants commencent là où ils commençaient |
 | une redirection vers une adresse d'`ATLAS_URL` (le serveur passif d'Atlas HA) | la suit, et commence par cette adresse aux appels suivants |
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
 | 401, ou un 403 autre que celui d'en dessous | se dit refusé tout de suite ; le cookie de session est oublié |
