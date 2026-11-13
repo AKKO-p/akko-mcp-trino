@@ -7,8 +7,9 @@ Registrars add tools; extensions (below) add the rest, never in place of the cor
 A registrar is ``(mcp, client)`` or ``(mcp, client, tools)``. Either way, every
 tool it adds through ``mcp.tool()`` or ``mcp.add_tool()`` is audited like a
 built-in one; the three-argument form also receives the `ToolContext` (audit,
-a governed ``run``, describers of ``describe_table``). Its answers are sent once, as
-text, like the built-in ones, unless it passes ``structured_output=True`` itself.
+a governed ``run``, describers of ``describe_table``). Its tools keep the SDK's
+default for structured output; a plugin may pass ``structured_output=False`` to send
+its answers once, as text, like the built-in ones.
 
 Extensions (see `akko_mcp_trino.extensions`) are applied here too: their
 identity modes, the audit they wrap, the client tags of the queries, and their
@@ -54,9 +55,10 @@ def instructions_for(config: Config) -> str:
 
 
 class _AuditedServer:
-    """The MCP server as a tool plugin sees it: every tool it adds is audited, due
-    within the same time budget as a built-in one, and answers once, as text, unless
-    the plugin asks for structured output itself."""
+    """The MCP server as a tool plugin sees it: every tool it adds is audited, and due
+    within the same time budget as a built-in one. The SDK's default for structured
+    output is kept; a plugin may pass ``structured_output=False`` to send its answers
+    once, as text."""
 
     def __init__(self, mcp: Any, audit: Any, budget_seconds: float, max_names: int) -> None:
         self._mcp, self._audit, self._budget = mcp, audit, budget_seconds
@@ -64,7 +66,6 @@ class _AuditedServer:
 
     def tool(self, *args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
         """The server's ``tool`` decorator, with the audit wrapped around the function."""
-        kwargs.setdefault("structured_output", False)
         register = self._mcp.tool(*args, **kwargs)
         name = kwargs.get("name") or (args[0] if args else None)
 
@@ -84,7 +85,6 @@ class _AuditedServer:
     def add_tool(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
         """The server's ``add_tool``, with the audit wrapped around the function."""
         name = kwargs.get("name") or (args[0] if args else None)
-        kwargs.setdefault("structured_output", False)
         wrapped = audited(
             self._audit, fn, name=name, budget_seconds=self._budget, max_names=self._max_names
         )

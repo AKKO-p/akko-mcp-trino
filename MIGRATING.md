@@ -28,11 +28,12 @@ Nothing is removed or renamed in the answers of the tools; some answers are now 
   compiler. For `ATLAS_AUTH=kerberos`, install `akko-mcp-trino[atlas-kerberos]` instead (it
   needs a C compiler and the MIT Kerberos headers); without the bindings the server stops at
   start and names that extra. The container image is unchanged and still carries them.
-- **Replies carry the answer once.** A reply no longer repeats the JSON in `structuredContent`,
-  and the tools no longer declare an `outputSchema`. The text of the reply, `content[0].text`, is
-  unchanged. A program that read `structuredContent["result"]` reads `content[0].text` instead,
-  the same JSON text. A tool plugin that wants structured output passes `structured_output=True`
-  to `mcp.tool()` or `mcp.add_tool()`.
+- **Replies carry the answer once.** A reply of a built-in tool no longer repeats the JSON in
+  `structuredContent`, and the built-in tools no longer declare an `outputSchema`. The text of the
+  reply, `content[0].text`, is unchanged. A program that read `structuredContent["result"]` reads
+  `content[0].text` instead, the same JSON text. The tools of a tool plugin are unchanged: they
+  keep the SDK's default, and a plugin may pass `structured_output=False` to `mcp.tool()` or
+  `mcp.add_tool()` to send its answers once.
 
 ## From 0.7 to 0.8
 

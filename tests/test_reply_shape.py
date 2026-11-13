@@ -138,18 +138,14 @@ def test_an_error_reply_carries_no_structured_content_either(monkeypatch):
     assert json.loads(reply.content[0].text)["kind"] == "read_only"
 
 
-def test_a_plugin_tool_sends_its_answer_once_unless_it_asks_for_structured_output(monkeypatch):
-    """A plugin's tools follow the built-in ones; a plugin that wants structured output says so."""
+def test_a_plugin_tool_keeps_the_sdk_default_unless_it_passes_the_flag(monkeypatch):
+    """A plugin's tools keep the SDK's structured output, as before; a plugin that wants its
+    answers sent once passes ``structured_output=False``."""
 
     def registrar(mcp, client):
         @mcp.tool()
-        def plain() -> str:
-            """Answer as text."""
-            return json.dumps({"a": 1})
-
-        @mcp.tool(structured_output=True)
         def shaped() -> dict[str, int]:
-            """Answer with a structure, on purpose."""
+            """Answer with a structure."""
             return {"a": 1}
 
         def added() -> str:
@@ -158,17 +154,32 @@ def test_a_plugin_tool_sends_its_answer_once_unless_it_asks_for_structured_outpu
 
         mcp.add_tool(added)
 
+        @mcp.tool(structured_output=False)
+        def once() -> str:
+            """Answer as text, once."""
+            return json.dumps({"a": 1})
+
+        def added_once() -> str:
+            """Answer as text, added, once."""
+            return "y"
+
+        mcp.add_tool(added_once, structured_output=False)
+
     mcp = _server(monkeypatch, [registrar])
 
     async def scenario():
         tools = {t.name: t for t in await mcp.list_tools()}
-        replies = {n: await mcp.call_tool(n, {}) for n in ("plain", "shaped", "added")}
+        names = ("shaped", "added", "once", "added_once")
+        replies = {n: await mcp.call_tool(n, {}) for n in names}
         return tools, replies
 
     tools, replies = anyio.run(scenario)
-    assert tools["plain"].output_schema is None
-    assert tools["added"].output_schema is None
     assert tools["shaped"].output_schema is not None
-    assert replies["plain"].structured_content is None
-    assert replies["added"].structured_content is None
+    assert tools["added"].output_schema is not None
     assert replies["shaped"].structured_content == {"a": 1}
+    assert replies["added"].structured_content == {"result": "x"}
+    assert tools["once"].output_schema is None
+    assert tools["added_once"].output_schema is None
+    assert replies["once"].structured_content is None
+    assert replies["added_once"].structured_content is None
+    assert replies["once"].content[0].text == '{"a": 1}'
