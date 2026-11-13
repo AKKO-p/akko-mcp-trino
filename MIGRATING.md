@@ -34,6 +34,27 @@ Nothing is removed or renamed in the answers of the tools; some answers are now 
   `content[0].text` instead, the same JSON text. A tool registered with `tools.tool()` answers
   once, like the built-in tools; a tool added with `mcp.tool()` or `mcp.add_tool()` keeps the
   SDK's default and may pass `structured_output=False`.
+- **Statements refused before Trino.** `execute_query` and `explain_query` now refuse some
+  statements that 0.8.0 sent to Trino. A statement longer than 100000 characters, or whose
+  brackets nest deeper than 32, is refused with `"kind": "invalid_argument"`; raise
+  `MCP_MAX_SQL_CHARS` or `MCP_MAX_SQL_NESTING` to accept it. A statement whose check takes
+  more than 2 seconds is refused with `"kind": "time_budget"`; raise `MCP_SQL_PARSE_SECONDS`
+  (300 at most). A call that finds no free worker within that time is refused the same way;
+  raise `MCP_SQL_PARSE_WORKERS`. A second statement of the same caller waits for the first and
+  is refused with `"kind": "busy"` only if its turn has not come within that time. An `EXPLAIN`
+  of an `EXPLAIN` is refused, and no setting accepts it.
+- **Worker processes.** The server now starts `MCP_SQL_PARSE_WORKERS` child Python processes (2
+  by default) on the first statement, measured at 29 to 58 MB of memory each. Count them in a
+  container memory limit and in a process (PID) limit, and allow the server to start them: a
+  policy that forbids it to exec a program, or a seccomp profile that forbids the calls, leaves
+  every statement refused. Set `MCP_SQL_PARSE_WORKERS=1` to use less memory.
+- **Context providers.** A provider can signal an answer too large to read with the new
+  `ProviderAnswerTooLarge`, a `ProviderUnavailable` that opens no retry pause.
+  `akko-mcp-trino-atlas` 0.8.1 needs `akko-mcp-trino` 0.8.1 or later: with the core pinned at
+  0.8.0, `pip install -U akko-mcp-trino-atlas` does not resolve; upgrade both.
+- **Atlas behind a compressing proxy.** The Atlas client asks for `gzip` or `deflate` only and
+  reads no other coding. A proxy in front of Atlas that ignores `Accept-Encoding` and answers
+  with `br` or `zstd` now makes each call `unavailable`; turn that compression off for Atlas.
 
 ## From 0.7 to 0.8
 
