@@ -154,6 +154,25 @@ def test_each_http_transport_admits_a_verified_caller_and_queries_as_the_configu
     assert json.loads(text)["rows"][0][0] == "svc", "the query did not run as TRINO_USER"
 
 
+def test_each_http_transport_sends_each_answer_once_as_text(served):
+    """No output schema in tools/list, no structuredContent in a reply: the JSON comes once."""
+    transport, url = served
+    headers = {"Authorization": f"Bearer {_token('alice')}"}
+
+    async def shape():
+        async with _open(transport, url, headers) as streams:
+            async with ClientSession(streams[0], streams[1]) as s:
+                await s.initialize()
+                tools = (await s.list_tools()).tools
+                reply = await s.call_tool("execute_query", {"sql": "SELECT 1"})
+                return [t.output_schema for t in tools], reply
+
+    schemas, reply = anyio.run(shape)
+    assert schemas == [None] * len(schemas)
+    assert reply.structured_content is None
+    assert json.loads(reply.content[0].text)["rows"][0][0] == "svc"
+
+
 def test_each_http_transport_refuses_without_a_token(served):
     transport, url = served
     with pytest.raises(Exception):

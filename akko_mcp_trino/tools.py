@@ -857,6 +857,8 @@ class ToolContext:
         missing row means, so the model reports it instead of retrying.
         ``read_only`` and ``destructive`` must say what the tool can really do:
         a host skips its confirmation on a tool annotated read-only.
+        Each answer is JSON text sent once, as the text of the reply: no output
+        schema, so the SDK does not repeat it as structured content.
         """
         register = self._mcp.tool(
             annotations=ToolAnnotations(
@@ -865,7 +867,8 @@ class ToolContext:
                 destructive_hint=destructive,
                 idempotent_hint=idempotent,
                 open_world_hint=open_world,
-            )
+            ),
+            structured_output=False,
         )
 
         def deco(fn: Callable) -> Callable:

@@ -22,6 +22,10 @@ sont des données, et Trino ne liste que ce que cette identité peut voir. Chaqu
 `profile_table` et d'`execute_query` disent aussi qu'une valeur masquée ou une ligne absente est la
 policy d'accès, pas une erreur à retenter.
 
+Chaque réponse est le JSON montré plus haut, envoyé une seule fois, comme texte de la réponse
+(`content[0].text`). Les tools ne déclarent pas d'`outputSchema` et n'envoient pas de
+`structuredContent` : une réponse pèse ce que pèse son contenu.
+
 Un argument `catalog`, `schema` ou `table` est un seul nom nu, pris tel qu'il est écrit : une table
 de métadonnées Iceberg comme `orders$snapshots`, un nom avec des accents, des espaces ou un point,
 ou qui commence par un chiffre est lu comme ce seul nom, et Trino le met en minuscules. Un nom
