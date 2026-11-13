@@ -322,6 +322,11 @@ they apply, say what was cut:
   both applied. To read the rest, select fewer columns or shorter values, add `LIMIT`, or
   aggregate.
 
+The `sample` of `describe_table` is bounded the same way (cells, size, `cut_columns`,
+`truncated_reason`). The `plan` of `explain_query`, when `EXPLAIN` is allowed, stays within
+`MCP_MAX_RESULT_BYTES` bytes too: a longer plan is cut and the answer adds `"truncated": true`
+and `"truncated_reason": "bytes"`.
+
 The audit line of the call notes the rows returned and `truncated`, and the reason, `rows` or
 `bytes`, in `truncated_reason` with the module `fingerprint-audit`; never the data or the
 statement.

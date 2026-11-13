@@ -406,6 +406,23 @@ def bound_result(res: dict, max_cell_chars: int, max_bytes: int) -> Optional[tup
     return text, {"rows": len(kept), "reason": reason}
 
 
+def bound_plan(plan: str, max_bytes: int) -> str:
+    """The JSON of an ``explain_query`` plan within ``max_bytes`` bytes.
+
+    A plan that does not fit is cut, and the answer says so: ``"truncated": true`` and
+    ``"truncated_reason": "bytes"``, as an ``execute_query`` answer does.
+    """
+    text = dumps({"plan": plan})
+    if len(text) <= max_bytes:
+        return text
+    kept = plan[:max_bytes]
+    while True:
+        text = dumps({"plan": kept, "truncated": True, "truncated_reason": "bytes"})
+        if len(text) <= max_bytes:
+            return text
+        kept = kept[: len(kept) - (len(text) - max_bytes)]
+
+
 def table_name(parts: tuple[str, ...]) -> str:
     """A table's name as the agent wrote it, a part with a dot quoted (a double quote in it
     doubled, as Trino reads it), so it reads as one."""
@@ -1411,8 +1428,15 @@ def register_query_tools(
                 # Rows of data are read: the audit line names that statement and its rows.
                 statement = f"SELECT * FROM {fqn} LIMIT {n}"
                 note(sql=statement)
-                out["sample"] = run(statement)
-                note(rows=len(out["sample"]["rows"]))
+                sample = run(statement)
+                note(rows=len(sample["rows"]))
+                # Data, as in execute_query: its cells and its size are bounded the same way.
+                bounded = bound_result(sample, max_cell_chars, max_result_bytes)
+                out["sample"] = (
+                    json.loads(bounded[0])
+                    if bounded is not None
+                    else {**sample, "rows": [], "row_count": 0, "truncated": True}
+                )
             # The context comes last: it takes only what the call has left past its reserve.
             # It is of the columns of this page, the ones Trino has just listed; a page that
             # does not hold them all is partial, and serves no grain.
@@ -1596,7 +1620,7 @@ def register_query_tools(
             note(rows=len(res["rows"]), truncated=was_cut(res))
             if not show_plan:
                 return dumps({"valid": True})
-            return dumps({"plan": "\n".join(str(r[0]) for r in res["rows"])})
+            return bound_plan("\n".join(str(r[0]) for r in res["rows"]), max_result_bytes)
         except Exception as e:  # noqa: BLE001
             return error_reply(e, parsed, advice_visible)
 

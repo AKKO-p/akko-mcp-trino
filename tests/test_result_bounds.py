@@ -386,3 +386,51 @@ def test_the_new_settings_are_read_validated_and_printed(monkeypatch, capsys):
         "answers: up to 2000 bytes of JSON, a cell of 50 characters and a Trino comment of 70 "
         "at most, cut past them"
     ) in capsys.readouterr().out
+
+
+# ---- the sample of describe_table and the plan of explain_query
+
+
+def _described_with_sample(sample, **settings):
+    described = {"columns": ["Column", "Type", "Extra", "Comment"], "rows": [["a", "int", "", ""]]}
+    mcp = FakeMCP()
+    client = FakeClient(results=[{**described, "row_count": 1}, sample])
+    register_query_tools(mcp, client, **settings)
+    return json.loads(in_request(lambda: mcp.tools["describe_table"]("c", "s", "t", sample_rows=3)))
+
+
+def test_the_sample_of_describe_table_is_bounded_like_a_query():
+    sample = _result(["a", "b"], [["x" * 500, "k"], ["y", "k"]])
+    out = _described_with_sample(sample, max_cell_chars=50)["sample"]
+    assert out["rows"] == [["x" * 50, "k"], ["y", "k"]] and out["cut_columns"] == ["a"]
+    out = _described_with_sample(_result(["a"], [["x" * 300]] * 20), max_result_bytes=1000)[
+        "sample"
+    ]
+    assert out["truncated"] is True and out["truncated_reason"] == "bytes"
+    assert 0 < out["row_count"] < 20 and out["row_count"] == len(out["rows"])
+    plain = _described_with_sample(_result(["a"], [["x"]]))["sample"]
+    assert plain == _result(["a"], [["x"]])
+
+
+def test_a_sample_whose_columns_pass_the_bound_has_no_row():
+    columns = [f"column_{i:05d}" for i in range(200)]
+    out = _described_with_sample(_result(columns, [[1] * 200]), max_result_bytes=1000)["sample"]
+    assert out["rows"] == [] and out["row_count"] == 0 and out["truncated"] is True
+
+
+def _plan(text, **settings):
+    mcp = FakeMCP()
+    client = FakeClient(result={"columns": ["Query Plan"], "rows": [[text]], "row_count": 1})
+    register_query_tools(mcp, client, extra_reads=frozenset({"EXPLAIN"}), **settings)
+    raw = in_request(lambda: mcp.tools["explain_query"](SQL))
+    return raw, json.loads(raw)
+
+
+def test_the_plan_of_explain_query_is_bounded_and_says_it_was_cut():
+    raw, out = _plan("Fragment 0\n" * 5, max_result_bytes=2000)
+    assert out == {"plan": "Fragment 0\n" * 5}
+    plan = 'node "q"\n' * 2000
+    raw, out = _plan(plan, max_result_bytes=2000)
+    assert len(raw) <= 2000
+    assert out["truncated"] is True and out["truncated_reason"] == "bytes"
+    assert plan.startswith(out["plan"]) and 0 < len(out["plan"]) < len(plan)

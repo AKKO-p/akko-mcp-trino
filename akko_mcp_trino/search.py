@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .audit import CallTimeout, current_call, error_code, note
+from .config import DEFAULT_COMMENT_CHARS
 from .context.text import clean_comment
 from .errors import INVALID_ARGUMENT, TIME_BUDGET, VIEW_REFUSED, explain_error, metadata_view_error
 from .sql_guard import (
@@ -244,7 +245,7 @@ def search(
     max_word_length: int,
     reserve_seconds: float,
     max_catalogs: int,
-    comment_chars: int = 1000,
+    comment_chars: int = DEFAULT_COMMENT_CHARS,
     concurrency: int = 1,
     slots: Optional[threading.Semaphore] = None,
 ) -> dict:
