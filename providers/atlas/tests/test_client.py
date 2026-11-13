@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import dataclasses
+import gzip
 import http.server
 import logging
 import socket
@@ -13,7 +14,16 @@ import time
 import certifi
 import httpx
 import pytest
-from akko_mcp_trino.context import ProviderRefused, ProviderUnavailable, TableRef
+from akko_mcp_trino.context import (
+    UNAVAILABLE,
+    ContextChain,
+    ContextLoop,
+    ContextSettings,
+    ProviderAnswerTooLarge,
+    ProviderRefused,
+    ProviderUnavailable,
+    TableRef,
+)
 from atlas_replay import ATLAS, FakeAtlas, transport
 from fake_spnego import install
 
@@ -885,3 +895,147 @@ def test_an_address_that_answered_then_froze_is_left_after_the_connect_timeout(c
     # spare it, and the third call starts at b.
     assert seen == ["atlas-a", "atlas-a", "atlas-b"]
     assert left_lines(caplog) == ["atlas address 1 of 2 in ATLAS_URL did not answer in time"]
+
+
+# The size of an answer: ATLAS_MAX_RESPONSE_BYTES, read as the body arrives.
+CAP = 1_048_576
+TOO_LARGE = "lower MCP_CONTEXT_BATCH"
+
+
+class _Unsized(httpx.AsyncByteStream):
+    """A body with no Content-Length, four times the cap, sent by chunks of 64 KiB; counts
+    what was taken from it. Finite, so that a client without a cap ends too."""
+
+    def __init__(self) -> None:
+        self.sent = 0
+        self.closed = False
+
+    async def __aiter__(self):
+        chunk = b" " * 65_536
+        while self.sent < 4 * CAP:
+            self.sent += len(chunk)
+            yield chunk
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def _large(size: int = CAP + 1) -> httpx.Response:
+    return httpx.Response(
+        200, headers={"content-type": "application/json"}, content=b" " * (size - 2) + b"{}"
+    )
+
+
+def too_large_lines(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if TOO_LARGE in r.getMessage()]
+
+
+def test_body_over_cap_is_unavailable_not_outage(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    # At the cap, the answer is read; one byte over, the call is unavailable.
+    handler = by_host({"atlas-a": _large(CAP), "atlas-b": "replay"})
+    (found,) = calls(build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP)))
+    assert found == {}
+    handler = by_host({"atlas-a": _large(), "atlas-b": "replay"})
+    first, second = calls(build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP)), count=2)
+    assert isinstance(first, ProviderAnswerTooLarge) and isinstance(second, ProviderAnswerTooLarge)
+    assert isinstance(first, ProviderUnavailable)
+    # Not an outage of the address: no other address is tried, the next call starts there again.
+    assert [r.url.host for r in handler.seen] == ["atlas-a", "atlas-a"]
+    # One line per call, naming neither a table, an address nor the account.
+    said = "atlas answered more than ATLAS_MAX_RESPONSE_BYTES for one read; lower MCP_CONTEXT_BATCH"
+    assert too_large_lines(caplog) == [said, said]
+    assert "atlas unreachable" not in caplog.text
+    for forbidden in ("invoices", "ledger", "atlas-a", "reader", PASSWORD):
+        assert forbidden not in "\n".join(too_large_lines(caplog))
+
+    # A small body that inflates past the cap is measured as it is decoded.
+    bomb = httpx.Response(
+        200,
+        headers={"content-type": "application/json", "content-encoding": "gzip"},
+        content=gzip.compress(b" " * (CAP + 1)),
+    )
+    handler = by_host({"atlas-a": bomb, "atlas-b": "replay"})
+    (error,) = calls(build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP)))
+    assert isinstance(error, ProviderAnswerTooLarge)
+
+    # Under the core's chain: the call is unavailable, no retry pause opens, and the next
+    # call asks Atlas again.
+    handler = by_host({"atlas-a": _large(), "atlas-b": "replay"})
+    p = build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP))
+    settings = ContextSettings(
+        timeout_seconds=5.0,
+        reserve_seconds=0.0,
+        max_concurrency=8,
+        retry_after_seconds=30.0,
+        refused_retry_seconds=60.0,
+        batch=50,
+        ttl_seconds=60.0,
+        cache_bytes=1_000_000,
+        terms_cache_bytes=1_000_000,
+    )
+    loop = ContextLoop()
+    loop.start()
+    chain = ContextChain([p], settings, loop=loop)
+    try:
+        for _ in range(2):
+            got = loop.submit(chain._gather((INVOICES,), time.monotonic() + 5), timeout=10)
+            assert got.statuses[p.name] == UNAVAILABLE
+        assert p.name not in chain._breakers
+        assert [r.url.host for r in handler.seen] == ["atlas-a", "atlas-a"]
+    finally:
+        chain.close()
+        loop.close()
+
+
+def test_body_over_cap_without_content_length_stops_early(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    unsized = _Unsized()
+    answer = httpx.Response(200, headers={"content-type": "application/json"}, stream=unsized)
+    handler = by_host({"atlas-a": answer, "atlas-b": "replay"})
+    start = time.monotonic()
+    (error,) = calls(build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP)))
+    assert isinstance(error, ProviderAnswerTooLarge)
+    assert time.monotonic() - start < 2.0
+    # Read up to the cap and one chunk more at most, then the body is closed.
+    assert CAP < unsized.sent <= CAP + 65_536
+    assert unsized.closed
+    assert len(too_large_lines(caplog)) == 1
+    assert [r.url.host for r in handler.seen] == ["atlas-a"]
+
+
+def test_body_over_cap_on_parallel_term_reads_warns_once(caplog):
+    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    atlas = FakeAtlas("atlas-2.4")
+    first = "00000000-0000-4000-8000-000000000010"  # Invoice@finance, Atlas 2.4
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(first):
+            return atlas(request)
+        # The three reads wait here together, then each reads a body too large.
+        await asyncio.sleep(0)
+        return _large()
+
+    async def run(p: AtlasProvider):
+        try:
+            return await p.terms(
+                [first, "guid-2", "guid-3", "guid-4"], deadline=time.monotonic() + 5
+            )
+        finally:
+            await p.aclose()
+
+    p = build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP), ATLAS_GLOSSARIES="finance")
+    with pytest.raises(ProviderAnswerTooLarge):
+        asyncio.run(run(p))
+    assert len(too_large_lines(caplog)) == 1
+
+
+def test_body_over_cap_in_the_check_is_said():
+    handler = by_host({"atlas-a": _large(), "atlas-b": _large()})
+    p = build(handler, ATLAS_MAX_RESPONSE_BYTES=str(CAP))
+    lines = p.check_lines()
+    asyncio.run(p.aclose())
+    assert lines[-1].startswith("UNREACHABLE")

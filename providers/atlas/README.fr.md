@@ -62,6 +62,7 @@ cite une adresse, un proxy ni un secret.
 | `ATLAS_TIMEOUT_SECONDS` | délai d'une requête à Atlas ; avec plusieurs adresses, voir plus bas son rapport à `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | délai pour ouvrir une connexion à une adresse, inférieur à `ATLAS_TIMEOUT_SECONDS`, pour qu'une adresse muette laisse la place à la suivante dans le temps de l'appel | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | lectures de termes de glossaire envoyées à la fois, de 1 à 32 ; avec Kerberos, aussi les négociations menées à la fois | `4` |
+| `ATLAS_MAX_RESPONSE_BYTES` | taille maximale du corps d'une réponse d'Atlas une fois décodé, au moins `1048576` ; la lecture s'arrête au-delà, avec ou sans `Content-Length`, et l'appel est `unavailable` pour lui seul : aucune autre adresse n'est essayée et aucune pause de réessai ne s'ouvre. Un avertissement par appel conseille de baisser `MCP_CONTEXT_BATCH` | `67108864` |
 
 Un secret donné par fichier (`*_FILE`) est relu quand le fichier change.
 
@@ -136,6 +137,7 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 | 401, ou un 403 autre que celui d'en dessous | se dit refusé tout de suite ; le cookie de session est oublié |
 | 403 avec `ATLAS-403-00-001` (Atlas refuse au compte une partie des objets demandés) | ne sert rien de cette lecture (tout le lot de tables, ou ce terme), reste ouvert, et écrit une fois pour l'appel `atlas refused some objects to the account; an account with no read grant serves nothing` ; les tables de ce lot reçoivent le statut `not_found`, exprès, le même qu'une table qu'Atlas ne connaît pas, pour qu'un agent ne puisse pas distinguer un objet refusé d'un objet absent |
 | un 200 qui n'est pas du JSON (une page de connexion Knox), un JSON illisible, un autre statut | se dit indisponible |
+| un corps plus long qu'`ATLAS_MAX_RESPONSE_BYTES` une fois décodé | cesse de le lire, et se dit indisponible pour cet appel seul : aucune autre adresse n'est essayée, les appels suivants commencent là où ils commençaient, aucune pause de réessai ne s'ouvre ; écrit une fois pour l'appel `atlas answered more than ATLAS_MAX_RESPONSE_BYTES for one read; lower MCP_CONTEXT_BATCH` |
 | 404 avec `ATLAS-404-00-009` à une lecture de tables (aucune instance) | ne sait rien de ces tables |
 | 404 avec `ATLAS-404-00-005` à une lecture de terme (aucun GUID) | écarte ce terme |
 | 400 avec `ATLAS-400-00-014` (aucun type) | ne sait rien sous ce type, et s'en souvient jusqu'au `SIGHUP` |

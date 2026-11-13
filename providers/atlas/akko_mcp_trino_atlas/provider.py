@@ -294,6 +294,7 @@ class AtlasProvider:
             f"read {s.timeout_seconds:g} s",
             f"atlas: bulk reads: {s.max_query_chars} characters of query at most",
             f"atlas: term reads: {s.max_concurrent_requests} at once at most",
+            f"atlas: answer size: {s.max_response_bytes} bytes at most",
             f"atlas: glossaries: {names(sets[GLOSSARY])}",
             f"atlas: classifications: {names(sets[CLASSIFICATION])}",
             f"atlas: business metadata: {names(sets[PROPERTY])}",

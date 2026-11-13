@@ -358,6 +358,7 @@ def test_check_lines_print_every_setting_and_never_a_secret(tmp_path):
         "atlas: timeouts: connect 1 s, read 5 s",
         "atlas: bulk reads: 6000 characters of query at most",
         "atlas: term reads: 4 at once at most",
+        "atlas: answer size: 67108864 bytes at most",
         "atlas: glossaries: finance",
         "atlas: classifications: confidential",
         "atlas: business metadata: stewardship",
@@ -387,15 +388,16 @@ def test_check_lines_print_every_setting_and_never_a_secret(tmp_path):
     bare = provider(FakeAtlas("atlas-2.4"), **tuned)
     other = bare.check_lines()
     asyncio.run(bare.aclose())
-    assert other[1:7] == [
+    assert other[1:8] == [
         "atlas: authentication: knox token",
         "atlas: catalogs: archive -> secondary, lake -> primary",
         "atlas: table types: hive_table",
         "atlas: timeouts: connect 0.5 s, read 2.5 s",
         "atlas: bulk reads: 3000 characters of query at most",
         "atlas: term reads: 8 at once at most",
+        "atlas: answer size: 67108864 bytes at most",
     ]
-    assert other[7:14] == [
+    assert other[8:15] == [
         "atlas: glossaries: none",
         "atlas: classifications: none",
         "atlas: business metadata: none",

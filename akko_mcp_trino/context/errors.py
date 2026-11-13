@@ -15,3 +15,11 @@ class ProviderUnavailable(ProviderError):
 
 class ProviderRefused(ProviderError):
     """The catalogue refused the server's credentials or the request."""
+
+
+class ProviderAnswerTooLarge(ProviderUnavailable):
+    """The catalogue's answer to this call was larger than the provider accepts.
+
+    The call is ``unavailable``, as for an outage, but the catalogue is not down: no retry
+    pause opens, and the next call asks it again.
+    """

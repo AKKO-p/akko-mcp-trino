@@ -26,6 +26,11 @@ What an answer means:
   position in ``ATLAS_URL``, until it answers again;
 - a 200 that is not JSON (a Knox login page), JSON that cannot be read, or any other
   status: ``ProviderUnavailable``;
+- a body longer than ``ATLAS_MAX_RESPONSE_BYTES`` once decoded, with a ``Content-Length``
+  or without one: the read stops there and the call is ``ProviderAnswerTooLarge``, for it
+  alone. The address answered: no other address is tried, none is left, and the core opens
+  no retry pause. One line per call, ``atlas answered more than ATLAS_MAX_RESPONSE_BYTES
+  for one read; lower MCP_CONTEXT_BATCH``, names no table and no address;
 - Atlas's own "does not exist" answers, by status and error code, only those the read
   names as its own (``missing``): ``INSTANCE_BY_ATTRIBUTE``, a 404 with
   ``ATLAS-404-00-009`` (no instance has that unique attribute); ``INSTANCE_BY_GUID``, a
@@ -41,6 +46,7 @@ secret.
 """
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import Generator, Iterator, Mapping
@@ -52,7 +58,7 @@ from types import MappingProxyType
 from typing import Any
 
 import httpx
-from akko_mcp_trino.context import ProviderRefused, ProviderUnavailable
+from akko_mcp_trino.context import ProviderAnswerTooLarge, ProviderRefused, ProviderUnavailable
 
 from .settings import BASIC, KERBEROS, KNOX, AtlasSettings
 from .spnego import NegotiationError, SpnegoAuth
@@ -97,14 +103,20 @@ class _Outage(Exception):
         self.connect = connect
 
 
+class _TooLarge(Exception):
+    """The body of an answer is longer than ``ATLAS_MAX_RESPONSE_BYTES``."""
+
+
 class Watch:
     """The first tries a call is waiting on, shared by the call's child tasks: each one's
     address and the monotonic time it started. What is left in it when the call's deadline
-    passes is what may not have answered in time."""
+    passes is what may not have answered in time. ``too_large`` says whether the call has
+    already logged an answer too large."""
 
     def __init__(self) -> None:
-        """Start empty: no first try waiting."""
+        """Start empty: no first try waiting, nothing said."""
         self.waiting: dict[object, tuple[int, float]] = {}
+        self.too_large = False
 
 
 _WATCH: ContextVar[Watch | None] = ContextVar("atlas_watch", default=None)
@@ -145,15 +157,15 @@ def client_options(settings: AtlasSettings) -> dict[str, Any]:
     }
 
 
-def _error_code(response: httpx.Response) -> str:
+def _error_code(response: httpx.Response, body: bytes) -> str:
     """The ``errorCode`` of an Atlas error answer, or an empty string."""
     if not _is_json(response):
         return ""
     try:
-        body = response.json()
+        doc = json.loads(body)
     except ValueError:
         return ""
-    code = body.get("errorCode") if isinstance(body, dict) else None
+    code = doc.get("errorCode") if isinstance(doc, dict) else None
     return code if isinstance(code, str) else ""
 
 
@@ -206,15 +218,20 @@ class AtlasClient:
         for step in range(count):
             index = (start + step) % count
             try:
-                response = await self._send(self._urls[index] + path, params, index, step == 0)
+                response, body = await self._send(
+                    self._urls[index] + path, params, index, step == 0
+                )
             except _Outage as outage:
                 if outage.connect:
                     # A silent or closed address is not tried first again.
                     self._first = (index + 1) % count
                 continue
+            except _TooLarge:
+                # The address answered, too much for one read: the call alone fails.
+                raise self._too_large() from None
             # The address that answered, after a passive server's redirect included.
             self._first = self._index(response.url, index)
-            return self._read(response, missing)
+            return self._read(response, body, missing)
         raise self._unavailable("no address of ATLAS_URL answered")
 
     @contextmanager
@@ -251,7 +268,7 @@ class AtlasClient:
 
     async def _send(
         self, url: str, params: Mapping[str, str] | None, index: int, first: bool
-    ) -> httpx.Response:
+    ) -> tuple[httpx.Response, bytes]:
         """One request to one address, following redirects among the addresses only;
         ``index`` is the position of that address in ``ATLAS_URL``, ``first`` whether it is
         the address the call started with."""
@@ -259,7 +276,7 @@ class AtlasClient:
             at = self._index(httpx.URL(url), index)
             try:
                 auth = _auth(self._settings, self._kerberos) or httpx.USE_CLIENT_DEFAULT
-                response = await self._wait(at if first else None, url, params, auth)
+                response, body = await self._wait(at if first else None, url, params, auth)
             except (httpx.ConnectError, httpx.ConnectTimeout):
                 raise _Outage(connect=True) from None
             except (httpx.ReadTimeout, httpx.WriteTimeout):
@@ -282,7 +299,7 @@ class AtlasClient:
             location = response.headers.get("location")
             # A redirect without a location is an answer like another: not followed.
             if not response.is_redirect or not location:
-                return response
+                return response, body
             target = response.url.join(location)
             if not self._ours(target):
                 raise ProviderRefused("atlas redirected outside ATLAS_URL")
@@ -291,17 +308,17 @@ class AtlasClient:
 
     async def _wait(
         self, at: int | None, url: str, params: Mapping[str, str] | None, auth: Any
-    ) -> httpx.Response:
-        """The request; while it waits, ``at`` (a first try's address) is in the call's
-        watch, and stays there when the wait is cancelled, for ``leave`` to read."""
+    ) -> tuple[httpx.Response, bytes]:
+        """The request and its body; while it waits, ``at`` (a first try's address) is in the
+        call's watch, and stays there when the wait is cancelled, for ``leave`` to read."""
         watch = _WATCH.get()
         if at is None or watch is None:
-            return await self._http.get(url, params=params, auth=auth)
+            return await self._fetch(url, params, auth)
         entry = object()
         watch.waiting[entry] = (at, time.monotonic())
         token = _WAITING.set((watch, entry))
         try:
-            response = await self._http.get(url, params=params, auth=auth)
+            answer = await self._fetch(url, params, auth)
         except asyncio.CancelledError:
             raise
         except BaseException:
@@ -310,7 +327,25 @@ class AtlasClient:
         finally:
             _WAITING.reset(token)
         watch.waiting.pop(entry, None)
-        return response
+        return answer
+
+    async def _fetch(
+        self, url: str, params: Mapping[str, str] | None, auth: Any
+    ) -> tuple[httpx.Response, bytes]:
+        """Send the request and read its body as it arrives, decoded, up to
+        ``ATLAS_MAX_RESPONSE_BYTES``: one byte more raises ``_TooLarge`` and closes the
+        connection, whatever ``Content-Length`` says, or without one."""
+        request = self._http.build_request("GET", url, params=params)
+        response = await self._http.send(request, auth=auth, stream=True)
+        try:
+            cap, body = self._settings.max_response_bytes, bytearray()
+            async for chunk in response.aiter_bytes():
+                body += chunk
+                if len(body) > cap:
+                    raise _TooLarge
+            return response, bytes(body)
+        finally:
+            await response.aclose()
 
     @contextmanager
     def _aside(self) -> Iterator[None]:
@@ -356,24 +391,37 @@ class AtlasClient:
                 return index
         return default
 
-    def _read(self, response: httpx.Response, missing: MissingCodes) -> Any:
+    def _read(self, response: httpx.Response, body: bytes, missing: MissingCodes) -> Any:
         status = response.status_code
-        if status == 403 and _error_code(response) == OBJECTS_REFUSED:
+        if status == 403 and _error_code(response, body) == OBJECTS_REFUSED:
             return Missing.FORBIDDEN
         if status in _REFUSED:
             # A new session is opened on the next call, under the secret read then.
             self._http.cookies.clear()
             raise ProviderRefused(f"atlas answered {status}")
-        if status != 200 and (found := missing.get((status, _error_code(response)))):
+        if status != 200 and (found := missing.get((status, _error_code(response, body)))):
             return found
         if status != 200:
             raise self._unavailable(f"atlas answered {status}")
         if not _is_json(response):
             raise self._unavailable("atlas answered a page that is not JSON")
         try:
-            return response.json()
+            return json.loads(body)
         except ValueError:
             raise self._unavailable("atlas answered JSON that cannot be read") from None
+
+    @staticmethod
+    def _too_large() -> ProviderAnswerTooLarge:
+        """The call's error for an answer too large, said once per call."""
+        watch = _WATCH.get()
+        if watch is None or not watch.too_large:
+            if watch is not None:
+                watch.too_large = True
+            log.warning(
+                "atlas answered more than ATLAS_MAX_RESPONSE_BYTES for one read; "
+                "lower MCP_CONTEXT_BATCH"
+            )
+        return ProviderAnswerTooLarge("atlas answered more than ATLAS_MAX_RESPONSE_BYTES")
 
     @staticmethod
     def _unavailable(why: str) -> ProviderUnavailable:

@@ -235,6 +235,8 @@ follows these rules:
   no value, no sample.
 - It respects the deadline it is given. It raises `ProviderRefused` when its account is refused,
   and `ProviderUnavailable` when the data catalog is down, late, or returns what it cannot read.
+  An answer larger than it accepts raises `ProviderAnswerTooLarge`: the call is `unavailable`,
+  but the data catalog is not down, so no retry pause opens.
   The text of its errors stays in the server. Its logs and `check_lines()` never hold its secret
   or a schema, table or column name.
 - It imports neither `akko_mcp_trino.trino_client` nor `akko_mcp_trino.identity`, never receives

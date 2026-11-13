@@ -242,7 +242,9 @@ fournisseur suit ces règles :
   de données : ni valeur, ni échantillon.
 - Il respecte l'échéance qu'il reçoit. Il lève `ProviderRefused` quand son compte est refusé, et
   `ProviderUnavailable` quand le catalogue de données est en panne, en retard, ou rend ce qu'il ne
-  sait pas lire. Le texte de ses erreurs reste dans le serveur. Ses journaux et `check_lines()` ne
+  sait pas lire. Une réponse plus grosse que ce qu'il accepte lève `ProviderAnswerTooLarge` :
+  l'appel est `unavailable`, mais le catalogue n'est pas en panne, et aucune pause de réessai ne
+  s'ouvre. Le texte de ses erreurs reste dans le serveur. Ses journaux et `check_lines()` ne
   contiennent jamais son secret, ni un nom de schéma, de table ou de colonne.
 - Il n'importe ni `akko_mcp_trino.trino_client` ni `akko_mcp_trino.identity`, ne reçoit jamais le
   client Trino ni l'identité de l'appelant, et n'écrit jamais dans son catalogue de données.

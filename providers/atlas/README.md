@@ -62,6 +62,7 @@ secret.
 | `ATLAS_TIMEOUT_SECONDS` | timeout of one request to Atlas; with several addresses, see below how it relates to `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | time to open a connection to one address, below `ATLAS_TIMEOUT_SECONDS`, so that a silent address gives way to the next one within the call | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | glossary term reads sent at once, from 1 to 32; with Kerberos, also the negotiations run at once | `4` |
+| `ATLAS_MAX_RESPONSE_BYTES` | longest body of one Atlas answer once decoded, at least `1048576`; the read stops past it, with or without `Content-Length`, and the call is `unavailable` for itself alone: no other address is tried and no retry pause opens. One warning per call says to lower `MCP_CONTEXT_BATCH` | `67108864` |
 
 A secret given as a file (`*_FILE`) is read again when the file changes.
 
@@ -135,6 +136,7 @@ a `User-Agent` of its own, and keeps the `ATLASSESSIONID` session cookie.
 | 401, or a 403 other than below | is refused at once; the session cookie is dropped |
 | 403 with `ATLAS-403-00-001` (Atlas refuses the account some of the objects asked) | serves nothing of that read (the whole batch of tables, or that term), stays open, and logs `atlas refused some objects to the account; an account with no read grant serves nothing` once for the call; the tables of that batch get the status `not_found`, on purpose, the same as a table Atlas does not hold, so that an agent cannot tell a refused object from an absent one |
 | a 200 that is not JSON (a Knox login page), JSON that cannot be read, another status | is unavailable |
+| a body longer than `ATLAS_MAX_RESPONSE_BYTES` once decoded | stops reading it, and is unavailable for that call alone: no other address is tried, the next calls start where they did, no retry pause opens; logs `atlas answered more than ATLAS_MAX_RESPONSE_BYTES for one read; lower MCP_CONTEXT_BATCH` once for the call |
 | 404 with `ATLAS-404-00-009` to a table read (no such instance) | knows nothing of these tables |
 | 404 with `ATLAS-404-00-005` to a term read (no such GUID) | leaves that term out |
 | 400 with `ATLAS-400-00-014` (no such type) | knows nothing under that type, and remembers it until `SIGHUP` |

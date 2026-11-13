@@ -18,6 +18,7 @@ from akko_mcp_trino.context import (
     ContextChain,
     ContextSettings,
     Gathered,
+    ProviderAnswerTooLarge,
     ProviderRefused,
     ProviderUnavailable,
     TermsResult,
@@ -390,6 +391,27 @@ def test_an_outage_raised_by_the_source_at_the_deadline_opens_no_breaker(loop):
     assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["one"] == "unavailable"
     assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["one"] == "ok"
     assert len(fake.calls) == 2
+
+
+def test_an_answer_too_large_for_one_call_opens_no_breaker(loop, caplog):
+    fake = Fake("one", known={ORDERS: TableContext()})
+    fake.fail = ProviderAnswerTooLarge("the answer is larger than allowed")
+    clock = Clock()
+    metrics = Metrics()
+    chain = _chain(loop, fake, clock=clock, metrics=metrics)
+    with caplog.at_level(logging.WARNING):
+        for _ in range(2):
+            got = chain.gather([ORDERS], deadline=clock.now + 5)
+            assert got.statuses["one"] == "unavailable"
+    # Each call reaches the source: an answer too large is not an outage of the source.
+    assert len(fake.calls) == 2
+    assert "one" not in chain._breakers
+    value = metrics.registry.get_sample_value
+    assert value("mcp_trino_context_breaker_open", {"provider": "one"}) in (None, 0)
+    assert caplog.records == []
+    fake.fail = None
+    assert chain.gather([ORDERS], deadline=clock.now + 5).statuses["one"] == "ok"
+    assert issubclass(ProviderAnswerTooLarge, ProviderUnavailable)
 
 
 def test_a_source_whose_mapping_fails_says_error_without_hiding_the_others(loop, caplog):

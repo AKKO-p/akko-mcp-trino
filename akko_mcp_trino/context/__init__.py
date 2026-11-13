@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from ..config import Config
 from .chain import ContextChain, ContextSettings, Gathered, TermsResult
-from .errors import ProviderError, ProviderRefused, ProviderUnavailable
+from .errors import ProviderAnswerTooLarge, ProviderError, ProviderRefused, ProviderUnavailable
 from .loop import ContextLoop
 from .provider import ContextProvider
 from .secrets import FileSecret, secret_setting
@@ -81,6 +81,7 @@ __all__ = [
     "Gathered",
     "Join",
     "Labelled",
+    "ProviderAnswerTooLarge",
     "ProviderError",
     "ProviderRefused",
     "ProviderUnavailable",
