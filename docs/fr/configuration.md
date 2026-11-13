@@ -37,7 +37,9 @@ serveur refuse de démarrer et dit pourquoi.
 | `TRINO_QUERY_TIMEOUT_SECONDS` | budget de temps d'une requête : au-delà, le serveur annule la requête dans Trino. `0` laisse la limite à Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | budget de temps d'un appel de tool, toutes ses requêtes comprises. Au-delà, aucune requête ne démarre, la requête en cours est annulée et l'agent reçoit une erreur. `0` ne pose aucun budget | `120` |
 | `MCP_MAX_SQL_CHARS` | longueur maximale, en caractères, d'une instruction que lisent `execute_query` et `explain_query`, au moins 1000. Une instruction plus longue est refusée (`invalid_argument`) avant d'être analysée | `100000` |
-| `MCP_MAX_SQL_NESTING` | profondeur maximale des parenthèses et des crochets imbriqués dans une instruction de `execute_query` et `explain_query`, au moins 8. Ceux d'une chaîne, d'un nom entre guillemets ou d'un commentaire ne comptent pas. Une instruction plus profonde est refusée (`invalid_argument`) avant d'être analysée : le temps d'analyse croît vite avec l'imbrication | `12` |
+| `MCP_MAX_SQL_NESTING` | profondeur maximale des parenthèses et des crochets imbriqués dans une instruction de `execute_query` et `explain_query`, au moins 8. Ceux d'une chaîne, d'un nom entre guillemets ou d'un commentaire ne comptent pas. Une instruction plus profonde est refusée (`invalid_argument`) avant d'être analysée : un premier refus peu coûteux, le délai d'analyse ci-dessous borne le reste | `32` |
+| `MCP_SQL_PARSE_SECONDS` | temps, en secondes, dont dispose un processus d'analyse pour analyser et contrôler une instruction de `execute_query` ou `explain_query`, plus de 0. Au-delà, le processus est tué et remplacé et l'appel refusé (`time_budget`) ; un appel qui ne trouve aucun processus libre dans ce délai est refusé aussi | `2` |
+| `MCP_SQL_PARSE_WORKERS` | nombre de processus qui analysent les instructions, au moins 1, démarrés au premier usage. Chaque appelant fait analyser une instruction à la fois ; un second appel pendant ce temps est refusé (`busy`) | `2` |
 
 ## Listes et recherche
 

@@ -209,3 +209,32 @@ def test_the_sql_bounds_reach_the_tools(monkeypatch):
     assert asked == []
     mcp.tools["execute_query"]("SELECT " + "(" * 8 + "1" + ")" * 8)
     assert asked == ["SELECT " + "(" * 8 + "1" + ")" * 8]
+
+
+def test_the_server_parses_with_its_own_pool_and_settings(monkeypatch):
+    """MCP_SQL_PARSE_SECONDS and MCP_SQL_PARSE_WORKERS reach the pool the server builds;
+    its refusals are counted on the server's metrics."""
+    from akko_mcp_trino import parse_pool
+    from akko_mcp_trino.metrics import Metrics
+
+    built = []
+
+    class _Pool(parse_pool.ParsePool):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr("akko_mcp_trino.server.ParsePool", _Pool)
+    metrics = Metrics()
+    mcp, _ = build_server(
+        replace(_CFG, sql_parse_seconds=0.75, sql_parse_workers=3, max_sql_chars=1000),
+        mcp_factory=lambda name, **_: FakeMCP(),
+        metrics=metrics,
+    )
+    ((pool),) = built
+    assert (pool.workers, pool.seconds) == (3, 0.75)
+    mcp.tools["execute_query"]("SELECT 1" + " " * 1000)
+    assert (
+        metrics.registry.get_sample_value("mcp_trino_sql_refusals_total", {"reason": "too_long"})
+        == 1
+    )

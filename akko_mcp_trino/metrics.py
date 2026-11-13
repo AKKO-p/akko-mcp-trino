@@ -71,6 +71,15 @@ class Metrics:
             registry=self.registry,
         )
 
+        self.sql_refusals = Counter(
+            "mcp_trino_sql_refusals_total",
+            "Agent statements refused before Trino by a bound or a parse worker, by reason "
+            "(too_long, too_nested, caller_busy, no_worker, deadline: a parse cut by the "
+            "deadline, worker_failed)",
+            ["reason"],
+            registry=self.registry,
+        )
+
     def render(self) -> tuple[bytes, str]:
         """Return (Prometheus exposition body, content-type)."""
         return generate_latest(self.registry), CONTENT_TYPE_LATEST

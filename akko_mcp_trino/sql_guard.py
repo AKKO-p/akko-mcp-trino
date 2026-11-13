@@ -13,7 +13,7 @@ brackets, so a short statement could otherwise hold a thread for minutes.
 from __future__ import annotations
 
 import re
-from typing import Optional, Union
+from typing import NamedTuple, Optional, Union
 
 import sqlglot
 from sqlglot import exp
@@ -456,7 +456,76 @@ def _referenced_tables(parsed: ParsedSQL, text: str, explained: bool = False) ->
     return sorted(names)
 
 
-def tables_for_column(sql: Union[str, ParsedSQL], identifier: str) -> list[tuple[str, ...]]:
+class ColumnScope(NamedTuple):
+    """What the advice on an unknown column needs of a statement, as plain values: the
+    tables it reads, each as its parts (lower case) and its alias (lower case, or empty),
+    and whether a column without a qualifier may belong to them (no CTE, no nested SELECT).
+    Picklable, so a worker process can hand it back."""
+
+    bare: bool
+    tables: tuple[tuple[tuple[str, ...], str], ...]
+
+
+class Analysis(NamedTuple):
+    """Everything a tool call derives from an agent's statement, as plain picklable values:
+    the read-only verdict, the tables the audit names, and the scope of the column advice."""
+
+    read_only: bool
+    tables: tuple[str, ...]
+    scope: ColumnScope
+
+
+def column_scope(sql: Union[str, ParsedSQL]) -> ColumnScope:
+    """The ``ColumnScope`` of ``sql`` (see ``tables_for_column``); one EXPLAIN is seen
+    through, and a statement that does not parse reads no table."""
+    parsed = _parsed(sql)
+    return _column_scope(parsed, parsed.text)
+
+
+def _column_scope(parsed: ParsedSQL, text: str, explained: bool = False) -> ColumnScope:
+    s = text.strip()
+    m = None if explained else _EXPLAIN_RE.match(s)  # one EXPLAIN is seen through, not two
+    if m is not None:
+        return _column_scope(parsed, m.group(2), True)
+    statements = parsed.trees(s)
+    if statements is None:  # unparseable: nothing named
+        return ColumnScope(False, ())
+    bare = True
+    tables: list[tuple[tuple[str, ...], str]] = []
+    for st in statements:
+        ctes = {cte.alias_or_name.lower() for cte in st.find_all(exp.CTE)}
+        nested = any(s.find_ancestor(exp.Select) is not None for s in st.find_all(exp.Select))
+        # A column without a qualifier may belong to a CTE or a nested SELECT (a subquery,
+        # EXISTS, IN), not to a table read inside it: no advice rather than a guess. The
+        # branches of a UNION are not nested.
+        bare = bare and not (ctes or nested)
+        for table in st.find_all(exp.Table):
+            if not isinstance(table.this, exp.Identifier):
+                continue
+            parts = tuple(p.lower() for p in (table.catalog, table.db, table.name) if p)
+            if len(parts) == 1 and parts[0] in ctes:
+                continue
+            tables.append((parts, table.alias.lower()))
+    return ColumnScope(bare, tuple(tables))
+
+
+def tables_in_scope(scope: ColumnScope, identifier: str) -> list[tuple[str, ...]]:
+    """The tables of ``scope`` the column ``identifier`` may belong to, sorted (see
+    ``tables_for_column``)."""
+    qualifier = identifier.lower().rpartition(".")[0]
+    if not qualifier and not scope.bare:
+        return []
+    names = {
+        parts
+        for parts, alias in scope.tables
+        if not qualifier or qualifier in (alias, parts[-1], ".".join(parts))
+    }
+    return sorted(names)
+
+
+def tables_for_column(
+    sql: Union[str, ParsedSQL, Analysis], identifier: str
+) -> list[tuple[str, ...]]:
     """The tables of ``sql`` a column it names may belong to, each as the parts the agent
     wrote (catalog, schema, table, those given), in lower case, sorted. A part keeps any dot
     it holds (``"x.y".t`` is the two parts ``x.y`` and ``t``), so a name is never read as
@@ -467,38 +536,20 @@ def tables_for_column(sql: Union[str, ParsedSQL], identifier: str) -> list[tuple
     without a qualifier may belong to any table the statement reads, unless the statement
     has a CTE or a nested SELECT (subquery, EXISTS, IN), which it may belong to instead:
     then nothing. A name defined by the statement (a CTE) is not a table. A statement that
-    does not parse names nothing. ``sql`` may be a ``ParsedSQL``."""
-    parsed = _parsed(sql)
-    return _tables_for_column(parsed, parsed.text, identifier)
+    does not parse names nothing. ``sql`` may be a ``ParsedSQL``, or an ``Analysis``, whose
+    scope is then read without any parse."""
+    scope = sql.scope if isinstance(sql, Analysis) else column_scope(sql)
+    return tables_in_scope(scope, identifier)
 
 
-def _tables_for_column(
-    parsed: ParsedSQL, text: str, identifier: str, explained: bool = False
-) -> list[tuple[str, ...]]:
-    s = text.strip()
-    m = None if explained else _EXPLAIN_RE.match(s)  # one EXPLAIN is seen through, not two
-    if m is not None:
-        return _tables_for_column(parsed, m.group(2), identifier, True)
-    statements = parsed.trees(s)
-    if statements is None:  # unparseable: nothing named
-        return []
-    qualifier = identifier.lower().rpartition(".")[0]
-    names: set[tuple[str, ...]] = set()
-    for st in statements:
-        ctes = {cte.alias_or_name.lower() for cte in st.find_all(exp.CTE)}
-        nested = any(s.find_ancestor(exp.Select) is not None for s in st.find_all(exp.Select))
-        if not qualifier and (ctes or nested):
-            # A column without a qualifier may belong to a CTE or a nested SELECT (a
-            # subquery, EXISTS, IN), not to a table read inside it: no advice rather than a
-            # guess. The branches of a UNION are not nested.
-            return []
-        for table in st.find_all(exp.Table):
-            if not isinstance(table.this, exp.Identifier):
-                continue
-            parts = [p.lower() for p in (table.catalog, table.db, table.name) if p]
-            if len(parts) == 1 and parts[0] in ctes:
-                continue
-            if qualifier and qualifier not in (table.alias.lower(), parts[-1], ".".join(parts)):
-                continue
-            names.add(tuple(parts))
-    return sorted(names)
+def analyze(
+    sql: str, session_catalog: str | None, extra_reads: frozenset[str] = frozenset()
+) -> Analysis:
+    """Parse ``sql`` once and derive what a tool call needs of it (see ``Analysis``). It is
+    what a parse worker runs; the server's own process never parses an agent's SQL."""
+    parsed = ParsedSQL(sql)
+    return Analysis(
+        read_only=is_read_only_sql(parsed, session_catalog, extra_reads),
+        tables=tuple(referenced_tables(parsed)),
+        scope=column_scope(parsed),
+    )

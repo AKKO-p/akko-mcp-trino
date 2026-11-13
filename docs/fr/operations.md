@@ -99,7 +99,7 @@ Un collecteur qui attend du JSON pur doit retirer ce préfixe.
 | Champ | Sens |
 |---|---|
 | `request_id`, `tool`, `subject` | quel appel, quel tool, pour qui ; la ligne n'a aucun champ qui pourrait contenir le bearer ou le texte SQL |
-| `ok`, `error` | le résultat ; `error` est un code, jamais un message, parce qu'un message de Trino peut citer une valeur lue dans une ligne (`Cannot cast '<value>' to INT`) : le type et le nom de l'erreur de Trino pour une erreur Trino (`USER_ERROR:INVALID_CAST_ARGUMENT`), la classe de toute autre exception (`TimeoutError`, `CallTimeout` au-delà du budget de l'appel), le code qu'un tool donne à son propre refus (`read_only`, `invalid_argument`, `sql_too_long`, `sql_too_nested`) ou un plugin avec `note(error=...)`, sinon `tool_error`. L'agent, lui, lit le message entier |
+| `ok`, `error` | le résultat ; `error` est un code, jamais un message, parce qu'un message de Trino peut citer une valeur lue dans une ligne (`Cannot cast '<value>' to INT`) : le type et le nom de l'erreur de Trino pour une erreur Trino (`USER_ERROR:INVALID_CAST_ARGUMENT`), la classe de toute autre exception (`TimeoutError`, `CallTimeout` au-delà du budget de l'appel), le code qu'un tool donne à son propre refus (`read_only`, `invalid_argument`, `sql_too_long`, `sql_too_nested`, `parse_deadline`, `parse_no_worker`, `parse_busy`, `parse_failed`) ou un plugin avec `note(error=...)`, sinon `tool_error`. L'agent, lui, lit le message entier |
 | `duration_ms` | la durée de l'appel |
 
 Ce qu'a fait un appel (le SHA-256 de son SQL, les tables, les lignes, si elles ont été coupées) est
@@ -119,8 +119,10 @@ Ces endpoints n'existent que sur les transports HTTP, sur le port de santé.
   Trino ; en modes `impersonation` et `service`, un `SELECT 1` borné sous `TRINO_USER`, au nom de
   personne d'autre. Quand le contrôle échoue, `/ready` rend un `503` avec
   `{"status": "error", "detail": ...}`.
-- `/metrics` expose `mcp_trino_queries_total`, `mcp_trino_query_errors_total` et
-  `mcp_trino_query_duration_seconds`. Avec des fournisseurs de contexte chargés, il expose aussi,
+- `/metrics` expose `mcp_trino_queries_total`, `mcp_trino_query_errors_total`,
+  `mcp_trino_query_duration_seconds` et `mcp_trino_sql_refusals_total`, les instructions refusées
+  avant Trino par `reason` : `too_long`, `too_nested`, `caller_busy`, `no_worker`, `deadline` (une
+  analyse coupée par le délai) ou `worker_failed` ; jamais une instruction ni un nom. Avec des fournisseurs de contexte chargés, il expose aussi,
   par fournisseur, `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total` (par statut),
   `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total` (trouvé ou
   non), `mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`. Un appel que

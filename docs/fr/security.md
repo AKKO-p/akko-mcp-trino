@@ -66,11 +66,22 @@ Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans l
   d'un filtre de lignes ou d'un masque de colonne. Elles sont refusées, sauf si l'administrateur
   les nomme dans `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`,
   `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`).
-- **Une instruction est bornée avant d'être analysée.** Une instruction de plus de
-  `MCP_MAX_SQL_CHARS` caractères (100000 par défaut), ou dont les parenthèses et crochets
-  s'imbriquent sur plus de `MCP_MAX_SQL_NESTING` niveaux (12 par défaut), est refusée avant que
-  l'analyseur la voie : un SQL très imbriqué n'occupe plus le serveur. Une instruction dans les
-  bornes est analysée une fois, et chaque contrôle lit cet arbre unique.
+- **Une instruction est bornée avant d'être analysée, puis analysée dans un délai.** Une
+  instruction de plus de `MCP_MAX_SQL_CHARS` caractères (100000 par défaut), ou dont les
+  parenthèses et crochets s'imbriquent sur plus de `MCP_MAX_SQL_NESTING` niveaux (32 par défaut),
+  est refusée avant que l'analyseur la voie. Une instruction dans ces bornes est analysée une
+  fois, dans l'un des `MCP_SQL_PARSE_WORKERS` processus d'analyse (2 par défaut), jamais dans le
+  processus du serveur, et chaque contrôle lit cette analyse unique. Un processus qui n'a pas
+  répondu dans `MCP_SQL_PARSE_SECONDS` (2 par défaut) est tué et remplacé, et l'appel est refusé
+  (`time_budget`) ; de même pour un appel qui ne trouve aucun processus libre dans ce délai, et un
+  processus en échec fait refuser son appel. Un SQL très imbriqué ou répété n'occupe donc plus le
+  serveur. Un appelant fait analyser une instruction à la fois : un second appel pendant
+  l'analyse du premier est refusé aussitôt (`busy`). Un appel sans appelant vérifié compte pour le
+  compte Trino configuré. Les processus démarrent au premier usage, n'écrivent nulle part (leurs
+  flux standard sont le périphérique nul), ne reçoivent aucun réglage du serveur et s'arrêtent
+  avec lui. Le risque qui reste : un appelant authentifié peut occuper un processus pendant le
+  délai, une fois à la fois, si bien qu'autant d'appelants qu'il y a de processus peuvent retarder
+  les autres ; des quotas par utilisateur sont prévus.
 - **Les écritures sont refusées n'importe où dans l'arbre.** L'instruction est analysée en arbre.
   Elle est refusée si elle contient plus d'une instruction, ou si un `INSERT`, `UPDATE`, `DELETE`,
   `MERGE`, `CREATE`, `DROP`, `ALTER`, `GRANT`, `CALL` ou `SET` apparaît n'importe où dans l'arbre,

@@ -336,9 +336,9 @@ could not resolve.
 | `permission` | Trino or the identity provider refused the right; report it, do not retry |
 | `invalid_argument` | the server refused an argument (an identifier, an `offset`, a cursor, a search text out of bounds, a statement too long or too deeply nested) before calling Trino |
 | `read_only` | the statement writes and the server is read-only |
-| `time_budget` | the call ran out of its time budget; narrow the request |
-| `busy` | `profile_table` already runs as many calls as this server allows (`MCP_PROFILE_MAX_CONCURRENT`); call again in a few seconds, as its `hint` says |
-| `unavailable` | Trino could not answer (internal error, lost connection); this says nothing about whether the statement is valid, so try again later |
+| `time_budget` | the call ran out of its time budget, or its statement could not be checked within `MCP_SQL_PARSE_SECONDS`; narrow or simplify the request |
+| `busy` | `profile_table` already runs as many calls as this server allows (`MCP_PROFILE_MAX_CONCURRENT`), or a statement of the same caller is still being checked; call again in a few seconds |
+| `unavailable` | Trino could not answer (internal error, lost connection), or the worker that checked the statement failed; this says nothing about whether the statement is valid, so try again later |
 | `other` | any other error |
 
 When Trino cannot find a column (`COLUMN_NOT_FOUND`, with its name) in `execute_query` or

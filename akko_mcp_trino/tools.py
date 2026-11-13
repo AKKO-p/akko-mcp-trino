@@ -88,18 +88,17 @@ from .errors import (
     metadata_view_error,
 )
 from .identity import current_principal, current_subject
+from .parse_pool import ParsePool, ParseRefused, shared_pool
 from .search import search
 from .sql_guard import (
     JDBC_COLUMNS,
     TABLE_COMMENTS,
-    ParsedSQL,
+    Analysis,
     SQLBoundError,
     check_sql_bounds,
     governed_catalog,
     is_read_only_sql,
     normalize_sql,
-    parse_once,
-    referenced_tables,
     sql_literal,
     tables_for_column,
     validate_identifier,
@@ -318,11 +317,11 @@ def table_name(parts: tuple[str, ...]) -> str:
 
 def error_reply(
     exc: Exception,
-    sql: Union[str, ParsedSQL] = "",
+    sql: Union[str, Analysis] = "",
     visible: Optional[Callable[[tuple[str, ...]], bool]] = None,
 ) -> str:
     """The error for the agent, whole, with its kind (see ``akko_mcp_trino.errors``); for the
-    audit, its code only. A column of ``sql`` (a ``ParsedSQL`` is read, not parsed again)
+    audit, its code only. A column of ``sql`` (an ``Analysis`` is read, never parsed)
     Trino could not find (``COLUMN_NOT_FOUND``,
     named) adds a ``hint`` naming the tables of the agent's own statement it may belong to,
     never a name from Trino, and only those ``visible`` says the caller sees, at most
@@ -800,6 +799,7 @@ def register_query_tools(
     profile_max_concurrent: int = DEFAULT_PROFILE_MAX_CONCURRENT,
     max_sql_chars: int = DEFAULT_MAX_SQL_CHARS,
     max_sql_nesting: int = DEFAULT_MAX_SQL_NESTING,
+    parser: Optional[ParsePool] = None,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -842,7 +842,8 @@ def register_query_tools(
     `MCP_PROFILE_MAX_CONCURRENT`). `execute_query` and `explain_query` refuse a statement
     longer than `max_sql_chars` characters or whose brackets nest deeper than
     `max_sql_nesting` before parsing it (`MCP_MAX_SQL_CHARS`, `MCP_MAX_SQL_NESTING`), then
-    parse it once."""
+    have it parsed once by `parser`, a pool of parse workers (`MCP_SQL_PARSE_WORKERS`,
+    `MCP_SQL_PARSE_SECONDS`; the process's shared pool with the defaults when None)."""
     tools = ToolContext(
         mcp,
         client,
@@ -1434,28 +1435,37 @@ def register_query_tools(
 
     show_plan = "EXPLAIN" in extra_reads
 
-    def agent_sql(sql: str) -> Union[ParsedSQL, str]:
-        """The agent's statement, normalized and parsed once; or, for one past the bounds,
-        the refusal, sent before any parse and audited by its code, never its text."""
+    pool = parser if parser is not None else shared_pool()
+
+    def agent_sql(sql: str) -> Union[tuple[str, Analysis], str]:
+        """The agent's statement, normalized, with its analysis by a parse worker; or the
+        refusal, audited by its code, never its text: past the bounds, before any parse;
+        past the parse deadline, or with a statement of the same caller still checked
+        (see ``akko_mcp_trino.parse_pool``)."""
         try:
             check_sql_bounds(sql, max_chars=max_sql_chars, max_nesting=max_sql_nesting)
         except SQLBoundError as e:
+            pool.count(e.code.removeprefix("sql_"))
             return refusal_reply(e.code, str(e))
-        return parse_once(normalize_sql(sql))
+        text = normalize_sql(sql)
+        try:
+            return text, pool.analyze(text, session_catalog, extra_reads, current_subject() or "")
+        except ParseRefused as e:
+            return refusal_reply(e.code, str(e), kind=e.kind)
 
     def explain_query(sql: str) -> str:
-        parsed = agent_sql(sql)
-        if isinstance(parsed, str):
-            return parsed
-        sql = parsed.text
+        checked = agent_sql(sql)
+        if isinstance(checked, str):
+            return checked
+        sql, parsed = checked
         try:
-            if not is_read_only_sql(parsed, session_catalog, extra_reads):
+            if not parsed.read_only:
                 return refusal_reply(
                     "read_only", "Only a read-only statement can be explained", kind=READ_ONLY
                 )
             # Without EXPLAIN opened, Trino only analyzes the statement and prints no plan.
             statement = f"EXPLAIN {sql}" if show_plan else f"EXPLAIN (TYPE VALIDATE) {sql}"
-            note(sql=statement, tables=referenced_tables(parsed))
+            note(sql=statement, tables=parsed.tables)
             res = run(statement)
             note(rows=len(res["rows"]), truncated=was_cut(res))
             if not show_plan:
@@ -1468,17 +1478,17 @@ def register_query_tools(
     tool("Explain query")(explain_query)
 
     def execute_query(sql: str, max_rows: int = 0) -> str:
-        parsed = agent_sql(sql)
-        if isinstance(parsed, str):
-            return parsed
-        sql = parsed.text
-        if read_only and not is_read_only_sql(parsed, session_catalog, extra_reads):
+        checked = agent_sql(sql)
+        if isinstance(checked, str):
+            return checked
+        sql, parsed = checked
+        if read_only and not parsed.read_only:
             return refusal_reply(
                 "read_only",
                 f"Read-only mode: only {_allowed_reads(extra_reads)} are allowed",
                 kind=READ_ONLY,
             )
-        note(sql=sql, tables=referenced_tables(parsed))
+        note(sql=sql, tables=parsed.tables)
         try:
             res = run(sql, max_rows=int(max_rows))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent

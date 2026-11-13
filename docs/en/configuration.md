@@ -37,7 +37,9 @@ says why.
 | `TRINO_QUERY_TIMEOUT_SECONDS` | time budget of one query: past it, the server cancels the query in Trino. `0` leaves the limit to Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | time budget of one tool call, every query of the call included. Past it, no query starts, the running query is cancelled and the agent gets an error. `0` sets no budget | `120` |
 | `MCP_MAX_SQL_CHARS` | longest statement `execute_query` and `explain_query` read, in characters, at least 1000. A longer one is refused (`invalid_argument`) before it is parsed | `100000` |
-| `MCP_MAX_SQL_NESTING` | deepest nesting of round and square brackets in a statement of `execute_query` and `explain_query`, at least 8. Brackets in a string, a quoted name or a comment do not count. A deeper statement is refused (`invalid_argument`) before it is parsed: the parser's time grows quickly with nesting | `12` |
+| `MCP_MAX_SQL_NESTING` | deepest nesting of round and square brackets in a statement of `execute_query` and `explain_query`, at least 8. Brackets in a string, a quoted name or a comment do not count. A deeper statement is refused (`invalid_argument`) before it is parsed: a cheap first refusal, the parse deadline below bounds the rest | `32` |
+| `MCP_SQL_PARSE_SECONDS` | time, in seconds, a worker process has to parse and check one statement of `execute_query` or `explain_query`, above 0. Past it, the worker is killed and replaced and the call refused (`time_budget`); a call that finds no worker free within it is refused too | `2` |
+| `MCP_SQL_PARSE_WORKERS` | number of worker processes that parse the statements, at least 1, started on first use. Each caller has one statement checked at a time; a second call meanwhile is refused (`busy`) | `2` |
 
 ## Listings and search
 

@@ -73,6 +73,8 @@ CORE_MODULES = {
     "modules/fingerprint_audit",
     "modules/token_policy",
     "modules/trino_tags",
+    "parse_pool",
+    "parse_worker",
     "plugins",
     "search",
     "server",

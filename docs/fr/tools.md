@@ -350,9 +350,9 @@ Trino n'a pas su résoudre, quand Trino le nomme.
 | `permission` | Trino ou l'identity provider a refusé le droit : le rapporter, ne pas réessayer |
 | `invalid_argument` | le serveur a refusé un argument (un identifiant, un `offset`, un curseur, un texte de recherche hors limites, une instruction trop longue ou trop imbriquée) avant d'appeler Trino |
 | `read_only` | l'instruction écrit et le serveur est en lecture seule |
-| `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
-| `busy` | `profile_table` exécute déjà autant d'appels que ce serveur le permet (`MCP_PROFILE_MAX_CONCURRENT`) : rappeler dans quelques secondes, comme le dit son `hint` |
-| `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue) : cela ne dit rien de la validité de l'instruction, réessayer plus tard |
+| `time_budget` | l'appel a épuisé son budget de temps, ou son instruction n'a pu être contrôlée dans `MCP_SQL_PARSE_SECONDS` : restreindre ou simplifier la demande |
+| `busy` | `profile_table` exécute déjà autant d'appels que ce serveur le permet (`MCP_PROFILE_MAX_CONCURRENT`), ou une instruction du même appelant est encore en cours de contrôle : rappeler dans quelques secondes |
+| `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue), ou le processus qui contrôlait l'instruction a échoué : cela ne dit rien de la validité de l'instruction, réessayer plus tard |
 | `other` | toute autre erreur |
 
 Quand Trino ne trouve pas une colonne (`COLUMN_NOT_FOUND`, avec son nom) dans `execute_query` ou

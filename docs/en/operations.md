@@ -99,7 +99,7 @@ collector that expects plain JSON must strip that prefix.
 | Field | Meaning |
 |---|---|
 | `request_id`, `tool`, `subject` | which call, which tool, for whom; the line has no field that could hold the bearer or the SQL text |
-| `ok`, `error` | the outcome; `error` is a code, never a message, because a message from Trino may quote a value read from a row (`Cannot cast '<value>' to INT`): Trino's error type and name for a Trino error (`USER_ERROR:INVALID_CAST_ARGUMENT`), the class of any other exception (`TimeoutError`, `CallTimeout` past the call's budget), the code a tool names for its own refusal (`read_only`, `invalid_argument`, `sql_too_long`, `sql_too_nested`) or a plugin with `note(error=...)`, else `tool_error`. The agent reads the whole message |
+| `ok`, `error` | the outcome; `error` is a code, never a message, because a message from Trino may quote a value read from a row (`Cannot cast '<value>' to INT`): Trino's error type and name for a Trino error (`USER_ERROR:INVALID_CAST_ARGUMENT`), the class of any other exception (`TimeoutError`, `CallTimeout` past the call's budget), the code a tool names for its own refusal (`read_only`, `invalid_argument`, `sql_too_long`, `sql_too_nested`, `parse_deadline`, `parse_no_worker`, `parse_busy`, `parse_failed`) or a plugin with `note(error=...)`, else `tool_error`. The agent reads the whole message |
 | `duration_ms` | how long the call took |
 
 What a call did (the SHA-256 of its SQL, the tables, the rows, whether they were cut) is kept in
@@ -116,8 +116,10 @@ These endpoints exist over the HTTP transports only, on the health port.
 - What `/ready` checks depends on the identity mode: in `jwt` mode, Trino's public `/v1/info`; in
   `impersonation` and `service` modes, a bounded `SELECT 1` as `TRINO_USER`, impersonating no
   one. When the check fails, `/ready` returns `503` with `{"status": "error", "detail": ...}`.
-- `/metrics` exposes `mcp_trino_queries_total`, `mcp_trino_query_errors_total` and
-  `mcp_trino_query_duration_seconds`. With context providers loaded, it also exposes, by provider,
+- `/metrics` exposes `mcp_trino_queries_total`, `mcp_trino_query_errors_total`,
+  `mcp_trino_query_duration_seconds` and `mcp_trino_sql_refusals_total`, the statements refused
+  before Trino by `reason`: `too_long`, `too_nested`, `caller_busy`, `no_worker`, `deadline` (a
+  parse cut by the deadline) or `worker_failed`; never a statement or a name. With context providers loaded, it also exposes, by provider,
   `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total` (by status),
   `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total` (hit or
   miss), `mcp_trino_context_cache_bytes` and `mcp_trino_context_breaker_open`. A call the tool

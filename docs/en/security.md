@@ -63,10 +63,21 @@ Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed in
   column mask. They are refused unless the administrator names them in
   `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`,
   `SHOW ROLES`, `SHOW SESSION`).
-- **A statement is bounded before it is parsed.** One longer than `MCP_MAX_SQL_CHARS` characters
-  (100000 by default), or whose brackets nest deeper than `MCP_MAX_SQL_NESTING` (12 by default),
-  is refused before the parser sees it, so deeply nested SQL no longer ties up the server. A
-  statement within the bounds is parsed once, and every check reads that one tree.
+- **A statement is bounded before it is parsed, and parsed within a deadline.** One longer than
+  `MCP_MAX_SQL_CHARS` characters (100000 by default), or whose brackets nest deeper than
+  `MCP_MAX_SQL_NESTING` (32 by default), is refused before the parser sees it. A statement within
+  these bounds is parsed once, in one of `MCP_SQL_PARSE_WORKERS` worker processes (2 by default),
+  never in the server's own process, and every check reads that one analysis. A worker that has
+  not answered within `MCP_SQL_PARSE_SECONDS` (2 by default) is killed and replaced, and the call
+  is refused (`time_budget`); so is a call that finds no worker free within that time, and a
+  worker that fails refuses its call too. Deeply nested or repeated SQL therefore no longer ties
+  up the server. A caller has one statement checked at a time: a second call while the first is
+  checked is refused at once (`busy`). A call without a verified caller counts as the configured
+  Trino account. The workers start on first use, write nowhere (their standard streams are the
+  null device), get none of the server's settings, and end with the server.
+  The remaining risk: an authenticated caller can keep one worker busy for the deadline at a
+  time, so as many callers as there are workers can delay the others; per-user quotas are
+  planned.
 - **Writes are refused anywhere in the tree.** The statement is parsed into an AST. It is refused
   if it holds more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`,
   `DROP`, `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including inside a CTE,
