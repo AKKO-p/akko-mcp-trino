@@ -336,11 +336,12 @@ they apply, say what was cut:
   aggregate.
 
 The `sample` of `describe_table` is bounded the same way (cells, size, `cut_columns`,
-`truncated_reason`). The `plan` of `explain_query`, when `EXPLAIN` is allowed, stays within
+`truncated_reason`); a sample whose column names alone pass the bound comes with no row,
+`truncated` true and `truncated_reason` `"bytes"`. The `plan` of `explain_query`, when `EXPLAIN` is allowed, stays within
 `MCP_MAX_RESULT_BYTES` bytes too: a longer plan is cut and the answer adds `"truncated": true`
 and `"truncated_reason": "bytes"`.
 
-The audit line of the call notes the rows returned and `truncated`, and the reason, `rows` or
+The audit line of the call notes the rows returned and `truncated`, for the sample and the plan too, and the reason, `rows` or
 `bytes`, in `truncated_reason` with the module `fingerprint-audit`; never the data or the
 statement.
 

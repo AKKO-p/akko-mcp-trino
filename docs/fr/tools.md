@@ -352,11 +352,12 @@ clés, absentes sauf si elles s'appliquent, disent ce qui a été coupé :
   colonnes ou des valeurs plus courtes, ajoutez `LIMIT`, ou agrégez.
 
 Le `sample` de `describe_table` est borné de la même façon (cellules, taille, `cut_columns`,
-`truncated_reason`). Le `plan` d'`explain_query`, quand `EXPLAIN` est autorisé, reste lui aussi
+`truncated_reason`) ; un échantillon dont les seuls noms de colonnes dépassent la borne vient
+sans ligne, `truncated` vrai et `truncated_reason` à `"bytes"`. Le `plan` d'`explain_query`, quand `EXPLAIN` est autorisé, reste lui aussi
 dans `MCP_MAX_RESULT_BYTES` octets : un plan plus long est coupé et la réponse ajoute
 `"truncated": true` et `"truncated_reason": "bytes"`.
 
-La ligne d'audit de l'appel note les lignes rendues et `truncated`, et la raison, `rows` ou
+La ligne d'audit de l'appel note les lignes rendues et `truncated`, pour l'échantillon et le plan aussi, et la raison, `rows` ou
 `bytes`, dans `truncated_reason` avec le module `fingerprint-audit` ; jamais les données ni
 l'instruction.
 

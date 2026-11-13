@@ -1433,14 +1433,24 @@ def register_query_tools(
                 statement = f"SELECT * FROM {target} LIMIT {n}"
                 note(sql=statement)
                 sample = run(statement)
-                note(rows=len(sample["rows"]))
-                # Data, as in execute_query: its cells and its size are bounded the same way.
+                # Data, as in execute_query: its cells and its size are bounded the same way,
+                # and the audit notes the rows served and why they were cut.
                 bounded = bound_result(sample, max_cell_chars, max_result_bytes)
-                out["sample"] = (
-                    json.loads(bounded[0])
-                    if bounded is not None
-                    else {**sample, "rows": [], "row_count": 0, "truncated": True}
-                )
+                if bounded is None:
+                    out["sample"] = {
+                        **sample,
+                        "rows": [],
+                        "row_count": 0,
+                        "truncated": True,
+                        "truncated_reason": "bytes",
+                    }
+                    note(rows=0, truncated=True, truncated_reason="bytes")
+                else:
+                    out["sample"] = json.loads(bounded[0])
+                    done = bounded[1]
+                    note(rows=done["rows"])
+                    if done["reason"]:
+                        note(truncated=True, truncated_reason=done["reason"])
             # The context comes last: it takes only what the call has left past its reserve.
             # It is of the columns of this page, the ones Trino has just listed; a page that
             # does not hold them all is partial, and serves no grain.
@@ -1626,7 +1636,10 @@ def register_query_tools(
             note(rows=len(res["rows"]), truncated=was_cut(res))
             if not show_plan:
                 return dumps({"valid": True})
-            return bound_plan("\n".join(str(r[0]) for r in res["rows"]), max_result_bytes)
+            text = bound_plan("\n".join(str(r[0]) for r in res["rows"]), max_result_bytes)
+            if json.loads(text).get("truncated"):
+                note(truncated=True, truncated_reason="bytes")
+            return text
         except Exception as e:  # noqa: BLE001
             return error_reply(e, parsed, advice_visible)
 
