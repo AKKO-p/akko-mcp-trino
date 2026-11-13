@@ -5,7 +5,8 @@
 ## Les fournisseurs de contexte
 
 Ce serveur et le serveur MCP d'un catalogue de données ont des métiers différents et se branchent
-côte à côte ; [Un serveur MCP par métier](design-notes.md#notes) dit pourquoi.
+côte à côte ;
+[Un serveur MCP par métier](design-notes.md#un-serveur-mcp-par-métier) dit pourquoi.
 
 Dans ces pages, un *catalog* est un catalog Trino, et un *catalogue de données* est un service de
 métadonnées comme Apache Atlas ou OpenMetadata.
@@ -29,8 +30,8 @@ Deux fournisseurs viennent avec ce dépôt :
 - `file`, dans le cœur, la référence du contrat : un catalogue de données tenu dans un fichier
   JSON ;
 - `atlas`, pour Apache Atlas, un paquet à part (`akko-mcp-trino-atlas`, installé par l'extra
-  `atlas`, ou `atlas-kerberos` pour Kerberos). Ses réglages, sa mise en place de Kerberos et le compte qu'il lui faut sont dans
-  [son README](../../providers/atlas/README.fr.md).
+  `atlas`, ou `atlas-kerberos` pour Kerberos). Ses réglages, sa mise en place de Kerberos et le
+  compte qu'il lui faut sont dans [son README](../../providers/atlas/README.fr.md).
 
 Le contexte suit ce que Trino liste pour l'appelant : [Sécurité](security.md#les-droits-du-contexte)
 en donne les règles. Charger un fournisseur ou non, c'est le choix entre les deux modes de

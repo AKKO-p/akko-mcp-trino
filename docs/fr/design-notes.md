@@ -59,7 +59,9 @@ jamais à sa place, et le contrôle de lecture seule s'applique quoi qu'elles re
 
 **Le serveur ne décide pas des droits.** Voir [Trino d'abord](security.md#trino-dabord).
 
-**Un serveur MCP par métier.** Ce serveur interroge Trino sous l'identité de l'utilisateur vérifié
+### Un serveur MCP par métier
+
+Ce serveur interroge Trino sous l'identité de l'utilisateur vérifié
 et laisse Trino décider des droits ; un catalogue de données comme Atlas, OpenMetadata ou DataHub a
 son propre métier, le sens des données, leur lignage et leurs glossaires, et quand il a son propre
 serveur MCP, l'agent branche les deux côte à côte et les combine. Cinq règles en découlent.
@@ -75,8 +77,8 @@ serveur MCP, l'agent branche les deux côte à côte et les combine. Cinq règle
 - Trino d'abord : aucun nom venu d'un catalogue n'est servi avant que Trino l'ait listé à
   l'utilisateur, donc le contexte enrichit ce que Trino montre et ne propose jamais un objet.
 - Des noms communs : chaque réponse donne le nom Trino complet (`catalog.schema.table`), si bien
-  qu'un agent peut rapprocher nos réponses de celles du serveur du catalogue sans que les deux
-  serveurs se connaissent.
+  qu'un agent peut rapprocher les réponses de ce serveur de celles du serveur du catalogue sans que
+  les deux serveurs se connaissent.
 
 Le serveur du catalogue garde la recherche métier riche, le lignage, l'édition des glossaires et le
 travail des intendants. Ce serveur garde le contexte utile pour écrire une requête, servi sous les
@@ -91,7 +93,7 @@ parle à l'API du catalogue, et le nom complet `catalog.schema.table` que porte 
 permet à l'agent de rapprocher les réponses des deux. Le
 [premier mode de déploiement](deployment.md#avec-un-catalogue-de-données) fait tourner ce serveur à
 côté de celui du catalogue : rien ici ne le bloque ni ne le remplace. Voir
-[Un serveur MCP par métier](#notes) plus haut.
+[Un serveur MCP par métier](#un-serveur-mcp-par-métier) plus haut.
 
 ### Un utilisateur peut-il encore écrire dans Trino ?
 

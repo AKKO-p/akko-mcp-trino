@@ -212,7 +212,8 @@ Without a provider, no data catalog code is loaded and no data catalog is called
 The chart has no value of its own for the context: its variables go in `extraEnv`, a secret only
 through `valueFrom`, and the `file` provider's JSON file in `extraVolumes` and `extraVolumeMounts`.
 The image carries the Atlas provider from 0.8.0, inactive, with the Kerberos bindings and
-libraries of its `atlas-kerberos` extra. For Atlas with Basic authentication:
+libraries of the provider's `kerberos` extra
+(what `akko-mcp-trino[atlas-kerberos]` installs). For Atlas with Basic authentication:
 
 ```yaml
 extraEnv:
