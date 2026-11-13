@@ -455,3 +455,197 @@ def test_describe_of_a_short_name_is_refused_when_the_session_catalog_is_system(
 
     assert is_read_only_sql("DESCRIBE runtime.queries", session_catalog="system") is False
     assert is_read_only_sql("DESCRIBE demo.crm.orders", session_catalog="system") is True
+
+
+# ---- bounds checked before parsing, and one parse ----
+
+# TPC-H query 20, with its nested IN and scalar subqueries.
+_TPCH_Q20 = """
+SELECT s_name, s_address
+FROM tpch.tiny.supplier, tpch.tiny.nation
+WHERE s_suppkey IN (
+    SELECT ps_suppkey FROM tpch.tiny.partsupp
+    WHERE ps_partkey IN (SELECT p_partkey FROM tpch.tiny.part WHERE p_name LIKE 'forest%')
+      AND ps_availqty > (
+        SELECT 0.5 * sum(l_quantity) FROM tpch.tiny.lineitem
+        WHERE l_partkey = ps_partkey AND l_suppkey = ps_suppkey
+          AND l_shipdate >= date '1994-01-01'
+          AND l_shipdate < date '1994-01-01' + interval '1' year
+      )
+)
+  AND s_nationkey = n_nationkey AND n_name = 'CANADA'
+ORDER BY s_name
+"""
+
+# A report six subqueries deep, with functions, CASE, CAST and a window nested inside.
+_REPORT_6_LEVELS = """
+SELECT region, round(sum(coalesce(net, 0)), 2) AS total
+FROM (
+  SELECT region, net, rank() OVER (PARTITION BY region ORDER BY net DESC) AS r
+  FROM (
+    SELECT region, CASE WHEN status = 'F' THEN cast(amount AS decimal(18, 2)) ELSE 0 END AS net
+    FROM (
+      SELECT r_name AS region, status, amount
+      FROM (
+        SELECT o_custkey, o_orderstatus AS status, o_totalprice AS amount
+        FROM (
+          SELECT * FROM tpch.tiny.orders
+          WHERE o_custkey IN (
+            SELECT c_custkey FROM tpch.tiny.customer
+            WHERE c_acctbal > (SELECT avg(coalesce(c_acctbal, 0)) FROM tpch.tiny.customer)
+          )
+        ) l6
+      ) l5
+      JOIN tpch.tiny.customer ON c_custkey = o_custkey
+      JOIN tpch.tiny.nation ON n_nationkey = c_nationkey
+      JOIN tpch.tiny.region ON r_regionkey = n_regionkey
+    ) l4
+  ) l3
+) l2
+WHERE r <= 10
+GROUP BY region
+"""
+
+
+def test_too_long_sql_refused():
+    sql_guard.check_sql_bounds("x" * 1000, max_chars=1000, max_nesting=8)  # at the bound: read
+    with pytest.raises(ValueError, match="1001 characters long; this server reads 1000 at most"):
+        sql_guard.check_sql_bounds("x" * 1001, max_chars=1000, max_nesting=8)
+    with pytest.raises(sql_guard.SQLBoundError) as refused:
+        sql_guard.check_sql_bounds("x" * 1001, max_chars=1000, max_nesting=8)
+    assert refused.value.code == "sql_too_long"
+
+
+def test_nesting_past_the_bound_is_refused_with_its_code():
+    sql_guard.check_sql_bounds("SELECT " + "(" * 8 + "1" + ")" * 8, max_chars=1000, max_nesting=8)
+    with pytest.raises(sql_guard.SQLBoundError, match="more than 8 deep") as refused:
+        sql_guard.check_sql_bounds(
+            "SELECT " + "ARRAY[" * 9 + "1" + "]" * 9, max_chars=1000, max_nesting=8
+        )
+    assert refused.value.code == "sql_too_nested"
+    assert isinstance(refused.value, ValueError)
+    # round and square brackets count together
+    assert sql_guard.sql_nesting("SELECT ([([1])])") == 4
+    # the scan stops once past the bound
+    assert sql_guard.sql_nesting("(" * 1000, stop_above=8) == 9
+
+
+@pytest.mark.parametrize(
+    ("sql", "depth"),
+    [
+        ("SELECT '((((((((((((((((((((' FROM t", 0),
+        ("SELECT 'it''s [[[[[[[[[[[[[[[[[[' FROM t", 0),
+        ("SELECT ''''||'((((((((((((((((((((' FROM t", 0),
+        ('SELECT "a(((((((((((((((((((" FROM t', 0),
+        ('SELECT "a""[[[[[[[[[[[[[[[[[[[[" FROM t', 0),
+        ("SELECT 1 -- ((((((((((((((((((((\nFROM t", 0),
+        ("SELECT 1 -- ((((((((((((((((((((\r(1)", 1),
+        ("SELECT 1 /* [[[[[[[[[[[[[[[[[[[[ */ FROM t", 0),
+        ("SELECT 1 /* it's -- ( */ (1)", 1),
+        ("SELECT 1 -- /* \n(1)", 1),
+        ("SELECT f(g('((((((((((((((((((((')) FROM t", 2),
+        ("SELECT f('a)', g(1)) FROM t", 2),
+        ('SELECT "x)" FROM (SELECT 1 AS "x)")', 1),
+    ],
+)
+def test_brackets_in_literals_and_comments_do_not_count(sql, depth):
+    assert sql_guard.sql_nesting(sql) == depth
+    sql_guard.check_sql_bounds(sql, max_chars=1000, max_nesting=8)
+
+
+@pytest.mark.parametrize(
+    ("sql", "depth"),
+    [
+        ("SELECT ))))]]]] " + "(" * 9 + "1" + ")" * 9, 9),
+        ("SELECT (1)) ((1))", 2),
+        ("SELECT ]" * 20, 0),
+    ],
+)
+def test_unbalanced_closers_never_make_the_depth_negative(sql, depth):
+    assert sql_guard.sql_nesting(sql) == depth
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 'open ((((((((((((((((",
+        'SELECT "open ((((((((((((((((',
+        "SELECT 'open '' ((((((((((((((((",
+        "SELECT 1 /* open ((((((((((((((((",
+        "SELECT 1 -- ((((((((((((((((",
+    ],
+)
+def test_an_open_literal_or_comment_hides_the_rest_as_it_does_from_the_parser(sql):
+    assert sql_guard.sql_nesting(sql) == 0
+
+
+def test_realistic_deep_query_is_accepted():
+    from akko_mcp_trino.config import DEFAULT_MAX_SQL_CHARS, DEFAULT_MAX_SQL_NESTING
+
+    for sql in (_TPCH_Q20, _REPORT_6_LEVELS):
+        sql_guard.check_sql_bounds(
+            sql, max_chars=DEFAULT_MAX_SQL_CHARS, max_nesting=DEFAULT_MAX_SQL_NESTING
+        )
+        assert sql_guard.is_read_only_sql(sql, "tpch")
+    assert sql_guard.sql_nesting(_TPCH_Q20) == 3
+    assert sql_guard.sql_nesting(_REPORT_6_LEVELS) == 9
+
+
+def test_a_parsed_statement_is_read_by_every_reader_without_parsing_again(monkeypatch):
+    real, texts = sql_guard.sqlglot.parse, []
+
+    def counting(sql, *args, **kwargs):
+        texts.append(sql)
+        return real(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sql_guard.sqlglot, "parse", counting)
+    parsed = sql_guard.parse_once("  SELECT n.nope FROM tpch.tiny.nation n  ")
+    assert parsed.text == "SELECT n.nope FROM tpch.tiny.nation n"
+    assert texts == [], "nothing is parsed before it is read"
+    assert sql_guard.is_read_only_sql(parsed, "tpch")
+    assert sql_guard.referenced_tables(parsed) == ["tpch.tiny.nation"]
+    assert sql_guard.tables_for_column(parsed, "n.nope") == [("tpch", "tiny", "nation")]
+    assert texts == ["SELECT n.nope FROM tpch.tiny.nation n"]
+    # an EXPLAIN: the statement and the statement it explains, each parsed once
+    texts.clear()
+    explain = sql_guard.parse_once("EXPLAIN SELECT nope FROM tpch.tiny.nation")
+    assert sql_guard.is_read_only_sql(explain, "tpch", frozenset({"EXPLAIN"}))
+    assert sql_guard.referenced_tables(explain) == ["tpch.tiny.nation"]
+    assert sql_guard.tables_for_column(explain, "nope") == [("tpch", "tiny", "nation")]
+    assert sorted(texts) == [
+        "EXPLAIN SELECT nope FROM tpch.tiny.nation",
+        "SELECT nope FROM tpch.tiny.nation",
+    ]
+    # a statement that does not parse is parsed once, and each reader fails closed
+    texts.clear()
+    broken = sql_guard.parse_once("SELECT FROM WHERE (((")
+    assert not sql_guard.is_read_only_sql(broken)
+    assert sql_guard.referenced_tables(broken) == []
+    assert sql_guard.tables_for_column(broken, "x") == []
+    assert texts == ["SELECT FROM WHERE ((("]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "EXPLAIN EXPLAIN SELECT 1",
+        "EXPLAIN /* plan */ EXPLAIN SELECT 1",
+        "EXPLAIN (TYPE LOGICAL) EXPLAIN (TYPE IO) SELECT 1",
+        "EXPLAIN " * 2000 + "SELECT 1",
+    ],
+)
+def test_an_explain_of_an_explain_is_refused_in_linear_time(sql, monkeypatch):
+    """A chain of EXPLAIN was read once per link: 900 links took 3 s on one CPU, 2000
+    raised RecursionError. Now the statement and the one it explains are read, no more."""
+    real, texts = sql_guard.sqlglot.parse, []
+
+    def counting(text, *args, **kwargs):
+        texts.append(text)
+        return real(text, *args, **kwargs)
+
+    monkeypatch.setattr(sql_guard.sqlglot, "parse", counting)
+    parsed = sql_guard.parse_once(sql)
+    assert sql_guard.is_read_only_sql(parsed, "c", frozenset({"EXPLAIN"})) is False
+    assert sql_guard.referenced_tables(parsed) == []
+    assert sql_guard.tables_for_column(parsed, "x") == []
+    assert len(texts) <= 2

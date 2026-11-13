@@ -36,6 +36,8 @@ says why.
 | `TRINO_MAX_ROWS` | result cap, at least 1. The server reads one more row to say whether the answer was `truncated`. Also the size of one page of a listing | `100` |
 | `TRINO_QUERY_TIMEOUT_SECONDS` | time budget of one query: past it, the server cancels the query in Trino. `0` leaves the limit to Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | time budget of one tool call, every query of the call included. Past it, no query starts, the running query is cancelled and the agent gets an error. `0` sets no budget | `120` |
+| `MCP_MAX_SQL_CHARS` | longest statement `execute_query` and `explain_query` read, in characters, at least 1000. A longer one is refused (`invalid_argument`) before it is parsed | `100000` |
+| `MCP_MAX_SQL_NESTING` | deepest nesting of round and square brackets in a statement of `execute_query` and `explain_query`, at least 8. Brackets in a string, a quoted name or a comment do not count. A deeper statement is refused (`invalid_argument`) before it is parsed: the parser's time grows quickly with nesting | `12` |
 
 ## Listings and search
 

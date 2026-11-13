@@ -334,7 +334,7 @@ could not resolve.
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino refused the statement; fix that part of it |
 | `permission` | Trino or the identity provider refused the right; report it, do not retry |
-| `invalid_argument` | the server refused an argument (an identifier, an `offset`, a cursor, a search text out of bounds) before calling Trino |
+| `invalid_argument` | the server refused an argument (an identifier, an `offset`, a cursor, a search text out of bounds, a statement too long or too deeply nested) before calling Trino |
 | `read_only` | the statement writes and the server is read-only |
 | `time_budget` | the call ran out of its time budget; narrow the request |
 | `busy` | `profile_table` already runs as many calls as this server allows (`MCP_PROFILE_MAX_CONCURRENT`); call again in a few seconds, as its `hint` says |

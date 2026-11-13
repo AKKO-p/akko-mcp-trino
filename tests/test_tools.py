@@ -1769,3 +1769,132 @@ def test_an_empty_page_asks_no_catalogue(setups):
     out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
     assert out["tables"] == [] and "context_sources" not in out, "nothing was asked"
     assert provider.calls == []
+
+
+# ---- an agent's statement: bounded before it is parsed, then parsed once ----
+
+
+@pytest.fixture
+def parses(monkeypatch):
+    """The texts sqlglot parses, in order; the real parser still answers."""
+    from akko_mcp_trino import sql_guard
+
+    real, texts = sql_guard.sqlglot.parse, []
+
+    def counting(sql, *args, **kwargs):
+        texts.append(sql)
+        return real(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sql_guard.sqlglot, "parse", counting)
+    return texts
+
+
+def _deep_array(depth):
+    return "SELECT " + "ARRAY[" * depth + "1" + "]" * depth
+
+
+def test_nested_brackets_refused_before_parse(monkeypatch):
+    """Past MCP_MAX_SQL_NESTING (12 by default) the parser is never called, Trino is never
+    asked, and the audit keeps the refusal's code, never the statement."""
+    from akko_mcp_trino import sql_guard
+
+    called = []
+    monkeypatch.setattr(sql_guard.sqlglot, "parse", lambda *a, **k: called.append(a) or [])
+    mcp, client, audit = FakeMCP(), FakeClient(), InMemoryAudit()
+    register_query_tools(mcp, client, audit=audit)
+    for tool in ("execute_query", "explain_query"):
+        out = json.loads(in_request(lambda: mcp.tools[tool](sql=_deep_array(13))))
+        assert out["kind"] == "invalid_argument"
+        assert "more than 12 deep" in out["error"]
+    assert called == [] and client.calls == []
+    assert [(e.tool, e.ok, e.error) for e in audit.events] == [
+        ("execute_query", False, "sql_too_nested"),
+        ("explain_query", False, "sql_too_nested"),
+    ]
+    assert [e.call.sql_sha256 for e in audit.events] == ["", ""], "no digest of the text"
+    # at the bound, the statement is parsed (here by the fake, which finds no statement)
+    out = json.loads(mcp.tools["execute_query"](sql=_deep_array(12)))
+    assert out["kind"] == "read_only" and len(called) == 1
+
+
+def test_too_long_sql_refused_by_the_tools_before_parse(parses):
+    mcp, client, audit = FakeMCP(), FakeClient(), InMemoryAudit()
+    register_query_tools(mcp, client, audit=audit, max_sql_chars=1000)
+    long_sql = "SELECT 1 FROM t WHERE x IN (" + ", ".join(["1"] * 400) + ")"
+    for tool in ("execute_query", "explain_query"):
+        out = json.loads(mcp.tools[tool](sql=long_sql))
+        assert out["kind"] == "invalid_argument"
+        assert out["error"].startswith(f"The statement is {len(long_sql)} characters long")
+    assert parses == [] and client.calls == []
+    assert [e.error for e in audit.events] == ["sql_too_long", "sql_too_long"]
+
+
+def test_the_bounds_are_the_ones_given(parses):
+    mcp, client = FakeMCP(), FakeClient()
+    register_query_tools(mcp, client, max_sql_nesting=14)
+    mcp.tools["execute_query"](sql="SELECT " + "(" * 14 + "1" + ")" * 14)
+    assert len(parses) == 1 and len(client.calls) == 1
+    out = json.loads(mcp.tools["execute_query"](sql="SELECT " + "(" * 15 + "1" + ")" * 15))
+    assert "more than 14 deep" in out["error"] and len(parses) == 1
+
+
+def test_execute_query_parses_once(parses):
+    mcp, client = _registered()
+    mcp.tools["execute_query"]("SELECT a FROM c.s.t ;")
+    assert parses == ["SELECT a FROM c.s.t"] and client.calls[-1][0] == "SELECT a FROM c.s.t"
+    # writes allowed: the audit's table names read the one parse
+    parses.clear()
+    mcp, _ = _registered(read_only=False)
+    mcp.tools["execute_query"]("INSERT INTO c.s.t VALUES (1)")
+    assert parses == ["INSERT INTO c.s.t VALUES (1)"]
+    # an opened EXPLAIN: the statement and the one it explains, each once
+    parses.clear()
+    mcp, _ = _registered(extra_reads=frozenset({"EXPLAIN"}))
+    mcp.tools["execute_query"]("EXPLAIN SELECT a FROM c.s.t")
+    assert sorted(parses) == ["EXPLAIN SELECT a FROM c.s.t", "SELECT a FROM c.s.t"]
+    # Trino's unknown column: the advice reads the same tree
+    from tests.test_column_hint import _column, _tools
+
+    parses.clear()
+    out = json.loads(_tools(_column("nope"))["execute_query"](sql="SELECT nope FROM crm.accounts"))
+    assert out["hint"].startswith("Read the columns of crm.accounts")
+    assert parses == ["SELECT nope FROM crm.accounts"]
+
+
+def test_explain_query_parses_once(parses):
+    mcp, client = _registered(result={"columns": ["Valid"], "rows": [[True]], "row_count": 1})
+    assert json.loads(mcp.tools["explain_query"]("SELECT a FROM c.s.t;")) == {"valid": True}
+    assert parses == ["SELECT a FROM c.s.t"]
+    from tests.test_column_hint import _column, _tools
+
+    parses.clear()
+    out = json.loads(_tools(_column("nope"))["explain_query"](sql="SELECT nope FROM crm.accounts"))
+    assert out["hint"].startswith("Read the columns of crm.accounts")
+    assert parses == ["SELECT nope FROM crm.accounts"]
+
+
+def test_parse_bound_keeps_other_calls_responsive():
+    """A statement the parser would take minutes on is refused at once, and a call made at
+    the same time is served at once too: no thread is held by the parser."""
+    import threading
+
+    mcp, client = _registered(result={"columns": ["n"], "rows": [[1]], "row_count": 1})
+    answers = {}
+
+    def call(name, sql):
+        started = time.monotonic()
+        answers[name] = (json.loads(mcp.tools["execute_query"](sql)), time.monotonic() - started)
+
+    heavy = threading.Thread(target=call, args=("heavy", _deep_array(22)), daemon=True)
+    light = threading.Thread(target=call, args=("light", "SELECT 1"), daemon=True)
+    heavy.start()
+    light.start()
+    light.join(0.5)
+    heavy.join(0.5)
+    assert set(answers) == {"heavy", "light"}, "a call was still running after 0.5 s"
+    assert answers["light"][0]["rows"] == [[1]] and answers["light"][1] < 0.5
+    assert answers["heavy"][0]["kind"] == "invalid_argument" and answers["heavy"][1] < 0.5
+    # the deepest statement allowed is parsed within the same time
+    started = time.monotonic()
+    mcp.tools["execute_query"](_deep_array(12))
+    assert time.monotonic() - started < 0.5

@@ -94,6 +94,14 @@ DEFAULT_PROFILE_MAX_CONCURRENT = 4
 MAX_PROFILE_MAX_CONCURRENT = 64
 # What a client tag may hold: Trino splits the tags on commas.
 _CLIENT_TAG_RE = re.compile(r"[A-Za-z0-9_.:=/-]{1,100}")
+# The longest statement an agent may send, and the deepest its brackets may nest, both checked
+# before the statement is parsed, and the least each may be set to. The parser's time doubles
+# with each level of some brackets (a type name followed by a bracket, such as ARRAY[ or
+# ROW(): 12 levels take about 0.2 s on one CPU, 18 levels several seconds.
+DEFAULT_MAX_SQL_CHARS = 100000
+MIN_MAX_SQL_CHARS = 1000
+DEFAULT_MAX_SQL_NESTING = 12
+MIN_MAX_SQL_NESTING = 8
 # The least MCP_CONTEXT_RESERVE_SECONDS a server with a context provider accepts. Past its
 # deadline, the chain waits up to 0.25 s for a provider to hand back control (its
 # ``_GRACE_SECONDS``, which includes 0.1 s for a late read to end on its own, then 0.1 s for
@@ -241,6 +249,10 @@ class Config:
     # The most catalogs `list_catalogs` reads, past the row cap, before it pages them:
     # above it the tool answers an error, never a cut list.
     max_catalogs: int = DEFAULT_MAX_CATALOGS
+    # The longest statement execute_query and explain_query read, and the deepest its round
+    # and square brackets may nest; past either, the statement is refused before it is parsed.
+    max_sql_chars: int = DEFAULT_MAX_SQL_CHARS
+    max_sql_nesting: int = DEFAULT_MAX_SQL_NESTING
     # The names each list of a call's audit record keeps (its tables, the tables whose
     # description it served); the others are counted, once each, never written.
     audit_max_names: int = DEFAULT_AUDIT_MAX_NAMES
@@ -364,6 +376,16 @@ class Config:
             found.append(
                 f"MCP_DESCRIBE_SCHEMA_COLUMNS={self.describe_schema_columns}: "
                 "describe_schema must be allowed 1 column or more"
+            )
+        if self.max_sql_chars < MIN_MAX_SQL_CHARS:
+            found.append(
+                f"MCP_MAX_SQL_CHARS={self.max_sql_chars}: a statement must be allowed "
+                f"{MIN_MAX_SQL_CHARS} characters or more"
+            )
+        if self.max_sql_nesting < MIN_MAX_SQL_NESTING:
+            found.append(
+                f"MCP_MAX_SQL_NESTING={self.max_sql_nesting}: a statement must be allowed "
+                f"{MIN_MAX_SQL_NESTING} nested brackets or more"
             )
         if not 1 <= self.audit_max_names <= MAX_AUDIT_MAX_NAMES:
             found.append(
@@ -659,6 +681,10 @@ class Config:
             trino_client_cert=os.environ.get("TRINO_CLIENT_CERT", ""),
             trino_client_key=os.environ.get("TRINO_CLIENT_KEY", ""),
             max_catalogs=int(os.environ.get("MCP_MAX_CATALOGS", str(DEFAULT_MAX_CATALOGS))),
+            max_sql_chars=int(os.environ.get("MCP_MAX_SQL_CHARS", str(DEFAULT_MAX_SQL_CHARS))),
+            max_sql_nesting=int(
+                os.environ.get("MCP_MAX_SQL_NESTING", str(DEFAULT_MAX_SQL_NESTING))
+            ),
             audit_max_names=int(
                 os.environ.get("MCP_AUDIT_MAX_NAMES", str(DEFAULT_AUDIT_MAX_NAMES))
             ),

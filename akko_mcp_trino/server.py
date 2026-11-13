@@ -183,6 +183,8 @@ def build_server(
         profile_client_tag=config.profile_client_tag,
         profile_timeout_seconds=config.profile_timeout_seconds,
         profile_max_concurrent=config.profile_max_concurrent,
+        max_sql_chars=config.max_sql_chars,
+        max_sql_nesting=config.max_sql_nesting,
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds, config.audit_max_names)
     registrars = [r for ext in exts for r in ext.tool_registrars()]

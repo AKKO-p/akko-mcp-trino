@@ -99,7 +99,7 @@ Un collecteur qui attend du JSON pur doit retirer ce préfixe.
 | Champ | Sens |
 |---|---|
 | `request_id`, `tool`, `subject` | quel appel, quel tool, pour qui ; la ligne n'a aucun champ qui pourrait contenir le bearer ou le texte SQL |
-| `ok`, `error` | le résultat ; `error` est un code, jamais un message, parce qu'un message de Trino peut citer une valeur lue dans une ligne (`Cannot cast '<value>' to INT`) : le type et le nom de l'erreur de Trino pour une erreur Trino (`USER_ERROR:INVALID_CAST_ARGUMENT`), la classe de toute autre exception (`TimeoutError`, `CallTimeout` au-delà du budget de l'appel), le code qu'un tool donne à son propre refus (`read_only`, `invalid_argument`) ou un plugin avec `note(error=...)`, sinon `tool_error`. L'agent, lui, lit le message entier |
+| `ok`, `error` | le résultat ; `error` est un code, jamais un message, parce qu'un message de Trino peut citer une valeur lue dans une ligne (`Cannot cast '<value>' to INT`) : le type et le nom de l'erreur de Trino pour une erreur Trino (`USER_ERROR:INVALID_CAST_ARGUMENT`), la classe de toute autre exception (`TimeoutError`, `CallTimeout` au-delà du budget de l'appel), le code qu'un tool donne à son propre refus (`read_only`, `invalid_argument`, `sql_too_long`, `sql_too_nested`) ou un plugin avec `note(error=...)`, sinon `tool_error`. L'agent, lui, lit le message entier |
 | `duration_ms` | la durée de l'appel |
 
 Ce qu'a fait un appel (le SHA-256 de son SQL, les tables, les lignes, si elles ont été coupées) est

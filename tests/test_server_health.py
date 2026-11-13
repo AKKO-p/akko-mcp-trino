@@ -181,3 +181,31 @@ def test_the_names_an_audit_line_keeps_reach_the_tools_and_a_plugin(monkeypatch)
     built_in, plugin = (e.call for e in audit.events)
     assert (built_in.tables, built_in.tables_cut) == (["a.b.c"], 1)
     assert (plugin.tables, plugin.tables_cut) == (["p.q.r"], 2)
+
+
+def test_the_sql_bounds_reach_the_tools(monkeypatch):
+    """MCP_MAX_SQL_CHARS and MCP_MAX_SQL_NESTING set low: the built server's execute_query
+    refuses past them before Trino is asked."""
+    import json
+
+    asked = []
+
+    class _Trino:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query(self, sql, user=None, params=None, **keywords):
+            asked.append(sql)
+            return {"columns": ["c"], "rows": [[1]], "row_count": 1, "truncated": False}
+
+    monkeypatch.setattr("akko_mcp_trino.server.TrinoClient", _Trino)
+    mcp, _ = build_server(
+        replace(_CFG, max_sql_chars=1000, max_sql_nesting=8),
+        mcp_factory=lambda name, **_: FakeMCP(),
+    )
+    nested = json.loads(mcp.tools["execute_query"]("SELECT " + "(" * 9 + "1" + ")" * 9))
+    long = json.loads(mcp.tools["execute_query"]("SELECT 1" + " " * 1000 + "FROM c.s.t"))
+    assert "more than 8 deep" in nested["error"] and "reads 1000 at most" in long["error"]
+    assert asked == []
+    mcp.tools["execute_query"]("SELECT " + "(" * 8 + "1" + ")" * 8)
+    assert asked == ["SELECT " + "(" * 8 + "1" + ")" * 8]

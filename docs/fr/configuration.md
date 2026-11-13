@@ -36,6 +36,8 @@ serveur refuse de démarrer et dit pourquoi.
 | `TRINO_MAX_ROWS` | plafond de résultat, au moins 1. Le serveur lit une ligne de plus pour dire si la réponse a été coupée (`truncated`). C'est aussi la taille d'une page de liste | `100` |
 | `TRINO_QUERY_TIMEOUT_SECONDS` | budget de temps d'une requête : au-delà, le serveur annule la requête dans Trino. `0` laisse la limite à Trino | `60` |
 | `MCP_CALL_TIMEOUT_SECONDS` | budget de temps d'un appel de tool, toutes ses requêtes comprises. Au-delà, aucune requête ne démarre, la requête en cours est annulée et l'agent reçoit une erreur. `0` ne pose aucun budget | `120` |
+| `MCP_MAX_SQL_CHARS` | longueur maximale, en caractères, d'une instruction que lisent `execute_query` et `explain_query`, au moins 1000. Une instruction plus longue est refusée (`invalid_argument`) avant d'être analysée | `100000` |
+| `MCP_MAX_SQL_NESTING` | profondeur maximale des parenthèses et des crochets imbriqués dans une instruction de `execute_query` et `explain_query`, au moins 8. Ceux d'une chaîne, d'un nom entre guillemets ou d'un commentaire ne comptent pas. Une instruction plus profonde est refusée (`invalid_argument`) avant d'être analysée : le temps d'analyse croît vite avec l'imbrication | `12` |
 
 ## Listes et recherche
 

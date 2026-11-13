@@ -63,11 +63,15 @@ Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed in
   column mask. They are refused unless the administrator names them in
   `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`,
   `SHOW ROLES`, `SHOW SESSION`).
+- **A statement is bounded before it is parsed.** One longer than `MCP_MAX_SQL_CHARS` characters
+  (100000 by default), or whose brackets nest deeper than `MCP_MAX_SQL_NESTING` (12 by default),
+  is refused before the parser sees it, so deeply nested SQL no longer ties up the server. A
+  statement within the bounds is parsed once, and every check reads that one tree.
 - **Writes are refused anywhere in the tree.** The statement is parsed into an AST. It is refused
   if it holds more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`,
   `DROP`, `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including inside a CTE,
   a subquery, or the statement an `EXPLAIN` explains. `EXPLAIN ANALYZE` is refused, because it
-  runs what it explains.
+  runs what it explains, and so is an `EXPLAIN` of an `EXPLAIN`.
 - **Table functions and `system` are refused**, and so is any `SHOW` that names `system`. The
   metadata tools refuse `system` as a catalog name too, and `list_catalogs` does not list it.
 - **A name without a catalog** is read in the session catalog (`TRINO_CATALOG`, `system` by

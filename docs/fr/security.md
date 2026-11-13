@@ -66,11 +66,17 @@ Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans l
   d'un filtre de lignes ou d'un masque de colonne. Elles sont refusées, sauf si l'administrateur
   les nomme dans `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`,
   `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`).
+- **Une instruction est bornée avant d'être analysée.** Une instruction de plus de
+  `MCP_MAX_SQL_CHARS` caractères (100000 par défaut), ou dont les parenthèses et crochets
+  s'imbriquent sur plus de `MCP_MAX_SQL_NESTING` niveaux (12 par défaut), est refusée avant que
+  l'analyseur la voie : un SQL très imbriqué n'occupe plus le serveur. Une instruction dans les
+  bornes est analysée une fois, et chaque contrôle lit cet arbre unique.
 - **Les écritures sont refusées n'importe où dans l'arbre.** L'instruction est analysée en arbre.
   Elle est refusée si elle contient plus d'une instruction, ou si un `INSERT`, `UPDATE`, `DELETE`,
   `MERGE`, `CREATE`, `DROP`, `ALTER`, `GRANT`, `CALL` ou `SET` apparaît n'importe où dans l'arbre,
   y compris dans une CTE, une sous-requête ou l'instruction qu'un `EXPLAIN` explique.
-  `EXPLAIN ANALYZE` est refusé, parce qu'il exécute ce qu'il explique.
+  `EXPLAIN ANALYZE` est refusé, parce qu'il exécute ce qu'il explique, de même qu'un `EXPLAIN`
+  d'un `EXPLAIN`.
 - **Les table functions et `system` sont refusés**, de même que tout `SHOW` qui nomme `system`.
   Les tools de métadonnées refusent aussi `system` comme nom de catalog, et `list_catalogs` ne le
   liste pas.

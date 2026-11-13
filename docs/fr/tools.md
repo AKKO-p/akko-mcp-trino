@@ -348,7 +348,7 @@ Trino n'a pas su résoudre, quand Trino le nomme.
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino a refusé l'instruction : corriger cette partie |
 | `permission` | Trino ou l'identity provider a refusé le droit : le rapporter, ne pas réessayer |
-| `invalid_argument` | le serveur a refusé un argument (un identifiant, un `offset`, un curseur, un texte de recherche hors limites) avant d'appeler Trino |
+| `invalid_argument` | le serveur a refusé un argument (un identifiant, un `offset`, un curseur, un texte de recherche hors limites, une instruction trop longue ou trop imbriquée) avant d'appeler Trino |
 | `read_only` | l'instruction écrit et le serveur est en lecture seule |
 | `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
 | `busy` | `profile_table` exécute déjà autant d'appels que ce serveur le permet (`MCP_PROFILE_MAX_CONCURRENT`) : rappeler dans quelques secondes, comme le dit son `hint` |

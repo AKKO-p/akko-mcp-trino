@@ -123,6 +123,8 @@ def check_config(config: Config, *, strict: bool = False) -> int:
             if config.call_timeout_seconds > 0
             else "none"
         ),
+        f"agent SQL: up to {config.max_sql_chars} characters, brackets nested "
+        f"{config.max_sql_nesting} deep at most, refused past either before it is parsed",
         f"listings: {config.max_rows} names a page; list_catalogs reads up to "
         f"{config.max_catalogs} catalogs",
         f"describe_schema: up to {config.describe_schema_tables} tables a page "

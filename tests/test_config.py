@@ -76,6 +76,8 @@ _ENV_KEYS = [
     "MCP_PROFILE_TYPE_CHARS",
     "MCP_SEARCH_MAX_THREADS",
     "MCP_VISIBILITY_ENABLED",
+    "MCP_MAX_SQL_CHARS",
+    "MCP_MAX_SQL_NESTING",
 ]
 
 
@@ -877,3 +879,31 @@ def test_names_kept_outside_1_to_100000_refuse_to_start(monkeypatch, count):
     assert Config.from_env().problems() == [
         f"MCP_AUDIT_MAX_NAMES={count}: an audit line keeps 1 to 100000 names a list"
     ]
+
+
+def test_bounds_settings_validated_and_in_check(monkeypatch, capsys):
+    """MCP_MAX_SQL_CHARS (100000, 1000 at least) and MCP_MAX_SQL_NESTING (12, 8 at least):
+    read from the environment, refused below their least, printed by --check."""
+    from akko_mcp_trino.__main__ import check_config
+
+    c = Config.from_env()
+    assert (c.max_sql_chars, c.max_sql_nesting) == (100000, 12)
+    assert not [p for p in c.problems() if "MCP_MAX_SQL" in p]
+    monkeypatch.setenv("MCP_MAX_SQL_CHARS", "1000")
+    monkeypatch.setenv("MCP_MAX_SQL_NESTING", "8")
+    c = Config.from_env()
+    assert (c.max_sql_chars, c.max_sql_nesting) == (1000, 8)
+    assert not [p for p in c.problems() if "MCP_MAX_SQL" in p]
+    monkeypatch.setenv("MCP_MAX_SQL_CHARS", "999")
+    monkeypatch.setenv("MCP_MAX_SQL_NESTING", "7")
+    assert [p for p in Config.from_env().problems() if "MCP_MAX_SQL" in p] == [
+        "MCP_MAX_SQL_CHARS=999: a statement must be allowed 1000 characters or more",
+        "MCP_MAX_SQL_NESTING=7: a statement must be allowed 8 nested brackets or more",
+    ]
+    monkeypatch.setenv("MCP_MAX_SQL_CHARS", "50000")
+    monkeypatch.setenv("MCP_MAX_SQL_NESTING", "10")
+    check_config(Config.from_env())
+    assert (
+        "agent SQL: up to 50000 characters, brackets nested 10 deep at most, refused past "
+        "either before it is parsed"
+    ) in capsys.readouterr().out

@@ -36,7 +36,7 @@ import re
 import threading
 import time
 import uuid
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence, Union
 
 from mcp.types import ToolAnnotations
 
@@ -58,6 +58,8 @@ from .config import (
     DEFAULT_DESCRIBE_SCHEMA_TABLES,
     DEFAULT_MAX_CATALOGS,
     DEFAULT_MAX_ROWS,
+    DEFAULT_MAX_SQL_CHARS,
+    DEFAULT_MAX_SQL_NESTING,
     DEFAULT_PROFILE_CLIENT_TAG,
     DEFAULT_PROFILE_DESCRIBE_ROWS,
     DEFAULT_PROFILE_MAX_COLUMNS,
@@ -90,9 +92,13 @@ from .search import search
 from .sql_guard import (
     JDBC_COLUMNS,
     TABLE_COMMENTS,
+    ParsedSQL,
+    SQLBoundError,
+    check_sql_bounds,
     governed_catalog,
     is_read_only_sql,
     normalize_sql,
+    parse_once,
     referenced_tables,
     sql_literal,
     tables_for_column,
@@ -312,11 +318,12 @@ def table_name(parts: tuple[str, ...]) -> str:
 
 def error_reply(
     exc: Exception,
-    sql: str = "",
+    sql: Union[str, ParsedSQL] = "",
     visible: Optional[Callable[[tuple[str, ...]], bool]] = None,
 ) -> str:
     """The error for the agent, whole, with its kind (see ``akko_mcp_trino.errors``); for the
-    audit, its code only. A column of ``sql`` Trino could not find (``COLUMN_NOT_FOUND``,
+    audit, its code only. A column of ``sql`` (a ``ParsedSQL`` is read, not parsed again)
+    Trino could not find (``COLUMN_NOT_FOUND``,
     named) adds a ``hint`` naming the tables of the agent's own statement it may belong to,
     never a name from Trino, and only those ``visible`` says the caller sees, at most
     ``MAX_ADVICE_TABLES`` of them; an ambiguous or unnamed column has none, and neither has
@@ -791,6 +798,8 @@ def register_query_tools(
     profile_client_tag: str = DEFAULT_PROFILE_CLIENT_TAG,
     profile_timeout_seconds: float = 0.0,
     profile_max_concurrent: int = DEFAULT_PROFILE_MAX_CONCURRENT,
+    max_sql_chars: int = DEFAULT_MAX_SQL_CHARS,
+    max_sql_nesting: int = DEFAULT_MAX_SQL_NESTING,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -830,7 +839,10 @@ def register_query_tools(
     the query's and the call's budgets; it runs `profile_max_concurrent` calls at once at
     most, and answers ``busy`` past them (`MCP_PROFILE_MODES`, `MCP_PROFILE_VALUE_CHARS`,
     `MCP_PROFILE_DESCRIBE_ROWS`, `MCP_PROFILE_CLIENT_TAG`, `MCP_PROFILE_TIMEOUT_SECONDS`,
-    `MCP_PROFILE_MAX_CONCURRENT`)."""
+    `MCP_PROFILE_MAX_CONCURRENT`). `execute_query` and `explain_query` refuse a statement
+    longer than `max_sql_chars` characters or whose brackets nest deeper than
+    `max_sql_nesting` before parsing it (`MCP_MAX_SQL_CHARS`, `MCP_MAX_SQL_NESTING`), then
+    parse it once."""
     tools = ToolContext(
         mcp,
         client,
@@ -1422,40 +1434,55 @@ def register_query_tools(
 
     show_plan = "EXPLAIN" in extra_reads
 
-    def explain_query(sql: str) -> str:
+    def agent_sql(sql: str) -> Union[ParsedSQL, str]:
+        """The agent's statement, normalized and parsed once; or, for one past the bounds,
+        the refusal, sent before any parse and audited by its code, never its text."""
         try:
-            sql = normalize_sql(sql)
-            if not is_read_only_sql(sql, session_catalog, extra_reads):
+            check_sql_bounds(sql, max_chars=max_sql_chars, max_nesting=max_sql_nesting)
+        except SQLBoundError as e:
+            return refusal_reply(e.code, str(e))
+        return parse_once(normalize_sql(sql))
+
+    def explain_query(sql: str) -> str:
+        parsed = agent_sql(sql)
+        if isinstance(parsed, str):
+            return parsed
+        sql = parsed.text
+        try:
+            if not is_read_only_sql(parsed, session_catalog, extra_reads):
                 return refusal_reply(
                     "read_only", "Only a read-only statement can be explained", kind=READ_ONLY
                 )
             # Without EXPLAIN opened, Trino only analyzes the statement and prints no plan.
             statement = f"EXPLAIN {sql}" if show_plan else f"EXPLAIN (TYPE VALIDATE) {sql}"
-            note(sql=statement, tables=referenced_tables(sql))
+            note(sql=statement, tables=referenced_tables(parsed))
             res = run(statement)
             note(rows=len(res["rows"]), truncated=was_cut(res))
             if not show_plan:
                 return dumps({"valid": True})
             return dumps({"plan": "\n".join(str(r[0]) for r in res["rows"])})
         except Exception as e:  # noqa: BLE001
-            return error_reply(e, sql, advice_visible)
+            return error_reply(e, parsed, advice_visible)
 
     explain_query.__doc__ = _EXPLAIN_PLAN_DOC if show_plan else _EXPLAIN_VALIDATE_DOC
     tool("Explain query")(explain_query)
 
     def execute_query(sql: str, max_rows: int = 0) -> str:
-        sql = normalize_sql(sql)
-        if read_only and not is_read_only_sql(sql, session_catalog, extra_reads):
+        parsed = agent_sql(sql)
+        if isinstance(parsed, str):
+            return parsed
+        sql = parsed.text
+        if read_only and not is_read_only_sql(parsed, session_catalog, extra_reads):
             return refusal_reply(
                 "read_only",
                 f"Read-only mode: only {_allowed_reads(extra_reads)} are allowed",
                 kind=READ_ONLY,
             )
-        note(sql=sql, tables=referenced_tables(sql))
+        note(sql=sql, tables=referenced_tables(parsed))
         try:
             res = run(sql, max_rows=int(max_rows))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
-            return error_reply(e, sql, advice_visible)
+            return error_reply(e, parsed, advice_visible)
         note(rows=res["row_count"], truncated=bool(res.get("truncated", False)))
         return dumps(res)
 
