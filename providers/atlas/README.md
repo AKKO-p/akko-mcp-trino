@@ -63,7 +63,7 @@ secret.
 | `ATLAS_TIMEOUT_SECONDS` | timeout of one request to Atlas; with several addresses, see below how it relates to `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | time to open a connection to one address, below `ATLAS_TIMEOUT_SECONDS`, so that a silent address gives way to the next one within the call | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | glossary term reads sent at once, from 1 to 32; with Kerberos, also the negotiations run at once | `4` |
-| `ATLAS_MAX_RESPONSE_BYTES` | longest body of one Atlas answer once decoded, at least `1048576`; the bound is per read, not per call, and a call may hold several reads at once (bulk reads, then up to `ATLAS_MAX_CONCURRENT_REQUESTS` term reads); the read stops past it, with or without `Content-Length`, and the call is `unavailable` for itself alone: no other address is tried and no retry pause opens. One warning per call says to lower `MCP_CONTEXT_BATCH` | `67108864` |
+| `ATLAS_MAX_RESPONSE_BYTES` | longest body of one Atlas answer once decoded, at least `1048576`; the bound is per read, not per call, and a call may hold several reads at once (bulk reads, then up to `ATLAS_MAX_CONCURRENT_REQUESTS` term reads); the read stops past it, with or without `Content-Length`, and the call is `unavailable` for itself alone: no other address is tried and no retry pause opens. One warning per call says to lower `MCP_CONTEXT_BATCH`. The bound is on the bytes of the answer, not on the memory of the decoded JSON, which can take many times more | `67108864` |
 
 A secret given as a file (`*_FILE`) is read again when the file changes.
 
