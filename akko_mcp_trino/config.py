@@ -103,6 +103,9 @@ DEFAULT_MAX_SQL_CHARS = 100000
 MIN_MAX_SQL_CHARS = 1000
 DEFAULT_MAX_SQL_NESTING = 32
 MIN_MAX_SQL_NESTING = 8
+# The longest parse deadline: a wait the pool can always make (a queue's timeout overflows past
+# about 9e9 s), and far past any statement worth parsing.
+MAX_SQL_PARSE_SECONDS = 300
 # What an agent is served at most: the JSON of one execute_query answer, one cell of it, and
 # one comment Trino holds on a table or a column (data is cut, never refused; see tools.py).
 DEFAULT_MAX_RESULT_BYTES = 1048576
@@ -416,10 +419,11 @@ class Config:
         ):
             if count < 1:
                 found.append(f"{name}={count}: a text must be allowed 1 character or more")
-        if not self.sql_parse_seconds > 0:
+        # NaN fails both sides; infinity and any too large a wait, the upper one.
+        if not 0 < self.sql_parse_seconds <= MAX_SQL_PARSE_SECONDS:
             found.append(
-                f"MCP_SQL_PARSE_SECONDS={self.sql_parse_seconds:g}: the parse of a statement "
-                "must be given more than 0 seconds"
+                "MCP_SQL_PARSE_SECONDS: the parse of a statement must be given more than 0 "
+                f"seconds and {MAX_SQL_PARSE_SECONDS} at most"
             )
         if self.sql_parse_workers < 1:
             found.append(

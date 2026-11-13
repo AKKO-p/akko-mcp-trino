@@ -928,9 +928,19 @@ def test_parse_worker_settings_validated_and_in_check(monkeypatch, capsys):
     assert "parsed by 1 worker processes within 0.5 s" in capsys.readouterr().out
     monkeypatch.setenv("MCP_SQL_PARSE_SECONDS", "0")
     monkeypatch.setenv("MCP_SQL_PARSE_WORKERS", "0")
+    seconds = (
+        "MCP_SQL_PARSE_SECONDS: the parse of a statement must be given more than 0 seconds "
+        "and 300 at most"
+    )
     assert [p for p in Config.from_env().problems() if "MCP_SQL_PARSE" in p] == [
-        "MCP_SQL_PARSE_SECONDS=0: the parse of a statement must be given more than 0 seconds",
+        seconds,
         "MCP_SQL_PARSE_WORKERS=0: statements are parsed by 1 worker process or more",
     ]
-    monkeypatch.setenv("MCP_SQL_PARSE_SECONDS", "-1")
-    assert any("MCP_SQL_PARSE_SECONDS=-1" in p for p in Config.from_env().problems())
+    monkeypatch.setenv("MCP_SQL_PARSE_WORKERS", "1")
+    # A deadline the pool cannot wait for (a queue's timeout overflows past about 9e9 s) is
+    # refused at start, as is one that is not a number of seconds; the message is fixed.
+    for value in ("-1", "inf", "nan", "1e10", "300.5"):
+        monkeypatch.setenv("MCP_SQL_PARSE_SECONDS", value)
+        assert [p for p in Config.from_env().problems() if "MCP_SQL_PARSE" in p] == [seconds]
+    monkeypatch.setenv("MCP_SQL_PARSE_SECONDS", "300")
+    assert not [p for p in Config.from_env().problems() if "MCP_SQL_PARSE" in p]
