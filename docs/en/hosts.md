@@ -13,7 +13,7 @@ agents uses the Mistral Agents API. The hosts follow one of three paths:
 | [2. Your own Trino, from your workstation](#2-your-own-trino-from-your-workstation-stdio-and-oauth2) | stdio, the host starts the server | you, signed in by Trino's own browser login (`oauth2`) | one person, with a Trino that uses OAuth2 |
 | [3. A shared server for a team](#3-a-shared-server-for-a-team-streamable-http-and-a-token-per-user) | streamable HTTP over HTTPS | each user, from their own bearer token (`jwt`, the default) | a team, one server |
 
-**Versions.** The commands on this page pin 0.8.0, the current release, which lists nine tools.
+**Versions.** The commands on this page pin 0.8.1, the current release, which lists nine tools.
 
 **Find your host.**
 
@@ -204,7 +204,7 @@ In a Claude Code session, `/mcp` shows the server's status. In Cursor, the serve
 **Customize**, with its tools under *Available Tools*. In VS Code, run the command
 **MCP: List Servers**.
 
-With 0.8.0, the release pinned on this page, you should see nine tools: `search_columns`,
+With 0.8.1, the release pinned on this page, you should see nine tools: `search_columns`,
 `list_catalogs`, `list_schemas`, `list_tables`, `describe_schema`, `describe_table`,
 `profile_table`, `explain_query` and `execute_query`. Then ask the two questions from the
 [quickstart](quickstart.md#ask-a-question).
@@ -237,7 +237,7 @@ For **Claude Desktop**, use the entry below without `"type": "stdio"`
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.8.0"
+        "akko-mcp-trino==0.8.1"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -291,7 +291,7 @@ network would let anyone query Trino through it. Never turn token verification o
         "-e", "TRINO_CATALOG=iceberg",
         "-e", "MCP_AUTH_ENABLED=false",
         "-e", "MCP_AUTH_REQUIRED=false",
-        "akkoai/akko-mcp-trino:0.8.0"
+        "akkoai/akko-mcp-trino:0.8.1"
       ]
     }
   }
@@ -425,7 +425,7 @@ and Cursor:
     "trino": {
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.8.0"
+        "akko-mcp-trino==0.8.1"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -472,7 +472,7 @@ claude mcp add \
   --env TRINO_TOKEN_EXCHANGE_AUDIENCE=trino \
   --env "MCP_USER_TOKEN=$MCP_USER_TOKEN" \
   --transport stdio trino \
-  -- uvx akko-mcp-trino==0.8.0
+  -- uvx akko-mcp-trino==0.8.1
 ```
 
 `claude mcp list` then shows `✔ Connected` once the server answers. As in path 1, Claude Code
@@ -503,7 +503,7 @@ neither ([`examples/vscode-mcp-stdio.json`](../../examples/vscode-mcp-stdio.json
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.8.0"
+        "akko-mcp-trino==0.8.1"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
@@ -649,7 +649,7 @@ package: run it from a clone of this repository, with Python 3.12 or later.
 git clone https://github.com/AKKO-p/akko-mcp-trino.git
 cd akko-mcp-trino
 python3 -m venv .venv && . .venv/bin/activate
-pip install akko-mcp-trino==0.8.0
+pip install akko-mcp-trino==0.8.1
 python3 examples/check_host_config.py ~/.cursor/mcp.json --search email --describe demo.crm.customers
 ```
 

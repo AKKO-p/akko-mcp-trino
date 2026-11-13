@@ -7,7 +7,7 @@
 | [`cursor-oauth2.json`](cursor-oauth2.json), [`claude-desktop-oauth2.json`](claude-desktop-oauth2.json) | the same hosts launching the server over stdio, signed in by Trino's own browser login (`oauth2`) |
 | [`vscode-mcp.json`](vscode-mcp.json), [`vscode-mcp-stdio.json`](vscode-mcp-stdio.json) | VS Code's `.vscode/mcp.json`, over HTTP and over stdio; the token and the client secret are asked through `inputs` and kept out of the file |
 | [`check_host_config.py`](check_host_config.py) | checks one of these files without the host: starts or reaches the server as the host would, lists the tools, calls `search_columns`, and `describe_table` with `--describe` |
-| [`mcp-stdio.json`](mcp-stdio.json) | Claude Desktop or Cursor launching the server over stdio (`uvx akko-mcp-trino==0.8.0`), the user's token in `MCP_USER_TOKEN` |
+| [`mcp-stdio.json`](mcp-stdio.json) | Claude Desktop or Cursor launching the server over stdio (`uvx akko-mcp-trino==0.8.1`), the user's token in `MCP_USER_TOKEN` |
 | [`agent.py`](agent.py) | a complete agent on any OpenAI-compatible model (Mistral, through La Plateforme, OpenRouter or LiteLLM; or any other provider), driving the MCP tools with the user's token: `search_columns` to find where the data lives, `describe_schema` to learn it, `execute_query` to read it |
 | [`mistral_agents.py`](mistral_agents.py) | an agent on Mistral's Agents API with the official `mistralai` SDK, whose MCP client runs in your process with the user's token |
 

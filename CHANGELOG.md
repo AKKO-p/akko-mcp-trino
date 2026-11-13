@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.1] - 2026-11-13
 
 ### Security
 - Deeply nested or very long SQL is refused before it is parsed, so it no longer ties up the server: `execute_query` and `explain_query` refuse a statement longer than `MCP_MAX_SQL_CHARS` characters (100000 by default, 1000 at least) or whose round and square brackets nest deeper than `MCP_MAX_SQL_NESTING` (32 by default, 8 at least; brackets in a string, a quoted name or a comment do not count), with `"kind": "invalid_argument"`, before Trino is asked anything. The audit line notes `sql_too_long` or `sql_too_nested`, never the text.
@@ -21,6 +21,9 @@ All notable changes to this project are documented here. The format follows
 - Each answer is sent once. A reply no longer repeats its JSON in `structuredContent`, and `tools/list` no longer declares an `outputSchema` for the built-in tools; the text of the reply (`content[0].text`) is unchanged, byte for byte. A reply was about twice the size of its answer, so the bytes on the wire now stay within `MCP_MAX_RESULT_BYTES` as documented. A tool registered with `tools.tool()` answers once, like the built-in tools; a tool added with `mcp.tool()` or `mcp.add_tool()` keeps the SDK's default and may pass `structured_output=False`.
 - The design notes state the principle "One MCP server per job": the agent plugs in this server and a data catalog's own MCP server side by side, this server never calls another MCP server, and a catalog adapter stays thin, optional and read-only, with Trino first and the full Trino name in every answer. The answer to "What if the data catalog already has its own MCP server?" says so, in English and in French.
 - The `atlas` extra installs the Atlas provider without the Kerberos bindings, so it needs no compiler; the new `atlas-kerberos` extra adds them (`pip install "akko-mcp-trino[atlas-kerberos]"`, which builds `gssapi` and `krb5` and needs a C compiler and the MIT Kerberos headers). `ATLAS_AUTH=kerberos` without the bindings stops the server at start with `ATLAS_AUTH=kerberos needs the Kerberos bindings: install akko-mcp-trino[atlas-kerberos]`. The container image still carries the bindings.
+- `akko-mcp-trino-atlas` 0.8.1 needs `akko-mcp-trino` 0.8.1 or later: it signals an answer that is too large with `ProviderAnswerTooLarge`, which 0.8.0 does not have.
+- The Helm chart 0.3.1 runs the image 0.8.1 by default (`appVersion`).
+- The host pages, `DOCKERHUB.md`, the examples and the Helm checks of `integration/helm/` pin 0.8.1.
 
 ## [0.8.0] - 2026-11-12
 
