@@ -75,7 +75,8 @@ Ce module ajoute à la ligne d'audit ce que l'appel a fait, après les champs du
 ordre : `request_id`, `tool`, `subject`, `token_id` (le `jti` du token, jamais le token), `ok`,
 `error`, `sql_sha256`, `tables`, `duration_ms`, `rows`, `truncated`, `metadata_served` (les tables
 dont la description de catalogue de données est parvenue à l'appelant). Le texte SQL n'a toujours
-aucun champ.
+aucun champ. Quand une réponse a été coupée, `truncated_reason` (`rows` ou `bytes`) suit
+`metadata_served` ; il est absent sinon.
 
 `sql_sha256` est le SHA-256 de l'instruction envoyée à Trino pour l'appelant. Un tool qui en envoie
 plusieurs garde la dernière qu'il a notée, celle qui a répondu à l'agent (l'agrégat de

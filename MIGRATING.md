@@ -1,5 +1,22 @@
 # Migrating
 
+## From 0.8.0 to 0.8.1
+
+Nothing is removed or renamed in the answers of the tools; some answers are now shorter.
+
+- **Big results.** An `execute_query` answer holds at most `MCP_MAX_RESULT_BYTES` bytes of JSON
+  (1 MiB by default), and a cell at most `MCP_MAX_CELL_CHARS` characters (4000 by default). A
+  client that relied on a long text, a large binary value or a big array in one cell now reads
+  it cut, and the new key `cut_columns` names the column; one that read very large results now
+  gets the first rows, `truncated` true and the new key `truncated_reason` set to `"bytes"`
+  (`"rows"` when the row cap cut it). Select fewer columns or shorter values, or raise the
+  settings, to read more.
+- **Long comments.** A comment Trino holds on a table or a column is cut at `MCP_COMMENT_CHARS`
+  characters (1000 by default) and cleaned of control, bidirectional and zero-width characters.
+  The entry says `"cut": ["comment"]` (`describe_table`: `comments_cut` lists the columns). A
+  client that relied on the raw text of a very long comment, or on control characters in it,
+  reads the cleaned and cut one.
+
 ## From 0.7 to 0.8
 
 Nothing is removed or renamed in the answers of the tools.

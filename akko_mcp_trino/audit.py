@@ -134,6 +134,8 @@ class ToolCall:
     max_names: int = DEFAULT_AUDIT_MAX_NAMES
     tables_cut: int = 0
     metadata_served_cut: int = 0
+    # Why an answer was cut, when it was: "rows" (the row cap) or "bytes" (the answer's size).
+    truncated_reason: str = ""
     # Every name noted, by list: kept or counted once each, at a constant cost.
     _seen: dict[str, set[str]] = field(default_factory=dict, init=False, repr=False, compare=False)
 
@@ -215,6 +217,7 @@ def note(
     tables: Iterable[str] = (),
     rows: Optional[int] = None,
     truncated: Optional[bool] = None,
+    truncated_reason: Optional[str] = None,
     metadata_served: Iterable[str] = (),
     error: Optional[str] = None,
 ) -> None:
@@ -224,7 +227,8 @@ def note(
     SHA-256 is kept); ``tables`` the tables it names or the call is about (each list keeps
     the call's ``max_names`` names, and counts the others in ``tables_cut`` and
     ``metadata_served_cut``);
-    ``rows`` the rows or items returned; ``truncated`` whether they were cut;
+    ``rows`` the rows or items returned; ``truncated`` whether they were cut and
+    ``truncated_reason`` why (``rows`` or ``bytes``; no data, no statement);
     ``metadata_served`` the tables an extension served descriptions of;
     ``error`` the code of the failure the tool returns, never its message.
     """
@@ -238,6 +242,8 @@ def note(
         call.rows = rows
     if truncated is not None:
         call.truncated = truncated
+    if truncated_reason is not None:
+        call.truncated_reason = truncated_reason
     _add(call, "metadata_served", metadata_served)
     if error is not None:
         call.error = error

@@ -80,6 +80,15 @@ Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed in
   The remaining risk: an authenticated caller can keep one worker busy for the deadline at a
   time, so as many callers as there are workers can delay the others; per-user quotas are
   planned.
+- **What an agent reads is bounded, and a comment is untrusted text.** An `execute_query` answer
+  holds at most `MCP_MAX_RESULT_BYTES` bytes of JSON (1 MiB by default) and a cell at most
+  `MCP_MAX_CELL_CHARS` characters (4000 by default), whatever type it has, so one huge cell or a
+  wide result cannot flood an agent's context; the answer says what it cut (`truncated_reason`,
+  `cut_columns`). A comment Trino holds on a table or a column, in `describe_table`,
+  `describe_schema` and `search_columns`, is cleaned of control, bidirectional and zero-width
+  characters and cut at `MCP_COMMENT_CHARS` characters (1000 by default), as catalog text is, and
+  the entry says when it was cut. Comments stay data: the descriptions of the tools tell the model
+  never to follow them as instructions.
 - **Writes are refused anywhere in the tree.** The statement is parsed into an AST. It is refused
   if it holds more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`,
   `DROP`, `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including inside a CTE,

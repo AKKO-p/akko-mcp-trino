@@ -103,6 +103,12 @@ DEFAULT_MAX_SQL_CHARS = 100000
 MIN_MAX_SQL_CHARS = 1000
 DEFAULT_MAX_SQL_NESTING = 32
 MIN_MAX_SQL_NESTING = 8
+# What an agent is served at most: the JSON of one execute_query answer, one cell of it, and
+# one comment Trino holds on a table or a column (data is cut, never refused; see tools.py).
+DEFAULT_MAX_RESULT_BYTES = 1048576
+MIN_MAX_RESULT_BYTES = 1000
+DEFAULT_MAX_CELL_CHARS = 4000
+DEFAULT_COMMENT_CHARS = 1000
 # The least MCP_CONTEXT_RESERVE_SECONDS a server with a context provider accepts. Past its
 # deadline, the chain waits up to 0.25 s for a provider to hand back control (its
 # ``_GRACE_SECONDS``, which includes 0.1 s for a late read to end on its own, then 0.1 s for
@@ -254,6 +260,12 @@ class Config:
     # and square brackets may nest; past either, the statement is refused before it is parsed.
     max_sql_chars: int = DEFAULT_MAX_SQL_CHARS
     max_sql_nesting: int = DEFAULT_MAX_SQL_NESTING
+    # The most JSON bytes one execute_query answer holds, the most characters of one of its
+    # cells, and of one Trino comment on a table or a column (describe_table, describe_schema,
+    # search_columns): past them, the rows, the cell or the comment are cut, and the answer says so.
+    max_result_bytes: int = DEFAULT_MAX_RESULT_BYTES
+    max_cell_chars: int = DEFAULT_MAX_CELL_CHARS
+    comment_chars: int = DEFAULT_COMMENT_CHARS
     # The statements of execute_query and explain_query are parsed in this many worker
     # processes, each within this many seconds; past it, the worker is killed and the call
     # refused, and so is a call that finds no worker free within it.
@@ -393,6 +405,17 @@ class Config:
                 f"MCP_MAX_SQL_NESTING={self.max_sql_nesting}: a statement must be allowed "
                 f"{MIN_MAX_SQL_NESTING} nested brackets or more"
             )
+        if self.max_result_bytes < MIN_MAX_RESULT_BYTES:
+            found.append(
+                f"MCP_MAX_RESULT_BYTES={self.max_result_bytes}: an answer must be allowed "
+                f"{MIN_MAX_RESULT_BYTES} bytes or more"
+            )
+        for name, count in (
+            ("MCP_MAX_CELL_CHARS", self.max_cell_chars),
+            ("MCP_COMMENT_CHARS", self.comment_chars),
+        ):
+            if count < 1:
+                found.append(f"{name}={count}: a text must be allowed 1 character or more")
         if not self.sql_parse_seconds > 0:
             found.append(
                 f"MCP_SQL_PARSE_SECONDS={self.sql_parse_seconds:g}: the parse of a statement "
@@ -701,6 +724,11 @@ class Config:
             max_sql_nesting=int(
                 os.environ.get("MCP_MAX_SQL_NESTING", str(DEFAULT_MAX_SQL_NESTING))
             ),
+            max_result_bytes=int(
+                os.environ.get("MCP_MAX_RESULT_BYTES", str(DEFAULT_MAX_RESULT_BYTES))
+            ),
+            max_cell_chars=int(os.environ.get("MCP_MAX_CELL_CHARS", str(DEFAULT_MAX_CELL_CHARS))),
+            comment_chars=int(os.environ.get("MCP_COMMENT_CHARS", str(DEFAULT_COMMENT_CHARS))),
             sql_parse_seconds=float(
                 os.environ.get("MCP_SQL_PARSE_SECONDS", str(DEFAULT_PARSE_SECONDS))
             ),

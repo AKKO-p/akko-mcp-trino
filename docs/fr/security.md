@@ -84,6 +84,16 @@ Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans l
   aucun réglage du serveur et s'arrêtent avec lui. Le risque qui reste : un appelant authentifié peut occuper un processus pendant le
   délai, une fois à la fois, si bien qu'autant d'appelants qu'il y a de processus peuvent retarder
   les autres ; des quotas par utilisateur sont prévus.
+- **Ce qu'un agent lit est borné, et un commentaire est un texte non fiable.** Une réponse
+  d'`execute_query` contient au plus `MCP_MAX_RESULT_BYTES` octets de JSON (1 Mio par défaut) et
+  une cellule au plus `MCP_MAX_CELL_CHARS` caractères (4000 par défaut), quel que soit son type :
+  une cellule énorme ou un résultat large ne peut pas inonder le contexte d'un agent, et la
+  réponse dit ce qu'elle a coupé (`truncated_reason`, `cut_columns`). Un commentaire que Trino
+  porte sur une table ou une colonne, dans `describe_table`, `describe_schema` et
+  `search_columns`, est débarrassé des caractères de contrôle, bidirectionnels et de largeur nulle
+  et coupé à `MCP_COMMENT_CHARS` caractères (1000 par défaut), comme le texte d'un catalogue, et
+  l'entrée dit quand il l'a été. Les commentaires restent des données : les descriptions des tools
+  demandent au modèle de ne jamais les suivre comme des instructions.
 - **Les écritures sont refusées n'importe où dans l'arbre.** L'instruction est analysée en arbre.
   Elle est refusée si elle contient plus d'une instruction, ou si un `INSERT`, `UPDATE`, `DELETE`,
   `MERGE`, `CREATE`, `DROP`, `ALTER`, `GRANT`, `CALL` ou `SET` apparaît n'importe où dans l'arbre,

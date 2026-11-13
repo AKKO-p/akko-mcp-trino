@@ -186,6 +186,9 @@ def build_server(
         profile_max_concurrent=config.profile_max_concurrent,
         max_sql_chars=config.max_sql_chars,
         max_sql_nesting=config.max_sql_nesting,
+        max_result_bytes=config.max_result_bytes,
+        max_cell_chars=config.max_cell_chars,
+        comment_chars=config.comment_chars,
         parser=ParsePool(config.sql_parse_workers, config.sql_parse_seconds, metrics=metrics),
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds, config.audit_max_names)

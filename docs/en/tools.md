@@ -14,7 +14,7 @@
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20, first page only), `column_offset` (optional, 0 by default) | one page of the columns, with types and comments, and a governed sample when asked; see [describe_table](#describe_table) |
 | `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (all but the table optional) | aggregates of the rows the caller may read; see [profile_table](#profile_table) |
 | `explain_query` | `sql` | `{"valid": true}`: Trino analyzed a read-only statement as the caller, without running it; `{"plan": "..."}` only when `EXPLAIN` is in `MCP_EXTRA_READ_COMMANDS` |
-| `execute_query` | `sql`, `max_rows` (optional, lower than the server's cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
+| `execute_query` | `sql`, `max_rows` (optional, lower than the server's cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}`, plus `truncated_reason` and `cut_columns` when they apply; see [Bounds](#bounds) |
 
 Every tool runs in Trino through the identity mode, the listing tools included: metadata is data,
 and Trino lists only what that identity may see. Every description is written for a model and
@@ -302,6 +302,36 @@ would skip for a read-only tool. The eight other tools only read, whatever the s
 Results are capped at `TRINO_MAX_ROWS` (100 by default, at least 1). The server reads one more
 row, so `truncated` says whether the answer was cut, and the rest of the query is cancelled in
 Trino.
+
+An `execute_query` answer is also bounded in size, whatever the rows hold. Two keys, absent unless
+they apply, say what was cut:
+
+- **A cell** past `MCP_MAX_CELL_CHARS` characters (4000 by default) is cut. A text is cut to that
+  many characters; a binary value, served as hexadecimal, to that many digits; any other value
+  (an array, a map, a row, a number, a date) whose JSON text is longer is replaced by that text
+  cut. `cut_columns` is present only when a cell of the rows returned was cut, and lists the
+  names of their columns, in the order of `columns`, each once.
+- **The answer** as a whole stays within `MCP_MAX_RESULT_BYTES` bytes (1 MiB by default),
+  measured on the JSON the tool returns. Rows are added in order while it fits; the first that
+  would not fit, and those after it, are left out. `row_count` says how many came back,
+  `truncated` is true and `truncated_reason` is `"bytes"`. When even the first row does not fit,
+  the answer has no row, `truncated` true and the same reason. A statement whose column names
+  alone pass the bound is refused (`invalid_argument`).
+- `truncated_reason` is present only when `truncated` is true: `"rows"` when the row cap
+  (`TRINO_MAX_ROWS` or `max_rows`) cut the answer, `"bytes"` when the size bound did, also when
+  both applied. To read the rest, select fewer columns or shorter values, add `LIMIT`, or
+  aggregate.
+
+The audit line of the call notes the rows returned and `truncated`, and the reason, `rows` or
+`bytes`, in `truncated_reason` with the module `fingerprint-audit`; never the data or the
+statement.
+
+The comments Trino holds on tables and columns, served by `describe_table`, `describe_schema`
+and `search_columns`, are text the owners of the data wrote. They are cleaned of control, format
+(bidirectional controls and zero-width characters included) and separator characters, and cut at
+`MCP_COMMENT_CHARS` characters (1000 by default), as the text of a catalog is. An entry whose
+comment was cut says `"cut": ["comment"]`; `describe_table`, whose rows are lists, says
+`"comments_cut": [<column names>]` on the answer.
 
 With `TRINO_QUERY_TIMEOUT_SECONDS` (60 s by default), the server cancels a longer query in Trino
 and tells the agent. The server enforces this budget itself rather than setting a session

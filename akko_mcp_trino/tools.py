@@ -53,10 +53,13 @@ from .audit import (
     set_current_request_id,
 )
 from .config import (
+    DEFAULT_COMMENT_CHARS,
     DEFAULT_DESCRIBE_MAX_COLUMNS,
     DEFAULT_DESCRIBE_SCHEMA_COLUMNS,
     DEFAULT_DESCRIBE_SCHEMA_TABLES,
     DEFAULT_MAX_CATALOGS,
+    DEFAULT_MAX_CELL_CHARS,
+    DEFAULT_MAX_RESULT_BYTES,
     DEFAULT_MAX_ROWS,
     DEFAULT_MAX_SQL_CHARS,
     DEFAULT_MAX_SQL_NESTING,
@@ -77,6 +80,7 @@ from .config import (
 )
 from .context import ContextSetup
 from .context.reply import ContextReader, ContextService
+from .context.text import clean_comment
 from .context.types import TableRef
 from .context.visibility import Visibility
 from .errors import (
@@ -309,6 +313,99 @@ def dumps(obj: Any) -> str:
     return json.dumps(obj, default=_plain)
 
 
+def _cut_cell(cell: Any, limit: int) -> tuple[Any, bool]:
+    """A cell of at most ``limit`` characters, and whether it was cut.
+
+    A text is cut to ``limit`` characters; a binary value, served as hexadecimal, to
+    ``limit`` hexadecimal digits; any other value (a number, an array, a map, a row, a date)
+    whose JSON text is longer than ``limit`` is replaced by that text cut to ``limit``
+    characters.
+    """
+    if isinstance(cell, str):
+        return (cell[:limit], True) if len(cell) > limit else (cell, False)
+    if isinstance(cell, (bytes, bytearray, memoryview)):
+        raw = bytes(cell)
+        if 2 * len(raw) <= limit:
+            return cell, False
+        return raw[: (limit + 1) // 2].hex()[:limit], True
+    if cell is None or isinstance(cell, bool):
+        return cell, False
+    text = dumps(cell)
+    return (text[:limit], True) if len(text) > limit else (cell, False)
+
+
+def bound_result(res: dict, max_cell_chars: int, max_bytes: int) -> Optional[tuple[str, dict]]:
+    """The JSON of an ``execute_query`` answer, within ``max_bytes`` bytes, its cells within
+    ``max_cell_chars`` characters; with what it did, ``{"rows": n, "reason": ...}``.
+
+    Every key of ``res`` stays. A cell past ``max_cell_chars`` is cut (see ``_cut_cell``), and
+    ``cut_columns`` names the columns of the rows returned that had one, in the result's
+    order. Rows are added in order while the whole JSON stays within ``max_bytes``; the first
+    that would not fit, and those after it, are left out, ``row_count`` says how many were
+    returned, and ``truncated`` is true with ``truncated_reason`` ``"bytes"``. When the row
+    cap alone cut the answer, ``truncated_reason`` is ``"rows"``. The two new keys are absent
+    from an answer that was not cut. None when even the columns alone do not fit.
+    """
+    columns = res.get("columns", [])
+    capped = bool(res.get("truncated", False))
+    rows = res["rows"]
+    kept: list[list] = []
+    cuts: list[set[int]] = []  # for each row kept, the indexes of its cut cells
+
+    def prepared(row: list) -> tuple[list, set[int]]:
+        shown, cut = [], set()
+        for i, cell in enumerate(row):
+            value, shortened = _cut_cell(cell, max_cell_chars)
+            shown.append(value)
+            if shortened:
+                cut.add(i)
+        return shown, cut
+
+    def render() -> tuple[str, Optional[str]]:
+        """The JSON of the answer with the rows kept, and why it was cut."""
+        out = {**res, "rows": kept}
+        reason = "bytes" if len(kept) < len(rows) else ("rows" if capped else None)
+        if len(kept) < len(rows):
+            out["row_count"], out["truncated"] = len(kept), True
+        if reason:
+            out["truncated_reason"] = reason
+        cut = sorted({i for indexes in cuts for i in indexes})
+        if cut:
+            out["cut_columns"] = list(dict.fromkeys(str(columns[i]) for i in cut))
+        return dumps(out), reason
+
+    # The answer without its rows, with the longest of its new keys: what the rows may fill
+    # is what is left. It errs on the long side (the answer without rows is shorter than it),
+    # so what it refuses is refused for good.
+    used = len(dumps({**res, "rows": [], "truncated": True, "truncated_reason": "bytes"}))
+    if used > max_bytes:
+        return None
+    for row in rows:
+        shown, cut = prepared(row)
+        used += len(dumps(shown)) + 2
+        if used > max_bytes:
+            break
+        kept.append(shown)
+        cuts.append(cut)
+    # The text is what counts. The estimate leaves out ``cut_columns`` and counts the digits
+    # of ``row_count`` at their most: rows leave until the text fits, then come back while
+    # the next one fits, so that the answer holds as many rows as the bound allows.
+    text, reason = render()
+    while len(text) > max_bytes and kept:
+        kept.pop(), cuts.pop()
+        text, reason = render()
+    while len(kept) < len(rows):
+        shown, cut = prepared(rows[len(kept)])
+        kept.append(shown)
+        cuts.append(cut)
+        candidate = render()
+        if len(candidate[0]) > max_bytes:
+            kept.pop(), cuts.pop()
+            break
+        text, reason = candidate
+    return text, {"rows": len(kept), "reason": reason}
+
+
 def table_name(parts: tuple[str, ...]) -> str:
     """A table's name as the agent wrote it, a part with a dot quoted (a double quote in it
     doubled, as Trino reads it), so it reads as one."""
@@ -418,6 +515,12 @@ _EXECUTE_DOC = """Run {what} on Trino and return the rows.
         permission, function, type, invalid_argument, read_only, time_budget, other),
         and "unavailable" means Trino did not answer. An unknown column may add "hint",
         the table of your statement to read with describe_table before you write it again.
+        The answer is bounded in size: a cell longer than the server's bound is cut, and
+        "cut_columns" names the columns that had one; when the rows together would be too
+        large, the last ones are left out, truncated is true and "truncated_reason" is
+        "bytes" (the server's size bound), where "rows" says the row cap cut it: select
+        fewer columns or shorter values, add LIMIT or an aggregate. Both keys appear only
+        when they apply.
         """
 # The reads execute_query accepts, said once for its description and its refusal.
 _ALLOWED_READS = (
@@ -799,6 +902,9 @@ def register_query_tools(
     profile_max_concurrent: int = DEFAULT_PROFILE_MAX_CONCURRENT,
     max_sql_chars: int = DEFAULT_MAX_SQL_CHARS,
     max_sql_nesting: int = DEFAULT_MAX_SQL_NESTING,
+    max_result_bytes: int = DEFAULT_MAX_RESULT_BYTES,
+    max_cell_chars: int = DEFAULT_MAX_CELL_CHARS,
+    comment_chars: int = DEFAULT_COMMENT_CHARS,
     parser: Optional[ParsePool] = None,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
@@ -843,7 +949,11 @@ def register_query_tools(
     longer than `max_sql_chars` characters or whose brackets nest deeper than
     `max_sql_nesting` before parsing it (`MCP_MAX_SQL_CHARS`, `MCP_MAX_SQL_NESTING`), then
     have it parsed once by `parser`, a pool of parse workers (`MCP_SQL_PARSE_WORKERS`,
-    `MCP_SQL_PARSE_SECONDS`; the process's shared pool with the defaults when None)."""
+    `MCP_SQL_PARSE_SECONDS`; the process's shared pool with the defaults when None).
+    `execute_query` answers `max_result_bytes` bytes of JSON at most and cuts a cell past
+    `max_cell_chars` characters (`MCP_MAX_RESULT_BYTES`, `MCP_MAX_CELL_CHARS`); a comment
+    Trino holds on a table or a column is cleaned, and cut past `comment_chars` characters,
+    in `describe_table`, `describe_schema` and `search_columns` (`MCP_COMMENT_CHARS`)."""
     tools = ToolContext(
         mcp,
         client,
@@ -990,6 +1100,7 @@ def register_query_tools(
                     max_word_length=search_max_word_length,
                     reserve_seconds=search_reserve_seconds,
                     max_catalogs=max_catalogs,
+                    comment_chars=comment_chars,
                     concurrency=search_concurrency,
                     slots=search_slots,
                 )
@@ -1155,9 +1266,11 @@ def register_query_tools(
                         else:
                             rows = [r for r in rows if str(r[0]) != names[last]]
                     for t, column, kind, remark, _ in rows:
-                        columns.setdefault(str(t), []).append(
-                            {"column": column, "type": kind, "comment": remark}
-                        )
+                        remark, remark_cut = clean_comment(remark, comment_chars)
+                        item = {"column": column, "type": kind, "comment": remark}
+                        if remark_cut:
+                            item["cut"] = ["comment"]
+                        columns.setdefault(str(t), []).append(item)
                     # One comment per table, of the tables the page keeps only.
                     comment_rows = run(
                         each_table(
@@ -1172,13 +1285,16 @@ def register_query_tools(
                 except Exception as e:  # noqa: BLE001 - no other way: the error says why
                     note(error=error_code(e))
                     return dumps(metadata_view_error(e))
-                comments = {str(r[0]): r[1] for r in comment_rows}
+                comments = {str(r[0]): clean_comment(r[1], comment_chars) for r in comment_rows}
             # Whole tables only, while their columns stay within the budget; the first
             # table of a page always comes, however wide, so a page never stays empty.
-            described = [
-                {"table": n, "type": k, "comment": comments.get(n), "columns": columns.get(n, [])}
-                for n, k in kept
-            ]
+            described = []
+            for n, k in kept:
+                comment, comment_cut = comments.get(n, (None, False))
+                entry = {"table": n, "type": k, "comment": comment, "columns": columns.get(n, [])}
+                if comment_cut:
+                    entry["cut"] = ["comment"]
+                described.append(entry)
             shortened = len(described) < len(page)
             next_offset = _next_offset(start, described, more or shortened)
             note(
@@ -1258,7 +1374,15 @@ def register_query_tools(
             described = run(f"DESCRIBE {fqn}", row_limit=end)
             listed = described["rows"][:end]
             more = was_cut(described) or len(described["rows"]) > end
-            rows = listed[start:end]
+            rows, comments_cut = [], []
+            for described_row in listed[start:end]:
+                # Column 4 of DESCRIBE is the comment, text the data's owners wrote.
+                row = list(described_row)
+                if len(row) > 3:
+                    row[3], comment_cut = clean_comment(row[3], comment_chars)
+                    if comment_cut:
+                        comments_cut.append(str(row[0]))
+                rows.append(row)
             columns_cut = more and end == describe_max_columns
             next_column = start + len(rows) if more and not columns_cut else None
             out: dict[str, Any] = {
@@ -1269,6 +1393,8 @@ def register_query_tools(
                 "next_column_offset": next_column,
                 "columns_cut": columns_cut,
             }
+            if comments_cut:
+                out["comments_cut"] = comments_cut
             # Only a first page that holds every column describes all of the table; a page
             # past the last column is not truncated, and describes none of it.
             complete = start == 0 and not more
@@ -1493,8 +1619,17 @@ def register_query_tools(
             res = run(sql, max_rows=int(max_rows))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
             return error_reply(e, parsed, advice_visible)
-        note(rows=res["row_count"], truncated=bool(res.get("truncated", False)))
-        return dumps(res)
+        bounded = bound_result(res, max_cell_chars, max_result_bytes)
+        if bounded is None:
+            return refusal_reply(
+                "result_columns_too_long",
+                "The names of the result's columns alone are longer than the server's answer "
+                "bound: select fewer columns, or give them shorter names",
+            )
+        text, done = bounded
+        reason = done["reason"]
+        note(rows=done["rows"], truncated=reason is not None, truncated_reason=reason or "")
+        return text
 
     execute_query.__doc__ = _EXECUTE_DOC.format(
         what="one read-only SQL statement" if read_only else "one SQL statement",

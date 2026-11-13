@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .audit import CallTimeout, current_call, error_code, note
+from .context.text import clean_comment
 from .errors import INVALID_ARGUMENT, TIME_BUDGET, VIEW_REFUSED, explain_error, metadata_view_error
 from .sql_guard import (
     JDBC_COLUMNS,
@@ -243,6 +244,7 @@ def search(
     max_word_length: int,
     reserve_seconds: float,
     max_catalogs: int,
+    comment_chars: int = 1000,
     concurrency: int = 1,
     slots: Optional[threading.Semaphore] = None,
 ) -> dict:
@@ -266,7 +268,9 @@ def search(
     each as the caller and within the call, in threads that take one of ``slots`` each (the
     reads in flight of every call of the process); with none free, the call reads the
     catalog itself. Unless the call's budget runs out, the answer and the cursor are those
-    of a search of one catalog at a time."""
+    of a search of one catalog at a time. A comment is cleaned and cut at ``comment_chars``
+    characters as catalogue text is, and an entry whose comment was cut says
+    ``"cut": ["comment"]``."""
     words = search_words(text, min_length)
     if not words:
         raise ValueError(
@@ -542,10 +546,15 @@ def search(
                 rows = []
                 for row in res["rows"][:room]:
                     where = {"catalog": cat, "schema": sch, "table": row[0]}
+                    comment, was_cut = clean_comment(
+                        row[1] if phase == TABLES else row[3], comment_chars
+                    )
                     if phase == TABLES:
-                        entry = {**where, "comment": row[1]}
+                        entry = {**where, "comment": comment}
                     else:
-                        entry = {**where, "column": row[1], "type": row[2], "comment": row[3]}
+                        entry = {**where, "column": row[1], "type": row[2], "comment": comment}
+                    if was_cut:
+                        entry["cut"] = ["comment"]
                     if mode == PER_WORD:
                         entry["words"] = found_by(row[2:] if phase == TABLES else row[4:])
                     rows.append(entry)

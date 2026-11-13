@@ -128,6 +128,9 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         f"{config.max_sql_nesting} deep at most, refused past either before it is parsed; "
         f"parsed by {config.sql_parse_workers} worker processes within "
         f"{config.sql_parse_seconds:g} s, one statement at a time per caller",
+        f"answers: up to {config.max_result_bytes} bytes of JSON, a cell of "
+        f"{config.max_cell_chars} characters and a Trino comment of {config.comment_chars} at "
+        "most, cut past them",
         f"listings: {config.max_rows} names a page; list_catalogs reads up to "
         f"{config.max_catalogs} catalogs",
         f"describe_schema: up to {config.describe_schema_tables} tables a page "
