@@ -15,6 +15,12 @@
 
 **Donnez à vos agents IA un accès en lecture seule à Trino, et rien de plus.**
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/main/docs/images/demo.gif" width="900" alt="Un terminal enregistré montre Alice et Carol qui envoient la même question SQL à akko-mcp-trino. Trino l'exécute au nom d'Alice et renvoie 10 clients avec leurs e-mails en clair, puis au nom de Carol et renvoie 5 clients européens aux e-mails masqués.">
+</p>
+
+Alice et Carol posent la même question au même serveur, et Trino applique les règles de chacune.
+
 akko-mcp-trino est un serveur [MCP](https://modelcontextprotocol.io) pour Trino. Un agent peut s'en
 servir pour trouver des tables et des colonnes, décrire un schéma ou une table, lister les
 catalogs, les schémas et les tables, et expliquer ou exécuter une requête. Le serveur analyse

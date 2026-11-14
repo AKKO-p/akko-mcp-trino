@@ -17,6 +17,12 @@
 
 **Give your AI agents read-only access to Trino, and nothing more.**
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/main/docs/images/demo.gif" width="900" alt="A terminal recording shows Alice and Carol sending the same SQL question to akko-mcp-trino. Trino runs it as Alice and returns 10 customers with their e-mails in clear, then as Carol and returns 5 European customers with masked e-mails.">
+</p>
+
+Alice and Carol ask the same question through the same server, and Trino applies each one's rules.
+
 akko-mcp-trino is an [MCP](https://modelcontextprotocol.io) server for Trino. An agent can use it
 to find tables and columns, describe a schema or a table, list catalogs, schemas and tables, and
 explain or run a query. The server parses every statement and refuses any write before it reaches
