@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.8.1] - 2026-11-13
+## [0.8.1] - 2026-11-14
 
 ### Security
 - Deeply nested or very long SQL is refused before it is parsed, so it no longer ties up the server: `execute_query` and `explain_query` refuse a statement longer than `MCP_MAX_SQL_CHARS` characters (100000 by default, 1000 at least) or whose round and square brackets nest deeper than `MCP_MAX_SQL_NESTING` (32 by default, 8 at least; brackets in a string, a quoted name or a comment do not count), with `"kind": "invalid_argument"`, before Trino is asked anything. The audit line notes `sql_too_long` or `sql_too_nested`, never the text.
