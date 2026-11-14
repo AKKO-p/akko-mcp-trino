@@ -73,7 +73,8 @@ Here are the claims, by identity provider:
 This module adds to the audit line what the call did, after the core's fields, in this order:
 `request_id`, `tool`, `subject`, `token_id` (the token's `jti`, never the token), `ok`, `error`,
 `sql_sha256`, `tables`, `duration_ms`, `rows`, `truncated`, `metadata_served` (the tables whose
-data catalog description reached the caller). The SQL text still has no field.
+data catalog description reached the caller). The SQL text still has no field. When an answer
+was cut, `truncated_reason` (`rows` or `bytes`) follows `metadata_served`, and is absent otherwise.
 
 `sql_sha256` is the SHA-256 of the statement sent to Trino for the caller. A tool that sends
 several keeps the last one it noted, the one that answered the agent (the aggregate of

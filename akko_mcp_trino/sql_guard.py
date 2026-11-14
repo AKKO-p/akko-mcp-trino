@@ -1,22 +1,38 @@
-"""SQL guards: literal escaping, identifier validation, read-only classification.
+"""SQL guards: literal escaping, name quoting, bounds, read-only classification.
 
 Pure logic, no I/O. Read-only classification is done on the AST (sqlglot), not
 by looking at the first keyword: it rejects multi-statement input, a WITH that
 wraps a write, and side-effecting commands. Anything that cannot be parsed is
 refused. Fail closed.
+
+An agent's statement is bounded before it is parsed (``check_sql_bounds``), then parsed
+once (``ParsedSQL``); the parse time grows with some nesting and repetition, and the parse
+workers' deadline bounds it (``akko_mcp_trino.parse_pool``).
 """
 
 from __future__ import annotations
 
 import re
+from typing import NamedTuple, Optional, Union
 
 import sqlglot
 from sqlglot import exp
 from sqlglot.dialects.trino import Trino
 from sqlglot.tokens import TokenType
 
-# A Trino identifier: alphanumerics, underscore and hyphen only.
-_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+# The longest name of a catalog, a schema or a table an agent may give.
+MAX_NAME_LENGTH = 1024
+# What a name may not hold: a control character (Unicode category Cc, NUL and line breaks
+# included); a bidirectional control (U+061C, U+200E, U+200F, U+202A to U+202E, U+2066 to
+# U+2069) or a line or paragraph separator (U+2028, U+2029), which make a text that shows the
+# name read in another order or on another line; or half of a surrogate pair, which no client
+# can send to Trino. The zero-width joiner and non-joiner stay: scripts need them.
+_NOT_IN_A_NAME = re.compile(
+    r"[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029"
+    r"\ud800-\udfff]"
+)
+# The characters of a refused name an error message quotes, at most.
+_SHOWN_NAME_CHARS = 100
 
 # sqlglot expression types that are purely READS: a SELECT, a set operation of reads
 # (UNION, EXCEPT, INTERSECT), a parenthesized read and VALUES. DESCRIBE goes by its words
@@ -62,6 +78,123 @@ _EXPLAIN_RE = re.compile(
 # fewer, Trino fills in the session catalog (and schema).
 _SHOW_QUALIFIED_PARTS = {"SCHEMAS": 1, "TABLES": 2, "COLUMNS": 3}
 _NAME_TOKENS = (TokenType.VAR, TokenType.IDENTIFIER)
+
+
+# What the nesting scan stops at: a bracket, a quote, or the start of a comment.
+_NESTING_MARKS = re.compile(r"[()\[\]'\"]|--|/\*")
+_LINE_END = re.compile(r"[\r\n]")
+
+
+class SQLBoundError(ValueError):
+    """A statement past a bound of the server, refused before it is parsed; ``code`` names
+    the bound for the audit, the message tells the agent what to change."""
+
+    def __init__(self, code: str, message: str) -> None:
+        """``code``: ``sql_too_long`` or ``sql_too_nested``."""
+        super().__init__(message)
+        self.code = code
+
+
+def sql_nesting(sql: str, stop_above: Optional[int] = None) -> int:
+    """How deep the round and square brackets of ``sql`` nest, in one linear pass, without
+    parsing.
+
+    Brackets inside a string literal (``'...'``, ``''`` inside it), a quoted identifier
+    (``"..."``, ``""`` inside it), a line comment (``--`` to the end of the line) or a block
+    comment (``/* ... */``) do not count. A closing bracket with none open is ignored, so
+    the depth never goes below 0. A literal, identifier or comment left open hides the rest
+    of the text, as it does from the parser, which refuses it. With ``stop_above``, the scan
+    stops as soon as the depth passes it."""
+    depth = deepest = 0
+    i = 0
+    while True:
+        mark = _NESTING_MARKS.search(sql, i)
+        if mark is None:
+            return deepest
+        token, i = mark.group(), mark.end()
+        if token in ("(", "["):
+            depth += 1
+            if depth > deepest:
+                deepest = depth
+                if stop_above is not None and deepest > stop_above:
+                    return deepest
+        elif token in (")", "]"):
+            depth = max(depth - 1, 0)
+        elif token == "--":
+            end = _LINE_END.search(sql, i)
+            if end is None:
+                return deepest
+            i = end.end()
+        elif token == "/*":
+            close = sql.find("*/", i)
+            if close < 0:
+                return deepest
+            i = close + 2
+        else:  # a quote: the literal or identifier ends at a quote that is not doubled
+            while True:
+                close = sql.find(token, i)
+                if close < 0:
+                    return deepest
+                if sql.startswith(token, close + 1):
+                    i = close + 2
+                    continue
+                i = close + 1
+                break
+
+
+def check_sql_bounds(sql: str, *, max_chars: int, max_nesting: int) -> None:
+    """Refuse ``sql`` before it is parsed when it is longer than ``max_chars`` characters
+    (``MCP_MAX_SQL_CHARS``) or nests its brackets deeper than ``max_nesting``
+    (``MCP_MAX_SQL_NESTING``); raises ``SQLBoundError``, a ValueError whose message is for
+    the agent. One linear pass over the text, without sqlglot."""
+    if len(sql) > max_chars:
+        raise SQLBoundError(
+            "sql_too_long",
+            f"The statement is {len(sql)} characters long; this server reads {max_chars} at "
+            "most. Write a shorter statement.",
+        )
+    if sql_nesting(sql, stop_above=max_nesting) > max_nesting:
+        raise SQLBoundError(
+            "sql_too_nested",
+            f"The statement nests brackets more than {max_nesting} deep; this server reads "
+            f"{max_nesting} levels at most. Write it with fewer nested levels, for example "
+            "with a WITH clause.",
+        )
+
+
+class ParsedSQL:
+    """A statement, parsed at most once.
+
+    The read-only check, the tables the audit names and the advice on an unknown column
+    read the same trees: no text is parsed twice. The statement an EXPLAIN explains is
+    parsed once too, when first read."""
+
+    def __init__(self, sql: str) -> None:
+        """``sql``, stripped, is ``text``; nothing is parsed yet."""
+        self.text = sql.strip()
+        self._trees: dict[str, Optional[list[exp.Expr]]] = {}
+
+    def trees(self, text: str) -> Optional[list[exp.Expr]]:
+        """The statements of ``text`` (this statement, or a part of it, stripped), parsed
+        on first use; None when it does not parse."""
+        key = text.strip()
+        if key not in self._trees:
+            try:
+                statements = sqlglot.parse(key, read="trino")
+                self._trees[key] = [st for st in statements if st is not None]
+            except Exception:  # noqa: BLE001 - unparseable: each reader fails closed
+                self._trees[key] = None
+        return self._trees[key]
+
+
+def parse_once(sql: str) -> ParsedSQL:
+    """``sql`` to read with ``is_read_only_sql``, ``referenced_tables`` and
+    ``tables_for_column``, which then share its trees."""
+    return ParsedSQL(sql)
+
+
+def _parsed(sql: Union[str, ParsedSQL]) -> ParsedSQL:
+    return sql if isinstance(sql, ParsedSQL) else ParsedSQL(sql)
 
 
 def _is_system(name: str | None) -> bool:
@@ -185,17 +318,53 @@ def normalize_sql(sql: str) -> str:
 
 
 def validate_identifier(name: str, label: str = "identifier") -> str:
-    """Validate and return a Trino SQL identifier, or raise ValueError.
+    """``name``, a catalog, schema or table name an agent gives, checked; or raise ValueError.
 
-    Only alphanumerics, underscores and hyphens are accepted, so a catalog,
-    schema or table name can never carry an injection.
+    Any name Trino can hold is accepted, as written: ``orders$snapshots``, ``2024_sales``,
+    ``données``, a quote or a dot included. It is text of 1 to ``MAX_NAME_LENGTH``
+    characters without a control character, a bidirectional control or a line or paragraph
+    separator. It is never written in SQL as it is:
+    ``quote_identifier`` puts it in double quotes, ``sql_literal`` in a string literal.
     """
-    if not name or not _IDENTIFIER_RE.match(name):
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(name) > MAX_NAME_LENGTH
+        or _NOT_IN_A_NAME.search(name)
+    ):
+        shown = repr(_cut_name(name)) if isinstance(name, str) else type(name).__name__
         raise ValueError(
-            f"Invalid {label}: {name!r}. "
-            "Only alphanumeric characters, underscores, and hyphens are allowed."
+            f"Invalid {label}: {shown}. A name is text of 1 to {MAX_NAME_LENGTH} characters, "
+            "without control characters, bidirectional controls or line separators."
         )
     return name
+
+
+def _cut_name(name: str) -> str:
+    """``name`` cut at ``_SHOWN_NAME_CHARS`` characters, "…" said."""
+    if len(name) > _SHOWN_NAME_CHARS:
+        return name[:_SHOWN_NAME_CHARS] + "\u2026"
+    return name
+
+
+def shown_name(name: str) -> str:
+    """``name`` as a message shows it: as it is when every character prints, in repr
+    otherwise (a format character such as a zero-width joiner is then written as its
+    escape), cut at ``_SHOWN_NAME_CHARS`` characters."""
+    cut = _cut_name(name)
+    return cut if cut.isprintable() else repr(cut)
+
+
+def quote_identifier(name: str) -> str:
+    """``name`` as one Trino delimited identifier: in double quotes, each double quote in it
+    doubled, so it can never close its quotes. Trino folds it to lower case as it folds an
+    unquoted name."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def quoted_name(*parts: str) -> str:
+    """A qualified name, such as ``catalog.schema.table``, each part quoted."""
+    return ".".join(quote_identifier(part) for part in parts)
 
 
 def governed_catalog(name: str) -> str:
@@ -236,7 +405,9 @@ def _describe_is_governed(names: list, session_catalog: str | None) -> bool:
 
 
 def is_read_only_sql(
-    sql: str, session_catalog: str | None = None, extra_reads: frozenset[str] = frozenset()
+    sql: Union[str, ParsedSQL],
+    session_catalog: str | None = None,
+    extra_reads: frozenset[str] = frozenset(),
 ) -> bool:
     """True if and only if the query is purely a read, decided on the AST (sqlglot).
 
@@ -248,14 +419,25 @@ def is_read_only_sql(
     names are refused like ``system.`` written out. Commands go by an allow-list:
     SELECT, DESCRIBE of a table, and SHOW CATALOGS, SCHEMAS, TABLES, COLUMNS and
     FUNCTIONS; ``extra_reads`` (from ``parse_extra_reads``) opens EXPLAIN and the other
-    SHOW kinds of ``EXTRA_READ_COMMANDS``, one by one.
+    SHOW kinds of ``EXTRA_READ_COMMANDS``, one by one; an EXPLAIN of an EXPLAIN is refused.
+    ``sql`` may be a ``ParsedSQL``, whose trees are then read rather than parsed again.
     """
-    s = sql.strip()
+    parsed = _parsed(sql)
+    return _is_read_only(parsed, parsed.text, session_catalog, extra_reads)
+
+
+def _is_read_only(
+    parsed: ParsedSQL,
+    text: str,
+    session_catalog: str | None,
+    extra_reads: frozenset[str],
+    explained: bool = False,
+) -> bool:
+    s = text.strip()
     if not s:
         return False
-    try:
-        statements = [st for st in sqlglot.parse(s, read="trino") if st is not None]
-    except Exception:  # noqa: BLE001 — parse impossible → refus (fail-closed)
+    statements = parsed.trees(s)
+    if statements is None:  # parse impossible: refused (fail closed)
         return False
     if len(statements) != 1:  # exactly one statement, never stacked queries
         return False
@@ -273,34 +455,39 @@ def is_read_only_sql(
     if isinstance(st, exp.Command):  # SHOW and EXPLAIN, unstructured
         s = s[tokens[0].start :]
         if head == "EXPLAIN":
-            if "EXPLAIN" not in extra_reads:
+            # An EXPLAIN never explains an EXPLAIN.
+            if explained or "EXPLAIN" not in extra_reads:
                 return False
             m = _EXPLAIN_RE.match(s)
             if m is None or m.group(1):  # malformed, or ANALYZE: it would run the statement
                 return False
             # the explained statement must itself be a read
-            return is_read_only_sql(m.group(2), session_catalog, extra_reads)
+            return _is_read_only(parsed, m.group(2), session_catalog, extra_reads, True)
         if head == "SHOW":
             rest = (s.split(None, 1) + [""])[1]
             return _show_is_governed(rest, session_catalog, extra_reads)
     return False  # Insert / Update / Delete / Create / Drop / Alter / Grant / …
 
 
-def referenced_tables(sql: str) -> list[str]:
+def referenced_tables(sql: Union[str, ParsedSQL]) -> list[str]:
     """The tables a statement names, as written, in lower case, once each, sorted.
 
     For the audit record, not for access: Trino decides what may be read. A
     name defined by the statement itself (a CTE) is not a table; a table
-    function is not a name. ``DESCRIBE`` and ``EXPLAIN`` are seen through. A
-    statement that does not parse names nothing.
+    function is not a name. ``DESCRIBE`` and one ``EXPLAIN`` are seen through. A
+    statement that does not parse names nothing. ``sql`` may be a ``ParsedSQL``.
     """
-    s = sql.strip()
-    m = _EXPLAIN_RE.match(s)
+    parsed = _parsed(sql)
+    return _referenced_tables(parsed, parsed.text)
+
+
+def _referenced_tables(parsed: ParsedSQL, text: str, explained: bool = False) -> list[str]:
+    s = text.strip()
+    m = None if explained else _EXPLAIN_RE.match(s)  # one EXPLAIN is seen through, not two
     if m is not None:
-        return referenced_tables(m.group(2))
-    try:
-        statements = [st for st in sqlglot.parse(s, read="trino") if st is not None]
-    except Exception:  # noqa: BLE001 - unparseable: nothing named
+        return _referenced_tables(parsed, m.group(2), True)
+    statements = parsed.trees(s)
+    if statements is None:  # unparseable: nothing named
         return []
     names: set[str] = set()
     for st in statements:
@@ -315,7 +502,76 @@ def referenced_tables(sql: str) -> list[str]:
     return sorted(names)
 
 
-def tables_for_column(sql: str, identifier: str) -> list[tuple[str, ...]]:
+class ColumnScope(NamedTuple):
+    """What the advice on an unknown column needs of a statement, as plain values: the
+    tables it reads, each as its parts (lower case) and its alias (lower case, or empty),
+    and whether a column without a qualifier may belong to them (no CTE, no nested SELECT).
+    Picklable, so a worker process can hand it back."""
+
+    bare: bool
+    tables: tuple[tuple[tuple[str, ...], str], ...]
+
+
+class Analysis(NamedTuple):
+    """Everything a tool call derives from an agent's statement, as plain picklable values:
+    the read-only verdict, the tables the audit names, and the scope of the column advice."""
+
+    read_only: bool
+    tables: tuple[str, ...]
+    scope: ColumnScope
+
+
+def column_scope(sql: Union[str, ParsedSQL]) -> ColumnScope:
+    """The ``ColumnScope`` of ``sql`` (see ``tables_for_column``); one EXPLAIN is seen
+    through, and a statement that does not parse reads no table."""
+    parsed = _parsed(sql)
+    return _column_scope(parsed, parsed.text)
+
+
+def _column_scope(parsed: ParsedSQL, text: str, explained: bool = False) -> ColumnScope:
+    s = text.strip()
+    m = None if explained else _EXPLAIN_RE.match(s)  # one EXPLAIN is seen through, not two
+    if m is not None:
+        return _column_scope(parsed, m.group(2), True)
+    statements = parsed.trees(s)
+    if statements is None:  # unparseable: nothing named
+        return ColumnScope(False, ())
+    bare = True
+    tables: list[tuple[tuple[str, ...], str]] = []
+    for st in statements:
+        ctes = {cte.alias_or_name.lower() for cte in st.find_all(exp.CTE)}
+        nested = any(s.find_ancestor(exp.Select) is not None for s in st.find_all(exp.Select))
+        # A column without a qualifier may belong to a CTE or a nested SELECT (a subquery,
+        # EXISTS, IN), not to a table read inside it: no advice rather than a guess. The
+        # branches of a UNION are not nested.
+        bare = bare and not (ctes or nested)
+        for table in st.find_all(exp.Table):
+            if not isinstance(table.this, exp.Identifier):
+                continue
+            parts = tuple(p.lower() for p in (table.catalog, table.db, table.name) if p)
+            if len(parts) == 1 and parts[0] in ctes:
+                continue
+            tables.append((parts, table.alias.lower()))
+    return ColumnScope(bare, tuple(tables))
+
+
+def tables_in_scope(scope: ColumnScope, identifier: str) -> list[tuple[str, ...]]:
+    """The tables of ``scope`` the column ``identifier`` may belong to, sorted (see
+    ``tables_for_column``)."""
+    qualifier = identifier.lower().rpartition(".")[0]
+    if not qualifier and not scope.bare:
+        return []
+    names = {
+        parts
+        for parts, alias in scope.tables
+        if not qualifier or qualifier in (alias, parts[-1], ".".join(parts))
+    }
+    return sorted(names)
+
+
+def tables_for_column(
+    sql: Union[str, ParsedSQL, Analysis], identifier: str
+) -> list[tuple[str, ...]]:
     """The tables of ``sql`` a column it names may belong to, each as the parts the agent
     wrote (catalog, schema, table, those given), in lower case, sorted. A part keeps any dot
     it holds (``"x.y".t`` is the two parts ``x.y`` and ``t``), so a name is never read as
@@ -326,32 +582,20 @@ def tables_for_column(sql: str, identifier: str) -> list[tuple[str, ...]]:
     without a qualifier may belong to any table the statement reads, unless the statement
     has a CTE or a nested SELECT (subquery, EXISTS, IN), which it may belong to instead:
     then nothing. A name defined by the statement (a CTE) is not a table. A statement that
-    does not parse names nothing."""
-    s = sql.strip()
-    m = _EXPLAIN_RE.match(s)
-    if m is not None:
-        return tables_for_column(m.group(2), identifier)
-    try:
-        statements = [st for st in sqlglot.parse(s, read="trino") if st is not None]
-    except Exception:  # noqa: BLE001 - unparseable: nothing named
-        return []
-    qualifier = identifier.lower().rpartition(".")[0]
-    names: set[tuple[str, ...]] = set()
-    for st in statements:
-        ctes = {cte.alias_or_name.lower() for cte in st.find_all(exp.CTE)}
-        nested = any(s.find_ancestor(exp.Select) is not None for s in st.find_all(exp.Select))
-        if not qualifier and (ctes or nested):
-            # A column without a qualifier may belong to a CTE or a nested SELECT (a
-            # subquery, EXISTS, IN), not to a table read inside it: no advice rather than a
-            # guess. The branches of a UNION are not nested.
-            return []
-        for table in st.find_all(exp.Table):
-            if not isinstance(table.this, exp.Identifier):
-                continue
-            parts = [p.lower() for p in (table.catalog, table.db, table.name) if p]
-            if len(parts) == 1 and parts[0] in ctes:
-                continue
-            if qualifier and qualifier not in (table.alias.lower(), parts[-1], ".".join(parts)):
-                continue
-            names.add(tuple(parts))
-    return sorted(names)
+    does not parse names nothing. ``sql`` may be a ``ParsedSQL``, or an ``Analysis``, whose
+    scope is then read without any parse."""
+    scope = sql.scope if isinstance(sql, Analysis) else column_scope(sql)
+    return tables_in_scope(scope, identifier)
+
+
+def analyze(
+    sql: str, session_catalog: str | None, extra_reads: frozenset[str] = frozenset()
+) -> Analysis:
+    """Parse ``sql`` once and derive what a tool call needs of it (see ``Analysis``). It is
+    what a parse worker runs; the server's own process never parses an agent's SQL."""
+    parsed = ParsedSQL(sql)
+    return Analysis(
+        read_only=is_read_only_sql(parsed, session_catalog, extra_reads),
+        tables=tuple(referenced_tables(parsed)),
+        scope=column_scope(parsed),
+    )

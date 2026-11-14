@@ -64,6 +64,7 @@ bash scripts/lock.sh check    # les verrous suivent leurs sources (CONTRIBUTING.
 bash lint-vendor-neutral.sh   # échoue si le paquet importe quoi que ce soit de propre à un produit
 pytest                        # une couverture des lignes ou des branches sous 100 % fait échouer l'exécution
 integration/run.sh            # en conditions réelles : Keycloak, Trino et trois serveurs dans Docker, puis supprimés
+integration/names/run.sh      # en conditions réelles : les tools de métadonnées sur des noms comme orders$snapshots, puis supprimés
 python -m build --no-isolation && twine check dist/*
 akko-mcp-trino --check        # la configuration effective, sans secret ; code 2 si le serveur ne démarrerait pas
 ```
@@ -102,7 +103,10 @@ même chose depuis Python.
 
 Une fonction d'enregistrement à trois arguments reçoit le `ToolContext` :
 
-- `tools.tool(title, governed=..., open_world=...)` enregistre un tool avec ses annotations MCP ;
+- `tools.tool(title, governed=..., open_world=...)` enregistre un tool avec ses annotations MCP.
+  Un tool enregistré par `tools.tool()` répond une seule fois, comme les tools intégrés ; un tool
+  ajouté par `mcp.tool()` ou `mcp.add_tool()` garde le défaut du SDK et peut passer
+  `structured_output=False` ;
 - `tools.run(sql)` interroge Trino par le mode d'identité ;
 - `tools.note(...)` enregistre ce qu'a fait l'appel (le SQL lancé, les tables, les lignes, si elles
   ont été coupées) ;
@@ -241,7 +245,10 @@ fournisseur suit ces règles :
   de données : ni valeur, ni échantillon.
 - Il respecte l'échéance qu'il reçoit. Il lève `ProviderRefused` quand son compte est refusé, et
   `ProviderUnavailable` quand le catalogue de données est en panne, en retard, ou rend ce qu'il ne
-  sait pas lire. Le texte de ses erreurs reste dans le serveur. Ses journaux et `check_lines()` ne
+  sait pas lire. Une réponse plus grosse que ce qu'il accepte lève `ProviderAnswerTooLarge` :
+  l'appel est `unavailable`, mais le catalogue n'est pas en panne, et aucune pause de réessai ne
+  s'ouvre. Elle ne sert qu'à une réponse que le fournisseur refuse pour sa taille ou sa forme,
+  jamais à une panne. Le texte de ses erreurs reste dans le serveur. Ses journaux et `check_lines()` ne
   contiennent jamais son secret, ni un nom de schéma, de table ou de colonne.
 - Il n'importe ni `akko_mcp_trino.trino_client` ni `akko_mcp_trino.identity`, ne reçoit jamais le
   client Trino ni l'identité de l'appelant, et n'écrit jamais dans son catalogue de données.

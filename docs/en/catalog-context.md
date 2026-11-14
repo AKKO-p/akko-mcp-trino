@@ -4,6 +4,9 @@
 
 ## Context providers
 
+This server and a data catalog's own MCP server do different jobs and are plugged in side by side;
+[One MCP server per job](design-notes.md#one-mcp-server-per-job) says why.
+
 In these pages, a *catalog* is a Trino catalog, and a *data catalog* is a metadata service such as
 Apache Atlas or OpenMetadata.
 
@@ -23,8 +26,8 @@ Two providers come with this repository:
 
 - `file`, in the core, the reference for the contract: a data catalog kept in one JSON file;
 - `atlas`, for Apache Atlas, a package of its own (`akko-mcp-trino-atlas`, installed by the
-  `atlas` extra). Its settings, its Kerberos setup and the account it needs are in
-  [its README](../../providers/atlas/README.md).
+  `atlas` extra, or by `atlas-kerberos` for Kerberos). Its settings, its Kerberos setup and the
+  account it needs are in [its README](../../providers/atlas/README.md).
 
 The context follows what Trino lists for the caller: [Security](security.md#the-rights-of-the-context)
 gives the rules. Whether to load a provider at all is the choice between the two modes of

@@ -32,7 +32,7 @@ classifiers = [
 ]
 # No upper bound on the core: the provider speaks its CONTEXT_API, which the core checks at start.
 dependencies = [
-  "akko-mcp-trino>=0.8.0",
+  "akko-mcp-trino>=0.8.1",
   "httpx>=0.28.1,<1",
 ]
 

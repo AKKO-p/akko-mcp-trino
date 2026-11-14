@@ -160,10 +160,10 @@ def test_list_schemas_validates_identifier():
         "truncated": False,
     }
     assert client.calls[-1][0] == (
-        "SELECT schema_name FROM iceberg.information_schema.schemata "
+        'SELECT schema_name FROM "iceberg".information_schema.schemata '
         "ORDER BY schema_name OFFSET 0 LIMIT 101"
     )
-    out = json.loads(mcp.tools["list_schemas"]("bad;name"))
+    out = json.loads(mcp.tools["list_schemas"]("bad\nname"))
     assert "Invalid catalog" in out["error"] and len(client.calls) == 1, "nothing must reach Trino"
 
 
@@ -177,10 +177,10 @@ def test_list_tables_validates_both_identifiers():
         "truncated": False,
     }
     assert client.calls[-1][0] == (
-        "SELECT table_name FROM iceberg.information_schema.tables "
+        'SELECT table_name FROM "iceberg".information_schema.tables '
         "WHERE table_schema = 'fraud' ORDER BY table_name OFFSET 0 LIMIT 101"
     )
-    out = json.loads(mcp.tools["list_tables"]("iceberg", "bad schema"))
+    out = json.loads(mcp.tools["list_tables"]("iceberg", "bad\tschema"))
     assert "Invalid schema" in out["error"] and len(client.calls) == 1
 
 
@@ -232,7 +232,7 @@ def test_list_tables_on_a_missing_or_hidden_schema_says_so_never_an_empty_list()
     out = json.loads(mcp.tools["list_tables"]("demo", "CRMM"))
     assert out == {"error": "Schema demo.CRMM not found or not visible", "kind": "schema"}
     assert client.calls[-1][0] == (
-        "SELECT schema_name FROM demo.information_schema.schemata WHERE schema_name = 'crmm'"
+        "SELECT schema_name FROM \"demo\".information_schema.schemata WHERE schema_name = 'crmm'"
     )
 
 
@@ -362,7 +362,7 @@ def test_describe_table_builds_qualified_name():
     )
     out = json.loads(mcp.tools["describe_table"]("iceberg", "fraud", "scores"))
     assert out["columns"] == ["Column", "Type"]
-    assert "DESCRIBE iceberg.fraud.scores" in client.calls[-1][0]
+    assert 'DESCRIBE "iceberg"."fraud"."scores"' in client.calls[-1][0]
 
 
 def test_execute_query_read_only_blocks_writes():
@@ -489,7 +489,7 @@ def test_trino_error_is_audited_as_failure():
 def test_invalid_identifier_is_audited_as_a_failure():
     """An agent gets {"error": …} it can act on, and the audit line says it failed."""
     mcp, _, audit = _registered_with_audit()
-    out = json.loads(in_request(lambda: mcp.tools["list_schemas"]("bad;name")))
+    out = json.loads(in_request(lambda: mcp.tools["list_schemas"]("bad\nname")))
     assert "Invalid catalog" in out["error"]
     assert audit.events[0].ok is False and audit.events[0].tool == "list_schemas"
 
@@ -546,7 +546,7 @@ def test_describe_table_can_add_a_governed_sample():
     mcp, client = _registered()
     out = json.loads(in_request(lambda: mcp.tools["describe_table"]("c", "s", "t", sample_rows=5)))
     assert out["sample"]["rows"] == [["v"]]
-    assert client.calls[-1] == ("SELECT * FROM c.s.t LIMIT 5", "alice_admin")
+    assert client.calls[-1] == ('SELECT * FROM "c"."s"."t" LIMIT 5', "alice_admin")
 
 
 def test_describe_table_sample_is_capped_and_never_negative():
@@ -813,7 +813,7 @@ def test_a_refused_write_has_kind_read_only():
 
 def test_an_invalid_identifier_has_kind_invalid_argument():
     mcp, _ = _registered()
-    out = json.loads(mcp.tools["list_schemas"]("bad;name"))
+    out = json.loads(mcp.tools["list_schemas"]("bad\nname"))
     assert out["kind"] == "invalid_argument" and "Invalid catalog" in out["error"]
 
 
@@ -888,8 +888,8 @@ def test_describe_schema_returns_whole_tables_with_comments():
         "shortened": False,
     }
     assert [sql for sql, _ in client.calls] == [
-        "SELECT schema_name FROM demo.information_schema.schemata WHERE schema_name = 'crm'",
-        "SELECT table_name, table_type FROM demo.information_schema.tables "
+        "SELECT schema_name FROM \"demo\".information_schema.schemata WHERE schema_name = 'crm'",
+        'SELECT table_name, table_type FROM "demo".information_schema.tables '
         "WHERE table_schema = 'crm' ORDER BY table_name OFFSET 0 LIMIT 21",
         "SELECT * FROM ("
         "SELECT table_name, column_name, type_name, remarks, ordinal_position "
@@ -1041,7 +1041,7 @@ def test_describe_schema_refuses_the_system_catalog():
     for catalog in ("system", "SYSTEM"):
         out = json.loads(mcp.tools["describe_schema"](catalog, "jdbc"))
         assert out["kind"] == "invalid_argument" and "system catalog" in out["error"]
-    out = json.loads(mcp.tools["describe_schema"]("demo", "crm'--"))
+    out = json.loads(mcp.tools["describe_schema"]("demo", "crm\n--"))
     assert "Invalid schema" in out["error"] and client.calls == []
 
 
@@ -1328,7 +1328,7 @@ def test_a_refused_describe_calls_no_provider_and_serves_nothing(setups):
     out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert out == {"error": str(denied), "kind": "other"}
     assert provider.calls == [] and [sql for sql, _, _ in client.calls] == [
-        "DESCRIBE demo.sales.orders"
+        'DESCRIBE "demo"."sales"."orders"'
     ]
 
 
@@ -1382,7 +1382,7 @@ def test_the_gate_runs_tagged_and_as_the_effective_subject(setups):
     )
     in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders"))
     (describe, *gate) = client.calls
-    assert describe == ("DESCRIBE demo.sales.orders", "alice_admin", ())
+    assert describe == ('DESCRIBE "demo"."sales"."orders"', "alice_admin", ())
     assert gate and all(
         user == "alice_admin" and trino_client.GATE_TAG in tags for _, user, tags in gate
     )
@@ -1494,7 +1494,7 @@ def test_no_filter_statement_starts_with_less_than_the_reserve_left(setups):
     )
     out = json.loads(in_request(lambda: mcp.tools["describe_table"]("demo", "sales", "orders")))
     assert "error" not in out and out["context_sources"] == {"catalog": "not_checked"}
-    assert [sql for sql, _, _ in client.calls] == ["DESCRIBE demo.sales.orders"]
+    assert [sql for sql, _, _ in client.calls] == ['DESCRIBE "demo"."sales"."orders"']
 
 
 def test_join_targets_past_the_deadline_are_not_proven_and_never_asked(setups, monkeypatch):
@@ -1769,3 +1769,179 @@ def test_an_empty_page_asks_no_catalogue(setups):
     out = json.loads(in_request(lambda: mcp.tools["describe_schema"]("demo", "sales")))
     assert out["tables"] == [] and "context_sources" not in out, "nothing was asked"
     assert provider.calls == []
+
+
+# ---- an agent's statement: bounded, then parsed once, by a worker process ----
+
+
+@pytest.fixture
+def parses(monkeypatch):
+    """The texts the server's own process parses: none is an agent's statement."""
+    from akko_mcp_trino import sql_guard
+
+    real, texts = sql_guard.sqlglot.parse, []
+
+    def counting(sql, *args, **kwargs):
+        texts.append(sql)
+        return real(sql, *args, **kwargs)
+
+    monkeypatch.setattr(sql_guard.sqlglot, "parse", counting)
+    return texts
+
+
+class _SpyPool:
+    """A parse pool that records what it is asked, then asks the shared pool."""
+
+    def __init__(self):
+        from akko_mcp_trino.parse_pool import shared_pool
+
+        self.asked, self.counted, self._pool = [], [], shared_pool()
+
+    def analyze(self, sql, session_catalog, extra_reads, caller):
+        self.asked.append((sql, caller))
+        return self._pool.analyze(sql, session_catalog, extra_reads, caller)
+
+    def count(self, reason):
+        self.counted.append(reason)
+
+
+def _with_spy(**kw):
+    mcp, client, audit, spy = (
+        FakeMCP(),
+        FakeClient(**kw.pop("client", {})),
+        InMemoryAudit(),
+        _SpyPool(),
+    )
+    register_query_tools(mcp, client, audit=audit, parser=spy, **kw)
+    return mcp, client, audit, spy
+
+
+def _deep_array(depth):
+    return "SELECT " + "ARRAY[" * depth + "1" + "]" * depth
+
+
+def test_nested_brackets_refused_before_parse(parses):
+    """Past MCP_MAX_SQL_NESTING (32 by default) no worker is asked, Trino is never asked,
+    and the audit keeps the refusal's code, never the statement."""
+    mcp, client, audit, spy = _with_spy()
+    for tool in ("execute_query", "explain_query"):
+        out = json.loads(in_request(lambda: mcp.tools[tool](sql=_deep_array(33))))
+        assert out["kind"] == "invalid_argument"
+        assert "more than 32 deep" in out["error"]
+    assert spy.asked == [] and client.calls == [] and parses == []
+    assert spy.counted == ["too_nested", "too_nested"]
+    assert [(e.tool, e.ok, e.error) for e in audit.events] == [
+        ("execute_query", False, "sql_too_nested"),
+        ("explain_query", False, "sql_too_nested"),
+    ]
+    assert [e.call.sql_sha256 for e in audit.events] == ["", ""], "no digest of the text"
+    # at the bound, a worker is asked
+    mcp.tools["execute_query"](sql="SELECT " + "(" * 32 + "1" + ")" * 32)
+    assert len(spy.asked) == 1 and parses == []
+
+
+def test_too_long_sql_refused_by_the_tools_before_parse(parses):
+    mcp, client, audit, spy = _with_spy(max_sql_chars=1000)
+    long_sql = "SELECT 1 FROM t WHERE x IN (" + ", ".join(["1"] * 400) + ")"
+    for tool in ("execute_query", "explain_query"):
+        out = json.loads(mcp.tools[tool](sql=long_sql))
+        assert out["kind"] == "invalid_argument"
+        assert out["error"].startswith(f"The statement is {len(long_sql)} characters long")
+    assert spy.asked == [] and parses == [] and client.calls == []
+    assert [e.error for e in audit.events] == ["sql_too_long", "sql_too_long"]
+    assert spy.counted == ["too_long", "too_long"]
+
+
+def test_the_bounds_are_the_ones_given():
+    mcp, client, _, spy = _with_spy(max_sql_nesting=14)
+    mcp.tools["execute_query"](sql="SELECT " + "(" * 14 + "1" + ")" * 14)
+    assert len(spy.asked) == 1 and len(client.calls) == 1
+    out = json.loads(mcp.tools["execute_query"](sql="SELECT " + "(" * 15 + "1" + ")" * 15))
+    assert "more than 14 deep" in out["error"] and len(spy.asked) == 1
+
+
+def test_execute_query_parses_once(parses):
+    """One worker request per call, whatever the path; the server's process parses none."""
+    mcp, client, _, spy = _with_spy()
+    in_request(lambda: mcp.tools["execute_query"]("SELECT a FROM c.s.t ;"))
+    assert spy.asked == [("SELECT a FROM c.s.t", "alice_admin")]
+    assert client.calls[-1][0] == "SELECT a FROM c.s.t"
+    # writes allowed: the audit's table names come from the same request
+    mcp, _, audit, spy = _with_spy(read_only=False)
+    in_request(lambda: mcp.tools["execute_query"]("INSERT INTO c.s.t VALUES (1)"))
+    assert len(spy.asked) == 1 and audit.events[-1].call.tables == ["c.s.t"]
+    # an opened EXPLAIN
+    mcp, _, _, spy = _with_spy(extra_reads=frozenset({"EXPLAIN"}))
+    mcp.tools["execute_query"]("EXPLAIN SELECT a FROM c.s.t")
+    assert spy.asked == [("EXPLAIN SELECT a FROM c.s.t", "")], "no verified caller: the account"
+    # Trino's unknown column: the advice reads the same analysis
+    from tests.test_column_hint import _column, _tools
+
+    out = json.loads(_tools(_column("nope"))["execute_query"](sql="SELECT nope FROM crm.accounts"))
+    assert out["hint"].startswith("Read the columns of crm.accounts")
+    assert parses == []
+
+
+def test_explain_query_parses_once(parses):
+    mcp, _, _, spy = _with_spy(
+        client={"result": {"columns": ["Valid"], "rows": [[True]], "row_count": 1}}
+    )
+    assert json.loads(mcp.tools["explain_query"]("SELECT a FROM c.s.t;")) == {"valid": True}
+    assert spy.asked == [("SELECT a FROM c.s.t", "")]
+    from tests.test_column_hint import _column, _tools
+
+    out = json.loads(_tools(_column("nope"))["explain_query"](sql="SELECT nope FROM crm.accounts"))
+    assert out["hint"].startswith("Read the columns of crm.accounts")
+    assert parses == []
+
+
+def test_a_statement_the_workers_refuse_is_never_run():
+    """Past the deadline, the tools answer the pool's refusal and Trino is never asked."""
+    from akko_mcp_trino.parse_pool import ParsePool
+
+    pool = ParsePool(1, 1.0)
+    mcp, client, audit = FakeMCP(), FakeClient(), InMemoryAudit()
+    register_query_tools(mcp, client, audit=audit, parser=pool)
+    for tool in ("execute_query", "explain_query"):
+        out = json.loads(in_request(lambda: mcp.tools[tool](sql=_deep_array(24))))
+        assert out["kind"] == "time_budget" and "more than 1 s" in out["error"]
+    assert client.calls == []
+    assert [e.error for e in audit.events] == ["parse_deadline", "parse_deadline"]
+    assert [e.call.sql_sha256 for e in audit.events] == ["", ""]
+
+
+def test_parse_bound_keeps_other_calls_responsive():
+    """A statement whose parse outlasts the deadline holds one worker until the deadline,
+    then is refused; another caller's statement, sent meanwhile, is served at once."""
+    import threading
+
+    from akko_mcp_trino.auth import Principal
+    from akko_mcp_trino.identity import reset_current_principal, set_current_principal
+    from akko_mcp_trino.parse_pool import ParsePool
+
+    pool = ParsePool(2, 2.0)
+    mcp, client = FakeMCP(), FakeClient(result={"columns": ["n"], "rows": [[1]], "row_count": 1})
+    register_query_tools(mcp, client, parser=pool)
+    mcp.tools["execute_query"]("SELECT 1")  # the workers are started
+    answers = {}
+
+    def call(name, sql):
+        token = set_current_principal(Principal(subject=name))
+        try:
+            answers[name] = (json.loads(mcp.tools["execute_query"](sql)), time.monotonic())
+        finally:
+            reset_current_principal(token)
+
+    heavy = threading.Thread(target=call, args=("alice", _deep_array(24)), daemon=True)
+    started = time.monotonic()
+    heavy.start()
+    while "alice" not in pool._callers:
+        time.sleep(0.01)
+    bob_started = time.monotonic()
+    call("bob", "SELECT 1")
+    heavy.join(10)
+    assert answers["bob"][0]["rows"] == [[1]]
+    assert answers["bob"][1] - bob_started < 1.0, "bob never waited for alice's worker"
+    assert answers["bob"][1] < answers["alice"][1], "bob was served while alice's parse ran"
+    assert answers["alice"][0]["kind"] == "time_budget"
+    assert answers["alice"][1] - started < 2.0 + 0.5

@@ -107,7 +107,7 @@ def test_a_column_merges_classifications_and_terms_with_sources():
 def test_descriptions_are_cleaned_and_cut_fields_are_listed():
     merged = merge_table(
         [
-            ("a", TableContext(description="ab‮cdef", owner="o" * 10)),
+            ("a", TableContext(description="ab\u202ecdef", owner="o" * 10)),
             ("b", TableContext(description="x" * 10)),
             ("c", TableContext(description="y" * 3)),
         ],
@@ -131,7 +131,7 @@ def test_a_description_empty_after_cleaning_is_ignored():
 
 
 def test_invisible_characters_are_removed_from_every_catalogue_name():
-    zw, bidi = "\u200b", "‮"
+    zw, bidi = "\u200b", "\u202e"
     target = TableRef("c", "s", "t")
     merged = merge_table(
         [

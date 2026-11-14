@@ -59,12 +59,41 @@ jamais à sa place, et le contrôle de lecture seule s'applique quoi qu'elles re
 
 **Le serveur ne décide pas des droits.** Voir [Trino d'abord](security.md#trino-dabord).
 
+### Un serveur MCP par métier
+
+Ce serveur interroge Trino sous l'identité de l'utilisateur vérifié
+et laisse Trino décider des droits ; un catalogue de données comme Atlas, OpenMetadata ou DataHub a
+son propre métier, le sens des données, leur lignage et leurs glossaires, et quand il a son propre
+serveur MCP, l'agent branche les deux côte à côte et les combine. Cinq règles en découlent.
+
+- Le serveur n'appelle jamais un autre serveur MCP : un adaptateur de catalogue parle à l'API du
+  catalogue, si bien que chaque appel garde un appelant connu et que deux jeux de droits ne se
+  contredisent pas.
+- Un adaptateur est mince et optionnel : il lit par clé le contexte d'objets que Trino a déjà
+  listés à l'utilisateur, et il ne cherche pas, ne recopie ni le lignage ni la recherche du
+  catalogue, et n'écrit jamais dans le catalogue.
+- Le cœur ne dépend d'aucun catalogue : sans adaptateur, il répond à l'identique, et un catalogue
+  en panne ne bloque jamais une requête, car le contexte manque et la réponse le dit.
+- Trino d'abord : aucun nom venu d'un catalogue n'est servi avant que Trino l'ait listé à
+  l'utilisateur, donc le contexte enrichit ce que Trino montre et ne propose jamais un objet.
+- Des noms communs : chaque réponse donne le nom Trino complet (`catalog.schema.table`), si bien
+  qu'un agent peut rapprocher les réponses de ce serveur de celles du serveur du catalogue sans que
+  les deux serveurs se connaissent.
+
+Le serveur du catalogue garde la recherche métier riche, le lignage, l'édition des glossaires et le
+travail des intendants. Ce serveur garde le contexte utile pour écrire une requête, servi sous les
+droits de Trino.
+
 ## Questions
 
 ### Et si le catalogue de données a déjà son propre serveur MCP ?
 
-Le [premier mode de déploiement](deployment.md#avec-un-catalogue-de-données) fait tourner le
-serveur à côté : rien dans ce serveur ne le bloque ni ne le remplace.
+L'agent branche les deux serveurs. Ce serveur n'appelle jamais celui du catalogue : son adaptateur
+parle à l'API du catalogue, et le nom complet `catalog.schema.table` que porte chaque réponse
+permet à l'agent de rapprocher les réponses des deux. Le
+[premier mode de déploiement](deployment.md#avec-un-catalogue-de-données) fait tourner ce serveur à
+côté de celui du catalogue : rien ici ne le bloque ni ne le remplace. Voir
+[Un serveur MCP par métier](#un-serveur-mcp-par-métier) plus haut.
 
 ### Un utilisateur peut-il encore écrire dans Trino ?
 

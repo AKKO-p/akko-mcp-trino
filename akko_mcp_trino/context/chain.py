@@ -2,8 +2,9 @@
 
 Every source is read in parallel on the dedicated loop. A source that is down,
 or that refuses the account, is not called again before its delay; a deadline
-reached on a large read is not an outage and opens nothing. The text of a
-source's error never leaves the server: the caller gets one status per source.
+reached on a large read, or an answer too large for one call, is not an outage and
+opens nothing. The text of a source's error never leaves the server: the caller gets
+one status per source.
 """
 
 import asyncio
@@ -20,6 +21,7 @@ from typing import Any
 from ..config import Config
 from ..metrics import Metrics
 from .caches import ByteCache, ReadInFlightFailed, serialized_size
+from .errors import ProviderAnswerTooLarge
 from .loop import ContextLoop
 from .provider import ContextProvider
 from .status import (
@@ -453,7 +455,10 @@ class ContextChain:
         if status == REFUSED:
             self._open(provider, stamp, REFUSED, self._settings.refused_retry_seconds)
         elif status == UNAVAILABLE:
-            # A source that keeps the deadline itself is not down: nothing opens.
+            # A source that keeps the deadline itself is not down, and neither is one whose
+            # answer to this call was too large: nothing opens.
+            if isinstance(exc, ProviderAnswerTooLarge):
+                return cut_short
             if self._clock() >= deadline - _CANCEL_WAIT_SECONDS:
                 return cut_short
             self._open(provider, stamp, UNAVAILABLE, self._settings.retry_after_seconds)

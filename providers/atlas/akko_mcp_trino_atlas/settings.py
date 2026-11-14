@@ -35,6 +35,9 @@ DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_CONNECT_TIMEOUT_SECONDS = 1.0
 DEFAULT_MAX_CONCURRENT_REQUESTS = 4
 MAX_CONCURRENT_REQUESTS = 32
+# The longest body of one answer, once decoded: 64 MiB, and never under 1 MiB.
+DEFAULT_MAX_RESPONSE_BYTES = 67_108_864
+MIN_RESPONSE_BYTES = 1_048_576
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,7 @@ class AtlasSettings:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     connect_timeout_seconds: float = DEFAULT_CONNECT_TIMEOUT_SECONDS
     max_concurrent_requests: int = DEFAULT_MAX_CONCURRENT_REQUESTS
+    max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES
     verify: ssl.SSLContext | bool = field(default=True, repr=False, compare=False)
     proxy: str = field(default="", repr=False)
     _secret: FileSecret | str = field(default="", repr=False)
@@ -173,6 +177,17 @@ def _concurrency(env: Mapping[str, str]) -> int:
         raise ValueError(
             "ATLAS_MAX_CONCURRENT_REQUESTS must be an integer between 1 and "
             f"{MAX_CONCURRENT_REQUESTS}"
+        )
+    return int(text)
+
+
+def _response_bytes(env: Mapping[str, str]) -> int:
+    text = env.get("ATLAS_MAX_RESPONSE_BYTES", "").strip()
+    if not text:
+        return DEFAULT_MAX_RESPONSE_BYTES
+    if not text.isdecimal() or int(text) < MIN_RESPONSE_BYTES:
+        raise ValueError(
+            f"ATLAS_MAX_RESPONSE_BYTES must be an integer of at least {MIN_RESPONSE_BYTES}"
         )
     return int(text)
 
@@ -290,6 +305,7 @@ def read_settings(env: Mapping[str, str]) -> AtlasSettings:
         timeout_seconds=_positive(env, "ATLAS_TIMEOUT_SECONDS", DEFAULT_TIMEOUT_SECONDS, float),
         connect_timeout_seconds=_connect_timeout(env),
         max_concurrent_requests=_concurrency(env),
+        max_response_bytes=_response_bytes(env),
         verify=_verify(env),
         proxy=_proxy(env),
         **auth,

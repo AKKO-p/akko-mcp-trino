@@ -53,7 +53,13 @@ read-only rights, and only on data every caller may read (see
 
 ## The statements an agent may send
 
-Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed in SQL.
+A catalog, schema or table name given to a tool is taken as written: any text of 1 to 1024
+characters without a control character, such as `orders$snapshots`, `2024_sales` or `données`.
+It enters SQL only as a quoted identifier, each double quote in it doubled, or as a string
+literal. A name with a control character, a bidirectional control (U+061C, U+200E, U+200F,
+U+202A to U+202E, U+2066 to U+2069) or a line or paragraph separator (U+2028, U+2029) is refused
+before Trino is asked, and the refusal shows it escaped; the zero-width joiner and non-joiner,
+which some scripts need, are accepted.
 `execute_query` accepts any SQL Trino accepts, **as long as it is a read**.
 
 - **Commands go through an allow list**: `SELECT`, `DESCRIBE` of a table, `SHOW CATALOGS`,
@@ -63,11 +69,38 @@ Every identifier is validated (`[A-Za-z_][A-Za-z0-9_-]*`) before it is placed in
   column mask. They are refused unless the administrator names them in
   `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`,
   `SHOW ROLES`, `SHOW SESSION`).
+- **A statement is bounded before it is parsed, and parsed within a deadline.** One longer than
+  `MCP_MAX_SQL_CHARS` characters (100000 by default), or whose brackets nest deeper than
+  `MCP_MAX_SQL_NESTING` (32 by default), is refused before the parser sees it. A statement within
+  these bounds is parsed once, in one of `MCP_SQL_PARSE_WORKERS` worker processes (2 by default),
+  never in the server's own process, and every check reads that one analysis. A worker that has
+  not answered within `MCP_SQL_PARSE_SECONDS` (2 by default) is killed and replaced, and the call
+  is refused (`time_budget`); so is a call that finds no worker free within that time, and a
+  worker that fails refuses its call too. Deeply nested or repeated SQL therefore no longer ties
+  up the server. A caller has one statement checked at a time, so it holds one worker at most: a
+  second call while the first is checked waits its turn, and is refused (`busy`) if its turn has
+  not come within `MCP_SQL_PARSE_SECONDS`. Calls without a verified caller count as the
+  configured Trino account and share one such turn. A call waits at most twice
+  `MCP_SQL_PARSE_SECONDS`: for its turn and a worker, then for its answer. The workers start on first use, on Linux, macOS and Windows
+  alike, write nowhere (their standard streams are the null device, and the protocol runs on
+  pipes of their own), get none of the server's settings, and end with the server.
+  The remaining risk: an authenticated caller can keep one worker busy for the deadline at a
+  time, so as many callers as there are workers can delay the others; per-user quotas are
+  planned.
+- **What an agent reads is bounded, and a comment is untrusted text.** An `execute_query` answer
+  holds at most `MCP_MAX_RESULT_BYTES` bytes of JSON (1 MiB by default) and a cell at most
+  `MCP_MAX_CELL_CHARS` characters (4000 by default), whatever type it has, so one huge cell or a
+  wide result cannot flood an agent's context; the answer says what it cut (`truncated_reason`,
+  `cut_columns`). A comment Trino holds on a table or a column, in `describe_table`,
+  `describe_schema` and `search_columns`, is cleaned of control, bidirectional and zero-width
+  characters and cut at `MCP_COMMENT_CHARS` characters (1000 by default), as catalog text is, and
+  the entry says when it was cut. Comments stay data: the descriptions of the tools tell the model
+  never to follow them as instructions.
 - **Writes are refused anywhere in the tree.** The statement is parsed into an AST. It is refused
   if it holds more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`,
   `DROP`, `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including inside a CTE,
   a subquery, or the statement an `EXPLAIN` explains. `EXPLAIN ANALYZE` is refused, because it
-  runs what it explains.
+  runs what it explains, and so is an `EXPLAIN` of an `EXPLAIN`.
 - **Table functions and `system` are refused**, and so is any `SHOW` that names `system`. The
   metadata tools refuse `system` as a catalog name too, and `list_catalogs` does not list it.
 - **A name without a catalog** is read in the session catalog (`TRINO_CATALOG`, `system` by

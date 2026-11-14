@@ -59,6 +59,7 @@ from akko_mcp_trino.context import (
     PROPERTY,
     ColumnContext,
     Labelled,
+    ProviderAnswerTooLarge,
     ProviderRefused,
     ProviderUnavailable,
     TableContext,
@@ -136,11 +137,14 @@ def _glossary(qualified_name: Any) -> str:
 
 def _first_of(group: BaseExceptionGroup) -> BaseException:
     """The error a call raises when parallel reads failed: a refusal first, then an outage,
-    then whatever came first (the server says ``error`` for it)."""
+    then an answer refused for the call alone (an outage must open the retry pause), then
+    whatever came first (the server says ``error`` for it)."""
     errors = group.exceptions
-    for kind in (ProviderRefused, ProviderUnavailable):
+    for kind in (ProviderRefused, ProviderUnavailable, ProviderAnswerTooLarge):
         for error in errors:
-            if isinstance(error, kind):
+            if isinstance(error, kind) and (
+                kind is not ProviderUnavailable or not isinstance(error, ProviderAnswerTooLarge)
+            ):
                 return error
     return errors[0]
 
@@ -294,6 +298,7 @@ class AtlasProvider:
             f"read {s.timeout_seconds:g} s",
             f"atlas: bulk reads: {s.max_query_chars} characters of query at most",
             f"atlas: term reads: {s.max_concurrent_requests} at once at most",
+            f"atlas: answer size: {s.max_response_bytes} bytes at most",
             f"atlas: glossaries: {names(sets[GLOSSARY])}",
             f"atlas: classifications: {names(sets[CLASSIFICATION])}",
             f"atlas: business metadata: {names(sets[PROPERTY])}",
@@ -332,6 +337,9 @@ class AtlasProvider:
                 answer, absent = pool.submit(asyncio.run, ask()).result()
             except ProviderRefused:
                 return ["UNREACHABLE: atlas refused the account"]
+            except ProviderAnswerTooLarge as refused:
+                # Atlas answered: the line says what was refused, a fixed text.
+                return [f"UNREACHABLE: {refused}"]
             except ProviderUnavailable:
                 return ["UNREACHABLE: atlas did not answer"]
             except Exception as exc:  # noqa: BLE001 - the check says it failed, by type

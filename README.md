@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
-  <img src="https://img.shields.io/badge/version-0.8.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.8.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/python-3.12%20%7C%203.13-blue" alt="Python">
   <img src="https://img.shields.io/badge/MCP-2024--11--05%20to%202026--07--28%20%C2%B7%20streamable--http%20%7C%20sse%20%7C%20stdio-blue" alt="MCP">
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
@@ -119,7 +119,7 @@ in `service` mode, for the one identity you give it.
 - **One audit line per call.** Keyed by `X-Request-Id`, never holding the token or the SQL text: who called which tool, with which outcome, for how long.
 - **Nine tools,** annotated with what they can really do: `execute_query` is annotated read-only only while `TRINO_READ_ONLY` is true.
 - **Token verification.** Bearer tokens are verified against any OIDC provider's JWKS (issuer, audience bound to this server, expiry, clock tolerance), a token issued for Trino is refused, the protected resource metadata is published (RFC 9728), and the Host header is filtered.
-- **Context from a data catalog, off by default.** With `MCP_CONTEXT_PROVIDERS`, `describe_table` and `describe_schema` add what a data catalog holds about a table (descriptions, glossary terms, classifications, owner), only for the tables Trino lists to the caller, and beyond descriptions only what allow lists name. Providers for Apache Atlas (`akko-mcp-trino-atlas`) and for a JSON file: see [Context from a data catalog](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/catalog-context.md).
+- **Context from a data catalog, off by default.** With `MCP_CONTEXT_PROVIDERS`, `describe_table` and `describe_schema` add what a data catalog holds about a table (descriptions, glossary terms, classifications, owner), only for the tables Trino lists to the caller, and beyond descriptions only what allow lists name. Providers for Apache Atlas (`akko-mcp-trino-atlas`, installed by the `atlas` extra, or `atlas-kerberos` for Kerberos) and for a JSON file: see [Context from a data catalog](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/catalog-context.md).
 - **Extensible without forking.** Tool plugins and extensions are Python packages named at start: identity modes, guards, audit fields, routes, tools. An extension can only refuse what the core allows, never widen it.
 - **Any MCP host, any model.** Cursor, Claude Desktop, VS Code and the Python SDK; and any model, Mistral included, through the example agent.
 - **Tests.** 100% line and branch coverage, including in-process suites on the real SDK for all three transports, a live run against Keycloak and Trino in CI ([`integration/`](https://github.com/AKKO-p/akko-mcp-trino/tree/main/integration)), and a check that the package imports no vendor-specific code.

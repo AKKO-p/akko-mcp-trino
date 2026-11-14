@@ -76,6 +76,10 @@ _ENV_KEYS = [
     "MCP_PROFILE_TYPE_CHARS",
     "MCP_SEARCH_MAX_THREADS",
     "MCP_VISIBILITY_ENABLED",
+    "MCP_MAX_SQL_CHARS",
+    "MCP_MAX_SQL_NESTING",
+    "MCP_SQL_PARSE_SECONDS",
+    "MCP_SQL_PARSE_WORKERS",
 ]
 
 
@@ -592,7 +596,8 @@ def test_a_bound_below_one_is_refused(monkeypatch, name):
 
 
 @pytest.mark.parametrize(
-    "canary", ["orders", "a.b", "a.b.c.d", "a..c", "a.b.c d", "a.b;c.d", "system.runtime.queries"]
+    "canary",
+    ["orders", "a.b", "a.b.c.d", "a..c", "a.b.c\nd", "a.b.c\x1bd", "system.runtime.queries"],
 )
 def test_a_canary_must_name_one_table(monkeypatch, canary):
     monkeypatch.setenv("MCP_CONTEXT_CANARY", canary)
@@ -877,3 +882,65 @@ def test_names_kept_outside_1_to_100000_refuse_to_start(monkeypatch, count):
     assert Config.from_env().problems() == [
         f"MCP_AUDIT_MAX_NAMES={count}: an audit line keeps 1 to 100000 names a list"
     ]
+
+
+def test_bounds_settings_validated_and_in_check(monkeypatch, capsys):
+    """MCP_MAX_SQL_CHARS (100000, 1000 at least) and MCP_MAX_SQL_NESTING (32, 8 at least):
+    read from the environment, refused below their least, printed by --check."""
+    from akko_mcp_trino.__main__ import check_config
+
+    c = Config.from_env()
+    assert (c.max_sql_chars, c.max_sql_nesting) == (100000, 32)
+    assert not [p for p in c.problems() if "MCP_MAX_SQL" in p]
+    monkeypatch.setenv("MCP_MAX_SQL_CHARS", "1000")
+    monkeypatch.setenv("MCP_MAX_SQL_NESTING", "8")
+    c = Config.from_env()
+    assert (c.max_sql_chars, c.max_sql_nesting) == (1000, 8)
+    assert not [p for p in c.problems() if "MCP_MAX_SQL" in p]
+    monkeypatch.setenv("MCP_MAX_SQL_CHARS", "999")
+    monkeypatch.setenv("MCP_MAX_SQL_NESTING", "7")
+    assert [p for p in Config.from_env().problems() if "MCP_MAX_SQL" in p] == [
+        "MCP_MAX_SQL_CHARS=999: a statement must be allowed 1000 characters or more",
+        "MCP_MAX_SQL_NESTING=7: a statement must be allowed 8 nested brackets or more",
+    ]
+    monkeypatch.setenv("MCP_MAX_SQL_CHARS", "50000")
+    monkeypatch.setenv("MCP_MAX_SQL_NESTING", "10")
+    check_config(Config.from_env())
+    assert (
+        "agent SQL: up to 50000 characters, brackets nested 10 deep at most, refused past "
+        "either before it is parsed; parsed by 2 worker processes within 2 s, one statement "
+        "at a time per caller"
+    ) in capsys.readouterr().out
+
+
+def test_parse_worker_settings_validated_and_in_check(monkeypatch, capsys):
+    """MCP_SQL_PARSE_SECONDS (2, above 0) and MCP_SQL_PARSE_WORKERS (2, 1 at least)."""
+    from akko_mcp_trino.__main__ import check_config
+
+    c = Config.from_env()
+    assert (c.sql_parse_seconds, c.sql_parse_workers) == (2.0, 2)
+    monkeypatch.setenv("MCP_SQL_PARSE_SECONDS", "0.5")
+    monkeypatch.setenv("MCP_SQL_PARSE_WORKERS", "1")
+    c = Config.from_env()
+    assert (c.sql_parse_seconds, c.sql_parse_workers) == (0.5, 1)
+    assert not [p for p in c.problems() if "MCP_SQL_PARSE" in p]
+    check_config(c)
+    assert "parsed by 1 worker processes within 0.5 s" in capsys.readouterr().out
+    monkeypatch.setenv("MCP_SQL_PARSE_SECONDS", "0")
+    monkeypatch.setenv("MCP_SQL_PARSE_WORKERS", "0")
+    seconds = (
+        "MCP_SQL_PARSE_SECONDS: the parse of a statement must be given more than 0 seconds "
+        "and 300 at most"
+    )
+    assert [p for p in Config.from_env().problems() if "MCP_SQL_PARSE" in p] == [
+        seconds,
+        "MCP_SQL_PARSE_WORKERS=0: statements are parsed by 1 worker process or more",
+    ]
+    monkeypatch.setenv("MCP_SQL_PARSE_WORKERS", "1")
+    # A deadline the pool cannot wait for (a queue's timeout overflows past about 9e9 s) is
+    # refused at start, as is one that is not a number of seconds; the message is fixed.
+    for value in ("-1", "inf", "nan", "1e10", "300.5"):
+        monkeypatch.setenv("MCP_SQL_PARSE_SECONDS", value)
+        assert [p for p in Config.from_env().problems() if "MCP_SQL_PARSE" in p] == [seconds]
+    monkeypatch.setenv("MCP_SQL_PARSE_SECONDS", "300")
+    assert not [p for p in Config.from_env().problems() if "MCP_SQL_PARSE" in p]

@@ -6,7 +6,14 @@ import time
 
 import httpx
 import pytest
-from akko_mcp_trino.context import ProviderRefused, ProviderUnavailable, TableRef, Term, TermRef
+from akko_mcp_trino.context import (
+    ProviderAnswerTooLarge,
+    ProviderRefused,
+    ProviderUnavailable,
+    TableRef,
+    Term,
+    TermRef,
+)
 from atlas_replay import ATLAS, TERM, FakeAtlas, recording, transport
 
 from akko_mcp_trino_atlas import AtlasProvider
@@ -277,6 +284,14 @@ def test_a_refusal_among_outages_is_the_error_of_the_call():
     assert _first_of(ExceptionGroup("reads", [down, bug, refused, down])) is refused
     assert _first_of(ExceptionGroup("reads", [bug, down])) is down
     assert _first_of(ExceptionGroup("reads", [bug])) is bug
+
+
+def test_an_outage_among_answers_too_large_is_the_error_of_the_call():
+    # The outage opens the retry pause; an answer too large would hide it.
+    large, down = ProviderAnswerTooLarge("too large"), ProviderUnavailable("502")
+    bug = RuntimeError("bug")
+    assert _first_of(ExceptionGroup("reads", [large, bug, down])) is down
+    assert _first_of(ExceptionGroup("reads", [bug, large])) is large
 
 
 def test_an_unexpected_failure_among_parallel_reads_is_raised_as_it_is():

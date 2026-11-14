@@ -48,3 +48,14 @@ def clean_name(name: str) -> str:
     """
     text, cut = clean_text(name, NAME_CHARS)
     return "" if cut else text
+
+
+def clean_comment(comment: object, limit: int) -> tuple[object, bool]:
+    """A comment Trino holds on a table or a column, cleaned and cut as ``clean_text`` does.
+
+    Only a string is cleaned; ``None`` (no comment) or any other value is returned as it is,
+    never cut. The boolean says whether the comment was cut.
+    """
+    if isinstance(comment, str):
+        return clean_text(comment, limit)
+    return comment, False

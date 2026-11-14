@@ -36,6 +36,7 @@ from .context.loading import close_providers, load_providers
 from .extensions import Extension, extension_names, load_extensions
 from .health import build_health_app
 from .metrics import Metrics
+from .parse_pool import close_all as close_parse_pools
 from .plugins import tool_registrars
 from .server import build_server
 from .trino_client import resolve_identity
@@ -123,6 +124,13 @@ def check_config(config: Config, *, strict: bool = False) -> int:
             if config.call_timeout_seconds > 0
             else "none"
         ),
+        f"agent SQL: up to {config.max_sql_chars} characters, brackets nested "
+        f"{config.max_sql_nesting} deep at most, refused past either before it is parsed; "
+        f"parsed by {config.sql_parse_workers} worker processes within "
+        f"{config.sql_parse_seconds:g} s, one statement at a time per caller",
+        f"answers: up to {config.max_result_bytes} bytes of JSON, a cell of "
+        f"{config.max_cell_chars} characters and a Trino comment of {config.comment_chars} at "
+        "most, cut past them",
         f"listings: {config.max_rows} names a page; list_catalogs reads up to "
         f"{config.max_catalogs} catalogs",
         f"describe_schema: up to {config.describe_schema_tables} tables a page "
@@ -217,6 +225,7 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         if closing:
             return
         closing.append(True)
+        close_parse_pools()  # the parse workers first: they end at once
         for setup in started:
             setup.close()
 

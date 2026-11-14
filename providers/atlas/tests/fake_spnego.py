@@ -23,6 +23,8 @@ class FakeSpnego:
     late: Exception | None = None
     release: threading.Event = field(default_factory=threading.Event)
     threads: list[str] = field(default_factory=list)
+    # The wait of a given context, by its number from 1, in place of ``step_seconds``.
+    delays: dict[int, float] = field(default_factory=dict)
 
     def module(self) -> types.ModuleType:
         module = types.ModuleType("spnego")
@@ -48,8 +50,9 @@ class _Context:
 
     def step(self, in_token: bytes | None = None) -> bytes:
         self._fake.threads.append(threading.current_thread().name)
-        if self._fake.step_seconds:
-            self._fake.release.wait(self._fake.step_seconds)
+        seconds = self._fake.delays.get(self.number, self._fake.step_seconds)
+        if seconds:
+            self._fake.release.wait(seconds)
         if self._fake.late is not None:
             raise self._fake.late
         return f"token-{self.number}".encode()

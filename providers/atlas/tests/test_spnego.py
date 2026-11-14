@@ -8,8 +8,17 @@ import time
 
 import httpx
 import pytest
-from akko_mcp_trino.context import ProviderRefused, ProviderUnavailable, TableRef
-from atlas_replay import ATLAS, FakeAtlas, transport
+from akko_mcp_trino.context import (
+    OK,
+    UNAVAILABLE,
+    ContextChain,
+    ContextLoop,
+    ContextSettings,
+    ProviderRefused,
+    ProviderUnavailable,
+    TableRef,
+)
+from atlas_replay import ATLAS, Counted, FakeAtlas, transport
 from fake_spnego import install
 
 from akko_mcp_trino_atlas import AtlasProvider, from_env
@@ -118,7 +127,7 @@ def negotiating(atlas: FakeAtlas, *, session: bool = False):
 
 def test_kerberos_without_pyspnego_refuses_to_start(monkeypatch):
     monkeypatch.setitem(sys.modules, "spnego", None)  # the kerberos extra is not installed
-    with pytest.raises(ValueError, match=r"needs the kerberos extra") as raised:
+    with pytest.raises(ValueError, match=r"needs the Kerberos bindings") as raised:
         from_env(KERBEROS)
     assert KEYTAB not in str(raised.value) and PRINCIPAL not in str(raised.value)
     # Without a principal or a keytab, it refuses to start too, extra or not.
@@ -128,12 +137,21 @@ def test_kerberos_without_pyspnego_refuses_to_start(monkeypatch):
             from_env({k: v for k, v in KERBEROS.items() if k != name})
 
 
+def test_kerberos_without_bindings_names_the_extra(monkeypatch):
+    monkeypatch.setitem(sys.modules, "spnego", None)
+    with pytest.raises(ValueError) as raised:
+        from_env(KERBEROS)
+    assert str(raised.value) == (
+        "ATLAS_AUTH=kerberos needs the Kerberos bindings: install akko-mcp-trino[atlas-kerberos]"
+    )
+
+
 @pytest.mark.parametrize("binding", ["gssapi", "krb5"])
 def test_kerberos_without_its_bindings_refuses_to_start(monkeypatch, binding):
     # pyspnego installed alone imports, but cannot speak Kerberos without its bindings.
     install(monkeypatch)
     monkeypatch.setitem(sys.modules, binding, None)
-    with pytest.raises(ValueError, match=r"needs the kerberos extra"):
+    with pytest.raises(ValueError, match=r"needs the Kerberos bindings"):
         from_env(KERBEROS)
 
 
@@ -460,6 +478,257 @@ def test_negotiations_at_once_are_bounded_by_the_concurrent_requests(monkeypatch
     assert len(fake.contexts) == 1
 
 
+def _chain(p: AtlasProvider, retry_after: float = 30.0) -> tuple[ContextChain, ContextLoop]:
+    """The core's chain over the provider alone, on a loop of its own."""
+    settings = ContextSettings(
+        timeout_seconds=5.0,
+        reserve_seconds=0.0,
+        max_concurrency=8,
+        retry_after_seconds=retry_after,
+        refused_retry_seconds=60.0,
+        batch=50,
+        ttl_seconds=60.0,
+        cache_bytes=1_000_000,
+        terms_cache_bytes=1_000_000,
+    )
+    loop = ContextLoop()
+    loop.start()
+    return ContextChain([p], settings, loop=loop), loop
+
+
+def test_full_pool_of_stale_negotiations_is_unreachable_at_once(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="httpx")
+    fake = slow_kdc(monkeypatch, 10.0)  # a hung KDC: no step answers until the test ends
+    p = build(
+        negotiating(FakeAtlas("atlas-2.4")),
+        ATLAS_TABLE_TYPES="hive_table",
+        ATLAS_MAX_CONCURRENT_REQUESTS="2",
+    )
+    chain, loop = _chain(p)
+
+    def gather(seconds: float):
+        start = time.monotonic()
+        got = loop.submit(chain._gather((INVOICES,), start + seconds), timeout=5)
+        return got.statuses[p.name], time.monotonic() - start
+
+    try:
+        # Two calls cut at their deadline: each leaves a negotiation on a thread of the pool,
+        # and opens no pause, since the deadline cut it.
+        for _ in range(2):
+            status, _ = gather(0.3)
+            assert status == UNAVAILABLE
+        assert p.name not in chain._breakers
+        assert len(fake.contexts) == 2
+        # Every thread holds a negotiation whose call is gone: the next call does not wait for
+        # the KDC, it is unavailable at once, well within its deadline, and the chain opens the
+        # retry pause.
+        status, elapsed = gather(2.0)
+        assert status == UNAVAILABLE
+        assert elapsed < 0.2, f"the call took {elapsed:.2f} s"
+        assert chain._breakers[p.name].status == UNAVAILABLE
+        assert len(fake.contexts) == 2
+        assert PRINCIPAL not in caplog.text and KEYTAB not in caplog.text
+        # During the pause, Atlas is not asked at all.
+        status, elapsed = gather(2.0)
+        assert status == UNAVAILABLE and elapsed < 0.2
+        assert len(fake.contexts) == 2
+    finally:
+        fake.release.set()
+        chain.close()
+        loop.close()
+
+
+def test_kdc_wait_does_not_move_first_address(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.WARNING, logger="httpx")
+    fake = slow_kdc(monkeypatch, 3.0)
+    p = build(
+        negotiating(FakeAtlas("atlas-2.4")),
+        ATLAS_URL=f"{ATLAS},{OTHER}",
+        ATLAS_TABLE_TYPES="hive_table",
+    )
+    try:
+        (error,), elapsed, _ = asyncio.run(_beside(p, 0.5))
+    finally:
+        fake.release.set()
+    assert isinstance(error, ProviderUnavailable)
+    assert elapsed < 0.5 + 0.5, f"the call took {elapsed:.2f} s"
+    # The address answered its challenge at once; the wait was the KDC's, not the address's.
+    assert "did not answer in time" not in caplog.text
+    assert p._client._first == 0
+    assert [c["hostname"] for c in fake.contexts] == ["atlas-a"]
+
+
+def test_slow_but_live_kdc_is_not_an_outage(monkeypatch):
+    fake = slow_kdc(monkeypatch, 10.0)
+    # The first negotiation hangs; the next ones answer, slowly.
+    fake.delays[2] = 0.3
+    p = build(
+        negotiating(FakeAtlas("atlas-2.4")),
+        ATLAS_TABLE_TYPES="hive_table",
+        ATLAS_MAX_CONCURRENT_REQUESTS="2",
+    )
+    chain, loop = _chain(p)
+    try:
+        start = time.monotonic()
+        got = loop.submit(chain._gather((INVOICES,), start + 0.2), timeout=5)
+        assert got.statuses[p.name] == UNAVAILABLE
+        # One thread holds a negotiation whose call is gone, one is free: the next call waits
+        # for the KDC, as 0.8.0 did, and reads Atlas.
+        start = time.monotonic()
+        got = loop.submit(chain._gather((INVOICES,), start + 3.0), timeout=5)
+        elapsed = time.monotonic() - start
+        assert got.statuses[p.name] == OK
+        assert INVOICES in got.tables
+        assert elapsed >= 0.3
+        assert p.name not in chain._breakers
+        assert len(fake.contexts) == 2
+    finally:
+        fake.release.set()
+        chain.close()
+        loop.close()
+
+
+def _until(condition, seconds: float) -> bool:
+    end = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+def test_the_kdc_pause_ends_once_the_kdc_answers_again(monkeypatch):
+    fake = slow_kdc(monkeypatch, 10.0)
+    p = build(
+        negotiating(FakeAtlas("atlas-2.4")),
+        ATLAS_TABLE_TYPES="hive_table",
+        ATLAS_MAX_CONCURRENT_REQUESTS="2",
+    )
+    chain, loop = _chain(p, retry_after=0.3)
+
+    def gather(seconds: float):
+        start = time.monotonic()
+        got = loop.submit(chain._gather((INVOICES,), start + seconds), timeout=5)
+        return got.statuses[p.name], time.monotonic() - start
+
+    try:
+        for _ in range(2):
+            assert gather(0.3)[0] == UNAVAILABLE
+        status, elapsed = gather(2.0)
+        assert status == UNAVAILABLE and elapsed < 0.2, f"the call took {elapsed:.2f} s"
+        opened = time.monotonic()
+        # The KDC answers again: the threads it held are free, and no longer counted.
+        fake.release.set()
+        assert _until(lambda: not p._client._kerberos._stale, 3.0), "the threads stay counted"
+        time.sleep(max(0.0, opened + 0.3 + 0.05 - time.monotonic()))  # the pause is over
+        status, _ = gather(3.0)
+        assert status == OK
+        assert len(fake.contexts) == 3
+    finally:
+        fake.release.set()
+        chain.close()
+        loop.close()
+
+
+def test_a_pool_full_of_live_negotiations_queues_the_next_one(monkeypatch):
+    # A slow KDC that answers: every negotiation takes 0.3 s, and every call is in its deadline.
+    fake = slow_kdc(monkeypatch, 0.3)
+    p = build(
+        negotiating(FakeAtlas("atlas-2.4")),
+        ATLAS_TABLE_TYPES="hive_table",
+        ATLAS_MAX_CONCURRENT_REQUESTS="2",
+    )
+    chain, loop = _chain(p)
+
+    async def three() -> list:
+        async def one():
+            try:
+                return await p.describe([INVOICES], deadline=time.monotonic() + 3.0)
+            except Exception as exc:  # noqa: BLE001 - the test looks at the error
+                return exc
+
+        return await asyncio.gather(one(), one(), one())
+
+    try:
+        # Both threads are busy when the third call negotiates: it waits for one, as 0.8.0 did.
+        results = loop.submit(three(), timeout=5)
+        assert all(isinstance(r, dict) and INVOICES in r for r in results), results
+        assert len(fake.contexts) == 3
+        status = loop.submit(chain._gather((INVOICES,), time.monotonic() + 3.0), timeout=5)
+        assert status.statuses[p.name] == OK
+        assert p.name not in chain._breakers
+    finally:
+        fake.release.set()
+        chain.close()
+        loop.close()
+
+
+def _slow_after_token(handler, seconds: float, host: str | None = None):
+    """``handler``, with the authenticated requests (to ``host`` alone when set) answered
+    after ``seconds``."""
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        authorization = request.headers.get("authorization", "")
+        if authorization.startswith("Negotiate ") and host in (None, request.url.host):
+            await asyncio.sleep(seconds)
+        return handler(request)
+
+    return slow
+
+
+def test_the_challenge_counts_as_an_answer_of_the_address(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="httpx")
+    # The address never answered before; the KDC takes most of the deadline, and Atlas is slow
+    # after the token: the deadline cuts a short wait on an address that answered its challenge.
+    fake = slow_kdc(monkeypatch, 0.4)
+    p = build(
+        _slow_after_token(negotiating(FakeAtlas("atlas-2.4")), 1.0),
+        ATLAS_URL=f"{ATLAS},{OTHER}",
+        ATLAS_TABLE_TYPES="hive_table",
+    )
+    try:
+        (error,), _, _ = asyncio.run(_beside(p, 0.5))
+    finally:
+        fake.release.set()
+    assert isinstance(error, ProviderUnavailable)
+    assert len(fake.contexts) == 1
+    assert "did not answer in time" not in caplog.text
+    assert p._client._first == 0
+
+
+def test_an_address_hung_after_a_fast_negotiation_is_left(monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="httpx")
+    install(monkeypatch)  # a fast KDC
+    handler = negotiating(FakeAtlas("atlas-2.4"))
+    p = build(
+        _slow_after_token(handler, 3.0, host="atlas-a"),
+        ATLAS_URL=f"{ATLAS},{OTHER}",
+        ATLAS_TABLE_TYPES="hive_table",
+        ATLAS_CONNECT_TIMEOUT_SECONDS="0.2",
+    )
+
+    async def run():
+        try:
+            try:
+                first: object = await p.describe([INVOICES], deadline=time.monotonic() + 0.5)
+            except ProviderUnavailable as exc:
+                first = exc
+            asked = len(handler.seen)
+            second = await p.describe([INVOICES], deadline=time.monotonic() + 3.0)
+            return first, second, [r.url.host for r in handler.seen[asked:]]
+        finally:
+            await p.aclose()
+
+    first, second, hosts = asyncio.run(run())
+    # The first address answered its challenge, then hung on the authenticated request: that
+    # wait is its own, so it is named once and left.
+    assert isinstance(first, ProviderUnavailable)
+    assert "atlas address 1 of 2 in ATLAS_URL did not answer in time" in caplog.text
+    assert INVOICES in second
+    assert hosts and hosts[0] == "atlas-b"
+
+
 def test_a_synchronous_client_negotiates_too(monkeypatch):
     install(monkeypatch)
     auths: list[str] = []
@@ -475,6 +744,55 @@ def test_a_synchronous_client_negotiates_too(monkeypatch):
         with httpx.Client(transport=httpx.MockTransport(handler), auth=auth) as client:
             assert client.get(f"{ATLAS}/api/atlas/admin/version").status_code == 200
             assert client.get(f"{ATLAS}/open").status_code == 200  # no challenge, no token
+    finally:
+        auth.close()
+    assert auths == ["", "Negotiate " + base64.b64encode(b"token-1").decode(), ""]
+
+
+def test_a_challenge_body_is_never_read(monkeypatch):
+    install(monkeypatch)
+    atlas = FakeAtlas("atlas-2.4")
+    bodies: list[Counted] = []
+    # Four times the cap in plain bytes, and a stacked coding no client should decode.
+    payloads = {"identity": b" " * (4 * 1_048_576), "gzip, gzip": b"\x1f\x8b not gzip"}
+
+    for coding, payload in payloads.items():
+
+        def handler(request: httpx.Request, coding=coding, payload=payload) -> httpx.Response:
+            if not request.headers.get("authorization"):
+                bodies.append(Counted(payload))
+                headers = {**CHALLENGE, "content-encoding": coding}
+                return httpx.Response(401, headers=headers, stream=bodies[-1])
+            return atlas(request)
+
+        p = build(handler, ATLAS_TABLE_TYPES="hive_table", ATLAS_MAX_RESPONSE_BYTES="1048576")
+        (found,) = calls(p)
+        assert INVOICES in found, coding
+    assert len(bodies) == 2
+    assert all(body.sent == 0 and body.closed for body in bodies), [b.sent for b in bodies]
+
+
+def test_an_asynchronous_httpx_client_negotiates_too(monkeypatch):
+    install(monkeypatch)
+    auths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        auths.append(request.headers.get("authorization", ""))
+        if not auths[-1] and request.url.path != "/open":
+            return httpx.Response(401, headers=CHALLENGE)
+        return httpx.Response(200, json={})
+
+    auth = SpnegoAuth(PRINCIPAL, KEYTAB, "")
+
+    async def run() -> list[int]:
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, auth=auth) as client:
+            first = await client.get(f"{ATLAS}/api/atlas/admin/version")
+            second = await client.get(f"{ATLAS}/open")  # no challenge, no token
+            return [first.status_code, second.status_code]
+
+    try:
+        assert asyncio.run(run()) == [200, 200]
     finally:
         auth.close()
     assert auths == ["", "Negotiate " + base64.b64encode(b"token-1").decode(), ""]

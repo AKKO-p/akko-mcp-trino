@@ -14,13 +14,27 @@
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (de 0 à 20, première page seulement), `column_offset` (facultatif, 0 par défaut) | une page des colonnes, avec types et commentaires, et un échantillon gouverné sur demande ; voir [describe_table](#describe_table) |
 | `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (tous facultatifs sauf la table) | des agrégats des lignes que l'appelant peut lire ; voir [profile_table](#profile_table) |
 | `explain_query` | `sql` | `{"valid": true}` : Trino a analysé une instruction en lecture sous l'identité de l'appelant, sans l'exécuter ; `{"plan": "..."}` seulement quand `EXPLAIN` figure dans `MCP_EXTRA_READ_COMMANDS` |
-| `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}` |
+| `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}`, plus `truncated_reason` et `cut_columns` quand ils s'appliquent ; voir [Les bornes](#les-bornes) |
 
 Chaque tool passe par Trino sous le mode d'identité, les tools de liste compris : les métadonnées
 sont des données, et Trino ne liste que ce que cette identité peut voir. Chaque description est
 écrite pour un modèle et dit ce que rend le tool. Les descriptions de `describe_table`, de
 `profile_table` et d'`execute_query` disent aussi qu'une valeur masquée ou une ligne absente est la
 policy d'accès, pas une erreur à retenter.
+
+Chaque réponse est le JSON montré plus haut, envoyé une seule fois, comme texte de la réponse
+(`content[0].text`). Les tools ne déclarent pas d'`outputSchema` et n'envoient pas de
+`structuredContent` : une réponse pèse ce que pèse son contenu. Un tool enregistré par
+`tools.tool()` répond une seule fois, comme les tools intégrés ; un tool ajouté par `mcp.tool()` ou
+`mcp.add_tool()` garde le défaut du SDK et peut passer `structured_output=False` (voir
+[Développeurs](developers.md)).
+
+Un argument `catalog`, `schema` ou `table` est un seul nom nu, pris tel qu'il est écrit : une table
+de métadonnées Iceberg comme `orders$snapshots`, un nom avec des accents, des espaces ou un point,
+ou qui commence par un chiffre est lu comme ce seul nom, et Trino le met en minuscules. Un nom
+fait de 1 à 1024 caractères sans caractère de contrôle, contrôle bidirectionnel ni séparateur de
+ligne (voir [Sécurité](security.md#les-instructions-quun-agent-peut-envoyer)) ; tout autre est refusé avec
+`"kind": "invalid_argument"` avant que Trino ne soit interrogé.
 
 ## Le parcours d'un agent
 
@@ -317,6 +331,44 @@ Les résultats sont plafonnés à `TRINO_MAX_ROWS` (100 par défaut, au moins 1)
 ligne de plus, si bien que `truncated` dit si la réponse a été coupée, et le reste de la requête
 est annulé dans Trino.
 
+Une réponse d'`execute_query` est aussi bornée en taille, quoi que contiennent les lignes. Deux
+clés, absentes sauf si elles s'appliquent, disent ce qui a été coupé :
+
+- **Une cellule** de plus de `MCP_MAX_CELL_CHARS` caractères (4000 par défaut) est coupée. Un texte
+  est coupé à ce nombre de caractères ; une valeur binaire, rendue en hexadécimal, à ce nombre de
+  chiffres ; toute autre valeur (un tableau, une map, une row, un nombre, une date) dont le texte
+  JSON est plus long est remplacée par ce texte coupé. `cut_columns` n'apparaît que si une cellule
+  des lignes rendues a été coupée, et liste les noms de leurs colonnes, dans l'ordre de `columns`,
+  chacun une fois.
+- **La réponse** entière reste dans `MCP_MAX_RESULT_BYTES` octets (1 Mio par défaut), mesurés sur
+  le JSON que le tool rend. Les lignes s'ajoutent dans l'ordre tant que cela tient ; la première
+  qui ne tiendrait pas, et celles d'après, sont écartées. `row_count` dit combien sont rendues,
+  `truncated` est vrai et `truncated_reason` vaut `"bytes"`. Quand même la première ligne ne tient
+  pas, la réponse n'a aucune ligne, `truncated` vrai et la même raison. Une instruction dont les
+  noms de colonnes dépassent à eux seuls la borne est refusée (`invalid_argument`).
+- `truncated_reason` n'est présent que si `truncated` est vrai : `"rows"` quand le plafond de
+  lignes (`TRINO_MAX_ROWS` ou `max_rows`) a coupé la réponse, `"bytes"` quand la borne de taille
+  l'a fait, y compris quand les deux s'appliquaient. Pour lire la suite, choisissez moins de
+  colonnes ou des valeurs plus courtes, ajoutez `LIMIT`, ou agrégez.
+
+Le `sample` de `describe_table` est borné de la même façon (cellules, taille, `cut_columns`,
+`truncated_reason`) ; un échantillon dont les seuls noms de colonnes dépassent la borne vient
+sans ligne, `truncated` vrai et `truncated_reason` à `"bytes"`. Le `plan` d'`explain_query`, quand `EXPLAIN` est autorisé, reste lui aussi
+dans `MCP_MAX_RESULT_BYTES` octets : un plan plus long est coupé et la réponse ajoute
+`"truncated": true` et `"truncated_reason": "bytes"`.
+
+La ligne d'audit de l'appel note les lignes rendues et `truncated`, pour l'échantillon et le plan aussi, et la raison, `rows` ou
+`bytes`, dans `truncated_reason` avec le module `fingerprint-audit` ; jamais les données ni
+l'instruction.
+
+Les commentaires que Trino porte sur les tables et les colonnes, rendus par `describe_table`,
+`describe_schema` et `search_columns`, sont du texte qu'ont écrit les propriétaires des données.
+Ils sont débarrassés des caractères de contrôle, de format (contrôles bidirectionnels et
+caractères de largeur nulle compris) et de séparation, et coupés à `MCP_COMMENT_CHARS` caractères
+(1000 par défaut), comme le texte d'un catalogue. Une entrée dont le commentaire a été coupé dit
+`"cut": ["comment"]` ; `describe_table`, dont les rows sont des listes, dit
+`"comments_cut": [<noms des colonnes>]` sur la réponse.
+
 Avec `TRINO_QUERY_TIMEOUT_SECONDS` (60 s par défaut), le serveur annule dans Trino une requête plus
 longue et prévient l'agent. Le serveur tient ce budget lui-même au lieu de poser une propriété de
 session : un moteur de policies qui interdit aux utilisateurs de poser des propriétés de session
@@ -348,11 +400,11 @@ Trino n'a pas su résoudre, quand Trino le nomme.
 |---|---|
 | `syntax`, `column`, `table`, `schema`, `catalog`, `function`, `type` | Trino a refusé l'instruction : corriger cette partie |
 | `permission` | Trino ou l'identity provider a refusé le droit : le rapporter, ne pas réessayer |
-| `invalid_argument` | le serveur a refusé un argument (un identifiant, un `offset`, un curseur, un texte de recherche hors limites) avant d'appeler Trino |
+| `invalid_argument` | le serveur a refusé un argument (un identifiant, un `offset`, un curseur, un texte de recherche hors limites, une instruction trop longue ou trop imbriquée) avant d'appeler Trino |
 | `read_only` | l'instruction écrit et le serveur est en lecture seule |
-| `time_budget` | l'appel a épuisé son budget de temps : restreindre la demande |
-| `busy` | `profile_table` exécute déjà autant d'appels que ce serveur le permet (`MCP_PROFILE_MAX_CONCURRENT`) : rappeler dans quelques secondes, comme le dit son `hint` |
-| `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue) : cela ne dit rien de la validité de l'instruction, réessayer plus tard |
+| `time_budget` | l'appel a épuisé son budget de temps, ou son instruction n'a pu être contrôlée dans `MCP_SQL_PARSE_SECONDS` : restreindre ou simplifier la demande |
+| `busy` | `profile_table` exécute déjà autant d'appels que ce serveur le permet (`MCP_PROFILE_MAX_CONCURRENT`), ou une instruction du même appelant était encore en cours de contrôle après `MCP_SQL_PARSE_SECONDS` : rappeler dans quelques secondes |
+| `unavailable` | Trino n'a pas pu répondre (erreur interne, connexion perdue), ou le processus qui contrôlait l'instruction a échoué : cela ne dit rien de la validité de l'instruction, réessayer plus tard |
 | `other` | toute autre erreur |
 
 Quand Trino ne trouve pas une colonne (`COLUMN_NOT_FOUND`, avec son nom) dans `execute_query` ou

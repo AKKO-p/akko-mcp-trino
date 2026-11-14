@@ -152,6 +152,30 @@ jobs:
       - run: uv venv && uv pip install --resolution ${{ matrix.resolution }} -e . $(bash scripts/lock.sh pins pytest pytest-cov)
       - name: tests at the ${{ matrix.resolution }} versions of every dependency
         run: .venv/bin/python -m pytest -q
+  windows:
+    # The parse workers on Windows, where hosts such as Claude Desktop and Cursor start the
+    # server over stdio: the pool's tests and the stdio end-to-end test only. The package is
+    # installed as a Windows user gets it, its dependencies resolved on Windows (the SDK's
+    # stdio server imports pywin32 there, which the SDK declares for win32), with pytest at the
+    # version of requirements/dev.txt; the locks, compiled on Linux, would leave pywin32 out.
+    # The locked dev tools only bring uv.
+    name: parse workers (windows)
+    runs-on: windows-latest
+    needs: versions
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: ${{ needs.versions.outputs.python }}
+      - run: pip install --no-deps --require-hashes -r requirements/build.txt -r requirements/dev.txt
+      - run: uv venv && uv pip install --resolution highest . $(bash scripts/lock.sh pins pytest)
+      - name: pywin32 comes with the package on Windows
+        run: .venv/Scripts/python -c "import pywintypes, win32api"
+      - name: the parse pool and the stdio end-to-end test
+        run: .venv/Scripts/python -m pytest -q -p no:cacheprovider -o addopts="" tests/test_parse_pool.py tests/test_parse_process.py
   integration:
     # The identity modes, live: a disposable Keycloak (token exchange) and Trino (JWT and
     # client certificates), three servers built from this commit, every check of

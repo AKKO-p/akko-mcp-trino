@@ -18,14 +18,15 @@ de Trino. Il lit Atlas avec un compte à lui, par l'API REST v2 seulement, et n'
 ## Installation
 
 ```bash
-pip install "akko-mcp-trino[atlas]"     # le cœur avec ce fournisseur et Kerberos
+pip install "akko-mcp-trino[atlas]"     # le cœur avec ce fournisseur : Basic et Knox
 export MCP_CONTEXT_PROVIDERS=atlas
 ```
 
-Sous Linux, l'extra `atlas` compile les liaisons Kerberos (`gssapi`, `krb5`) depuis les sources :
-il lui faut un compilateur C et les en-têtes MIT Kerberos (`libkrb5-dev` sous Debian et Ubuntu,
-`krb5-devel` sous Red Hat). Avec l'authentification Basic ou un jeton Knox, installer sans eux :
-`pip install akko-mcp-trino akko-mcp-trino-atlas`.
+Cette installation n'a besoin d'aucun compilateur. Pour Kerberos, installer plutôt l'extra
+`atlas-kerberos` : `pip install "akko-mcp-trino[atlas-kerberos]"`. Sous Linux, il compile les
+liaisons Kerberos (`gssapi`, `krb5`) depuis les sources : il lui faut un compilateur C et les
+en-têtes MIT Kerberos (`libkrb5-dev` sous Debian et Ubuntu, `krb5-devel` sous Red Hat).
+`ATLAS_AUTH=kerberos` sans les liaisons arrête le serveur au démarrage et nomme cet extra.
 
 Seul : `pip install akko-mcp-trino-atlas` (Basic et Knox), ou
 `pip install "akko-mcp-trino-atlas[kerberos]"` pour Kerberos, qui apporte `pyspnego` et ses
@@ -33,7 +34,7 @@ liaisons GSSAPI (bibliothèques MIT Kerberos sur le système).
 
 Le fournisseur s'enregistre sous le groupe de points d'entrée `akko_mcp_trino.context`, sous le nom
 `atlas`. Rien n'est chargé tant que `MCP_CONTEXT_PROVIDERS` ne le nomme pas ; l'image de conteneur
-d'akko-mcp-trino l'embarque, inactif, avec son extra `kerberos` et les bibliothèques MIT Kerberos.
+d'akko-mcp-trino l'embarque, inactif, avec ses liaisons Kerberos et les bibliothèques MIT Kerberos.
 
 ## Réglages
 
@@ -62,6 +63,7 @@ cite une adresse, un proxy ni un secret.
 | `ATLAS_TIMEOUT_SECONDS` | délai d'une requête à Atlas ; avec plusieurs adresses, voir plus bas son rapport à `MCP_CONTEXT_TIMEOUT_SECONDS` | `5` |
 | `ATLAS_CONNECT_TIMEOUT_SECONDS` | délai pour ouvrir une connexion à une adresse, inférieur à `ATLAS_TIMEOUT_SECONDS`, pour qu'une adresse muette laisse la place à la suivante dans le temps de l'appel | `1` |
 | `ATLAS_MAX_CONCURRENT_REQUESTS` | lectures de termes de glossaire envoyées à la fois, de 1 à 32 ; avec Kerberos, aussi les négociations menées à la fois | `4` |
+| `ATLAS_MAX_RESPONSE_BYTES` | taille maximale du corps d'une réponse d'Atlas une fois décodé, au moins `1048576` ; la borne vaut par lecture, pas par appel, et un appel peut tenir plusieurs lectures à la fois (lectures par lot, puis jusqu'à `ATLAS_MAX_CONCURRENT_REQUESTS` lectures de termes) ; la lecture s'arrête au-delà, avec ou sans `Content-Length`, et l'appel est `unavailable` pour lui seul : aucune autre adresse n'est essayée et aucune pause de réessai ne s'ouvre. Un avertissement par appel conseille de baisser `MCP_CONTEXT_BATCH`. La borne porte sur les octets de la réponse, pas sur la mémoire du JSON décodé, qui peut en occuper bien davantage | `67108864` |
 
 Un secret donné par fichier (`*_FILE`) est relu quand le fichier change.
 
@@ -130,12 +132,14 @@ un `User-Agent` à lui, et garde le cookie de session `ATLASSESSIONID`.
 |---|---|
 | une connexion refusée, ou aucune ouverte en `ATLAS_CONNECT_TIMEOUT_SECONDS` | essaie l'adresse suivante d'`ATLAS_URL`, et commence par elle aux appels suivants ; puis se dit indisponible |
 | pas de réponse à temps de l'adresse par laquelle l'appel a commencé : un délai de lecture ou d'écriture dépassé, ou l'échéance de l'appel lui-même atteinte pendant qu'il l'attend | essaie l'adresse suivante d'`ATLAS_URL` s'il reste du temps à l'appel, commence par elle aux appels suivants, et l'écrit une fois au journal (plus bas) ; puis se dit indisponible |
-| une autre erreur de transport (une connexion fermée sous l'appel, une erreur du proxy), un corps qui ne se décode pas, ou un 5xx | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible ; les appels suivants commencent là où ils commençaient |
+| une autre erreur de transport (une connexion fermée sous l'appel, une erreur du proxy), un corps compressé qui ne se décode pas, s'arrête avant sa fin ou contient quoi que ce soit après elle (un second membre gzip, d'autres octets), ou un 5xx (son corps non lu) | essaie l'adresse suivante d'`ATLAS_URL`, puis se dit indisponible ; les appels suivants commencent là où ils commençaient |
 | une redirection vers une adresse d'`ATLAS_URL` (le serveur passif d'Atlas HA) | la suit, et commence par cette adresse aux appels suivants |
 | une redirection ailleurs (une connexion Knox sur un autre hôte) | se dit refusé tout de suite, sans essayer d'autre adresse, pour qu'aucune boucle d'essais ne verrouille le compte |
 | 401, ou un 403 autre que celui d'en dessous | se dit refusé tout de suite ; le cookie de session est oublié |
 | 403 avec `ATLAS-403-00-001` (Atlas refuse au compte une partie des objets demandés) | ne sert rien de cette lecture (tout le lot de tables, ou ce terme), reste ouvert, et écrit une fois pour l'appel `atlas refused some objects to the account; an account with no read grant serves nothing` ; les tables de ce lot reçoivent le statut `not_found`, exprès, le même qu'une table qu'Atlas ne connaît pas, pour qu'un agent ne puisse pas distinguer un objet refusé d'un objet absent |
 | un 200 qui n'est pas du JSON (une page de connexion Knox), un JSON illisible, un autre statut | se dit indisponible |
+| un corps dans un codage de contenu autre qu'aucun, `identity`, `gzip` ou `deflate`, ou dans plusieurs (le client demande `Accept-Encoding: gzip, deflate`) | n'en lit rien, et se dit indisponible pour cet appel seul, comme ci-dessous ; écrit une fois pour l'appel `atlas answered in a content coding other than gzip or deflate` |
+| un corps plus long qu'`ATLAS_MAX_RESPONSE_BYTES` une fois décodé | cesse de le lire, et se dit indisponible pour cet appel seul : aucune autre adresse n'est essayée, les appels suivants commencent là où ils commençaient, aucune pause de réessai ne s'ouvre ; écrit une fois pour l'appel `atlas answered more than ATLAS_MAX_RESPONSE_BYTES for one read; lower MCP_CONTEXT_BATCH` |
 | 404 avec `ATLAS-404-00-009` à une lecture de tables (aucune instance) | ne sait rien de ces tables |
 | 404 avec `ATLAS-404-00-005` à une lecture de terme (aucun GUID) | écarte ce terme |
 | 400 avec `ATLAS-400-00-014` (aucun type) | ne sait rien sous ce type, et s'en souvient jusqu'au `SIGHUP` |
@@ -196,16 +200,19 @@ passif d'Atlas renégocie avec l'actif. L'authentification mutuelle d'Atlas est 
 Une négociation tourne sur un fil d'exécution propre au fournisseur, jamais sur la boucle qui sert
 le contexte de chaque appel : un KDC lent ne retient jamais les autres lectures. Un KDC qui n'a
 pas répondu à l'échéance de l'appel (un port 88 filtré, des essais d'un KDC à l'autre) rend cet
-appel `unavailable` à son échéance ; le fournisseur n'est pas écarté comme en panne (pas de
-pause `MCP_CONTEXT_RETRY_AFTER_SECONDS`), puisque l'échéance a coupé l'appel, donc l'appel suivant
-renégocie et paie la même attente. Au plus
+appel `unavailable` à son échéance ; cela seul n'écarte pas le fournisseur comme en panne,
+puisque l'échéance a coupé l'appel, donc l'appel suivant renégocie. Au plus
 `ATLAS_MAX_CONCURRENT_REQUESTS` négociations tournent à la fois ; une négociation qui attend encore
 un fil quand son appel est coupé ne commence jamais, et une négociation en cours s'achève quand le
-KDC répond, son résultat écarté. L'attente du KDC compte comme une attente de l'adresse par
-laquelle l'appel a commencé : la ligne d'adresse plus haut peut donc la nommer, et les appels
-suivants peuvent commencer par l'adresse suivante d'`ATLAS_URL`. Une négociation en cours retient
-aussi le processus quand il s'arrête : Python attend son fil, donc un arrêt pendant un KDC bloqué
-dure jusqu'à ce que krb5 abandonne, dans le délai de grâce du pod.
+KDC répond, son résultat écarté. Quand chacun de ces fils est tenu par une négociation dont
+l'appel a été coupé, ce qui est pris pour un KDC qui ne répond plus, l'appel suivant ne l'attend
+pas : il est `unavailable` tout de suite, avant son échéance, et le fournisseur est réessayé
+comme une panne, après `MCP_CONTEXT_RETRY_AFTER_SECONDS`. Tant qu'un fil est libre, un KDC lent
+qui répond encore est attendu, jusqu'à l'échéance de l'appel. L'attente du KDC n'est pas une attente d'Atlas :
+l'adresse a répondu à son défi, donc la ligne d'adresse plus haut ne la nomme jamais pour cette
+attente, et les appels suivants commencent toujours par la même adresse d'`ATLAS_URL`. Une
+négociation en cours retient aussi le processus quand il s'arrête : Python attend son fil, donc
+un arrêt pendant un KDC bloqué dure jusqu'à ce que krb5 abandonne, dans le délai de grâce du pod.
 
 Une négociation qui échoue est un refus du compte, comme un 401, sans essayer d'autre adresse : un
 keytab que le KDC refuse (un mot de passe changé dans l'annuaire, un mauvais principal, un keytab

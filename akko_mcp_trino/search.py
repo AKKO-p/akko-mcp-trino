@@ -45,11 +45,16 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .audit import CallTimeout, current_call, error_code, note
+from .config import DEFAULT_COMMENT_CHARS
+from .context.text import clean_comment
 from .errors import INVALID_ARGUMENT, TIME_BUDGET, VIEW_REFUSED, explain_error, metadata_view_error
 from .sql_guard import (
     JDBC_COLUMNS,
+    MAX_NAME_LENGTH,
     TABLE_COMMENTS,
     governed_catalog,
+    quote_identifier,
+    shown_name,
     sql_literal,
     validate_identifier,
 )
@@ -86,9 +91,8 @@ PER_WORD_HINT = (
     "column or table name, then call describe_table on the table."
 )
 _WORD = re.compile(r"\w+")
-# What a cursor may hold: a schema name of this many characters at most, a row offset Trino
-# reads as a bigint.
-MAX_NAME_LENGTH = 1024
+# What a cursor may hold: a schema name of MAX_NAME_LENGTH characters at most, a row offset
+# Trino reads as a bigint.
 MAX_ROW_OFFSET = 2**63 - 1
 _INVALID_CURSOR = (
     "Invalid cursor: pass back next_cursor unchanged, or start the search again without a cursor"
@@ -243,6 +247,7 @@ def search(
     max_word_length: int,
     reserve_seconds: float,
     max_catalogs: int,
+    comment_chars: int = DEFAULT_COMMENT_CHARS,
     concurrency: int = 1,
     slots: Optional[threading.Semaphore] = None,
 ) -> dict:
@@ -266,7 +271,9 @@ def search(
     each as the caller and within the call, in threads that take one of ``slots`` each (the
     reads in flight of every call of the process); with none free, the call reads the
     catalog itself. Unless the call's budget runs out, the answer and the cursor are those
-    of a search of one catalog at a time."""
+    of a search of one catalog at a time. A comment is cleaned and cut at ``comment_chars``
+    characters as catalogue text is, and an entry whose comment was cut says
+    ``"cut": ["comment"]``."""
     words = search_words(text, min_length)
     if not words:
         raise ValueError(
@@ -331,7 +338,7 @@ def search(
     def schemas_of(cat: str, first: str, cancel: Optional[Cancellation] = None) -> list[str]:
         """The schemas of ``cat`` from ``first`` on, sorted, without information_schema."""
         sql = (
-            f"SELECT schema_name FROM {cat}.information_schema.schemata "
+            f"SELECT schema_name FROM {quote_identifier(cat)}.information_schema.schemata "
             f"WHERE schema_name >= {sql_literal(first)} "
             "AND schema_name <> 'information_schema' ORDER BY schema_name"
         )
@@ -343,7 +350,8 @@ def search(
         # no error: without this check the search would say it searched it, completely.
         note(error="schema_not_found")
         return {
-            "error": f"Schema {catalog}.{schema} not found or not visible",
+            "error": f"Schema {shown_name(catalog or '')}.{shown_name(schema or '')} "
+            "not found or not visible",
             "kind": "schema",
         }
 
@@ -542,10 +550,15 @@ def search(
                 rows = []
                 for row in res["rows"][:room]:
                     where = {"catalog": cat, "schema": sch, "table": row[0]}
+                    comment, was_cut = clean_comment(
+                        row[1] if phase == TABLES else row[3], comment_chars
+                    )
                     if phase == TABLES:
-                        entry = {**where, "comment": row[1]}
+                        entry = {**where, "comment": comment}
                     else:
-                        entry = {**where, "column": row[1], "type": row[2], "comment": row[3]}
+                        entry = {**where, "column": row[1], "type": row[2], "comment": comment}
+                    if was_cut:
+                        entry["cut"] = ["comment"]
                     if mode == PER_WORD:
                         entry["words"] = found_by(row[2:] if phase == TABLES else row[4:])
                     rows.append(entry)

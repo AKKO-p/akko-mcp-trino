@@ -7,7 +7,9 @@ Registrars add tools; extensions (below) add the rest, never in place of the cor
 A registrar is ``(mcp, client)`` or ``(mcp, client, tools)``. Either way, every
 tool it adds through ``mcp.tool()`` or ``mcp.add_tool()`` is audited like a
 built-in one; the three-argument form also receives the `ToolContext` (audit,
-a governed ``run``, describers of ``describe_table``).
+a governed ``run``, describers of ``describe_table``). A tool registered with
+``tools.tool()`` answers once, like the built-in tools; a tool added with ``mcp.tool()``
+or ``mcp.add_tool()`` keeps the SDK's default and may pass ``structured_output=False``.
 
 Extensions (see `akko_mcp_trino.extensions`) are applied here too: their
 identity modes, the audit they wrap, the client tags of the queries, and their
@@ -23,6 +25,7 @@ from . import __version__
 from .config import Config
 from .context import ContextChain, ContextLoop, ContextProvider, ContextSettings, ContextSetup
 from .extensions import Extension
+from .parse_pool import ParsePool
 from .sql_guard import parse_extra_reads
 from .tools import audited, register_query_tools
 from .trino_client import TrinoClient, resolve_identity
@@ -53,7 +56,9 @@ def instructions_for(config: Config) -> str:
 
 class _AuditedServer:
     """The MCP server as a tool plugin sees it: every tool it adds is audited, and due
-    within the same time budget as a built-in one."""
+    within the same time budget as a built-in one. The SDK's default for structured
+    output is kept; a plugin may pass ``structured_output=False`` to send its answers
+    once, as text."""
 
     def __init__(self, mcp: Any, audit: Any, budget_seconds: float, max_names: int) -> None:
         self._mcp, self._audit, self._budget = mcp, audit, budget_seconds
@@ -183,6 +188,12 @@ def build_server(
         profile_client_tag=config.profile_client_tag,
         profile_timeout_seconds=config.profile_timeout_seconds,
         profile_max_concurrent=config.profile_max_concurrent,
+        max_sql_chars=config.max_sql_chars,
+        max_sql_nesting=config.max_sql_nesting,
+        max_result_bytes=config.max_result_bytes,
+        max_cell_chars=config.max_cell_chars,
+        comment_chars=config.comment_chars,
+        parser=ParsePool(config.sql_parse_workers, config.sql_parse_seconds, metrics=metrics),
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds, config.audit_max_names)
     registrars = [r for ext in exts for r in ext.tool_registrars()]

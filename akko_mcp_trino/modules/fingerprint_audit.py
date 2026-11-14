@@ -44,6 +44,7 @@ FINGERPRINT_FIELDS = frozenset(
         "duration_ms",
         "rows",
         "truncated",
+        "truncated_reason",
         "metadata_served",
         "metadata_served_cut",
         "extra_dropped",
@@ -62,12 +63,13 @@ class FingerprintEvent(AuditEvent):
     tables_cut: int = 0
     rows: Optional[int] = None
     truncated: bool = False
+    truncated_reason: str = ""
     metadata_served: list[str] = field(default_factory=list)
     metadata_served_cut: int = 0
 
     def as_dict(self) -> dict:
         """The line in the order of the fields it joins; a ``_cut`` count only when a list
-        was cut."""
+        was cut, and ``truncated_reason`` only when an answer was cut."""
         line: dict[str, Any] = {
             "request_id": self.request_id,
             "tool": self.tool,
@@ -88,6 +90,8 @@ class FingerprintEvent(AuditEvent):
         )
         if self.metadata_served_cut:
             line["metadata_served_cut"] = self.metadata_served_cut
+        if self.truncated_reason:
+            line["truncated_reason"] = self.truncated_reason
         # An extension's field never overwrites a field of the fingerprint: dropped, counted.
         kept = {k: v for k, v in self.extra.items() if k not in FINGERPRINT_FIELDS}
         if len(kept) < len(self.extra):
@@ -116,6 +120,7 @@ class FingerprintAudit:
                 tables_cut=call.tables_cut if call is not None else 0,
                 rows=call.rows if call is not None else None,
                 truncated=call.truncated if call is not None else False,
+                truncated_reason=call.truncated_reason if call is not None else "",
                 metadata_served=list(call.metadata_served) if call is not None else [],
                 metadata_served_cut=call.metadata_served_cut if call is not None else 0,
             )

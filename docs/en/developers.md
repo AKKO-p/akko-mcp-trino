@@ -62,6 +62,7 @@ bash scripts/lock.sh check    # the locks match their sources (CONTRIBUTING.md, 
 bash lint-vendor-neutral.sh   # fails if the package imports anything product-specific
 pytest                        # line or branch coverage below 100% fails the run
 integration/run.sh            # live: Keycloak, Trino and three servers in Docker, then removed
+integration/names/run.sh      # live: the metadata tools on names such as orders$snapshots, then removed
 python -m build --no-isolation && twine check dist/*
 akko-mcp-trino --check        # effective configuration, no secrets; exit 2 if it would not start
 ```
@@ -98,7 +99,10 @@ change to the plugin. `build_server(extra_tool_registrars=...)` does the same fr
 
 A registrar with a third argument receives the `ToolContext`:
 
-- `tools.tool(title, governed=..., open_world=...)` registers a tool with its MCP annotations;
+- `tools.tool(title, governed=..., open_world=...)` registers a tool with its MCP annotations.
+  A tool registered with `tools.tool()` answers once, like the built-in tools; a tool added with
+  `mcp.tool()` or `mcp.add_tool()` keeps the SDK's default and may pass
+  `structured_output=False`;
 - `tools.run(sql)` queries Trino through the identity mode;
 - `tools.note(...)` records what the call did (the SQL it ran, the tables, the rows, whether they
   were cut);
@@ -234,6 +238,9 @@ follows these rules:
   no value, no sample.
 - It respects the deadline it is given. It raises `ProviderRefused` when its account is refused,
   and `ProviderUnavailable` when the data catalog is down, late, or returns what it cannot read.
+  An answer larger than it accepts raises `ProviderAnswerTooLarge`: the call is `unavailable`,
+  but the data catalog is not down, so no retry pause opens. It is only for an answer the
+  provider refused by its size or form, never for an outage.
   The text of its errors stays in the server. Its logs and `check_lines()` never hold its secret
   or a schema, table or column name.
 - It imports neither `akko_mcp_trino.trino_client` nor `akko_mcp_trino.identity`, never receives

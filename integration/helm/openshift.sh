@@ -22,14 +22,14 @@
 # the MCP calls go through the Service instead.
 #
 #   bash integration/helm/openshift.sh
-#   MCP_IMAGE=akkoai/akko-mcp-trino:0.8.0 CURL_OPTS=-k bash integration/helm/openshift.sh
+#   MCP_IMAGE=akkoai/akko-mcp-trino:0.8.1 CURL_OPTS=-k bash integration/helm/openshift.sh
 #
 # Nothing secret is printed: the test key and passwords stay in a temporary directory
 # and in Secrets, all removed at the end.
 set -uo pipefail
 cd "$(dirname "$0")"
 RELEASE="${RELEASE:-mcp-proof}"
-MCP_IMAGE="${MCP_IMAGE:-akkoai/akko-mcp-trino:0.8.0}"
+MCP_IMAGE="${MCP_IMAGE:-akkoai/akko-mcp-trino:0.8.1}"
 CHART=../../charts/akko-mcp-trino
 FULL="$RELEASE-akko-mcp-trino"
 ISSUER=https://idp.example.internal/realms/test

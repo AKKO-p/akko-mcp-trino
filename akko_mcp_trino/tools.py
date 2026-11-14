@@ -36,7 +36,7 @@ import re
 import threading
 import time
 import uuid
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional, Sequence, Union
 
 from mcp.types import ToolAnnotations
 
@@ -53,11 +53,16 @@ from .audit import (
     set_current_request_id,
 )
 from .config import (
+    DEFAULT_COMMENT_CHARS,
     DEFAULT_DESCRIBE_MAX_COLUMNS,
     DEFAULT_DESCRIBE_SCHEMA_COLUMNS,
     DEFAULT_DESCRIBE_SCHEMA_TABLES,
     DEFAULT_MAX_CATALOGS,
+    DEFAULT_MAX_CELL_CHARS,
+    DEFAULT_MAX_RESULT_BYTES,
     DEFAULT_MAX_ROWS,
+    DEFAULT_MAX_SQL_CHARS,
+    DEFAULT_MAX_SQL_NESTING,
     DEFAULT_PROFILE_CLIENT_TAG,
     DEFAULT_PROFILE_DESCRIBE_ROWS,
     DEFAULT_PROFILE_MAX_COLUMNS,
@@ -75,6 +80,7 @@ from .config import (
 )
 from .context import ContextSetup
 from .context.reply import ContextReader, ContextService
+from .context.text import clean_comment
 from .context.types import TableRef
 from .context.visibility import Visibility
 from .errors import (
@@ -86,14 +92,20 @@ from .errors import (
     metadata_view_error,
 )
 from .identity import current_principal, current_subject
+from .parse_pool import ParsePool, ParseRefused, shared_pool
 from .search import search
 from .sql_guard import (
     JDBC_COLUMNS,
     TABLE_COMMENTS,
+    Analysis,
+    SQLBoundError,
+    check_sql_bounds,
     governed_catalog,
     is_read_only_sql,
     normalize_sql,
-    referenced_tables,
+    quote_identifier,
+    quoted_name,
+    shown_name,
     sql_literal,
     tables_for_column,
     validate_identifier,
@@ -304,6 +316,116 @@ def dumps(obj: Any) -> str:
     return json.dumps(obj, default=_plain)
 
 
+def _cut_cell(cell: Any, limit: int) -> tuple[Any, bool]:
+    """A cell of at most ``limit`` characters, and whether it was cut.
+
+    A text is cut to ``limit`` characters; a binary value, served as hexadecimal, to
+    ``limit`` hexadecimal digits; any other value (a number, an array, a map, a row, a date)
+    whose JSON text is longer than ``limit`` is replaced by that text cut to ``limit``
+    characters.
+    """
+    if isinstance(cell, str):
+        return (cell[:limit], True) if len(cell) > limit else (cell, False)
+    if isinstance(cell, (bytes, bytearray, memoryview)):
+        raw = bytes(cell)
+        if 2 * len(raw) <= limit:
+            return cell, False
+        return raw[: (limit + 1) // 2].hex()[:limit], True
+    if cell is None or isinstance(cell, bool):
+        return cell, False
+    text = dumps(cell)
+    return (text[:limit], True) if len(text) > limit else (cell, False)
+
+
+def bound_result(res: dict, max_cell_chars: int, max_bytes: int) -> Optional[tuple[str, dict]]:
+    """The JSON of an ``execute_query`` answer, within ``max_bytes`` bytes, its cells within
+    ``max_cell_chars`` characters; with what it did, ``{"rows": n, "reason": ...}``.
+
+    Every key of ``res`` stays. A cell past ``max_cell_chars`` is cut (see ``_cut_cell``), and
+    ``cut_columns`` names the columns of the rows returned that had one, in the result's
+    order. Rows are added in order while the whole JSON stays within ``max_bytes``; the first
+    that would not fit, and those after it, are left out, ``row_count`` says how many were
+    returned, and ``truncated`` is true with ``truncated_reason`` ``"bytes"``. When the row
+    cap alone cut the answer, ``truncated_reason`` is ``"rows"``. The two new keys are absent
+    from an answer that was not cut. None when even the columns alone do not fit.
+    """
+    columns = res.get("columns", [])
+    capped = bool(res.get("truncated", False))
+    rows = res["rows"]
+    kept: list[list] = []
+    cuts: list[set[int]] = []  # for each row kept, the indexes of its cut cells
+
+    def prepared(row: list) -> tuple[list, set[int]]:
+        shown, cut = [], set()
+        for i, cell in enumerate(row):
+            value, shortened = _cut_cell(cell, max_cell_chars)
+            shown.append(value)
+            if shortened:
+                cut.add(i)
+        return shown, cut
+
+    def render() -> tuple[str, Optional[str]]:
+        """The JSON of the answer with the rows kept, and why it was cut."""
+        out = {**res, "rows": kept}
+        reason = "bytes" if len(kept) < len(rows) else ("rows" if capped else None)
+        if len(kept) < len(rows):
+            out["row_count"], out["truncated"] = len(kept), True
+        if reason:
+            out["truncated_reason"] = reason
+        cut = sorted({i for indexes in cuts for i in indexes})
+        if cut:
+            out["cut_columns"] = list(dict.fromkeys(str(columns[i]) for i in cut))
+        return dumps(out), reason
+
+    # The answer without its rows, with the longest of its new keys: what the rows may fill
+    # is what is left. It errs on the long side (the answer without rows is shorter than it),
+    # so what it refuses is refused for good.
+    used = len(dumps({**res, "rows": [], "truncated": True, "truncated_reason": "bytes"}))
+    if used > max_bytes:
+        return None
+    for row in rows:
+        shown, cut = prepared(row)
+        used += len(dumps(shown)) + 2
+        if used > max_bytes:
+            break
+        kept.append(shown)
+        cuts.append(cut)
+    # The text is what counts. The estimate leaves out ``cut_columns`` and counts the digits
+    # of ``row_count`` at their most: rows leave until the text fits, then come back while
+    # the next one fits, so that the answer holds as many rows as the bound allows.
+    text, reason = render()
+    while len(text) > max_bytes and kept:
+        kept.pop(), cuts.pop()
+        text, reason = render()
+    while len(kept) < len(rows):
+        shown, cut = prepared(rows[len(kept)])
+        kept.append(shown)
+        cuts.append(cut)
+        candidate = render()
+        if len(candidate[0]) > max_bytes:
+            kept.pop(), cuts.pop()
+            break
+        text, reason = candidate
+    return text, {"rows": len(kept), "reason": reason}
+
+
+def bound_plan(plan: str, max_bytes: int) -> str:
+    """The JSON of an ``explain_query`` plan within ``max_bytes`` bytes.
+
+    A plan that does not fit is cut, and the answer says so: ``"truncated": true`` and
+    ``"truncated_reason": "bytes"``, as an ``execute_query`` answer does.
+    """
+    text = dumps({"plan": plan})
+    if len(text) <= max_bytes:
+        return text
+    kept = plan[:max_bytes]
+    while True:
+        text = dumps({"plan": kept, "truncated": True, "truncated_reason": "bytes"})
+        if len(text) <= max_bytes:
+            return text
+        kept = kept[: len(kept) - (len(text) - max_bytes)]
+
+
 def table_name(parts: tuple[str, ...]) -> str:
     """A table's name as the agent wrote it, a part with a dot quoted (a double quote in it
     doubled, as Trino reads it), so it reads as one."""
@@ -312,11 +434,12 @@ def table_name(parts: tuple[str, ...]) -> str:
 
 def error_reply(
     exc: Exception,
-    sql: str = "",
+    sql: Union[str, Analysis] = "",
     visible: Optional[Callable[[tuple[str, ...]], bool]] = None,
 ) -> str:
     """The error for the agent, whole, with its kind (see ``akko_mcp_trino.errors``); for the
-    audit, its code only. A column of ``sql`` Trino could not find (``COLUMN_NOT_FOUND``,
+    audit, its code only. A column of ``sql`` (an ``Analysis`` is read, never parsed)
+    Trino could not find (``COLUMN_NOT_FOUND``,
     named) adds a ``hint`` naming the tables of the agent's own statement it may belong to,
     never a name from Trino, and only those ``visible`` says the caller sees, at most
     ``MAX_ADVICE_TABLES`` of them; an ambiguous or unnamed column has none, and neither has
@@ -412,6 +535,12 @@ _EXECUTE_DOC = """Run {what} on Trino and return the rows.
         permission, function, type, invalid_argument, read_only, time_budget, other),
         and "unavailable" means Trino did not answer. An unknown column may add "hint",
         the table of your statement to read with describe_table before you write it again.
+        The answer is bounded in size: a cell longer than the server's bound is cut, and
+        "cut_columns" names the columns that had one; when the rows together would be too
+        large, the last ones are left out, truncated is true and "truncated_reason" is
+        "bytes" (the server's size bound), where "rows" says the row cap cut it: select
+        fewer columns or shorter values, add LIMIT or an aggregate. Both keys appear only
+        when they apply.
         """
 # The reads execute_query accepts, said once for its description and its refusal.
 _ALLOWED_READS = (
@@ -487,11 +616,6 @@ def _cut(value: Any, size: int) -> tuple[Any, bool]:
     if isinstance(value, (str, bytes, bytearray, memoryview)) and len(value) > size:
         return value[:size], True
     return value, False
-
-
-def _quoted(name: str) -> str:
-    """A column name as a quoted identifier, a double quote in it doubled."""
-    return '"' + name.replace('"', '""') + '"'
 
 
 def _sample_percent(mode: str, percent: Any) -> float:
@@ -711,7 +835,7 @@ class ToolContext:
         shows neither a schema that does not exist nor one the policy hides: false for both.
         A catalog that does not exist or that the caller may not access raises Trino's error."""
         res = self.run(
-            f"SELECT schema_name FROM {catalog}.information_schema.schemata "
+            f"SELECT schema_name FROM {quote_identifier(catalog)}.information_schema.schemata "
             f"WHERE schema_name = {sql_literal(folded)}",
             timeout=timeout,
         )
@@ -733,6 +857,8 @@ class ToolContext:
         missing row means, so the model reports it instead of retrying.
         ``read_only`` and ``destructive`` must say what the tool can really do:
         a host skips its confirmation on a tool annotated read-only.
+        Each answer is JSON text sent once, as the text of the reply: no output
+        schema, so the SDK does not repeat it as structured content.
         """
         register = self._mcp.tool(
             annotations=ToolAnnotations(
@@ -741,7 +867,8 @@ class ToolContext:
                 destructive_hint=destructive,
                 idempotent_hint=idempotent,
                 open_world_hint=open_world,
-            )
+            ),
+            structured_output=False,
         )
 
         def deco(fn: Callable) -> Callable:
@@ -791,6 +918,12 @@ def register_query_tools(
     profile_client_tag: str = DEFAULT_PROFILE_CLIENT_TAG,
     profile_timeout_seconds: float = 0.0,
     profile_max_concurrent: int = DEFAULT_PROFILE_MAX_CONCURRENT,
+    max_sql_chars: int = DEFAULT_MAX_SQL_CHARS,
+    max_sql_nesting: int = DEFAULT_MAX_SQL_NESTING,
+    max_result_bytes: int = DEFAULT_MAX_RESULT_BYTES,
+    max_cell_chars: int = DEFAULT_MAX_CELL_CHARS,
+    comment_chars: int = DEFAULT_COMMENT_CHARS,
+    parser: Optional[ParsePool] = None,
 ) -> ToolContext:
     """Register the Trino tools on the MCPServer instance `mcp`; return the `ToolContext`
     the server hands to tool plugins.
@@ -830,7 +963,15 @@ def register_query_tools(
     the query's and the call's budgets; it runs `profile_max_concurrent` calls at once at
     most, and answers ``busy`` past them (`MCP_PROFILE_MODES`, `MCP_PROFILE_VALUE_CHARS`,
     `MCP_PROFILE_DESCRIBE_ROWS`, `MCP_PROFILE_CLIENT_TAG`, `MCP_PROFILE_TIMEOUT_SECONDS`,
-    `MCP_PROFILE_MAX_CONCURRENT`)."""
+    `MCP_PROFILE_MAX_CONCURRENT`). `execute_query` and `explain_query` refuse a statement
+    longer than `max_sql_chars` characters or whose brackets nest deeper than
+    `max_sql_nesting` before parsing it (`MCP_MAX_SQL_CHARS`, `MCP_MAX_SQL_NESTING`), then
+    have it parsed once by `parser`, a pool of parse workers (`MCP_SQL_PARSE_WORKERS`,
+    `MCP_SQL_PARSE_SECONDS`; the process's shared pool with the defaults when None).
+    `execute_query` answers `max_result_bytes` bytes of JSON at most and cuts a cell past
+    `max_cell_chars` characters (`MCP_MAX_RESULT_BYTES`, `MCP_MAX_CELL_CHARS`); a comment
+    Trino holds on a table or a column is cleaned, and cut past `comment_chars` characters,
+    in `describe_table`, `describe_schema` and `search_columns` (`MCP_COMMENT_CHARS`)."""
     tools = ToolContext(
         mcp,
         client,
@@ -902,7 +1043,8 @@ def register_query_tools(
             timeout = min(left - ADVICE_RESERVE_SECONDS, ADVICE_LOOKUP_SECONDS)
         try:
             res = run(
-                f"SELECT table_name FROM {governed_catalog(catalog)}.information_schema.tables "
+                "SELECT table_name FROM "
+                f"{quote_identifier(governed_catalog(catalog))}.information_schema.tables "
                 f"WHERE table_schema = {sql_literal(schema)} "
                 f"AND table_name = {sql_literal(table)}",
                 timeout=timeout,
@@ -977,6 +1119,7 @@ def register_query_tools(
                     max_word_length=search_max_word_length,
                     reserve_seconds=search_reserve_seconds,
                     max_catalogs=max_catalogs,
+                    comment_chars=comment_chars,
                     concurrency=search_concurrency,
                     slots=search_slots,
                 )
@@ -1021,7 +1164,8 @@ def register_query_tools(
             cat = governed_catalog(catalog)
             start = check_offset(offset)
             names, more = page_of(
-                f"SELECT schema_name FROM {cat}.information_schema.schemata ORDER BY schema_name",
+                f"SELECT schema_name FROM {quote_identifier(cat)}.information_schema.schemata "
+                "ORDER BY schema_name",
                 start,
             )
             return listing_reply("schemas", names, _next_offset(start, names, more))
@@ -1045,12 +1189,12 @@ def register_query_tools(
             cat = governed_catalog(catalog)
             sch = validate_identifier(schema, "schema")
             start = check_offset(offset)
-            # A validated name carries no quote. Trino folds an unquoted name to lower
-            # case, as SHOW TABLES FROM did: the schema is compared folded the same way.
+            # Trino folds a name to lower case, as SHOW TABLES FROM did: the schema is
+            # compared folded the same way, as a string literal.
             folded = sch.lower()
             names, more = page_of(
-                f"SELECT table_name FROM {cat}.information_schema.tables "
-                f"WHERE table_schema = '{folded}' ORDER BY table_name",
+                f"SELECT table_name FROM {quote_identifier(cat)}.information_schema.tables "
+                f"WHERE table_schema = {sql_literal(folded)} ORDER BY table_name",
                 start,
             )
             # information_schema shows no row for a schema that does not exist or that the
@@ -1059,7 +1203,7 @@ def register_query_tools(
             if not names and not schema_visible(cat, folded):
                 return refusal_reply(
                     "schema_not_found",
-                    f"Schema {cat}.{sch} not found or not visible",
+                    f"Schema {shown_name(cat)}.{shown_name(sch)} not found or not visible",
                     kind="schema",
                 )
             return listing_reply("tables", names, _next_offset(start, names, more))
@@ -1093,14 +1237,15 @@ def register_query_tools(
             if not schema_visible(cat, folded):
                 return refusal_reply(
                     "schema_not_found",
-                    f"Schema {cat}.{sch} not found or not visible",
+                    f"Schema {shown_name(cat)}.{shown_name(sch)} not found or not visible",
                     kind="schema",
                 )
             # One table more than a page tells whether more follow; row_limit, not the row
             # cap, bounds the read, so no table of the page is lost to the cap.
             size = describe_schema_tables
             res = run(
-                f"SELECT table_name, table_type FROM {cat}.information_schema.tables "
+                "SELECT table_name, table_type FROM "
+                f"{quote_identifier(cat)}.information_schema.tables "
                 f"WHERE table_schema = {sql_literal(folded)} ORDER BY table_name "
                 f"OFFSET {start} LIMIT {size + 1}",
                 row_limit=size + 1,
@@ -1142,9 +1287,11 @@ def register_query_tools(
                         else:
                             rows = [r for r in rows if str(r[0]) != names[last]]
                     for t, column, kind, remark, _ in rows:
-                        columns.setdefault(str(t), []).append(
-                            {"column": column, "type": kind, "comment": remark}
-                        )
+                        remark, remark_cut = clean_comment(remark, comment_chars)
+                        item = {"column": column, "type": kind, "comment": remark}
+                        if remark_cut:
+                            item["cut"] = ["comment"]
+                        columns.setdefault(str(t), []).append(item)
                     # One comment per table, of the tables the page keeps only.
                     comment_rows = run(
                         each_table(
@@ -1159,13 +1306,16 @@ def register_query_tools(
                 except Exception as e:  # noqa: BLE001 - no other way: the error says why
                     note(error=error_code(e))
                     return dumps(metadata_view_error(e))
-                comments = {str(r[0]): r[1] for r in comment_rows}
+                comments = {str(r[0]): clean_comment(r[1], comment_chars) for r in comment_rows}
             # Whole tables only, while their columns stay within the budget; the first
             # table of a page always comes, however wide, so a page never stays empty.
-            described = [
-                {"table": n, "type": k, "comment": comments.get(n), "columns": columns.get(n, [])}
-                for n, k in kept
-            ]
+            described = []
+            for n, k in kept:
+                comment, comment_cut = comments.get(n, (None, False))
+                entry = {"table": n, "type": k, "comment": comment, "columns": columns.get(n, [])}
+                if comment_cut:
+                    entry["cut"] = ["comment"]
+                described.append(entry)
             shortened = len(described) < len(page)
             next_offset = _next_offset(start, described, more or shortened)
             note(
@@ -1237,15 +1387,23 @@ def register_query_tools(
                 raise ValueError(
                     "Invalid sample_rows: sample rows come with the first page, column_offset 0."
                 )
-            fqn = f"{cat}.{sch}.{tbl}"
+            fqn, target = f"{cat}.{sch}.{tbl}", quoted_name(cat, sch, tbl)
             note(tables=[fqn])
             # DESCRIBE has no offset: it is read from the first column to the end of the
             # page, one row more telling whether more follow, never past the server's bound.
             end = min(start + tools.page_size, describe_max_columns)
-            described = run(f"DESCRIBE {fqn}", row_limit=end)
+            described = run(f"DESCRIBE {target}", row_limit=end)
             listed = described["rows"][:end]
             more = was_cut(described) or len(described["rows"]) > end
-            rows = listed[start:end]
+            rows, comments_cut = [], []
+            for described_row in listed[start:end]:
+                # Column 4 of DESCRIBE is the comment, text the data's owners wrote.
+                row = list(described_row)
+                if len(row) > 3:
+                    row[3], comment_cut = clean_comment(row[3], comment_chars)
+                    if comment_cut:
+                        comments_cut.append(str(row[0]))
+                rows.append(row)
             columns_cut = more and end == describe_max_columns
             next_column = start + len(rows) if more and not columns_cut else None
             out: dict[str, Any] = {
@@ -1256,6 +1414,8 @@ def register_query_tools(
                 "next_column_offset": next_column,
                 "columns_cut": columns_cut,
             }
+            if comments_cut:
+                out["comments_cut"] = comments_cut
             # Only a first page that holds every column describes all of the table; a page
             # past the last column is not truncated, and describes none of it.
             complete = start == 0 and not more
@@ -1270,10 +1430,27 @@ def register_query_tools(
                 out["describer_errors"] = failed
             if n:
                 # Rows of data are read: the audit line names that statement and its rows.
-                statement = f"SELECT * FROM {fqn} LIMIT {n}"
+                statement = f"SELECT * FROM {target} LIMIT {n}"
                 note(sql=statement)
-                out["sample"] = run(statement)
-                note(rows=len(out["sample"]["rows"]))
+                sample = run(statement)
+                # Data, as in execute_query: its cells and its size are bounded the same way,
+                # and the audit notes the rows served and why they were cut.
+                bounded = bound_result(sample, max_cell_chars, max_result_bytes)
+                if bounded is None:
+                    out["sample"] = {
+                        **sample,
+                        "rows": [],
+                        "row_count": 0,
+                        "truncated": True,
+                        "truncated_reason": "bytes",
+                    }
+                    note(rows=0, truncated=True, truncated_reason="bytes")
+                else:
+                    out["sample"] = json.loads(bounded[0])
+                    done = bounded[1]
+                    note(rows=done["rows"])
+                    if done["reason"]:
+                        note(truncated=True, truncated_reason=done["reason"])
             # The context comes last: it takes only what the call has left past its reserve.
             # It is of the columns of this page, the ones Trino has just listed; a page that
             # does not hold them all is partial, and serves no grain.
@@ -1296,13 +1473,15 @@ def register_query_tools(
     # of the threads every tool shares, so past the bound a call answers busy at once.
     profile_slots = threading.BoundedSemaphore(profile_max_concurrent)
 
-    def profile_of(fqn: str, columns: Optional[list[str]], mode: str, share: float) -> str:
-        """The profile of the table ``fqn``, a name already checked: DESCRIBE, then one
-        aggregate query, both as the caller."""
+    def profile_of(
+        fqn: str, target: str, columns: Optional[list[str]], mode: str, share: float
+    ) -> str:
+        """The profile of the table ``fqn``, whose parts were checked and quoted in
+        ``target``: DESCRIBE, then one aggregate query, both as the caller."""
         try:
             # One row more than the bound, past the server's row cap, tells whether DESCRIBE
             # listed more columns than are read.
-            listing = run(f"DESCRIBE {fqn}", row_limit=profile_describe_rows + 1)
+            listing = run(f"DESCRIBE {target}", row_limit=profile_describe_rows + 1)
             listed = listing["rows"]
             columns_cut = was_cut(listing) or len(listed) > profile_describe_rows
             described = {str(r[0]): str(r[1]) for r in listed[:profile_describe_rows]}
@@ -1311,7 +1490,7 @@ def register_query_tools(
             prefix = profile_value_chars + 1
             aggregates = ["count(*)"]
             for c in chosen:
-                name = _quoted(c)
+                name = quote_identifier(c)
                 aggregates.append(f"count({name})")
                 if not ordered[c]:
                     continue
@@ -1321,13 +1500,13 @@ def register_query_tools(
                 aggregates += [f"min({end})", f"max({end})"]
             if mode == "sample":
                 source = (
-                    f"(SELECT {', '.join(_quoted(c) for c in chosen)} FROM {fqn} "
+                    f"(SELECT {', '.join(quote_identifier(c) for c in chosen)} FROM {target} "
                     f"LIMIT {profile_sample_rows})"
                 )
             elif mode == "bernoulli":
-                source = f"{fqn} TABLESAMPLE BERNOULLI ({share!r})"
+                source = f"{target} TABLESAMPLE BERNOULLI ({share!r})"
             else:
-                source = fqn
+                source = target
             statement = f"SELECT {', '.join(aggregates)} FROM {source}"
             # The same refusal as execute_query: a statement it would refuse is refused here.
             if not is_read_only_sql(statement, session_catalog, extra_reads):
@@ -1401,7 +1580,7 @@ def register_query_tools(
             tbl = validate_identifier(table, "table")
         except Exception as e:  # noqa: BLE001
             return error_reply(e)
-        fqn = f"{cat}.{sch}.{tbl}"
+        fqn, target = f"{cat}.{sch}.{tbl}", quoted_name(cat, sch, tbl)
         note(tables=[fqn])
         if not profile_slots.acquire(blocking=False):
             note(error=BUSY)
@@ -1413,7 +1592,7 @@ def register_query_tools(
                 }
             )
         try:
-            return profile_of(fqn, columns, mode, share)
+            return profile_of(fqn, target, columns, mode, share)
         finally:
             profile_slots.release()
 
@@ -1422,42 +1601,78 @@ def register_query_tools(
 
     show_plan = "EXPLAIN" in extra_reads
 
-    def explain_query(sql: str) -> str:
+    pool = parser if parser is not None else shared_pool()
+
+    def agent_sql(sql: str) -> Union[tuple[str, Analysis], str]:
+        """The agent's statement, normalized, with its analysis by a parse worker; or the
+        refusal, audited by its code, never its text: past the bounds, before any parse;
+        past the parse deadline, or with a statement of the same caller still checked when
+        its turn should have come (see ``akko_mcp_trino.parse_pool``)."""
         try:
-            sql = normalize_sql(sql)
-            if not is_read_only_sql(sql, session_catalog, extra_reads):
+            check_sql_bounds(sql, max_chars=max_sql_chars, max_nesting=max_sql_nesting)
+        except SQLBoundError as e:
+            pool.count(e.code.removeprefix("sql_"))
+            return refusal_reply(e.code, str(e))
+        text = normalize_sql(sql)
+        try:
+            return text, pool.analyze(text, session_catalog, extra_reads, current_subject() or "")
+        except ParseRefused as e:
+            return refusal_reply(e.code, str(e), kind=e.kind)
+
+    def explain_query(sql: str) -> str:
+        checked = agent_sql(sql)
+        if isinstance(checked, str):
+            return checked
+        sql, parsed = checked
+        try:
+            if not parsed.read_only:
                 return refusal_reply(
                     "read_only", "Only a read-only statement can be explained", kind=READ_ONLY
                 )
             # Without EXPLAIN opened, Trino only analyzes the statement and prints no plan.
             statement = f"EXPLAIN {sql}" if show_plan else f"EXPLAIN (TYPE VALIDATE) {sql}"
-            note(sql=statement, tables=referenced_tables(sql))
+            note(sql=statement, tables=parsed.tables)
             res = run(statement)
             note(rows=len(res["rows"]), truncated=was_cut(res))
             if not show_plan:
                 return dumps({"valid": True})
-            return dumps({"plan": "\n".join(str(r[0]) for r in res["rows"])})
+            text = bound_plan("\n".join(str(r[0]) for r in res["rows"]), max_result_bytes)
+            if json.loads(text).get("truncated"):
+                note(truncated=True, truncated_reason="bytes")
+            return text
         except Exception as e:  # noqa: BLE001
-            return error_reply(e, sql, advice_visible)
+            return error_reply(e, parsed, advice_visible)
 
     explain_query.__doc__ = _EXPLAIN_PLAN_DOC if show_plan else _EXPLAIN_VALIDATE_DOC
     tool("Explain query")(explain_query)
 
     def execute_query(sql: str, max_rows: int = 0) -> str:
-        sql = normalize_sql(sql)
-        if read_only and not is_read_only_sql(sql, session_catalog, extra_reads):
+        checked = agent_sql(sql)
+        if isinstance(checked, str):
+            return checked
+        sql, parsed = checked
+        if read_only and not parsed.read_only:
             return refusal_reply(
                 "read_only",
                 f"Read-only mode: only {_allowed_reads(extra_reads)} are allowed",
                 kind=READ_ONLY,
             )
-        note(sql=sql, tables=referenced_tables(sql))
+        note(sql=sql, tables=parsed.tables)
         try:
             res = run(sql, max_rows=int(max_rows))
         except Exception as e:  # noqa: BLE001 - surface the error to the agent
-            return error_reply(e, sql, advice_visible)
-        note(rows=res["row_count"], truncated=bool(res.get("truncated", False)))
-        return dumps(res)
+            return error_reply(e, parsed, advice_visible)
+        bounded = bound_result(res, max_cell_chars, max_result_bytes)
+        if bounded is None:
+            return refusal_reply(
+                "result_columns_too_long",
+                "The names of the result's columns alone are longer than the server's answer "
+                "bound: select fewer columns, or give them shorter names",
+            )
+        text, done = bounded
+        reason = done["reason"]
+        note(rows=done["rows"], truncated=reason is not None, truncated_reason=reason or "")
+        return text
 
     execute_query.__doc__ = _EXECUTE_DOC.format(
         what="one read-only SQL statement" if read_only else "one SQL statement",

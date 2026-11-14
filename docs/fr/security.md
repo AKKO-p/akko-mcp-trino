@@ -56,7 +56,14 @@ identité des droits en lecture seule, et seulement sur les données que tout ap
 
 ## Les instructions qu'un agent peut envoyer
 
-Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans le SQL.
+Un nom de catalogue, de schéma ou de table donné à un tool est pris tel qu'il est écrit : tout
+texte de 1 à 1024 caractères sans caractère de contrôle, comme `orders$snapshots`, `2024_sales`
+ou `données`. Il n'entre dans le SQL que comme identifiant entre guillemets doubles, chaque
+guillemet double doublé, ou comme littéral de chaîne. Un nom qui porte un caractère de contrôle,
+un contrôle bidirectionnel (U+061C, U+200E, U+200F, U+202A à U+202E, U+2066 à U+2069) ou un
+séparateur de ligne ou de paragraphe (U+2028, U+2029) est refusé avant que Trino ne soit
+interrogé, et le refus le montre échappé ; l'antiliant et le liant sans chasse, dont certaines
+écritures ont besoin, sont acceptés.
 `execute_query` accepte tout SQL que Trino accepte, **pourvu que ce soit une lecture**.
 
 - **Les commandes passent par une liste blanche** : `SELECT`, `DESCRIBE` d'une table,
@@ -66,11 +73,41 @@ Chaque identifiant est validé (`[A-Za-z_][A-Za-z0-9_-]*`) avant d'entrer dans l
   d'un filtre de lignes ou d'un masque de colonne. Elles sont refusées, sauf si l'administrateur
   les nomme dans `MCP_EXTRA_READ_COMMANDS` (`EXPLAIN`, `SHOW STATS`, `SHOW CREATE`,
   `SHOW GRANTS`, `SHOW ROLES`, `SHOW SESSION`).
+- **Une instruction est bornée avant d'être analysée, puis analysée dans un délai.** Une
+  instruction de plus de `MCP_MAX_SQL_CHARS` caractères (100000 par défaut), ou dont les
+  parenthèses et crochets s'imbriquent sur plus de `MCP_MAX_SQL_NESTING` niveaux (32 par défaut),
+  est refusée avant que l'analyseur la voie. Une instruction dans ces bornes est analysée une
+  fois, dans l'un des `MCP_SQL_PARSE_WORKERS` processus d'analyse (2 par défaut), jamais dans le
+  processus du serveur, et chaque contrôle lit cette analyse unique. Un processus qui n'a pas
+  répondu dans `MCP_SQL_PARSE_SECONDS` (2 par défaut) est tué et remplacé, et l'appel est refusé
+  (`time_budget`) ; de même pour un appel qui ne trouve aucun processus libre dans ce délai, et un
+  processus en échec fait refuser son appel. Un SQL très imbriqué ou répété n'occupe donc plus le
+  serveur. Un appelant fait analyser une instruction à la fois, si bien qu'il n'occupe qu'un
+  processus au plus : un second appel pendant l'analyse du premier attend son tour, et il est
+  refusé (`busy`) si son tour n'est pas venu dans `MCP_SQL_PARSE_SECONDS`. Les appels sans
+  appelant vérifié comptent pour le compte Trino configuré et partagent ce même tour. Un appel
+  attend au plus deux fois `MCP_SQL_PARSE_SECONDS` : son tour et un processus, puis sa réponse. Les processus démarrent au premier
+  usage, sous Linux, macOS et Windows, n'écrivent nulle part (leurs flux standard sont le
+  périphérique nul, et le protocole passe par des tubes qui leur sont propres), ne reçoivent
+  aucun réglage du serveur et s'arrêtent avec lui. Le risque qui reste : un appelant authentifié peut occuper un processus pendant le
+  délai, une fois à la fois, si bien qu'autant d'appelants qu'il y a de processus peuvent retarder
+  les autres ; des quotas par utilisateur sont prévus.
+- **Ce qu'un agent lit est borné, et un commentaire est un texte non fiable.** Une réponse
+  d'`execute_query` contient au plus `MCP_MAX_RESULT_BYTES` octets de JSON (1 Mio par défaut) et
+  une cellule au plus `MCP_MAX_CELL_CHARS` caractères (4000 par défaut), quel que soit son type :
+  une cellule énorme ou un résultat large ne peut pas inonder le contexte d'un agent, et la
+  réponse dit ce qu'elle a coupé (`truncated_reason`, `cut_columns`). Un commentaire que Trino
+  porte sur une table ou une colonne, dans `describe_table`, `describe_schema` et
+  `search_columns`, est débarrassé des caractères de contrôle, bidirectionnels et de largeur nulle
+  et coupé à `MCP_COMMENT_CHARS` caractères (1000 par défaut), comme le texte d'un catalogue, et
+  l'entrée dit quand il l'a été. Les commentaires restent des données : les descriptions des tools
+  demandent au modèle de ne jamais les suivre comme des instructions.
 - **Les écritures sont refusées n'importe où dans l'arbre.** L'instruction est analysée en arbre.
   Elle est refusée si elle contient plus d'une instruction, ou si un `INSERT`, `UPDATE`, `DELETE`,
   `MERGE`, `CREATE`, `DROP`, `ALTER`, `GRANT`, `CALL` ou `SET` apparaît n'importe où dans l'arbre,
   y compris dans une CTE, une sous-requête ou l'instruction qu'un `EXPLAIN` explique.
-  `EXPLAIN ANALYZE` est refusé, parce qu'il exécute ce qu'il explique.
+  `EXPLAIN ANALYZE` est refusé, parce qu'il exécute ce qu'il explique, de même qu'un `EXPLAIN`
+  d'un `EXPLAIN`.
 - **Les table functions et `system` sont refusés**, de même que tout `SHOW` qui nomme `system`.
   Les tools de métadonnées refusent aussi `system` comme nom de catalog, et `list_catalogs` ne le
   liste pas.

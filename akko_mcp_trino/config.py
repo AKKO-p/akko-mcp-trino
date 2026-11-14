@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 
 from .audit import DEFAULT_AUDIT_MAX_NAMES
+from .parse_pool import DEFAULT_PARSE_SECONDS, DEFAULT_PARSE_WORKERS
 from .sql_guard import governed_catalog, parse_extra_reads, validate_identifier
 
 # The token signature algorithms the server may accept: public-key ones only, verified
@@ -94,6 +95,23 @@ DEFAULT_PROFILE_MAX_CONCURRENT = 4
 MAX_PROFILE_MAX_CONCURRENT = 64
 # What a client tag may hold: Trino splits the tags on commas.
 _CLIENT_TAG_RE = re.compile(r"[A-Za-z0-9_.:=/-]{1,100}")
+# The longest statement an agent may send, and the deepest its brackets may nest, both checked
+# before the statement is parsed, and the least each may be set to: a cheap early refusal. The
+# parse time grows with some nesting and repetition; the parse deadline bounds it
+# (MCP_SQL_PARSE_SECONDS, MCP_SQL_PARSE_WORKERS).
+DEFAULT_MAX_SQL_CHARS = 100000
+MIN_MAX_SQL_CHARS = 1000
+DEFAULT_MAX_SQL_NESTING = 32
+MIN_MAX_SQL_NESTING = 8
+# The longest parse deadline: a wait the pool can always make (a queue's timeout overflows past
+# about 9e9 s), and far past any statement worth parsing.
+MAX_SQL_PARSE_SECONDS = 300
+# What an agent is served at most: the JSON of one execute_query answer, one cell of it, and
+# one comment Trino holds on a table or a column (data is cut, never refused; see tools.py).
+DEFAULT_MAX_RESULT_BYTES = 1048576
+MIN_MAX_RESULT_BYTES = 1000
+DEFAULT_MAX_CELL_CHARS = 4000
+DEFAULT_COMMENT_CHARS = 1000
 # The least MCP_CONTEXT_RESERVE_SECONDS a server with a context provider accepts. Past its
 # deadline, the chain waits up to 0.25 s for a provider to hand back control (its
 # ``_GRACE_SECONDS``, which includes 0.1 s for a late read to end on its own, then 0.1 s for
@@ -124,8 +142,8 @@ def profile_mode_names(value: str) -> tuple[str, ...]:
 
 
 def _is_table_name(text: str) -> bool:
-    """Whether ``text`` is ``catalog.schema.table``: three valid identifiers, the first
-    outside the ``system`` catalog."""
+    """Whether ``text`` is ``catalog.schema.table``: three names ``validate_identifier``
+    accepts, the first outside the ``system`` catalog."""
     parts = text.split(".")
     if len(parts) != 3:
         return False
@@ -241,6 +259,21 @@ class Config:
     # The most catalogs `list_catalogs` reads, past the row cap, before it pages them:
     # above it the tool answers an error, never a cut list.
     max_catalogs: int = DEFAULT_MAX_CATALOGS
+    # The longest statement execute_query and explain_query read, and the deepest its round
+    # and square brackets may nest; past either, the statement is refused before it is parsed.
+    max_sql_chars: int = DEFAULT_MAX_SQL_CHARS
+    max_sql_nesting: int = DEFAULT_MAX_SQL_NESTING
+    # The most JSON bytes one execute_query answer holds, the most characters of one of its
+    # cells, and of one Trino comment on a table or a column (describe_table, describe_schema,
+    # search_columns): past them, the rows, the cell or the comment are cut, and the answer says so.
+    max_result_bytes: int = DEFAULT_MAX_RESULT_BYTES
+    max_cell_chars: int = DEFAULT_MAX_CELL_CHARS
+    comment_chars: int = DEFAULT_COMMENT_CHARS
+    # The statements of execute_query and explain_query are parsed in this many worker
+    # processes, each within this many seconds; past it, the worker is killed and the call
+    # refused, and so is a call that finds no worker free within it.
+    sql_parse_seconds: float = DEFAULT_PARSE_SECONDS
+    sql_parse_workers: int = DEFAULT_PARSE_WORKERS
     # The names each list of a call's audit record keeps (its tables, the tables whose
     # description it served); the others are counted, once each, never written.
     audit_max_names: int = DEFAULT_AUDIT_MAX_NAMES
@@ -364,6 +397,38 @@ class Config:
             found.append(
                 f"MCP_DESCRIBE_SCHEMA_COLUMNS={self.describe_schema_columns}: "
                 "describe_schema must be allowed 1 column or more"
+            )
+        if self.max_sql_chars < MIN_MAX_SQL_CHARS:
+            found.append(
+                f"MCP_MAX_SQL_CHARS={self.max_sql_chars}: a statement must be allowed "
+                f"{MIN_MAX_SQL_CHARS} characters or more"
+            )
+        if self.max_sql_nesting < MIN_MAX_SQL_NESTING:
+            found.append(
+                f"MCP_MAX_SQL_NESTING={self.max_sql_nesting}: a statement must be allowed "
+                f"{MIN_MAX_SQL_NESTING} nested brackets or more"
+            )
+        if self.max_result_bytes < MIN_MAX_RESULT_BYTES:
+            found.append(
+                f"MCP_MAX_RESULT_BYTES={self.max_result_bytes}: an answer must be allowed "
+                f"{MIN_MAX_RESULT_BYTES} bytes or more"
+            )
+        for name, count in (
+            ("MCP_MAX_CELL_CHARS", self.max_cell_chars),
+            ("MCP_COMMENT_CHARS", self.comment_chars),
+        ):
+            if count < 1:
+                found.append(f"{name}={count}: a text must be allowed 1 character or more")
+        # NaN fails both sides; infinity and any too large a wait, the upper one.
+        if not 0 < self.sql_parse_seconds <= MAX_SQL_PARSE_SECONDS:
+            found.append(
+                "MCP_SQL_PARSE_SECONDS: the parse of a statement must be given more than 0 "
+                f"seconds and {MAX_SQL_PARSE_SECONDS} at most"
+            )
+        if self.sql_parse_workers < 1:
+            found.append(
+                f"MCP_SQL_PARSE_WORKERS={self.sql_parse_workers}: statements are parsed by 1 "
+                "worker process or more"
             )
         if not 1 <= self.audit_max_names <= MAX_AUDIT_MAX_NAMES:
             found.append(
@@ -548,7 +613,7 @@ class Config:
         if self.context_canary and not _is_table_name(self.context_canary):
             found.append(
                 f"MCP_CONTEXT_CANARY={self.context_canary!r}: name one table as "
-                "catalog.schema.table, three identifiers (letters, digits, _ and -), "
+                "catalog.schema.table, three names without a dot or a control character, "
                 "outside the system catalog"
             )
         return found
@@ -659,6 +724,21 @@ class Config:
             trino_client_cert=os.environ.get("TRINO_CLIENT_CERT", ""),
             trino_client_key=os.environ.get("TRINO_CLIENT_KEY", ""),
             max_catalogs=int(os.environ.get("MCP_MAX_CATALOGS", str(DEFAULT_MAX_CATALOGS))),
+            max_sql_chars=int(os.environ.get("MCP_MAX_SQL_CHARS", str(DEFAULT_MAX_SQL_CHARS))),
+            max_sql_nesting=int(
+                os.environ.get("MCP_MAX_SQL_NESTING", str(DEFAULT_MAX_SQL_NESTING))
+            ),
+            max_result_bytes=int(
+                os.environ.get("MCP_MAX_RESULT_BYTES", str(DEFAULT_MAX_RESULT_BYTES))
+            ),
+            max_cell_chars=int(os.environ.get("MCP_MAX_CELL_CHARS", str(DEFAULT_MAX_CELL_CHARS))),
+            comment_chars=int(os.environ.get("MCP_COMMENT_CHARS", str(DEFAULT_COMMENT_CHARS))),
+            sql_parse_seconds=float(
+                os.environ.get("MCP_SQL_PARSE_SECONDS", str(DEFAULT_PARSE_SECONDS))
+            ),
+            sql_parse_workers=int(
+                os.environ.get("MCP_SQL_PARSE_WORKERS", str(DEFAULT_PARSE_WORKERS))
+            ),
             audit_max_names=int(
                 os.environ.get("MCP_AUDIT_MAX_NAMES", str(DEFAULT_AUDIT_MAX_NAMES))
             ),

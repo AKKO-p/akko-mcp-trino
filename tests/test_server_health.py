@@ -181,3 +181,88 @@ def test_the_names_an_audit_line_keeps_reach_the_tools_and_a_plugin(monkeypatch)
     built_in, plugin = (e.call for e in audit.events)
     assert (built_in.tables, built_in.tables_cut) == (["a.b.c"], 1)
     assert (plugin.tables, plugin.tables_cut) == (["p.q.r"], 2)
+
+
+def test_the_sql_bounds_reach_the_tools(monkeypatch):
+    """MCP_MAX_SQL_CHARS and MCP_MAX_SQL_NESTING set low: the built server's execute_query
+    refuses past them before Trino is asked."""
+    import json
+
+    asked = []
+
+    class _Trino:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query(self, sql, user=None, params=None, **keywords):
+            asked.append(sql)
+            return {"columns": ["c"], "rows": [[1]], "row_count": 1, "truncated": False}
+
+    monkeypatch.setattr("akko_mcp_trino.server.TrinoClient", _Trino)
+    mcp, _ = build_server(
+        replace(_CFG, max_sql_chars=1000, max_sql_nesting=8),
+        mcp_factory=lambda name, **_: FakeMCP(),
+    )
+    nested = json.loads(mcp.tools["execute_query"]("SELECT " + "(" * 9 + "1" + ")" * 9))
+    long = json.loads(mcp.tools["execute_query"]("SELECT 1" + " " * 1000 + "FROM c.s.t"))
+    assert "more than 8 deep" in nested["error"] and "reads 1000 at most" in long["error"]
+    assert asked == []
+    mcp.tools["execute_query"]("SELECT " + "(" * 8 + "1" + ")" * 8)
+    assert asked == ["SELECT " + "(" * 8 + "1" + ")" * 8]
+
+
+def test_the_answer_bounds_reach_the_tools(monkeypatch):
+    """MCP_MAX_RESULT_BYTES, MCP_MAX_CELL_CHARS and MCP_COMMENT_CHARS set low: the built
+    server's tools cut what they serve."""
+    import json
+
+    class _Trino:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def query(self, sql, user=None, params=None, **keywords):
+            if sql.startswith("DESCRIBE"):
+                rows = [["id", "int", "", "c" * 50]]
+            else:
+                rows = [["w" * 50] for _ in range(40)]
+            return {"columns": ["c"], "rows": rows, "row_count": len(rows), "truncated": False}
+
+    monkeypatch.setattr("akko_mcp_trino.server.TrinoClient", _Trino)
+    mcp, _ = build_server(
+        replace(_CFG, max_result_bytes=1000, max_cell_chars=20, comment_chars=30),
+        mcp_factory=lambda name, **_: FakeMCP(),
+    )
+    out = json.loads(mcp.tools["execute_query"]("SELECT 1 FROM c.s.t"))
+    assert out["truncated_reason"] == "bytes" and out["cut_columns"] == ["c"]
+    assert out["rows"][0] == ["w" * 20] and out["row_count"] < 40
+    described = json.loads(mcp.tools["describe_table"]("c", "s", "t"))
+    assert described["rows"][0][3] == "c" * 30 and described["comments_cut"] == ["id"]
+
+
+def test_the_server_parses_with_its_own_pool_and_settings(monkeypatch):
+    """MCP_SQL_PARSE_SECONDS and MCP_SQL_PARSE_WORKERS reach the pool the server builds;
+    its refusals are counted on the server's metrics."""
+    from akko_mcp_trino import parse_pool
+    from akko_mcp_trino.metrics import Metrics
+
+    built = []
+
+    class _Pool(parse_pool.ParsePool):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr("akko_mcp_trino.server.ParsePool", _Pool)
+    metrics = Metrics()
+    mcp, _ = build_server(
+        replace(_CFG, sql_parse_seconds=0.75, sql_parse_workers=3, max_sql_chars=1000),
+        mcp_factory=lambda name, **_: FakeMCP(),
+        metrics=metrics,
+    )
+    ((pool),) = built
+    assert (pool.workers, pool.seconds) == (3, 0.75)
+    mcp.tools["execute_query"]("SELECT 1" + " " * 1000)
+    assert (
+        metrics.registry.get_sample_value("mcp_trino_sql_refusals_total", {"reason": "too_long"})
+        == 1
+    )

@@ -1,5 +1,61 @@
 # Migrating
 
+## From 0.8.0 to 0.8.1
+
+Nothing is removed or renamed in the answers of the tools; some answers are now shorter.
+
+- **Big results.** An `execute_query` answer holds at most `MCP_MAX_RESULT_BYTES` bytes of JSON
+  (1 MiB by default), and a cell at most `MCP_MAX_CELL_CHARS` characters (4000 by default). A
+  client that relied on a long text, a large binary value or a big array in one cell now reads
+  it cut, and the new key `cut_columns` names the column; one that read very large results now
+  gets the first rows, `truncated` true and the new key `truncated_reason` set to `"bytes"`
+  (`"rows"` when the row cap cut it). Select fewer columns or shorter values, or raise the
+  settings, to read more.
+- **Long comments.** A comment Trino holds on a table or a column is cut at `MCP_COMMENT_CHARS`
+  characters (1000 by default) and cleaned of control, bidirectional and zero-width characters.
+  The entry says `"cut": ["comment"]` (`describe_table`: `comments_cut` lists the columns). A
+  client that relied on the raw text of a very long comment, or on control characters in it,
+  reads the cleaned and cut one.
+- **Names.** A catalog, schema or table name is no longer limited to letters, digits, `_` and
+  `-`: it is any text of 1 to 1024 characters without a control character, a bidirectional
+  control or a line or paragraph separator, written in SQL between double quotes. A name the
+  server refused before, such as `orders$snapshots` or `2024_sales`, now reaches Trino. A
+  refusal now says `A name is text of 1 to 1024 characters, without control characters,
+  bidirectional controls or line separators.` The statements the metadata tools send quote
+  every name, which Trino's query history and a policy engine that reads the SQL text now see.
+- **The `atlas` extra.** `pip install "akko-mcp-trino[atlas]"` no longer builds the Kerberos
+  bindings: it installs the Atlas provider for Basic authentication and a Knox token, with no
+  compiler. For `ATLAS_AUTH=kerberos`, install `akko-mcp-trino[atlas-kerberos]` instead (it
+  needs a C compiler and the MIT Kerberos headers); without the bindings the server stops at
+  start and names that extra. The container image is unchanged and still carries them.
+- **Replies carry the answer once.** A reply of a built-in tool no longer repeats the JSON in
+  `structuredContent`, and the built-in tools no longer declare an `outputSchema`. The text of the
+  reply, `content[0].text`, is unchanged. A program that read `structuredContent["result"]` reads
+  `content[0].text` instead, the same JSON text. A tool registered with `tools.tool()` answers
+  once, like the built-in tools; a tool added with `mcp.tool()` or `mcp.add_tool()` keeps the
+  SDK's default and may pass `structured_output=False`.
+- **Statements refused before Trino.** `execute_query` and `explain_query` now refuse some
+  statements that 0.8.0 sent to Trino. A statement longer than 100000 characters, or whose
+  brackets nest deeper than 32, is refused with `"kind": "invalid_argument"`; raise
+  `MCP_MAX_SQL_CHARS` or `MCP_MAX_SQL_NESTING` to accept it. A statement whose check takes
+  more than 2 seconds is refused with `"kind": "time_budget"`; raise `MCP_SQL_PARSE_SECONDS`
+  (300 at most). A call that finds no free worker within that time is refused the same way;
+  raise `MCP_SQL_PARSE_WORKERS`. A second statement of the same caller waits for the first and
+  is refused with `"kind": "busy"` only if its turn has not come within that time. An `EXPLAIN`
+  of an `EXPLAIN` is refused, and no setting accepts it.
+- **Worker processes.** The server now starts `MCP_SQL_PARSE_WORKERS` child Python processes (2
+  by default) on the first statement, measured at 29 to 58 MB of memory each. Count them in a
+  container memory limit and in a process (PID) limit, and allow the server to start them: a
+  policy that forbids it to exec a program, or a seccomp profile that forbids the calls, leaves
+  every statement refused. Set `MCP_SQL_PARSE_WORKERS=1` to use less memory.
+- **Context providers.** A provider can signal an answer too large to read with the new
+  `ProviderAnswerTooLarge`, a `ProviderUnavailable` that opens no retry pause.
+  `akko-mcp-trino-atlas` 0.8.1 needs `akko-mcp-trino` 0.8.1 or later: with the core pinned at
+  0.8.0, `pip install -U akko-mcp-trino-atlas` does not resolve; upgrade both.
+- **Atlas behind a compressing proxy.** The Atlas client asks for `gzip` or `deflate` only and
+  reads no other coding. A proxy in front of Atlas that ignores `Accept-Encoding` and answers
+  with `br` or `zstd` now makes each call `unavailable`; turn that compression off for Atlas.
+
 ## From 0.7 to 0.8
 
 Nothing is removed or renamed in the answers of the tools.
