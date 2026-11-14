@@ -420,8 +420,9 @@ def main() -> int:
         d_alice["short"],
     )
     check(
-        "discovery: a schema name with a quote and a backslash is refused before SQL",
-        d_alice["quote_schema"].get("kind") == "invalid_argument",
+        "discovery: a schema name with a quote and a backslash is quoted and not found",
+        d_alice["quote_schema"].get("kind") == "schema"
+        and "o'b\\c" in d_alice["quote_schema"].get("error", ""),
         d_alice["quote_schema"],
     )
     check(
