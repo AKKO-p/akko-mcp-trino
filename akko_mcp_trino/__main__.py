@@ -130,7 +130,12 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         f"{config.sql_parse_seconds:g} s, one statement at a time per caller",
         f"answers: up to {config.max_result_bytes} bytes of JSON, a cell of "
         f"{config.max_cell_chars} characters and a Trino comment of {config.comment_chars} at "
-        "most, cut past them",
+        "most, cut past them; "
+        + (
+            "invisible characters removed from text cells (MCP_CLEAN_CELLS)"
+            if config.clean_cells
+            else "text cells served as Trino returns them"
+        ),
         f"listings: {config.max_rows} names a page; list_catalogs reads up to "
         f"{config.max_catalogs} catalogs",
         f"describe_schema: up to {config.describe_schema_tables} tables a page "

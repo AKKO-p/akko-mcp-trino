@@ -28,6 +28,16 @@ def clean_text(text: str, limit: int) -> tuple[str, bool]:
     ``limit``, not the length of the text: reading stops at the first character kept past
     ``limit``, and a text whose first ``4 * limit + 1`` characters keep fewer is cut there.
     """
+    cleaned, cut, _ = clean_text_reporting(text, limit)
+    return cleaned, cut
+
+
+def clean_text_reporting(text: str, limit: int) -> tuple[str, bool, bool]:
+    """``clean_text``, and whether it removed a character of what it read.
+
+    The text and the first boolean are those of ``clean_text``, within the same window; the
+    second boolean says that at least one character was removed.
+    """
     window = _READ_PER_KEPT * limit + 1
     kept: list[str] = []
     read = 0
@@ -35,9 +45,9 @@ def clean_text(text: str, limit: int) -> tuple[str, bool]:
         read += 1
         if c in _KEPT_CONTROLS or unicodedata.category(c) not in _DROPPED:
             if len(kept) == limit:
-                return "".join(kept), True
+                return "".join(kept), True, read > len(kept) + 1
             kept.append(c)
-    return "".join(kept), read == window and len(text) > window
+    return "".join(kept), read == window and len(text) > window, read > len(kept)
 
 
 def clean_name(name: str) -> str:

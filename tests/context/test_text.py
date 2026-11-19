@@ -2,7 +2,7 @@
 
 import pathlib
 
-from akko_mcp_trino.context.text import NAME_CHARS, clean_name, clean_text
+from akko_mcp_trino.context.text import NAME_CHARS, clean_name, clean_text, clean_text_reporting
 
 
 def test_zero_width_and_bidi_characters_are_removed():
@@ -53,6 +53,21 @@ def test_a_text_of_dropped_characters_is_read_up_to_four_times_its_limit():
     assert clean_text(hidden, 10) == ("", True)
     assert clean_text("\u200b" * 30 + "abc", 10) == ("abc", False), "within the bound, whole"
     assert clean_text("\u200b" * 40 + "abc", 10) == ("a", True), "past it, cut and said"
+
+
+def test_the_report_says_whether_a_character_was_removed():
+    assert clean_text_reporting("a\u200bb", 10) == ("ab", False, True)
+    assert clean_text_reporting("a\nb\tc", 10) == ("a\nb\tc", False, False), "newline and tab stay"
+    assert clean_text_reporting("abcdef", 4) == ("abcd", True, False)
+    assert clean_text_reporting("ab\x07cdef", 4) == ("abcd", True, True), "cleaned and cut"
+    assert clean_text_reporting("", 4) == ("", False, False)
+
+
+def test_the_report_cleans_and_cuts_exactly_as_clean_text():
+    for text in ("a\u200bb\u202ec", "\u200b" * 40 + "abc", "abcdef", "abcd", "x\U000e0041y"):
+        assert clean_text_reporting(text, 10)[:2] == clean_text(text, 10)
+    hidden = _Reads("\u200b" * 100_000 + "x", allowed=41)
+    assert clean_text_reporting(hidden, 10) == ("", True, True), "within the same window"
 
 
 def test_a_name_within_its_bound_is_cleaned_whole():

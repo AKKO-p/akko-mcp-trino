@@ -193,6 +193,7 @@ def build_server(
         max_result_bytes=config.max_result_bytes,
         max_cell_chars=config.max_cell_chars,
         comment_chars=config.comment_chars,
+        clean_cells=config.clean_cells,
         parser=ParsePool(config.sql_parse_workers, config.sql_parse_seconds, metrics=metrics),
     )
     plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds, config.audit_max_names)

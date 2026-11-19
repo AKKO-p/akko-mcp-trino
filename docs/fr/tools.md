@@ -14,7 +14,7 @@
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (de 0 à 20, première page seulement), `column_offset` (facultatif, 0 par défaut) | une page des colonnes, avec types et commentaires, et un échantillon gouverné sur demande ; voir [describe_table](#describe_table) |
 | `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (tous facultatifs sauf la table) | des agrégats des lignes que l'appelant peut lire ; voir [profile_table](#profile_table) |
 | `explain_query` | `sql` | `{"valid": true}` : Trino a analysé une instruction en lecture sous l'identité de l'appelant, sans l'exécuter ; `{"plan": "..."}` seulement quand `EXPLAIN` figure dans `MCP_EXTRA_READ_COMMANDS` |
-| `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}`, plus `truncated_reason` et `cut_columns` quand ils s'appliquent ; voir [Les bornes](#les-bornes) |
+| `execute_query` | `sql`, `max_rows` (facultatif, inférieur au plafond du serveur) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}`, plus `truncated_reason`, `cut_columns` et `cleaned_columns` quand ils s'appliquent ; voir [Les bornes](#les-bornes) |
 
 Chaque tool passe par Trino sous le mode d'identité, les tools de liste compris : les métadonnées
 sont des données, et Trino ne liste que ce que cette identité peut voir. Chaque description est
@@ -311,7 +311,9 @@ row filters s'appliquent donc comme dans `execute_query`.
 - **Les valeurs coupées.** `min` et `max` sont rendus comme les cellules d'`execute_query`. Un texte
   ou un binaire plus long que `MCP_PROFILE_VALUE_CHARS` (caractères, ou octets) est coupé dans la
   requête même, en un préfixe exact de la vraie valeur, avec `"cut": ["min"]`, `["max"]` ou les
-  deux. Un type plus long que `MCP_PROFILE_TYPE_CHARS` est coupé, avec `"type"` dans `cut`.
+  deux. Un type plus long que `MCP_PROFILE_TYPE_CHARS` est coupé, avec `"type"` dans `cut`. Avec
+  `MCP_CLEAN_CELLS=true`, un `min` ou un `max` texte est d'abord nettoyé, et la colonne le dit dans
+  `"cleaned"` (voir [Les bornes](#les-bornes)).
 
 ## execute_query et explain_query
 
@@ -368,6 +370,34 @@ caractères de largeur nulle compris) et de séparation, et coupés à `MCP_COMM
 (1000 par défaut), comme le texte d'un catalogue. Une entrée dont le commentaire a été coupé dit
 `"cut": ["comment"]` ; `describe_table`, dont les rows sont des listes, dit
 `"comments_cut": [<noms des colonnes>]` sur la réponse.
+
+Les valeurs que portent les lignes sont, elles aussi, des données, écrites par quiconque écrit
+dans les tables. Les descriptions des trois tools qui les rendent, `execute_query` (ses lignes),
+`describe_table` (son `sample`) et `profile_table` (ses `min` et `max`), demandent au modèle de les
+lire comme des données, jamais comme des instructions.
+
+Par défaut, ces valeurs sont rendues telles que Trino les renvoie. Avec `MCP_CLEAN_CELLS=true`, le
+serveur retire de leur texte les caractères qu'il retire des commentaires (caractères de contrôle
+sauf le saut de ligne et la tabulation, caractères de format, séparateurs de ligne et de
+paragraphe), puis applique `MCP_MAX_CELL_CHARS` :
+
+- Dans `execute_query` et le `sample` de `describe_table`, une cellule texte est nettoyée, tout
+  comme chaque texte d'un tableau, d'une map (clés comprises) ou d'une row, à toute profondeur.
+  Les nombres, les dates, les valeurs binaires et les autres valeurs restent tels quels.
+  `cleaned_columns` nomme les colonnes des lignes rendues dont au moins un caractère a été retiré,
+  dans l'ordre de `columns`, chacune une fois, comme `cut_columns` ; la clé est absente quand
+  aucune ne l'a été, et les lignes écartées par la borne de taille ne comptent pas. Une cellule
+  peut être à la fois nettoyée et coupée : sa colonne figure alors dans les deux clés.
+- Dans `profile_table`, un `min` ou un `max` texte est nettoyé avant d'être coupé, et la colonne
+  dit lequel dans `"cleaned": ["min"]`, `["max"]` ou les deux.
+
+Une cellule texte est nettoyée et coupée en une seule lecture d'au plus
+`4 × MCP_MAX_CELL_CHARS + 1` caractères, quelle que soit sa longueur ; le texte d'un tableau, d'une
+map ou d'une row est lu en entier, comme son rendu JSON l'est déjà. Les descriptions des trois
+tools ne parlent du nettoyage et de ses clés que s'il est activé, et préviennent alors le modèle
+qu'une valeur nettoyée n'est plus, caractère pour caractère, celle qui est stockée : un filtre
+d'égalité sur elle peut ne rien trouver. [Sécurité](security.md#les-instructions-quun-agent-peut-envoyer)
+explique pourquoi il est désactivé par défaut et ce qu'il ne fait pas.
 
 Avec `TRINO_QUERY_TIMEOUT_SECONDS` (60 s par défaut), le serveur annule dans Trino une requête plus
 longue et prévient l'agent. Le serveur tient ce budget lui-même au lieu de poser une propriété de

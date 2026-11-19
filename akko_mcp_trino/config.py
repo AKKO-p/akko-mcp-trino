@@ -269,6 +269,11 @@ class Config:
     max_result_bytes: int = DEFAULT_MAX_RESULT_BYTES
     max_cell_chars: int = DEFAULT_MAX_CELL_CHARS
     comment_chars: int = DEFAULT_COMMENT_CHARS
+    # Remove the invisible characters (control, format and separator characters, newline and
+    # tab kept) from the text values of execute_query's rows, of describe_table's sample and of
+    # profile_table's min and max, as from comments; off by default, the values are served as
+    # Trino returns them.
+    clean_cells: bool = False
     # The statements of execute_query and explain_query are parsed in this many worker
     # processes, each within this many seconds; past it, the worker is killed and the call
     # refused, and so is a call that finds no worker free within it.
@@ -733,6 +738,7 @@ class Config:
             ),
             max_cell_chars=int(os.environ.get("MCP_MAX_CELL_CHARS", str(DEFAULT_MAX_CELL_CHARS))),
             comment_chars=int(os.environ.get("MCP_COMMENT_CHARS", str(DEFAULT_COMMENT_CHARS))),
+            clean_cells=os.environ.get("MCP_CLEAN_CELLS", "false").lower() == "true",
             sql_parse_seconds=float(
                 os.environ.get("MCP_SQL_PARSE_SECONDS", str(DEFAULT_PARSE_SECONDS))
             ),
