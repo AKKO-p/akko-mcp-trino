@@ -738,3 +738,42 @@ def test_a_refusal_cuts_each_quoted_name_and_says_where_to_find_the_names():
     assert out["kind"] == "invalid_argument"
     assert "x" * 100 + "\u2026" in out["error"] and "x" * 101 not in out["error"]
     assert "describe_table" in out["error"] and "column_offset" in out["error"]
+
+
+def test_a_text_min_or_max_keeps_its_invisible_characters_by_default():
+    row = _aggregates(2, 2, 2, "a​b", "z\U000e0041")
+    tool, _ = _profile(_described(("name", "varchar")), row)
+    column = _call(tool, "tpch", "tiny", "orders")["columns"][0]
+    assert (column["min"], column["max"]) == ("a​b", "z\U000e0041")
+    assert "cleaned" not in column
+
+
+def test_a_text_min_or_max_is_cleaned_when_asked_and_says_which():
+    columns = _described(("name", "varchar"), ("code", "char(3)"), ("raw", "varbinary"))
+    row = _aggregates(2, 2, 2, "a​b\tc", "z", 2, 2, "x", "y‮", 2, 2, b"\x00", b"\xe2")
+    tool, _ = _profile(columns, row, clean_cells=True)
+    by_name = {c["column"]: c for c in _call(tool, "tpch", "tiny", "orders")["columns"]}
+    assert (by_name["name"]["min"], by_name["name"]["max"]) == ("ab\tc", "z")
+    assert by_name["name"]["cleaned"] == ["min"]
+    assert (by_name["code"]["min"], by_name["code"]["max"]) == ("x", "y")
+    assert by_name["code"]["cleaned"] == ["max"]
+    assert (by_name["raw"]["min"], by_name["raw"]["max"]) == ("00", "e2")
+    assert "cleaned" not in by_name["raw"], "a binary value is never cleaned"
+    row = _aggregates(1, 1, 1, "​a", "b\x07")
+    tool, _ = _profile(_described(("name", "varchar")), row, clean_cells=True)
+    assert _call(tool, "tpch", "tiny", "orders")["columns"][0]["cleaned"] == ["min", "max"]
+    row = _aggregates(1, 1, 1, "a", "b")
+    tool, _ = _profile(_described(("name", "varchar")), row, clean_cells=True)
+    assert "cleaned" not in _call(tool, "tpch", "tiny", "orders")["columns"][0]
+
+
+def test_a_cleaned_min_is_cut_and_says_both():
+    """Trino sends one character past the bound: a value that long is longer than the
+    server serves, cleaned or not, and stays said cut."""
+    row = _aggregates(1, 1, 1, "abc​defgh", "ab​c")
+    tool, _ = _profile(
+        _described(("name", "varchar")), row, profile_value_chars=8, clean_cells=True
+    )
+    column = _call(tool, "tpch", "tiny", "orders")["columns"][0]
+    assert (column["min"], column["max"]) == ("abcdefgh", "abc")
+    assert column["cut"] == ["min"] and column["cleaned"] == ["min", "max"]

@@ -14,7 +14,7 @@
 | `describe_table` | `catalog`, `schema`, `table`, `sample_rows` (0 to 20, first page only), `column_offset` (optional, 0 by default) | one page of the columns, with types and comments, and a governed sample when asked; see [describe_table](#describe_table) |
 | `profile_table` | `catalog`, `schema`, `table`, `columns`, `mode`, `percent` (all but the table optional) | aggregates of the rows the caller may read; see [profile_table](#profile_table) |
 | `explain_query` | `sql` | `{"valid": true}`: Trino analyzed a read-only statement as the caller, without running it; `{"plan": "..."}` only when `EXPLAIN` is in `MCP_EXTRA_READ_COMMANDS` |
-| `execute_query` | `sql`, `max_rows` (optional, lower than the server's cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}`, plus `truncated_reason` and `cut_columns` when they apply; see [Bounds](#bounds) |
+| `execute_query` | `sql`, `max_rows` (optional, lower than the server's cap) | `{"columns": [...], "rows": [...], "row_count": n, "truncated": bool}`, plus `truncated_reason`, `cut_columns` and `cleaned_columns` when they apply; see [Bounds](#bounds) |
 
 Every tool runs in Trino through the identity mode, the listing tools included: metadata is data,
 and Trino lists only what that identity may see. Every description is written for a model and
@@ -297,7 +297,9 @@ masks and row filters apply as in `execute_query`.
 - **Cut values.** `min` and `max` are rendered like the cells of `execute_query`. A text or binary
   value longer than `MCP_PROFILE_VALUE_CHARS` (characters, or bytes) is cut in the query itself,
   to an exact prefix of the true value, with `"cut": ["min"]`, `["max"]` or both. A type longer
-  than `MCP_PROFILE_TYPE_CHARS` is cut, with `"type"` in `cut`.
+  than `MCP_PROFILE_TYPE_CHARS` is cut, with `"type"` in `cut`. With `MCP_CLEAN_CELLS=true`, a
+  text `min` or `max` is cleaned first, and the column says which in `"cleaned"` (see
+  [Bounds](#bounds)).
 
 ## execute_query and explain_query
 
@@ -351,6 +353,32 @@ and `search_columns`, are text the owners of the data wrote. They are cleaned of
 `MCP_COMMENT_CHARS` characters (1000 by default), as the text of a catalog is. An entry whose
 comment was cut says `"cut": ["comment"]`; `describe_table`, whose rows are lists, says
 `"comments_cut": [<column names>]` on the answer.
+
+The values the rows hold are data too, written by whoever writes to the tables. The descriptions
+of the three tools that serve them, `execute_query` (its rows), `describe_table` (its `sample`)
+and `profile_table` (its `min` and `max`), tell the model to read them as data, never as
+instructions.
+
+By default these values are served as Trino returns them. With `MCP_CLEAN_CELLS=true`, the
+server removes from their text the characters it removes from comments (control characters
+except newline and tab, format characters, line and paragraph separators), then applies
+`MCP_MAX_CELL_CHARS`:
+
+- In `execute_query` and the `sample` of `describe_table`, a text cell is cleaned, and so is
+  every text inside an array, a map (its keys included) or a row, at any depth. Numbers, dates,
+  binary values and the other values stay as they are. `cleaned_columns` names the columns of
+  the rows returned that had at least one character removed, in the order of `columns`, each
+  once, as `cut_columns` does; it is absent when none had, and rows left out by the size bound
+  do not count. A cell can be both cleaned and cut: its column is then in both keys.
+- In `profile_table`, a text `min` or `max` is cleaned before it is cut, and the column says
+  which in `"cleaned": ["min"]`, `["max"]` or both.
+
+A text cell is cleaned and cut in one read of at most `4 × MCP_MAX_CELL_CHARS + 1` characters,
+whatever its length; text inside an array, a map or a row is read whole, as its JSON rendering
+already is. The descriptions of the three tools mention the cleaning and its keys only when it
+is on, and then tell the model that a cleaned value is not character for character the stored
+one, so that an equality filter on it may not match. [Security](security.md#the-statements-an-agent-may-send)
+says why it is off by default and what it does not do.
 
 With `TRINO_QUERY_TIMEOUT_SECONDS` (60 s by default), the server cancels a longer query in Trino
 and tells the agent. The server enforces this budget itself rather than setting a session

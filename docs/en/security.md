@@ -96,6 +96,22 @@ which some scripts need, are accepted.
   characters and cut at `MCP_COMMENT_CHARS` characters (1000 by default), as catalog text is, and
   the entry says when it was cut. Comments stay data: the descriptions of the tools tell the model
   never to follow them as instructions.
+- **Row values are data, and their hidden characters can be removed.** The rows of
+  `execute_query`, the `sample` of `describe_table` and the `min` and `max` of `profile_table`
+  hold what was written to the tables, sometimes by people outside the organisation (a form, a
+  ticket, a review). The descriptions of these three tools tell the model to read them as data,
+  never as instructions. With `MCP_CLEAN_CELLS=true`, the server also removes from their text
+  values the characters it removes from comments: zero-width characters, bidirectional controls,
+  the Unicode tag characters (U+E0001 and U+E0020 to U+E007F, the assigned characters of the
+  block U+E0000 to U+E007F), which can carry text a human reader does not see, and the other
+  control, format and separator characters; newline and tab stay. The answer names what it
+  cleaned (`cleaned_columns`, `"cleaned"` in `profile_table`). The option is off by default, for
+  three reasons. A query should return what the database holds. Some of these characters are
+  legitimate: the zero-width non-joiner in Persian and Arabic text, the zero-width joiner in emoji
+  sequences, bidirectional marks, carriage returns; removing them changes the value, so a filter
+  on a cleaned value may not match. And only hidden text is removed: visible text written as an
+  instruction stays. The option reduces the room for hidden instructions; it does not neutralise
+  prompt injection. The audit record and the metrics are the same with it or without it.
 - **Writes are refused anywhere in the tree.** The statement is parsed into an AST. It is refused
   if it holds more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`,
   `DROP`, `ALTER`, `GRANT`, `CALL` or `SET` appears anywhere in the tree, including inside a CTE,

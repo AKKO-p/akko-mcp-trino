@@ -102,6 +102,24 @@ interrogé, et le refus le montre échappé ; l'antiliant et le liant sans chass
   et coupé à `MCP_COMMENT_CHARS` caractères (1000 par défaut), comme le texte d'un catalogue, et
   l'entrée dit quand il l'a été. Les commentaires restent des données : les descriptions des tools
   demandent au modèle de ne jamais les suivre comme des instructions.
+- **Les valeurs des lignes sont des données, et leurs caractères cachés peuvent être retirés.**
+  Les lignes d'`execute_query`, le `sample` de `describe_table` et les `min` et `max` de
+  `profile_table` contiennent ce qui a été écrit dans les tables, parfois par des personnes
+  extérieures à l'organisation (un formulaire, un ticket, un avis). Les descriptions de ces trois
+  tools demandent au modèle de les lire comme des données, jamais comme des instructions. Avec
+  `MCP_CLEAN_CELLS=true`, le serveur retire en plus de leurs valeurs texte les caractères qu'il
+  retire des commentaires : les caractères de largeur nulle, les contrôles bidirectionnels, les
+  caractères d'étiquette Unicode (U+E0001 et U+E0020 à U+E007F, les caractères attribués du bloc
+  U+E0000 à U+E007F), qui peuvent porter un texte qu'un lecteur humain ne voit pas, et les autres
+  caractères de contrôle, de format et de séparation ; le saut de ligne et la tabulation restent.
+  La réponse dit ce qui a été nettoyé (`cleaned_columns`, `"cleaned"` dans `profile_table`).
+  L'option est désactivée par défaut, pour trois raisons. Une requête doit rendre ce que la base
+  contient. Certains de ces caractères sont légitimes : l'antiliant sans chasse du persan et de
+  l'arabe, le liant sans chasse des séquences d'emoji, les marques bidirectionnelles, les retours
+  chariot ; les retirer change la valeur, si bien qu'un filtre sur une valeur nettoyée peut ne rien
+  trouver. Enfin, seul le texte caché disparaît : un texte visible rédigé comme une instruction
+  reste. L'option réduit la place laissée aux instructions cachées ; elle ne neutralise pas
+  l'injection de prompt. La ligne d'audit et les métriques sont les mêmes avec ou sans elle.
 - **Les écritures sont refusées n'importe où dans l'arbre.** L'instruction est analysée en arbre.
   Elle est refusée si elle contient plus d'une instruction, ou si un `INSERT`, `UPDATE`, `DELETE`,
   `MERGE`, `CREATE`, `DROP`, `ALTER`, `GRANT`, `CALL` ou `SET` apparaît n'importe où dans l'arbre,
