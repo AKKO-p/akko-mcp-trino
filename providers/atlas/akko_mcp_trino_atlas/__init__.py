@@ -23,7 +23,7 @@ from collections.abc import Mapping
 from .provider import AtlasProvider
 from .settings import BASIC, KERBEROS, KNOX, AtlasSettings, read_settings
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 
 __all__ = ["BASIC", "KERBEROS", "KNOX", "AtlasProvider", "AtlasSettings", "from_env"]
 

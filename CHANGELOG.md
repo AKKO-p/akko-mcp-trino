@@ -4,11 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.2] - 2026-11-19
 
 ### Security
 - The descriptions of the three tools that serve values of a table, `execute_query` (its rows), `describe_table` (its `sample`) and `profile_table` (its `min` and `max`), now tell the model to read those values as data, never as instructions, as the descriptions of the metadata tools already said of comments and catalog text. The other tools' descriptions are unchanged.
 - The new setting `MCP_CLEAN_CELLS` (`false` by default) removes the invisible characters of the text values these tools serve, with the rule that already cleans comments: control characters except newline and tab, format characters (zero-width characters, bidirectional controls, the Unicode tag characters U+E0001 and U+E0020 to U+E007F) and line and paragraph separators. In `execute_query` and the `sample` of `describe_table`, a text cell is cleaned, and so is every text inside an array, a map (its keys included) or a row, then `MCP_MAX_CELL_CHARS` applies; a text cell is read once, up to `4 × MCP_MAX_CELL_CHARS + 1` characters, whatever its length. The new key `cleaned_columns` names the columns of the rows returned that had a character removed, as `cut_columns` does, and only then. In `profile_table`, a text `min` or `max` is cleaned before it is cut, and the column says which in a new `"cleaned"` key. The three descriptions mention the cleaning only when it is on, and then say that a cleaned value is not the stored one, so that an equality filter on it may not match. `--check` says on the `answers:` line whether text cells are cleaned. Off, the answers are byte for byte those of 0.8.1. It is off by default because a query should return what the database holds, because some of these characters are legitimate (the zero-width non-joiner in Persian and Arabic text, the zero-width joiner in emoji sequences, bidirectional marks, carriage returns), and because it removes hidden text only, never visible text: it reduces hidden instructions, it does not neutralise prompt injection. The audit record and the metrics are unchanged.
+
+### Changed
+- The Helm chart 0.3.2 runs the image 0.8.2 by default (`appVersion`).
+- `akko-mcp-trino-atlas` 0.8.2 is released with the core, with no change of its own.
+- The host pages, `DOCKERHUB.md`, the examples and the Helm checks of `integration/helm/` pin 0.8.2.
 
 ## [0.8.1] - 2026-11-14
 
