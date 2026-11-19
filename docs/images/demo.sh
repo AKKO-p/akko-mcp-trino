@@ -9,4 +9,4 @@ exec docker run --rm -t --memory 256m \
   --network "${SANDBOX_PROJECT:-akko-sandbox}_default" \
   -e KEYCLOAK_URL=http://keycloak:8080 -e MCP_URL=http://mcp:3000/mcp \
   -v "$sandbox/demo:/sandbox/demo:ro" -v "$here/demo.py:/demo.py:ro" \
-  --entrypoint python "${MCP_IMAGE:-akkoai/akko-mcp-trino:0.8.1}" /demo.py
+  --entrypoint python "${MCP_IMAGE:-akkoai/akko-mcp-trino:0.8.2}" /demo.py
