@@ -110,7 +110,8 @@ which some scripts need, are accepted.
   legitimate: the zero-width non-joiner in Persian and Arabic text, the zero-width joiner in emoji
   sequences, bidirectional marks, carriage returns; removing them changes the value, so a filter
   on a cleaned value may not match. And only hidden text is removed: visible text written as an
-  instruction stays. The option reduces the room for hidden instructions; it does not neutralise
+  instruction stays, and so do the characters of other Unicode categories, such as variation
+  selectors and unassigned code points. The option reduces the room for hidden instructions; it does not neutralise
   prompt injection. The audit record and the metrics are the same with it or without it.
 - **Writes are refused anywhere in the tree.** The statement is parsed into an AST. It is refused
   if it holds more than one statement, or if an `INSERT`, `UPDATE`, `DELETE`, `MERGE`, `CREATE`,

@@ -473,7 +473,7 @@ def test_the_plan_of_explain_query_is_bounded_and_says_it_was_cut():
 
 # A zero width space, a right-to-left override, a tag character and a bell, around text an
 # agent should see; newline and tab are text.
-HIDDEN = "pay​ now‮\U000e0041 ok\x07\tthen\nend"
+HIDDEN = "pay\u200b now\u202e\U000e0041 ok\x07\tthen\nend"
 SHOWN = "pay now ok\tthen\nend"
 
 
@@ -503,7 +503,7 @@ def test_a_text_cell_is_cleaned_when_asked_and_its_column_named():
 
 
 def test_cleaned_columns_name_each_column_once_in_the_results_order():
-    rows = [["ok", "a​", "b​"], ["c​", "d​", "ok"]]
+    rows = [["ok", "a\u200b", "b\u200b"], ["c\u200b", "d\u200b", "ok"]]
     out = _query(_result(["x", "y", "z"], rows), clean_cells=True)[1]
     assert out["cleaned_columns"] == ["x", "y", "z"]
     out = _query(_result(["same", "same", "z"], rows), clean_cells=True)[1]
@@ -512,9 +512,9 @@ def test_cleaned_columns_name_each_column_once_in_the_results_order():
 
 def test_text_nested_in_an_array_a_row_or_a_map_is_cleaned_too():
     cells = [
-        ["a​", ["b‮", 3]],
-        ("r​", 1, None),
-        {"k​": "v\U000e0041", "n": [None, {"deep\x07": "x"}]},
+        ["a\u200b", ["b\u202e", 3]],
+        ("r\u200b", 1, None),
+        {"k\u200b": "v\U000e0041", "n": [None, {"deep\x07": "x"}]},
         ["clean", ("row", 2), {"k": "v"}],
     ]
     result = _result(["arr", "row", "map", "same"], [cells])
@@ -546,24 +546,28 @@ def test_values_that_are_not_text_are_never_touched():
 
 
 def test_a_cell_both_cleaned_and_cut_is_in_both_keys():
-    out = _query(_result(["a", "b"], [["x​" * 20, "y" * 20]]), clean_cells=True, max_cell_chars=5)[1]
+    out = _query(
+        _result(["a", "b"], [["x\u200b" * 20, "y" * 20]]), clean_cells=True, max_cell_chars=5
+    )[1]
     assert out["rows"] == [["xxxxx", "yyyyy"]]
     assert out["cut_columns"] == ["a", "b"] and out["cleaned_columns"] == ["a"]
-    out = _query(_result(["m"], [[["​" * 10, "z" * 10]]]), clean_cells=True, max_cell_chars=8)[1]
+    out = _query(_result(["m"], [[["\u200b" * 10, "z" * 10]]]), clean_cells=True, max_cell_chars=8)[
+        1
+    ]
     assert out["rows"] == [['["", "zz']] and out["cut_columns"] == out["cleaned_columns"] == ["m"]
 
 
 def test_a_huge_cell_of_hidden_characters_is_read_within_its_window_only():
     from tests.context.test_text import _Reads
 
-    huge = _Reads("​" * 5_000_000 + "x", allowed=4 * 10 + 1)
+    huge = _Reads("\u200b" * 5_000_000 + "x", allowed=4 * 10 + 1)
     out = _query(_result(["a"], [[huge]]), clean_cells=True, max_cell_chars=10)[1]
     assert out["rows"] == [[""]]
     assert out["cut_columns"] == ["a"] and out["cleaned_columns"] == ["a"]
 
 
 def test_cleaned_columns_leave_with_the_rows_that_do_not_fit():
-    rows = [["k", "k"], ["k", "z​" * 100]]
+    rows = [["k", "k"], ["k", "z\u200b" * 100]]
     whole = _query(_result(["a", "b"], rows), clean_cells=True)[1]
     assert whole["cleaned_columns"] == ["b"]
     only_first = len(json.dumps(_result(["a", "b"], rows[:1]))) + 120
@@ -575,14 +579,14 @@ def test_cleaned_columns_leave_with_the_rows_that_do_not_fit():
 def test_bound_result_cleans_only_when_asked():
     from akko_mcp_trino.tools import bound_result
 
-    result = _result(["a"], [["x​"]])
+    result = _result(["a"], [["x\u200b"]])
     assert json.loads(bound_result(result, 10, 1000)[0]) == result
     text, done = bound_result(result, 10, 1000, clean_cells=True)
     assert json.loads(text)["cleaned_columns"] == ["a"] and done == {"rows": 1, "reason": None}
 
 
 def test_the_sample_of_describe_table_is_cleaned_when_asked():
-    sample = _result(["a", "b"], [[HIDDEN, "k"], ["y", ["n​"]]])
+    sample = _result(["a", "b"], [[HIDDEN, "k"], ["y", ["n\u200b"]]])
     assert _described_with_sample(sample)["sample"] == sample
     out = _described_with_sample(sample, clean_cells=True)["sample"]
     assert out["rows"] == [[SHOWN, "k"], ["y", ["n"]]]
@@ -623,10 +627,18 @@ def test_the_server_passes_the_cleaning_setting_to_the_tools(monkeypatch):
 
     monkeypatch.setattr(
         "akko_mcp_trino.server.TrinoClient",
-        lambda *a, **k: FakeClient(result=_result(["a"], [["x​"]])),
+        lambda *a, **k: FakeClient(result=_result(["a"], [["x\u200b"]])),
     )
-    for clean_cells, rows in ((False, [["x​"]]), (True, [["x"]])):
+    for clean_cells, rows in ((False, [["x\u200b"]]), (True, [["x"]])):
         config = core_config(clean_cells=clean_cells)
         mcp, _ = build_server(config, mcp_factory=lambda name, **_: FakeMCP())
         out = json.loads(in_request(lambda: mcp.tools["execute_query"](SQL)))
         assert out["rows"] == rows
+
+
+def test_a_character_of_another_category_stays_when_cells_are_cleaned():
+    # A variation selector (Mn) and an unassigned code point (Cn) are not of the categories
+    # the rule removes: they are served, and the column is not named.
+    kept = "ok️\U000e0000"
+    out = _query(_result(["a"], [[kept]]), clean_cells=True)[1]
+    assert out["rows"] == [[kept]] and "cleaned_columns" not in out

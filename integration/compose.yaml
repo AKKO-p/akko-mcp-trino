@@ -122,6 +122,7 @@ services:
       <<: *jwt-environment
       TRINO_MAX_ROWS: "3"
       MCP_DESCRIBE_SCHEMA_TABLES: "3"
+      MCP_CLEAN_CELLS: "true"  # the one server that cleans the text of its rows
       MCP_RESOURCE_URL: http://mcp-paged:3000/mcp
 
   # The fallback for an identity provider without token exchange: the server's own

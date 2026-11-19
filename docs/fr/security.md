@@ -114,11 +114,12 @@ interrogé, et le refus le montre échappé ; l'antiliant et le liant sans chass
   caractères de contrôle, de format et de séparation ; le saut de ligne et la tabulation restent.
   La réponse dit ce qui a été nettoyé (`cleaned_columns`, `"cleaned"` dans `profile_table`).
   L'option est désactivée par défaut, pour trois raisons. Une requête doit rendre ce que la base
-  contient. Certains de ces caractères sont légitimes : l'antiliant sans chasse du persan et de
-  l'arabe, le liant sans chasse des séquences d'emoji, les marques bidirectionnelles, les retours
+  contient. Certains de ces caractères sont légitimes : l'antiliant sans chasse (ZWNJ) du persan
+  et de l'arabe, le liant sans chasse (ZWJ) des séquences d'emoji, les marques bidirectionnelles, les retours
   chariot ; les retirer change la valeur, si bien qu'un filtre sur une valeur nettoyée peut ne rien
   trouver. Enfin, seul le texte caché disparaît : un texte visible rédigé comme une instruction
-  reste. L'option réduit la place laissée aux instructions cachées ; elle ne neutralise pas
+  reste, de même que les caractères des autres catégories Unicode, comme les sélecteurs de
+  variante et les points de code non attribués. L'option réduit la place laissée aux instructions cachées ; elle ne neutralise pas
   l'injection de prompt. La ligne d'audit et les métriques sont les mêmes avec ou sans elle.
 - **Les écritures sont refusées n'importe où dans l'arbre.** L'instruction est analysée en arbre.
   Elle est refusée si elle contient plus d'une instruction, ou si un `INSERT`, `UPDATE`, `DELETE`,
