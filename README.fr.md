@@ -7,6 +7,7 @@
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
   <img src="https://img.shields.io/badge/code%20style-ruff-000000" alt="Ruff">
   <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
+  <a href="https://glama.ai/mcp/servers/AKKO-p/akko-mcp-trino"><img src="https://glama.ai/mcp/servers/AKKO-p/akko-mcp-trino/badges/score.svg" alt="AKKO-p/akko-mcp-trino MCP server" height="20"></a>
 </p>
 
 # akko-mcp-trino
