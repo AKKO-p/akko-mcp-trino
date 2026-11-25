@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.3] - 2026-11-25
 
 ### Security
 - The container image is built with Debian 13's current MIT Kerberos libraries (`1.21.3-5+deb13u2`, a Debian security update) and C library headers (`2.41-12+deb13u5`). The Debian mirrors no longer serve the versions the Dockerfile pinned, so the image no longer built.
@@ -12,6 +12,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 - The documentation, the `--check` output and the code comments said that the caller's own token never leaves the server. In `jwt` mode the server sends it to the identity provider's token endpoint (`TRINO_TOKEN_EXCHANGE_URL`) to exchange it; it never reaches Trino. They now say so. The `trino identity:` line of `--check` in `jwt` mode reads: `the verified caller, with a token for Trino obtained by token exchange; the caller's own token goes to the identity provider for the exchange, never to Trino`.
+
+### Changed
+- The Helm chart 0.3.3 runs the image 0.8.3 by default (`appVersion`).
+- `akko-mcp-trino-atlas` 0.8.3 is released with the core, with no change of its own.
+- The READMEs carry the server's Glama score badge, linked to its listing.
+- The host pages, `DOCKERHUB.md`, the examples and the Helm checks of `integration/helm/` pin 0.8.3.
 
 ## [0.8.2] - 2026-11-19
 
