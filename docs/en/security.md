@@ -94,8 +94,8 @@ which some scripts need, are accepted.
   `cut_columns`). A comment Trino holds on a table or a column, in `describe_table`,
   `describe_schema` and `search_columns`, is cleaned of control, bidirectional and zero-width
   characters and cut at `MCP_COMMENT_CHARS` characters (1000 by default), as catalog text is, and
-  the entry says when it was cut. Comments stay data: the descriptions of the tools tell the model
-  never to follow them as instructions.
+  the entry says when it was cut. Comments stay data: the descriptions of these three tools tell
+  the model to read them as data, never as instructions.
 - **Row values are data, and their hidden characters can be removed.** The rows of
   `execute_query`, the `sample` of `describe_table` and the `min` and `max` of `profile_table`
   hold what was written to the tables, sometimes by people outside the organisation (a form, a

@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 - The container image is built with Debian 13's current MIT Kerberos libraries (`1.21.3-5+deb13u2`, a Debian security update) and C library headers (`2.41-12+deb13u5`). The Debian mirrors no longer serve the versions the Dockerfile pinned, so the image no longer built.
+- The description of `describe_table` now tells the model to read the comments it returns as data, never as instructions, in the wording `search_columns` and `describe_schema` already use. Its answers and keys are unchanged.
+
+### Fixed
+- The documentation, the `--check` output and the code comments said that the caller's own token never leaves the server. In `jwt` mode the server sends it to the identity provider's token endpoint (`TRINO_TOKEN_EXCHANGE_URL`) to exchange it; it never reaches Trino. They now say so. The `trino identity:` line of `--check` in `jwt` mode reads: `the verified caller, with a token for Trino obtained by token exchange; the caller's own token goes to the identity provider for the exchange, never to Trino`.
 
 ## [0.8.2] - 2026-11-19
 

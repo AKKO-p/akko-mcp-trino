@@ -114,7 +114,8 @@ the schema on one page. Here is the first table, and the end of the answer:
 
 `describe_table` reads one page of a table's columns with Trino's `DESCRIBE`, run as the caller.
 A page holds up to `TRINO_MAX_ROWS` columns, starting at `column_offset`, with their types and
-comments.
+comments. As in `describe_schema` and `search_columns`, the tool's description tells the model to
+read these comments as data, never as instructions.
 
 - `truncated` is true when the page does not hold every column, and `next_column_offset` says
   where the next page starts (`null` on the last page).

@@ -10,7 +10,7 @@ and refuses any write before it reaches Trino.
 - **Per-user rights by default.** In `jwt` mode, the default, the server verifies the user's
   token (issued for this server), exchanges it at the identity provider for a token whose
   audience is Trino (OAuth 2.0 Token Exchange, RFC 8693), and Trino runs the query as that
-  user. The user's token is never passed on, and a request without a valid token gets `401`.
+  user. The user's token is never passed on to Trino, and a request without a valid token gets `401`.
 - **Without token exchange**, `impersonation` mode uses the server's own account (password or
   client certificate) and a Trino impersonation rule that only this account has.
 - **Or one identity, only when named** (`service` mode), announced as a warning at start and

@@ -191,8 +191,9 @@ class Config:
     user_token: str = ""
     # How the server reaches Trino. `jwt` (the default): every query runs as the
     # verified caller, with a token for Trino the server obtains from the identity
-    # provider by OAuth 2.0 Token Exchange (RFC 8693); the caller's own token never
-    # leaves the server. `impersonation`: the server authenticates as its own
+    # provider by OAuth 2.0 Token Exchange (RFC 8693); the caller's own token goes
+    # to the identity provider for the exchange, never to Trino. `impersonation`:
+    # the server authenticates as its own
     # Trino account and Trino runs the query as the verified caller, under an
     # impersonation rule limited to that account. `service`, only when named: every
     # query runs as `TRINO_USER`, whoever calls. https only for the first two. An

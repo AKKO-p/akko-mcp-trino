@@ -8,8 +8,8 @@ The core has four:
   audience is Trino (OAuth 2.0 Token Exchange, RFC 8693, see
   `akko_mcp_trino.token_exchange`). Trino verifies that token with its JWT
   authenticator and its access control (Ranger, OPA, file rules) decides for the
-  caller. The caller's own token never leaves the server: the MCP authorization
-  specification forbids passing it through.
+  caller. The caller's own token goes to the identity provider for the exchange,
+  never to Trino: the MCP authorization specification forbids passing it through.
 * ``impersonation``, for an identity provider that cannot exchange tokens: the
   server authenticates to Trino as its own account (``TRINO_USER`` with
   ``TRINO_PASSWORD``, or a client certificate), and asks Trino to run the query
@@ -369,7 +369,8 @@ class JwtIdentity:
             raise ValueError("TRINO_IDENTITY_MODE=jwt requires TRINO_HTTP_SCHEME=https")
         return [
             "trino identity: the verified caller, with a token for Trino obtained by token "
-            "exchange; the caller's own token never leaves the server",
+            "exchange; the caller's own token goes to the identity provider for the "
+            "exchange, never to Trino",
             *self._exchange.describe(),
         ]
 
