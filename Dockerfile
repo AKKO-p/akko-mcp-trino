@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r requireme
 # says how to move them with the base image).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      gcc=4:14.2.0-1 libc6-dev=2.41-12+deb13u4 libkrb5-dev=1.21.3-5+deb13u1 \
+      gcc=4:14.2.0-1 libc6-dev=2.41-12+deb13u5 libkrb5-dev=1.21.3-5+deb13u2 \
  && rm -rf /var/lib/apt/lists/* \
  && pip wheel --no-cache-dir --no-deps --no-build-isolation --require-hashes \
       -r requirements/kerberos.txt -w /src/kerberos
@@ -35,8 +35,8 @@ RUN useradd --create-home --uid 10001 mcp
 # has none of them. Each package apt installs is pinned, its dependencies included.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      libgssapi-krb5-2=1.21.3-5+deb13u1 libkrb5-3=1.21.3-5+deb13u1 \
-      libk5crypto3=1.21.3-5+deb13u1 libkrb5support0=1.21.3-5+deb13u1 \
+      libgssapi-krb5-2=1.21.3-5+deb13u2 libkrb5-3=1.21.3-5+deb13u2 \
+      libk5crypto3=1.21.3-5+deb13u2 libkrb5support0=1.21.3-5+deb13u2 \
       libkeyutils1=1.6.3-6 libcom-err2=1.47.2-3+b12 \
  && rm -rf /var/lib/apt/lists/*
 COPY requirements/image.txt /tmp/requirements/

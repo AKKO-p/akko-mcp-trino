@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- The container image is built with Debian 13's current MIT Kerberos libraries (`1.21.3-5+deb13u2`, a Debian security update) and C library headers (`2.41-12+deb13u5`). The Debian mirrors no longer serve the versions the Dockerfile pinned, so the image no longer built.
+
 ## [0.8.2] - 2026-11-19
 
 ### Security
