@@ -119,7 +119,9 @@ du schéma sur une seule page. Voici la première table, et la fin de la répons
 
 `describe_table` lit une page des colonnes d'une table par le `DESCRIBE` de Trino, lancé sous
 l'identité de l'appelant. Une page compte au plus `TRINO_MAX_ROWS` colonnes, à partir de
-`column_offset`, avec leurs types et leurs commentaires.
+`column_offset`, avec leurs types et leurs commentaires. Comme pour `describe_schema` et
+`search_columns`, la description du tool demande au modèle de lire ces commentaires comme des
+données, jamais comme des instructions.
 
 - `truncated` est vrai quand la page ne contient pas toutes les colonnes, et `next_column_offset`
   dit où commence la page suivante (`null` à la dernière page).

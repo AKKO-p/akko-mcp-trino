@@ -100,8 +100,8 @@ interrogé, et le refus le montre échappé ; l'antiliant et le liant sans chass
   porte sur une table ou une colonne, dans `describe_table`, `describe_schema` et
   `search_columns`, est débarrassé des caractères de contrôle, bidirectionnels et de largeur nulle
   et coupé à `MCP_COMMENT_CHARS` caractères (1000 par défaut), comme le texte d'un catalogue, et
-  l'entrée dit quand il l'a été. Les commentaires restent des données : les descriptions des tools
-  demandent au modèle de ne jamais les suivre comme des instructions.
+  l'entrée dit quand il l'a été. Les commentaires restent des données : les descriptions de ces trois
+  tools demandent au modèle de les lire comme des données, jamais comme des instructions.
 - **Les valeurs des lignes sont des données, et leurs caractères cachés peuvent être retirés.**
   Les lignes d'`execute_query`, le `sample` de `describe_table` et les `min` et `max` de
   `profile_table` contiennent ce qui a été écrit dans les tables, parfois par des personnes
