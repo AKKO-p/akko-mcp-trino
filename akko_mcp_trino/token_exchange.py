@@ -5,8 +5,9 @@ for this server must not be sent on to another service. In the ``jwt`` identity
 mode the server therefore acts as an OAuth client of the identity provider. It
 presents the caller's verified token (``subject_token``) with its own client
 credentials and asks for an access token whose audience is Trino; Trino verifies
-that token and runs the query as the user it names. The caller's token never
-leaves the server, and a token for Trino never reaches the caller.
+that token and runs the query as the user it names. The caller's token goes only
+to the identity provider's token endpoint (``TRINO_TOKEN_EXCHANGE_URL``), never to
+Trino, and a token for Trino never reaches the caller.
 
 Exchanged tokens are kept in memory, keyed by a hash of the caller's token,
 until shortly before they expire, so a tool call that runs several queries asks

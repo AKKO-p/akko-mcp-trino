@@ -26,7 +26,7 @@ Please do not include real tokens, real data or real hostnames in a report.
 The server accepts only a token issued for itself (its audience is
 `MCP_OIDC_AUDIENCE` or `MCP_RESOURCE_URL`, RFC 8707), refuses a token issued for
 Trino, and obtains a token for Trino by OAuth 2.0 Token Exchange (RFC 8693)
-with its own client. The caller's token is never passed on, as the MCP
+with its own client. The caller's token is never passed on to Trino, as the MCP
 authorization specification requires. Without token exchange, `impersonation`
 runs each query as the caller through the server's own account and an
 impersonation rule only that account has. `service` runs every query as one

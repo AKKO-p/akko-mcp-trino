@@ -38,10 +38,11 @@ in time.
 | `oauth2` | the local user, checked with `SELECT current_user` | Trino's native OAuth2 browser login; the driver caches tokens and signs in again when needed | local stdio hosts only, with a Trino coordinator configured for OAuth2 |
 | `service` | `TRINO_USER`, the same for every caller | a password, a client certificate, or no credential against a local coordinator | only when named: one identity for everyone, announced at start and to every host |
 
-In every mode, the caller's own token never leaves the server: the MCP authorization
-specification forbids passing it on ("token passthrough"). The caller's name comes from their
-verified token, or from Trino's `SELECT current_user` in `oauth2` mode, never from an unverified
-header. The server refuses to start in `jwt` or `impersonation` mode unless token verification
+In every mode, the caller's own token never reaches Trino: the MCP authorization specification
+forbids passing it on ("token passthrough"). In `jwt` mode the server sends it to the identity
+provider's token endpoint (`TRINO_TOKEN_EXCHANGE_URL`), and only there, to exchange it; the
+core's other modes send it nowhere. The caller's name comes from their verified token, or from
+Trino's `SELECT current_user` in `oauth2` mode, never from an unverified header. The server refuses to start in `jwt` or `impersonation` mode unless token verification
 requires a valid token. An extension (see [Extensions](developers.md#extensions)) may add other
 identity modes.
 

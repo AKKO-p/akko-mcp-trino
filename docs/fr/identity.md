@@ -38,8 +38,10 @@ lire, limité en lignes et en durée.
 | `oauth2` | l'utilisateur local, vérifié par `SELECT current_user` | la connexion navigateur OAuth2 native de Trino ; le pilote garde les tokens en cache et se reconnecte quand il le faut | MCP hosts locaux en stdio seulement, avec un coordinateur Trino configuré pour OAuth2 |
 | `service` | `TRINO_USER`, le même pour tous les appelants | un mot de passe, un certificat client, ou aucun secret face à un coordinateur local | seulement si on le nomme : une identité unique pour tous, annoncée au démarrage et à chaque MCP host |
 
-Quel que soit le mode, le token de l'appelant ne quitte jamais le serveur : la spécification
-d'autorisation de MCP interdit de le transmettre (« token passthrough »). Le nom de l'appelant
+Quel que soit le mode, le token de l'appelant n'atteint jamais Trino : la spécification
+d'autorisation de MCP interdit de le transmettre (« token passthrough »). En mode `jwt`, le serveur
+l'envoie au token endpoint de l'identity provider (`TRINO_TOKEN_EXCHANGE_URL`), et là seulement,
+pour l'échanger ; les autres modes du cœur ne l'envoient nulle part. Le nom de l'appelant
 vient de son token vérifié, ou du `SELECT current_user` de Trino en mode `oauth2`, jamais d'un
 en-tête non vérifié. Le serveur refuse de démarrer en mode `jwt` ou `impersonation` si la
 vérification du token n'exige pas un token valide. Une extension (voir

@@ -27,8 +27,8 @@ catalogs, les schémas et les tables, et expliquer ou exécuter une requête. Le
 chaque instruction et refuse toute écriture avant qu'elle n'atteigne Trino. Par défaut, chaque
 requête s'exécute au nom de l'utilisateur pour qui l'agent travaille. Le serveur vérifie le token
 de l'utilisateur, qui doit être émis pour ce serveur. Il obtient ensuite de l'identity provider un
-token distinct pour Trino (OAuth 2.0 Token Exchange). Le token de l'utilisateur ne quitte
-jamais le serveur. Le contrôle d'accès de Trino (OPA, Ranger ou les règles de Trino) décide ensuite
+token distinct pour Trino (OAuth 2.0 Token Exchange). Le token de l'utilisateur part à
+l'identity provider pour cet échange, jamais à Trino. Le contrôle d'accès de Trino (OPA, Ranger ou les règles de Trino) décide ensuite
 de ce que cet utilisateur peut lire. Les résultats sont limités en lignes et en durée, et chaque
 appel laisse une ligne d'audit.
 
@@ -123,7 +123,7 @@ avec les règles qu'il a déjà, ou, en mode `service`, pour l'identité unique 
 ## Fonctionnalités
 
 - **Lecture seule par construction, à travers ce serveur.** Le SQL est analysé en arbre et refusé si une écriture apparaît n'importe où dans l'arbre, CTE et sous-requêtes comprises. Les table functions (`TABLE(...)`, comme le `system.query` d'un connecteur JDBC) et le catalog `system` sont refusés aussi, y compris par un nom sans catalog quand le catalog de session est `system`. Ce qu'un utilisateur peut faire dans Trino par d'autres moyens relève des règles de Trino : voir [Sécurité](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/security.md#lecture-seule-à-travers-ce-serveur).
-- **Les droits de chaque utilisateur, par défaut.** En mode `jwt`, le mode par défaut, le serveur vérifie le token de l'appelant (émis pour ce serveur, jamais pour Trino), l'échange auprès de l'identity provider contre un token dont l'audience est Trino (RFC 8693), et Trino exécute la requête au nom de cet utilisateur. Le token de l'appelant n'est jamais transmis. Une requête sans token valide est refusée avec un `401`.
+- **Les droits de chaque utilisateur, par défaut.** En mode `jwt`, le mode par défaut, le serveur vérifie le token de l'appelant (émis pour ce serveur, jamais pour Trino), l'échange auprès de l'identity provider contre un token dont l'audience est Trino (RFC 8693), et Trino exécute la requête au nom de cet utilisateur. Le token de l'appelant n'est jamais transmis à Trino. Une requête sans token valide est refusée avec un `401`.
 - **Un fallback sans token exchange.** En mode `impersonation`, le serveur s'authentifie auprès de Trino avec son propre compte (mot de passe ou certificat client), et Trino exécute la requête au nom de l'appelant vérifié, selon une règle d'impersonation réservée à ce compte.
 - **Une identité unique, seulement si on la nomme.** En mode `service`, chaque requête s'exécute sous `TRINO_USER`. Ce mode n'est jamais choisi par défaut, et le serveur le dit au démarrage et à chaque MCP host dans ses instructions d'initialisation.
 - **Des limites par défaut.** Un plafond de lignes avec l'indicateur `truncated` (100), un budget de temps par requête, annulée dans Trino (60 s), et un budget de temps par appel de tool (120 s).

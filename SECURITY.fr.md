@@ -26,7 +26,7 @@ Merci de ne mettre dans un signalement ni vrais tokens, ni vraies données, ni v
 vérifié. Le serveur n'accepte qu'un token émis pour lui (son audience est `MCP_OIDC_AUDIENCE` ou
 `MCP_RESOURCE_URL`, RFC 8707), refuse un token émis pour Trino, et obtient un token pour Trino par
 OAuth 2.0 Token Exchange (RFC 8693) avec son propre client. Le token de l'appelant n'est jamais
-transmis, comme l'exige la spécification d'autorisation de MCP. Sans token exchange,
+transmis à Trino, comme l'exige la spécification d'autorisation de MCP. Sans token exchange,
 `impersonation` exécute chaque requête au nom de l'appelant par le compte propre du serveur et une
 règle d'impersonation réservée à ce compte. `service` exécute chaque requête sous une identité
 unique ; ce n'est jamais un mode par défaut, et il est annoncé par un avertissement au démarrage,

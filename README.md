@@ -28,9 +28,10 @@ to find tables and columns, describe a schema or a table, list catalogs, schemas
 explain or run a query. The server parses every statement and refuses any write before it reaches
 Trino. By default, each query runs as the user the agent acts for. The server verifies the user's
 token, which must be issued for this server. It then obtains a separate token for Trino from the
-identity provider (OAuth 2.0 Token Exchange). The user's own token never leaves the server.
-Trino's access control (OPA, Ranger, or Trino's own rules) then decides what that user may read.
-Results are limited in rows and in time, and every call leaves one audit line.
+identity provider (OAuth 2.0 Token Exchange). The user's own token goes to the identity provider
+for that exchange, never to Trino. Trino's access control (OPA, Ranger, or Trino's own rules)
+then decides what that user may read. Results are limited in rows and in time, and every call
+leaves one audit line.
 
 > **Upgrading from 0.7.x?** 0.8.0 adds a ninth tool, `profile_table`, and context from a data
 > catalog, off until `MCP_CONTEXT_PROVIDERS` names a provider. Without opting in, you meet three
@@ -118,7 +119,7 @@ in `service` mode, for the one identity you give it.
 ## Features
 
 - **Read-only by construction, through this server.** SQL is parsed into an AST and refused if a write appears anywhere in the tree, CTEs and subqueries included. Table functions (`TABLE(...)`, such as a JDBC connector's `system.query`) and the `system` catalog are refused too, including through a name without a catalog when the session catalog is `system`. What a user can do in Trino by other means is governed by Trino's rules: see [Security](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/security.md#read-only-through-this-server).
-- **Per-user rights by default.** In `jwt` mode, the default, the server verifies the caller's token (issued for this server, never for Trino), exchanges it at the identity provider for a token whose audience is Trino (RFC 8693), and Trino runs the query as that user. The caller's token is never passed on. A request without a valid token is refused with `401`.
+- **Per-user rights by default.** In `jwt` mode, the default, the server verifies the caller's token (issued for this server, never for Trino), exchanges it at the identity provider for a token whose audience is Trino (RFC 8693), and Trino runs the query as that user. The caller's token is never passed on to Trino. A request without a valid token is refused with `401`.
 - **A fallback without token exchange.** In `impersonation` mode, the server authenticates to Trino with its own account (password or client certificate), and Trino runs the query as the verified caller, under an impersonation rule that only this account has.
 - **One identity, only when named.** In `service` mode, every query runs as `TRINO_USER`. It is never chosen by default, and the server says so at start and to every host in its initialization instructions.
 - **Limits by default.** A row cap with a `truncated` flag (100), a time budget per query, cancelled in Trino (60 s), and a time budget per tool call (120 s).

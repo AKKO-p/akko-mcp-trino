@@ -495,7 +495,8 @@ def test_jwt_mode_says_what_it_sends_never_a_token_nor_the_secret():
     lines = JwtIdentity(_jwt_cfg()).describe()
     assert lines == [
         "trino identity: the verified caller, with a token for Trino obtained by token "
-        "exchange; the caller's own token never leaves the server",
+        "exchange; the caller's own token goes to the identity provider for the "
+        "exchange, never to Trino",
         "token exchange: https://idp/token as client mcp-server (secret set), audience trino",
     ]
     assert "s3cret" not in " ".join(lines)
