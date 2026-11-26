@@ -1,8 +1,8 @@
 #!/bin/sh
-# A throwaway certificate authority for the integration run: Trino's and
-# Keycloak's server certificates, and the client certificate the server's own
-# Trino account presents in impersonation mode (mTLS). The CA key is deleted
-# once everything is signed.
+# A throwaway certificate authority for the integration run: Trino's, Keycloak's
+# and the directory's (integration/ldap) server certificates, and the client
+# certificate the server's own Trino account presents in impersonation mode
+# (mTLS). The CA key is deleted once everything is signed.
 set -eu
 cd "${CERTS_DIR:-/certs}"
 if [ -s ca.crt ]; then echo "certificates already present"; exit 0; fi
@@ -25,16 +25,17 @@ sign() { # name, extendedKeyUsage, subjectAltName (or empty)
 }
 sign trino serverAuth "DNS:trino,DNS:localhost"
 sign keycloak serverAuth "DNS:keycloak,DNS:localhost"
+sign ldap serverAuth "DNS:ldap,DNS:localhost"
 sign mcp-service clientAuth ""
 rm -f ca.key ca.srl
 
 cat trino.key trino.crt > trino.pem && rm -f trino.key
-# Trino and Keycloak run as uid 1000, the MCP server as uid 10001 (in compose; the Helm
-# proof mounts the files from Secrets instead, and may run without root).
+# Trino, Keycloak and the directory run as uid 1000, the MCP server as uid 10001
+# (in compose; the Helm proof mounts the files from Secrets instead, and may run without root).
 if [ "$(id -u)" = 0 ]; then
-  chown 1000:1000 trino.pem keycloak.key keycloak.crt
+  chown 1000:1000 trino.pem keycloak.key keycloak.crt ldap.key ldap.crt
   chown 10001:10001 mcp-service.key mcp-service.crt
 fi
-chmod 0400 trino.pem keycloak.key mcp-service.key
-chmod 0444 ca.crt trino.crt keycloak.crt mcp-service.crt
+chmod 0400 trino.pem keycloak.key ldap.key mcp-service.key
+chmod 0444 ca.crt trino.crt keycloak.crt ldap.crt mcp-service.crt
 echo "integration certificates created"

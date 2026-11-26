@@ -206,6 +206,41 @@ jobs:
           glibc=$(docker run --rm akko-mcp-trino:ci ldd --version | head -1 | awk '{print $NF}')
           echo "image glibc $glibc, scripts/lock.sh ${{ needs.versions.outputs.glibc }}"
           test "$glibc" = "${{ needs.versions.outputs.glibc }}"
+  image-ubi9:
+    # The UBI 9 image (Dockerfile.ubi9): the wheelhouse from the locks, then the build with no
+    # network, then its version, the Kerberos check, and a start as an arbitrary user of group 0
+    # on a read-only root file system, as OpenShift's restricted-v2 SCC runs it.
+    name: container image builds (UBI 9, no network)
+    runs-on: ubuntu-latest
+    needs: [versions, test]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - name: the wheelhouse, from the locks, in the build stage's base image
+        run: bash scripts/wheelhouse.sh
+      - name: the image builds with no network
+        run: docker buildx build --network=none --load -f Dockerfile.ubi9 -t akko-mcp-trino:ci-ubi9 .
+      - name: the image prints its version, checks Kerberos and starts read-only as any user
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+          test "$(docker run --rm akko-mcp-trino:ci-ubi9 akko-mcp-trino --version)" = "akko-mcp-trino $version"
+          keytab=$(mktemp) && chmod 644 "$keytab" && settings=$(mktemp)
+          printf '%s\n' TRINO_IDENTITY_MODE=service MCP_AUTH_ENABLED=false MCP_AUTH_REQUIRED=false \
+            TRINO_HOST=trino.invalid TRINO_CATALOG=tpch TRINO_USER=mcp-reader \
+            MCP_CONTEXT_PROVIDERS=atlas 'ATLAS_CLUSTERS={"lake":"primary"}' \
+            ATLAS_URL=http://atlas.invalid:21000 ATLAS_AUTH=kerberos \
+            ATLAS_PRINCIPAL=mcp-reader@EXAMPLE.ORG ATLAS_KEYTAB=/tmp/mcp.keytab > "$settings"
+          docker run --rm -v "$keytab:/tmp/mcp.keytab:ro" --env-file="$settings" akko-mcp-trino:ci-ubi9 akko-mcp-trino --check
+          plain=$(mktemp)
+          printf '%s\n' TRINO_IDENTITY_MODE=service MCP_AUTH_ENABLED=false MCP_AUTH_REQUIRED=false \
+            TRINO_HOST=trino.invalid TRINO_CATALOG=tpch TRINO_USER=mcp-reader > "$plain"
+          docker run -d --name ubi9 --read-only --user 1234567:0 --cap-drop=ALL --env-file="$plain" akko-mcp-trino:ci-ubi9
+          for _ in $(seq 30); do
+            docker exec ubi9 python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/health')" && break
+            sleep 1
+          done
+          test "$(docker exec ubi9 id -u)" = 1234567
+          docker exec ubi9 python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3001/health')"
   changes:
     # Whether this push or pull request touches what the image is built from, or this workflow;
     # the arm64 build runs only then.

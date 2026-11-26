@@ -212,18 +212,23 @@ def test_every_pip_install_of_ci_the_release_and_the_image_is_locked() -> None:
     """A third-party package comes from a lock with its hashes; only local code goes --no-deps."""
     texts = {
         path.name: path.read_text()
-        for path in [ROOT / "Dockerfile", *sorted((ROOT / ".github/workflows").glob("*.yml"))]
+        for path in [
+            ROOT / "Dockerfile",
+            ROOT / "Dockerfile.ubi9",
+            *sorted((ROOT / ".github/workflows").glob("*.yml")),
+        ]
     }
     seen = 0
     for name, text in texts.items():
-        for line in text.splitlines():
+        # A command continued over several lines is read as one.
+        for line in text.replace("\\\n", " ").splitlines():
             if "pip install" not in line or line.lstrip().startswith("#"):
                 continue
             seen += 1
             if "uv pip install --resolution" in line:
                 continue  # the ranges job resolves the declared ranges, on purpose
             locked = "--require-hashes -r " in line
-            local = "--no-deps" in line and re.search(r"(-e |\./|/tmp/akko|\s\.$)", line)
+            local = "--no-deps" in line and re.search(r"(-e |\./|/tmp/(dist/)?akko|\s\.$)", line)
             # The image's kerberos extra: the wheels its build stage checked against their lock.
             built = "--no-index --find-links /tmp/kerberos " in line
             assert locked or local or built, f"{name}: {line.strip()}"
@@ -611,3 +616,116 @@ def test_the_release_builds_both_packages_from_the_tag_at_its_version() -> None:
     assert "python -m build --no-isolation --outdir dist providers/atlas" in job
     for name in ("akko_mcp_trino", "akko_mcp_trino_atlas"):
         assert f'"{name}-$v.tar.gz"' in job and f'"{name}-$v-py3-none-any.whl"' in job
+
+
+# The UBI 9 image (Dockerfile.ubi9): the same rules, with every package from the wheelhouse.
+UBI_BASE = re.compile(
+    r"^ARG (BUILD_BASE|BASE)=(registry\.access\.redhat\.com/ubi9/python-3(\d+)(-minimal)?"
+    r":[\w.-]+@sha256:[0-9a-f]{64})$",
+    re.M,
+)
+RPM_NVR = re.compile(r"[a-z0-9][a-z0-9_+.-]*-\d[\w.+~^]*-\d[\w.+~^]*")
+
+
+def _ubi9() -> str:
+    return (ROOT / "Dockerfile.ubi9").read_text()
+
+
+def _ubi9_stages() -> tuple[str, str]:
+    text = _ubi9()
+    first = text.index("\nFROM ")
+    second = text.index("\nFROM ", first + 1)
+    return text[first:second], text[second:]
+
+
+def test_the_ubi9_image_builds_on_two_bases_pinned_by_digest_with_the_python_of_the_locks():
+    text = _ubi9()
+    bases = {m.group(1): m for m in UBI_BASE.finditer(text)}
+    assert set(bases) == {"BUILD_BASE", "BASE"}
+    # The full image to build, the minimal one to run, of the same Python as the locks.
+    assert bases["BUILD_BASE"].group(4) is None and bases["BASE"].group(4) == "-minimal"
+    python = _lock_outputs()["python"]
+    assert {f"3.{m.group(3)}" for m in bases.values()} == {python}
+    assert re.findall(r"^FROM .*$", text, re.M) == ["FROM ${BUILD_BASE} AS build", "FROM ${BASE}"]
+
+
+def test_the_ubi9_image_reads_no_index_and_installs_no_system_package():
+    """Every pip install reads the wheelhouse alone (--no-index), the lock with its hashes or
+    the wheels of the build stage; no dnf, microdnf or yum: the build runs with no network."""
+    text = _ubi9().replace("\\\n", " ")
+    installs = re.findall(r"pip (?:install|wheel) [^&\n]*", text)
+    assert len(installs) == 5  # build tools, kerberos wheels; then lock, packages, extra
+    for install in installs:
+        locked = "--no-index --find-links /wheelhouse" in install and "--require-hashes -r" in install
+        local = "--no-deps /tmp/dist/akko_mcp_trino-" in install
+        built = '--no-index --find-links /tmp/kerberos "akko-mcp-trino-atlas[kerberos]"' in install
+        assert locked or local or built, install
+    instructions = re.sub(r"^#.*$", "", text, flags=re.M)
+    assert not re.search(r"\b(dnf|microdnf|yum|curl|wget)\b", instructions)
+    assert "pip check" in text
+
+
+def test_every_system_package_the_ubi9_image_relies_on_is_checked_at_its_version():
+    """The base images bring the compiler, the Kerberos headers and libraries: rpm -q checks
+    each at its exact name-version-release, and the build stage's Kerberos and Python are those
+    of the final stage."""
+    checked = []
+    for stage in _ubi9_stages():
+        [line] = re.findall(r"^RUN rpm -q (.*)$", stage.replace("\\\n", " "), re.M)
+        packages = line.split()
+        assert packages and all(RPM_NVR.fullmatch(p) for p in packages), packages
+        checked.append(dict(re.match(r"(.+?)-(\d.*)", p).groups() for p in packages))
+    build, final = checked
+    assert {"gcc", "krb5-devel", "python3.12"} <= set(build)
+    assert {"krb5-libs", "python3.12", "glibc"} <= set(final)
+    assert build["krb5-devel"] == final["krb5-libs"]
+    assert build["python3.12"] == final["python3.12"]
+
+
+def test_the_ubi9_image_mounts_what_it_installs_and_keeps_none_of_it():
+    build, final = _ubi9_stages()
+    assert "--mount=type=bind,source=wheelhouse,target=/wheelhouse" in build
+    for mount in (
+        "--mount=type=bind,source=wheelhouse,target=/wheelhouse",
+        "--mount=type=bind,source=requirements/image.txt,target=/tmp/image.txt",
+        "--mount=type=bind,from=build,source=/src/dist,target=/tmp/dist",
+        "--mount=type=bind,from=build,source=/src/kerberos,target=/tmp/kerberos",
+    ):
+        assert mount in final, mount
+    assert "COPY" not in final and "ENTRYPOINT" not in final
+    assert re.search(r'^CMD \["akko-mcp-trino"\]$', final, re.M)
+    # A numeric user, and nothing of the code writable by it or by group 0.
+    assert re.search(r"^USER 1001$", final, re.M)
+    assert "chown -h 0:0" in final and "chmod go-w" in final
+
+
+def test_the_wheelhouse_holds_the_locks_the_ubi9_image_installs():
+    script = (ROOT / "scripts/wheelhouse.sh").read_text()
+    for lock in ("build.txt", "image.txt", "kerberos.txt"):
+        assert f"requirements/{lock}" in script and f"requirements/{lock}" in _ubi9(), lock
+    # Every download is checked against the hashes of its lock.
+    downloads = re.findall(r"pip download [^\n]*", script)
+    assert len(downloads) == 2 and all("--require-hashes" in d for d in downloads)
+    assert "wheelhouse/" in (ROOT / ".gitignore").read_text().splitlines()
+
+
+def test_the_wheelhouse_script_reads_the_python_of_the_build_base(tmp_path: Path) -> None:
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(ROOT / "scripts/wheelhouse.sh", tmp_path / "scripts/wheelhouse.sh")
+    (tmp_path / "Dockerfile.ubi9").write_text(
+        "ARG BUILD_BASE=registry.example.internal/ubi9/python-399@sha256:" + "0" * 64 + "\n"
+    )
+    # Inside a RHEL 9 image the script runs there; elsewhere it starts that image. The test
+    # pretends to be inside, so that it reaches the Python check and stops there.
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "grep").write_text("#!/bin/sh\nexit 0\n")
+    (fake / "grep").chmod(0o755)
+    done = subprocess.run(
+        ["bash", str(tmp_path / "scripts/wheelhouse.sh")],
+        capture_output=True,
+        text=True,
+        env=os.environ | {"PATH": f"{fake}:{os.environ['PATH']}"},
+    )
+    assert done.returncode == 1
+    assert "3.99 in Dockerfile.ubi9" in done.stderr
