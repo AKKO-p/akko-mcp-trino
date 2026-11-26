@@ -140,9 +140,11 @@ arbitraire d'OpenShift. Les secrets sont lus dans un Secret existant. La chart p
 une autorité de certification interne, un Ingress, une Route OpenShift, une NetworkPolicy et un
 PodDisruptionBudget.
 
-`helm template` échoue sur un réglage que le serveur refuserait au démarrage, et sur une
-vérification du token coupée sans accord explicite. `helm test` lance `--check` avec la
-configuration de la release :
+`helm template` échoue sur un réglage qui ne peut pas fonctionner, comme un réglage que le
+serveur refuserait au démarrage. Un réglage qui fonctionne mais laisse quelque chose ouvert, comme
+la vérification du token coupée en mode `service`, est rendu, et les notes de l'installation
+disent le risque et le réglage sûr. `helm test` lance `--check` avec la configuration de la
+release :
 
 ```bash
 helm install mcp-trino ./charts/akko-mcp-trino -f my-values.yaml

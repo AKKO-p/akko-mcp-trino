@@ -254,7 +254,8 @@
           "type": "boolean"
         },
         "acknowledgeNoAuth": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Deprecated, without effect: accepted so that values of earlier versions still render."
         },
         "jwksUrl": {
           "type": "string"
@@ -304,7 +305,8 @@
           }
         },
         "acknowledgeInsecureJwks": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Deprecated, without effect: accepted so that values of earlier versions still render."
         }
       },
       "additionalProperties": false
@@ -597,7 +599,8 @@
           }
         },
         "acknowledgePlainHttp": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Deprecated, without effect: accepted so that values of earlier versions still render."
         }
       },
       "additionalProperties": false

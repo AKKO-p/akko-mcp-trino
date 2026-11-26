@@ -129,15 +129,16 @@ trino:
 
 # The door: every caller's bearer token is verified against the provider's JWKS.
 auth:
-  # MCP_AUTH_ENABLED and MCP_AUTH_REQUIRED. Turning either off refuses to render unless
-  # `acknowledgeNoAuth` is true, and only `service` mode can run without them.
+  # MCP_AUTH_ENABLED and MCP_AUTH_REQUIRED. Only `service` mode can run with either off, and
+  # NOTES then warns that every caller reaches Trino without a verified token.
   enabled: true
   required: true
+  # Deprecated, without effect: accepted so that values of earlier versions still render.
   acknowledgeNoAuth: false
   # The provider's JWKS endpoint (MCP_JWKS_URL), over https. Required when auth is enabled.
   jwksUrl: ""
-  # The JWKS is the trust anchor of the door: fetched over http, anyone on the path could
-  # substitute keys. A non-https jwksUrl refuses to render unless this is true.
+  # Deprecated, without effect: a non-https jwksUrl renders, and NOTES warns that anyone on the
+  # path could substitute keys.
   acknowledgeInsecureJwks: false
   # The issuer a token must carry (MCP_OIDC_ISSUER), required when auth is enabled.
   issuer: ""
@@ -256,10 +257,10 @@ startupProbe:
 terminationGracePeriodSeconds: 30
 
 # The MCP Service. NodePort or LoadBalancer publish the server in plain HTTP outside the
-# cluster (bearer tokens in clear): refused unless `acknowledgePlainHttp` is true, for a
-# TLS-terminating load balancer in front.
+# cluster (bearer tokens in clear): NOTES warns; put a TLS-terminating load balancer in front.
 service:
   type: ClusterIP
+  # Deprecated, without effect: accepted so that values of earlier versions still render.
   acknowledgePlainHttp: false
   annotations: {}
   # The health port (/health, /ready, /metrics) is served by a second Service,

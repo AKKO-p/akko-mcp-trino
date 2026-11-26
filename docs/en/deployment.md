@@ -139,9 +139,10 @@ with a read-only root filesystem, and also runs under OpenShift's arbitrary UID.
 from an existing Secret. The chart can also add an internal CA, an Ingress, an OpenShift Route, a
 NetworkPolicy and a PodDisruptionBudget.
 
-`helm template` fails on a setting the server would refuse at start, and on token verification
-turned off without an explicit acknowledgement. `helm test` runs `--check` with the release's
-configuration:
+`helm template` fails on a setting that cannot work, such as one the server would refuse at
+start. A setting that works but leaves something open, such as token verification turned off in
+`service` mode, renders, and the install's notes say the risk and the safe setting. `helm test`
+runs `--check` with the release's configuration:
 
 ```bash
 helm install mcp-trino ./charts/akko-mcp-trino -f my-values.yaml

@@ -13,6 +13,7 @@ All notable changes to this project are documented here. The format follows
 - The release publishes an SBOM with each image, the Debian one and the UBI 9 one: BuildKit's SBOM attestation (`sbom: true`), an attestation manifest per platform in the image's index, beside the provenance attestation that docker/build-push-action adds by default (`provenance` stays at its default). The signed build provenance of `actions/attest-build-provenance` is still pushed as before.
 
 ### Changed
+- The Helm chart warns instead of refusing a setting that works but leaves something open: the door off in `service` mode, a JWKS over `http`, a NodePort or LoadBalancer Service, the `system` catalog, an `extraEnv` entry that overrides a variable the chart manages, and a disruption budget that blocks every node drain now render, and NOTES says, one line each, the risk and the safe setting. A setting that cannot work, the ones the server refuses at start included, is still refused. `auth.acknowledgeNoAuth`, `auth.acknowledgeInsecureJwks` and `service.acknowledgePlainHttp` are still accepted and have no effect. The defaults do not change.
 - The Helm chart is 0.3.4: its templates changed (the NetworkPolicy of the `helm test` pod, `python -I` in that pod).
 - Chart: with `networkPolicy.enabled` and `tests.enabled`, a second NetworkPolicy lets the `helm test` pod reach the cluster DNS and the server's health port only, so that `helm test` passes in a namespace that denies egress by default.
 

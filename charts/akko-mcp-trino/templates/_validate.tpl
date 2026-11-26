@@ -1,6 +1,7 @@
 {{/*
-Settings the server would refuse at start, or that would leave something open, refused at
-render time with a message that names the value to change.
+Settings that cannot work, the ones the server would refuse at start included, refused at
+render time with a message that names the value to change. A setting that works but leaves
+something open renders, and NOTES.txt says what it leaves open (mcp-trino.warnings below).
 */}}
 {{- define "mcp-trino.validate" -}}
 {{- $v := .Values }}
@@ -15,10 +16,7 @@ render time with a message that names the value to change.
 {{- fail "trino.host is required: the Trino coordinator, such as trino.example.internal." }}
 {{- end }}
 {{- if not $v.trino.catalog }}
-{{- fail "trino.catalog is required: a data catalog where names without a catalog are read (never system)." }}
-{{- end }}
-{{- if eq (lower $v.trino.catalog) "system" }}
-{{- fail "trino.catalog=system: set a data catalog; with system, names without a catalog are refused." }}
+{{- fail "trino.catalog is required: a data catalog where names without a catalog are read." }}
 {{- end }}
 {{- if and (ne $mode "service") (ne $v.trino.httpScheme "https") }}
 {{- fail (printf "trino.identityMode=%s requires trino.httpScheme=https: a token or a credential never travels over http." $mode) }}
@@ -41,22 +39,16 @@ render time with a message that names the value to change.
 
 {{- /* The door. */}}
 {{- if and $v.auth.required (not $v.auth.enabled) }}
-{{- fail "auth.required=true with auth.enabled=false: a door that requires a token it cannot verify. Enable auth, or turn both off with auth.acknowledgeNoAuth=true (service mode only)." }}
+{{- fail "auth.required=true with auth.enabled=false: a door that requires a token it cannot verify, which the server refuses at start. Enable auth, or turn both off (service mode only)." }}
 {{- end }}
 {{- if not (and $v.auth.enabled $v.auth.required) }}
 {{- if ne $mode "service" }}
 {{- fail (printf "trino.identityMode=%s requires auth.enabled=true and auth.required=true: the caller is known only from a verified token." $mode) }}
 {{- end }}
-{{- if not $v.auth.acknowledgeNoAuth }}
-{{- fail "auth.enabled or auth.required is false: every caller would reach Trino without a verified token. Set auth.acknowledgeNoAuth=true to render it anyway (a local test only)." }}
-{{- end }}
 {{- end }}
 {{- if $v.auth.enabled }}
 {{- if not $v.auth.jwksUrl }}
 {{- fail "auth.jwksUrl is required when auth is enabled: the identity provider's JWKS endpoint." }}
-{{- end }}
-{{- if and (not (hasPrefix "https://" $v.auth.jwksUrl)) (not $v.auth.acknowledgeInsecureJwks) }}
-{{- fail (printf "auth.jwksUrl=%s is not https: the JWKS is the door's trust anchor, and over http anyone on the path could substitute keys. Use https, or set auth.acknowledgeInsecureJwks=true (a test only)." $v.auth.jwksUrl) }}
 {{- end }}
 {{- if not $v.auth.issuer }}
 {{- fail "auth.issuer is required when auth is enabled: the issuer the identity provider puts in its tokens (iss). Empty, the server refuses to start." }}
@@ -127,17 +119,8 @@ render time with a message that names the value to change.
 {{- if and $v.ingress.enabled (not $v.ingress.hosts) }}
 {{- fail "ingress.enabled=true requires ingress.hosts." }}
 {{- end }}
-{{- if and (ne $v.service.type "ClusterIP") (not $v.service.acknowledgePlainHttp) }}
-{{- fail (printf "service.type=%s publishes the MCP port in plain HTTP outside the cluster, bearer tokens in clear. Use an Ingress or a Route with TLS, or set service.acknowledgePlainHttp=true when a TLS-terminating load balancer is in front." $v.service.type) }}
-{{- end }}
 {{- if and $v.tests.enabled (not $v.service.exposeHealthPort) }}
 {{- fail "tests.enabled=true calls the health Service: keep service.exposeHealthPort=true, or set tests.enabled=false." }}
-{{- end }}
-{{- $managed := include "mcp-trino.managedEnv" . | fromJson }}
-{{- range $v.extraEnv }}
-{{- if hasKey $managed (.name | default "") }}
-{{- fail (printf "extraEnv sets %s, which the chart manages: set %s instead, so that the render-time checks apply." .name (get $managed .name)) }}
-{{- end }}
 {{- end }}
 {{- if $v.networkPolicy.enabled }}
 {{- if and (or $v.ingress.enabled (and $v.route.enabled (not $v.networkPolicy.ingress.openshiftRouter))) (not $v.networkPolicy.ingress.from) }}
@@ -155,9 +138,39 @@ render time with a message that names the value to change.
 {{- if and (not (kindIs "invalid" $pdb.minAvailable)) (not (kindIs "invalid" $pdb.maxUnavailable)) }}
 {{- fail "podDisruptionBudget: set minAvailable or maxUnavailable, not both." }}
 {{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Settings that work but leave something open, one line each: the risk and the safe setting.
+NOTES.txt prints them at install and upgrade; the server says its own at start and in --check.
+The acknowledge* values of earlier versions are accepted and have no effect.
+*/}}
+{{- define "mcp-trino.warnings" -}}
+{{- $v := .Values }}
+{{- if not (and $v.auth.enabled $v.auth.required) }}
+WARNING: the door is open (auth.enabled={{ $v.auth.enabled }}, auth.required={{ $v.auth.required }}): every caller reaches Trino as {{ $v.trino.user }} without a verified token. Safe setting: auth.enabled=true and auth.required=true.
+{{ end }}
+{{- if and $v.auth.enabled (not (hasPrefix "https://" $v.auth.jwksUrl)) }}
+WARNING: the JWKS is fetched over http ({{ $v.auth.jwksUrl }}): anyone on the path could substitute keys and mint accepted tokens. Safe setting: an https auth.jwksUrl.
+{{ end }}
+{{- if ne $v.service.type "ClusterIP" }}
+WARNING: service.type={{ $v.service.type }} serves the MCP port in plain HTTP outside the cluster, bearer tokens in clear. Safe setting: a ClusterIP Service behind an Ingress or a Route with TLS, or a TLS-terminating load balancer in front.
+{{ end }}
+{{- if eq (lower $v.trino.catalog) "system" }}
+WARNING: trino.catalog=system: names without a catalog are refused, so every query must name its catalog. Safe setting: a data catalog.
+{{ end }}
+{{- $managed := include "mcp-trino.managedEnv" . | fromJson }}
+{{- range $v.extraEnv }}
+{{- if hasKey $managed (.name | default "") }}
+WARNING: extraEnv sets {{ .name }}, which the chart manages: it overrides the chart's value, out of reach of its render-time checks. Safe setting: {{ get $managed .name }}.
+{{ end }}
+{{- end }}
+{{- if $v.podDisruptionBudget.enabled }}
+{{- $pdb := $v.podDisruptionBudget }}
 {{- $min := ternary 1 $pdb.minAvailable (and (kindIs "invalid" $pdb.minAvailable) (kindIs "invalid" $pdb.maxUnavailable)) }}
 {{- if and (not (kindIs "invalid" $min)) (not (kindIs "string" $min)) (ge (int $min) (int $v.replicaCount)) }}
-{{- fail (printf "podDisruptionBudget.minAvailable=%v with replicaCount=%v blocks every node drain: raise replicaCount, lower minAvailable or set maxUnavailable." $min $v.replicaCount) }}
-{{- end }}
+WARNING: podDisruptionBudget.minAvailable={{ $min }} with replicaCount={{ $v.replicaCount }} blocks every node drain. Safe setting: a higher replicaCount, a lower minAvailable, or maxUnavailable.
+{{ end }}
 {{- end }}
 {{- end }}
