@@ -138,7 +138,8 @@ $( [ -n "${BUILD_PULL_SECRET:-}" ] && printf '      pullSecret:\n        name: %
 EOF
   echo "  build context: $(du -sh "$context" | cut -f1) (the wheelhouse: $(du -sh "$context/wheelhouse" | cut -f1))"
   # The build pod's memory, sampled while it runs (when the cluster serves pod metrics).
-  ( while :; do k top pod -l openshift.io/build.name --no-headers 2>/dev/null; sleep 10; done ) >"$work/build-top" &
+  top=(top); [ "$(basename "$KUBECTL")" = oc ] && top=(adm top)  # oc has no top of its own
+  ( while :; do k "${top[@]}" pod -l openshift.io/build.name --no-headers 2>/dev/null; sleep 10; done ) >"$work/build-top" &
   sampler=$!
   start=$(date +%s)
   if oc -n "$NS" start-build akko-mcp-trino-ubi9 --from-dir="$context" --wait --follow >"$work/build" 2>&1; then
