@@ -141,6 +141,7 @@ These pages describe `main`. The documentation of a release is at its tag.
 | [Prerequisites](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/prerequisites.md) | what you need, and the versions supported and tested |
 | [Quickstart](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/quickstart.md) | the sandbox, a user's token, a host, a first question |
 | [Deployment](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/deployment.md) | install and run, the container, Helm on Kubernetes and OpenShift, Trino Gateway, with or without a data catalog |
+| [Deploy on OpenShift without internet access](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/openshift-air-gapped.md) | the UBI 9 image built with no network, Trino with LDAP passwords and impersonation |
 | [Identity](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/identity.md) | the four identity modes, the user claim, token verification |
 | [Connect an MCP host](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/hosts.md) | Claude Desktop, Cursor, any stdio host, the Python SDK, an agent |
 | [Context from a data catalog](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/catalog-context.md) | what a context provider serves, its limits, the `file` provider |

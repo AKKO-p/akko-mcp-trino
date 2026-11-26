@@ -230,7 +230,8 @@ def main() -> int:
     for user, target in (("alice", "bob"), ("bob", "alice"), ("bob", "mcp-server")):
         status, rows = trino(user, "SELECT current_user", as_user=target)
         check(
-            f"{user}, signed in to Trino with a directory password, may not run a query as {target}",
+            f"{user}, signed in to Trino with a directory password, "
+            f"may not run a query as {target}",
             status != 200 or isinstance(rows, str),
             (status, rows),
             shown=True,

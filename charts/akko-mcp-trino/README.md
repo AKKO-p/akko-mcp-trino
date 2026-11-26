@@ -176,6 +176,8 @@ the identity provider (`networkPolicy.egress.identityProvider`) and
 provider's when the door is on, and the ingress controller's with an Ingress. The health
 port admits a pod of the namespace that carries the release's test labels: anyone who
 may create pods in the namespace can do so, so keep the release in a namespace of its own.
+With `tests.enabled`, a second policy lets the `helm test` pod reach the cluster DNS and the
+server's health port only, so that the test passes in a namespace that denies egress by default.
 
 ## Environment
 

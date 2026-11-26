@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.8.3] - 2026-11-26
 
+### Added
+- `Dockerfile.ubi9` builds the image on Red Hat Universal Base Image 9 (`ubi9/python-312` to build, `ubi9/python-312-minimal` to run, both pinned by digest), for platforms that require Red Hat base images. It builds with no network (`--network=none`): every Python package comes, with its hashes, from a wheelhouse that `scripts/wheelhouse.sh` writes from the locks, and no system package is installed (each one the build relies on is checked at its exact version). The image runs as UID 1001 or any UID of group 0 on a read-only root filesystem; nothing of its code is writable by that user. The base images can be named from an internal registry (`--build-arg BUILD_BASE=... BASE=...`). CI builds it and runs `--version`, the Kerberos `--check` and a read-only start as an arbitrary user.
+- `integration/ldap/run.sh` proves the most constrained deployment: Trino with password authentication against a directory (LDAP) over https with an internal certificate authority, the server from the UBI 9 image in `impersonation` mode with its own directory account, Keycloak federated on the same directory, 25 checks (401 without a token, each user as Trino sees them, row filter and refusals by user, no usurpation through the server or directly in Trino, no write) and no token or password in the server's log. `integration/helm/openshift-ldap.sh` is the same case in an OpenShift project, the image built by a BuildConfig.
+- The page [Deploy on OpenShift without internet access](docs/en/openshift-air-gapped.md), in English and French, and the chart's `ci/airgapped-values.yaml`.
+
+### Changed
+- Chart: with `networkPolicy.enabled` and `tests.enabled`, a second NetworkPolicy lets the `helm test` pod reach the cluster DNS and the server's health port only, so that `helm test` passes in a namespace that denies egress by default.
+
 ### Security
 - The container image is built with Debian 13's current MIT Kerberos libraries (`1.21.3-5+deb13u2`, a Debian security update) and C library headers (`2.41-12+deb13u5`). The Debian mirrors no longer serve the versions the Dockerfile pinned, so the image no longer built.
 - The description of `describe_table` now tells the model to read the comments it returns as data, never as instructions, in the wording `search_columns` and `describe_schema` already use. Its answers and keys are unchanged.

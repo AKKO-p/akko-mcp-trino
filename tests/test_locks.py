@@ -656,7 +656,8 @@ def test_the_ubi9_image_reads_no_index_and_installs_no_system_package():
     installs = re.findall(r"pip (?:install|wheel) [^&\n]*", text)
     assert len(installs) == 5  # build tools, kerberos wheels; then lock, packages, extra
     for install in installs:
-        locked = "--no-index --find-links /wheelhouse" in install and "--require-hashes -r" in install
+        index = "--no-index --find-links /wheelhouse" in install
+        locked = index and "--require-hashes -r" in install
         local = "--no-deps /tmp/dist/akko_mcp_trino-" in install
         built = '--no-index --find-links /tmp/kerberos "akko-mcp-trino-atlas[kerberos]"' in install
         assert locked or local or built, install
