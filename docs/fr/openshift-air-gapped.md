@@ -77,8 +77,10 @@ fichiers que copie `Dockerfile.ubi9` et le dossier de wheels, pas le clone entie
 - les utilisateurs du projet ont droit à la stratégie Docker (`system:build-strategy-docker`), que
   les clusters durcis retirent souvent ;
 - le constructeur du cluster accepte `RUN --mount=type=bind` depuis une autre étape et depuis le
-  contexte. La documentation d'OpenShift ne dit pas depuis quelle version ; essayez-le sur le
-  cluster.
+  contexte. OpenShift 4.22 l'accepte : la construction d'un contexte de 27 Mo (dont 26 Mo de wheels)
+  y a pris 256 s et a poussé l'image dans le registre du projet, sous une limite de 2 Gio de
+  mémoire. La documentation d'OpenShift ne dit pas depuis quelle version ; sur un cluster plus
+  ancien, essayez-le.
 
 Si l'une d'elles manque, construisez l'image ailleurs et poussez-la, comme le fait la section
 suivante.
@@ -227,7 +229,10 @@ networkPolicy:
           protocol: TCP
 ```
 
-Donnez à `image.digest` le digest affiché par le push, à `userClaim` le claim qui porte l'uid de
+`imagePullSecrets` remplace les secrets de tirage qu'OpenShift donne au compte de service du pod :
+pour une image du registre du projet lui-même (celle qu'a construite une BuildConfig), ne le posez
+pas, sinon le tirage échoue (`ImagePullBackOff`, constaté sur OpenShift 4.22). Donnez à
+`image.digest` le digest affiché par le push, à `userClaim` le claim qui porte l'uid de
 l'annuaire (le nom que Trino connaît), et aux pairs de la NetworkPolicy ceux du cluster. Un
 `podSelector` sans `namespaceSelector` désigne des pods du projet de la release, et le port d'une
 règle est celui du pod, pas celui du Service. Un `ipBlock` correspond à l'adresse vers laquelle
@@ -295,5 +300,10 @@ racine en lecture seule. Un extrait d'une exécution réelle :
 contrôles dans un projet OpenShift avec les droits d'un membre : l'image construite par une
 BuildConfig depuis `Dockerfile.ubi9`, la chart installée avec
 [`values-ldap.yaml`](../../integration/helm/values-ldap.yaml), le pod sous `restricted-v2`, et
-`helm test`. Il ne prouve pas un cluster déconnecté : la construction dans le cluster dispose du
-réseau que le cluster donne aux builds, et ses fixtures tirent leurs images de registres publics.
+`helm test`. Sur OpenShift 4.22, dans un projet sans droit d'administration, tous les contrôles ont
+passé : la construction, le pod sous `restricted-v2` avec un UID de la plage du projet, la racine en
+lecture seule, le code qu'aucun utilisateur ne peut modifier, l'annuaire sous `restricted-v2`, les 26
+contrôles de `integration/ldap/check.py` par le Service, `helm test` avec la NetworkPolicy active,
+et aucun token ni mot de passe dans les journaux du serveur. Il ne prouve pas un cluster
+déconnecté : la construction dans le cluster dispose du réseau que le cluster donne aux builds, et
+ses fixtures tirent leurs images de registres publics.

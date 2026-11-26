@@ -74,7 +74,9 @@ creates one and sends it, with `oc start-build --from-dir`, a folder that holds 
 - the project's users may use the Docker strategy (`system:build-strategy-docker`), which hardened
   clusters often withdraw;
 - the cluster's builder supports `RUN --mount=type=bind` from another stage and from the context.
-  The OpenShift documentation does not say from which version; try it on the cluster.
+  OpenShift 4.22 does: there, the build of a 27 MB context (26 MB of wheels) took 256 s and pushed
+  the image to the project's registry, within a 2 GiB memory limit. The OpenShift documentation
+  does not say from which version; on an older cluster, try it.
 
 When one of them does not hold, build the image elsewhere and push it, as the next section does.
 
@@ -217,7 +219,9 @@ networkPolicy:
           protocol: TCP
 ```
 
-Set `image.digest` to the digest the push printed, `userClaim` to the claim that carries the
+`imagePullSecrets` replaces the pull secrets OpenShift gives the pod's service account: for an
+image of the project's own registry (one a BuildConfig built), leave it out, or the pull fails
+(`ImagePullBackOff`, seen on OpenShift 4.22). Set `image.digest` to the digest the push printed, `userClaim` to the claim that carries the
 directory's uid (the name Trino knows), and the peers of the NetworkPolicy to those of the
 cluster. A `podSelector` without a `namespaceSelector` names pods of the release's project, and the
 port of a rule is the pod's port, not the Service's. An `ipBlock` matches the address the packets
@@ -284,5 +288,10 @@ extract of a real run:
 checks in an OpenShift project with a member's rights: the image built by a BuildConfig from
 `Dockerfile.ubi9`, the chart installed with
 [`values-ldap.yaml`](../../integration/helm/values-ldap.yaml), the pod under `restricted-v2`, and
-`helm test`. It does not prove a disconnected cluster: the build in the cluster has the network the
-cluster gives builds, and its fixtures pull their images from public registries.
+`helm test`. On OpenShift 4.22, in a project without administration rights, every check passed:
+the build, the pod under `restricted-v2` with a UID of the project's range, the read-only root, the
+code no user can change, the directory under `restricted-v2`, the 26 checks of
+`integration/ldap/check.py` through the Service, `helm test` with the NetworkPolicy on, and no token
+or password in the server's log. It does not prove a disconnected cluster: the build in the cluster
+has the network the cluster gives builds, and its fixtures pull their images from public
+registries.
