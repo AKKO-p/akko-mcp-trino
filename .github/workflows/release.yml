@@ -193,9 +193,9 @@ jobs:
         with:
           context: tag
           platforms: ${{ steps.lock.outputs.platforms }}
-          # The SBOM of each platform's image, as a BuildKit attestation pushed in the image's
-          # index beside the provenance BuildKit adds by default; the signed provenance of
-          # image-provenance is a separate referrer of the same digest.
+          # The SBOM of each platform's image, as a BuildKit attestation manifest in the image's
+          # index, beside the provenance attestation build-push-action adds by default
+          # (provenance is left at that default).
           sbom: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
