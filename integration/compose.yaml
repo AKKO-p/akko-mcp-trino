@@ -104,7 +104,9 @@ services:
       TRINO_HTTP_SCHEME: https
       TRINO_VERIFY: /certs/ca.crt
       TRINO_CATALOG: tpch
-      MCP_JWKS_URL: http://keycloak:8080/realms/integration/protocol/openid-connect/certs
+      # The JWKS over https, checked against the run's CA (a JWKS over http is warned of).
+      MCP_JWKS_URL: https://keycloak:8443/realms/integration/protocol/openid-connect/certs
+      SSL_CERT_FILE: /certs/ca.crt
       MCP_OIDC_ISSUER: https://keycloak:8443/realms/integration
       MCP_OIDC_AUDIENCE: akko-mcp
       MCP_JWT_USER_CLAIM: preferred_username  # Keycloak's sub is a UUID
@@ -139,7 +141,9 @@ services:
       TRINO_USER: mcp-service
       TRINO_CLIENT_CERT: /certs/mcp-service.crt
       TRINO_CLIENT_KEY: /certs/mcp-service.key
-      MCP_JWKS_URL: http://keycloak:8080/realms/integration/protocol/openid-connect/certs
+      # The JWKS over https, checked against the run's CA (a JWKS over http is warned of).
+      MCP_JWKS_URL: https://keycloak:8443/realms/integration/protocol/openid-connect/certs
+      SSL_CERT_FILE: /certs/ca.crt
       MCP_OIDC_ISSUER: https://keycloak:8443/realms/integration
       MCP_OIDC_AUDIENCE: akko-mcp
       MCP_JWT_USER_CLAIM: preferred_username  # Keycloak's sub is a UUID

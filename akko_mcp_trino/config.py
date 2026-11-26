@@ -640,6 +640,23 @@ class Config:
             )
         elif not self.auth_required:
             found.append("MCP_AUTH_REQUIRED=false: a request without a valid token is served too")
+        if self.auth_enabled and self.jwks_url and not self.jwks_url.lower().startswith("https://"):
+            found.append(
+                f"MCP_JWKS_URL={self.jwks_url}: the keys that verify tokens are read over plain "
+                "http, so anyone on the path could substitute them and mint accepted tokens; "
+                "set an https MCP_JWKS_URL"
+            )
+        if self.trino_identity_mode == "jwt" and self.token_exchange_verify.strip().lower() in (
+            "false",
+            "0",
+            "no",
+        ):
+            found.append(
+                f"TRINO_TOKEN_EXCHANGE_VERIFY={self.token_exchange_verify.strip()}: the token "
+                "endpoint's certificate is not verified, so the server cannot know whom it "
+                "sends its client secret and the callers' tokens to; set "
+                "TRINO_TOKEN_EXCHANGE_VERIFY=true, or the path of a CA bundle"
+            )
         if self.trino_http_scheme == "https" and self.trino_verify.strip().lower() in (
             "false",
             "0",

@@ -1420,3 +1420,28 @@ def test_nothing_is_silenced_over_http_or_with_a_ca_bundle(recwarn):
     ):
         TrinoClient(_cfg(**over), identity=Mock())
     assert [f for f in warnings.filters if f[2] is InsecureRequestWarning] == []
+
+
+@pytest.mark.parametrize(
+    ("configured", "named"),
+    [("[::1]", "::1"), ("Trino.Example.Internal", "trino.example.internal"), ("trino", "trino")],
+)
+def test_the_silenced_host_is_the_one_urllib3_names(recwarn, configured, named):
+    """urllib3 names an IPv6 host without its brackets and lowers a host's case: the filter
+    matches the warning for Trino's host in every form, and not another host's."""
+    import warnings
+
+    from urllib3.exceptions import InsecureRequestWarning
+
+    TrinoClient(
+        _cfg(trino_host=configured, trino_http_scheme="https", trino_verify="false"),
+        identity=Mock(),
+    )
+    for host in (named, "other.example"):
+        warnings.warn(
+            f"Unverified HTTPS request is being made to host '{host}'. Adding certificate "
+            "verification is strongly advised.",
+            InsecureRequestWarning,
+            stacklevel=1,
+        )
+    assert [str(w.message).split("'")[1] for w in recwarn] == ["other.example"]

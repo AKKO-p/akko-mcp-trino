@@ -167,12 +167,17 @@ def quiet_unverified_trino(config: Config) -> None:
     ``--check``, that Trino's certificate is not verified; urllib3 would repeat it on every
     request to Trino, readiness probes included. Its ``InsecureRequestWarning`` is ignored for
     requests to Trino's host only, never for another host, and only when verification is off.
-    Adding the same filter again replaces it: one client or many, the list keeps one."""
+    Adding the same filter again replaces it: one client or many, the list keeps one. urllib3
+    names an IPv6 host without its brackets ([::1] is '::1'), and the match ignores case, as
+    urllib3 lowers the host's."""
     if config.trino_http_scheme != "https" or verify_setting(config) is not False:
         return
+    host = config.trino_host
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
     warnings.filterwarnings(
         "ignore",
-        message=re.escape(f"Unverified HTTPS request is being made to host '{config.trino_host}'"),
+        message=re.escape(f"Unverified HTTPS request is being made to host '{host}'"),
         category=InsecureRequestWarning,
     )
 

@@ -150,6 +150,58 @@ def test_trino_verification_on_or_without_tls_is_not_warned_of(monkeypatch, sche
     assert Config.from_env().warnings() == []
 
 
+@pytest.mark.parametrize("url", ["http://idp.example/certs", "HTTP://idp.example/certs"])
+def test_a_jwks_read_over_http_is_warned_of(monkeypatch, url):
+    """The chart's NOTES are not the only place: a render by helm template never shows them."""
+    monkeypatch.setenv("MCP_JWKS_URL", url)
+    assert Config.from_env().warnings() == [
+        f"MCP_JWKS_URL={url}: the keys that verify tokens are read over plain http, so anyone "
+        "on the path could substitute them and mint accepted tokens; set an https MCP_JWKS_URL"
+    ]
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"MCP_JWKS_URL": "https://idp.example/certs"},
+        {"MCP_JWKS_URL": "HTTPS://idp.example/certs"},
+        {
+            "MCP_JWKS_URL": "http://idp.example/certs",
+            "MCP_AUTH_ENABLED": "false",
+            "MCP_AUTH_REQUIRED": "false",
+            "TRINO_IDENTITY_MODE": "service",
+            "TRINO_USER": "u",
+        },
+    ],
+)
+def test_a_jwks_over_https_or_unused_is_not_warned_of(monkeypatch, over):
+    for name, value in over.items():
+        monkeypatch.setenv(name, value)
+    assert not any(w.startswith("MCP_JWKS_URL=") for w in Config.from_env().warnings())
+
+
+@pytest.mark.parametrize(
+    ("mode", "value", "warned"),
+    [
+        ("jwt", "false", True),
+        ("jwt", " No ", True),
+        ("jwt", "true", False),
+        ("jwt", "/etc/ca.pem", False),
+        ("impersonation", "false", False),
+    ],
+)
+def test_the_token_endpoint_unverified_is_warned_of_in_jwt_mode(monkeypatch, mode, value, warned):
+    monkeypatch.setenv("TRINO_IDENTITY_MODE", mode)
+    monkeypatch.setenv("TRINO_TOKEN_EXCHANGE_VERIFY", value)
+    expected = [
+        f"TRINO_TOKEN_EXCHANGE_VERIFY={value.strip()}: the token endpoint's certificate is not "
+        "verified, so the server cannot know whom it sends its client secret and the callers' "
+        "tokens to; set TRINO_TOKEN_EXCHANGE_VERIFY=true, or the path of a CA bundle"
+    ]
+    found = [w for w in Config.from_env().warnings() if w.startswith("TRINO_TOKEN_EXCHANGE_")]
+    assert found == (expected if warned else [])
+
+
 def test_a_door_that_requires_tokens_it_cannot_verify_is_a_problem(monkeypatch):
     monkeypatch.setenv("MCP_AUTH_ENABLED", "false")
     assert Config.from_env().problems() == [

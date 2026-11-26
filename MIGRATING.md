@@ -1,5 +1,30 @@
 # Migrating
 
+## From 0.8.3 to 0.8.4
+
+The server, its tools and their answers do not change. The Helm chart (0.3.4) and the warnings
+do:
+
+- **Settings the chart rendered no longer fail it.** Six settings that `helm template` and
+  `helm install` refused in 0.3.3 now render, with a warning: the door off in `service` mode
+  (`auth.enabled` or `auth.required` false), a JWKS over `http`, a NodePort or LoadBalancer
+  Service, `trino.catalog: system`, an `extraEnv` entry that overrides a variable of the
+  chart's ConfigMap, and a disruption budget that blocks every node drain. A pipeline that
+  relied on the render failing on one of them must now read the install's notes, or the
+  warnings the server writes at start and in `--check` (the door off and a JWKS over `http`
+  are among them; the Service type and the disruption budget are in the notes only).
+- **The acknowledgements.** `auth.acknowledgeNoAuth`, `auth.acknowledgeInsecureJwks` and
+  `service.acknowledgePlainHttp` are still accepted and have no effect: values written for
+  0.3.3 render as before.
+- **`extraEnv` and the chart's secrets.** An `extraEnv` entry named `TRINO_PASSWORD` or
+  `TRINO_TOKEN_EXCHANGE_CLIENT_SECRET`, when the chart puts that variable in the container's
+  env itself, is refused: the API server rejects two entries of one name. Use
+  `existingSecret.name` and `existingSecret.keys`.
+- **New warnings.** The server warns of `TRINO_VERIFY=false` over https, of a JWKS read over
+  `http` with token verification on, and of `TRINO_TOKEN_EXCHANGE_VERIFY=false` in `jwt` mode.
+  They appear at start, in `--check` and in the instructions the server sends MCP hosts; a host
+  or a check that expected no instructions in these configurations now sees them.
+
 ## From 0.8.0 to 0.8.1
 
 Nothing is removed or renamed in the answers of the tools; some answers are now shorter.
