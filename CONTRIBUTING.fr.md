@@ -129,7 +129,7 @@ docker run --rm registry.access.redhat.com/ubi9/python-312-minimal@sha256:<diges
 La CI la construit avec `--network=none` et lance `--version`, le `--check` Kerberos et un
 démarrage sous un utilisateur arbitraire avec un système de fichiers racine en lecture seule.
 `integration/ldap/run.sh` la fait tourner face à un Trino à authentification par mot de passe
-(voir [Déployer sur OpenShift sans accès à internet](docs/fr/openshift-air-gapped.md)).
+auprès d'un annuaire.
 
 `scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions : `LOCK_PYTHON`,
 les versions de Python des contrôles et de l'adaptateur Atlas (`CHECK_PYTHONS`), les plateformes de

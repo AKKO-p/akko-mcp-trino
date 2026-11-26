@@ -136,8 +136,7 @@ docker run --rm registry.access.redhat.com/ubi9/python-312-minimal@sha256:<diges
 
 CI builds it with `--network=none` and runs `--version`, the Kerberos `--check` and a start as an
 arbitrary user on a read-only root filesystem. `integration/ldap/run.sh` runs it against Trino with
-password authentication (see
-[Deploy on OpenShift without internet access](docs/en/openshift-air-gapped.md)).
+password authentication against a directory.
 
 `scripts/lock.sh` is the one place CI and the release read the versions from:
 `LOCK_PYTHON`, the Python versions of the checks and of the Atlas provider

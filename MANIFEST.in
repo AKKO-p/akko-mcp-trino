@@ -10,7 +10,7 @@ prune .venv
 include README.fr.md DOCKERHUB.md CONTRIBUTING.md CONTRIBUTING.fr.md SECURITY.md SECURITY.fr.md
 include LICENSE NOTICE charts/akko-mcp-trino/README.md charts/akko-mcp-trino/ci/gateway-values.yaml
 include integration/compose.yaml integration/helm/openshift-ldap.sh integration/helm/values-ldap.yaml
-include charts/akko-mcp-trino/ci/airgapped-values.yaml Dockerfile.ubi9 .gitignore
+include Dockerfile.ubi9 .gitignore
 graft integration/ldap
 graft docs/en
 graft docs/fr

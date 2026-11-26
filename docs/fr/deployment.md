@@ -150,8 +150,6 @@ helm test mcp-trino --logs
 ```
 
 Le [README de la chart](../../charts/akko-mcp-trino/README.md) (en anglais) en liste les valeurs.
-[Déployer sur OpenShift sans accès à internet](openshift-air-gapped.md) couvre un registre
-interne, l'image UBI 9 construite sans réseau et un Trino qui authentifie par mot de passe LDAP.
 
 ## Derrière Trino Gateway
 
