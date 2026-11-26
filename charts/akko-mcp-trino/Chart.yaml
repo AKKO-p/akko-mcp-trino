@@ -2,8 +2,8 @@ apiVersion: v2
 name: akko-mcp-trino
 description: Read-only MCP server for Trino, where each query runs as the verified caller.
 type: application
-version: 0.3.2
-appVersion: "0.8.2"
+version: 0.3.3
+appVersion: "0.8.3"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/AKKO-p/akko-mcp-trino
 sources:
