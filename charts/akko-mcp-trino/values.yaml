@@ -213,10 +213,12 @@ ca:
   setSslCertFile: true
 
 # Extra environment variables (an extension's own settings, for example), as container
-# env entries. Never a secret value: use valueFrom.secretKeyRef. A variable the chart
-# manages (TRINO_HOST, MCP_AUTH_ENABLED...) refuses to render, naming the value to set
-# instead. extraEnvFrom comes before the chart's ConfigMap, so the chart's settings win;
-# it must not carry those variables either.
+# env entries. Never a secret value: use valueFrom.secretKeyRef. A variable the chart writes
+# in its ConfigMap (TRINO_HOST, MCP_AUTH_ENABLED...) overrides the chart's value, and NOTES
+# warns, naming the value to set instead; one the chart puts in env from existingSecret
+# (TRINO_PASSWORD, TRINO_TOKEN_EXCHANGE_CLIENT_SECRET) refuses to render, as two entries of
+# one name are rejected. extraEnvFrom comes before the chart's ConfigMap, so the chart's
+# settings win.
 extraEnv: []
 extraEnvFrom: []
 extraVolumes: []
@@ -319,7 +321,7 @@ extraContainers: []
 # NetworkPolicy: ingress to the MCP port only from the listed peers (and from the OpenShift
 # router when the Route is enabled), to the health port from the helm test and the listed
 # metrics peers; egress only to DNS, Trino and the identity provider. With tests.enabled, a
-# second policy limits the helm test pod to DNS and the server's health port.
+# second policy limits the helm test pod to DNS, the server's health port and egress.extra.
 networkPolicy:
   enabled: false
   ingress:
