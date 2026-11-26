@@ -215,6 +215,88 @@ jobs:
           subject-name: ghcr.io/akko-p/akko-mcp-trino
           subject-digest: ${{ needs.image.outputs.digest }}
           push-to-registry: true
+  image-ubi9:
+    # The UBI 9 variant (Dockerfile.ubi9), under the same name with the -ubi9 suffix: X.Y.Z-ubi9,
+    # X.Y-ubi9 and ubi9; latest, X.Y and X.Y.Z stay the Debian image's. Its wheelhouse comes from
+    # the tag's locks (scripts/wheelhouse.sh, hashes checked), then the build runs with no
+    # network. linux/amd64 only: the platform its build and its checks were proven on. A tag
+    # from before Dockerfile.ubi9 has no such variant.
+    needs: ref
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ needs.ref.outputs.sha }}
+          path: tag
+      - id: variant
+        run: |
+          if [ -f tag/Dockerfile.ubi9 ]; then echo build=true >> "$GITHUB_OUTPUT"
+          else echo "::notice::this tag predates Dockerfile.ubi9: no UBI 9 image"; echo build=false >> "$GITHUB_OUTPUT"; fi
+      - if: steps.variant.outputs.build == 'true'
+        name: the wheelhouse, from the tag's locks
+        run: bash tag/scripts/wheelhouse.sh
+      - if: steps.variant.outputs.build == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+      - if: steps.variant.outputs.build == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.variant.outputs.build == 'true' && vars.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - if: steps.variant.outputs.build == 'true'
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
+        id: meta
+        with:
+          images: |
+            ghcr.io/akko-p/akko-mcp-trino
+            name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/akko-mcp-trino,enable=${{ vars.DOCKERHUB_USERNAME != '' }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ needs.ref.outputs.tag }},suffix=-ubi9
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.ref.outputs.tag }},suffix=-ubi9
+            type=raw,value=ubi9
+      - if: steps.variant.outputs.build == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        id: push
+        with:
+          context: tag
+          file: tag/Dockerfile.ubi9
+          network: none
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+  image-ubi9-provenance:
+    # The UBI 9 image's signed build provenance, in a job that runs nothing from the tag.
+    needs: image-ubi9
+    if: needs.image-ubi9.outputs.digest != ''
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-name: ghcr.io/akko-p/akko-mcp-trino
+          subject-digest: ${{ needs.image-ubi9.outputs.digest }}
+          push-to-registry: true
   dockerhub-page:
     # The Docker Hub page (overview and short description) follows DOCKERHUB.md,
     # read from the tag pushed, or from the default branch when run by hand.

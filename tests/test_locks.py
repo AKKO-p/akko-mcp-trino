@@ -237,7 +237,7 @@ def test_every_pip_install_of_ci_the_release_and_the_image_is_locked() -> None:
 
 def test_the_job_that_runs_the_code_of_a_tag_cannot_sign() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
-    jobs = re.split(r"^  (?=[a-z-]+:$)", workflow.split("\njobs:\n", 1)[1], flags=re.M)
+    jobs = re.split(r"^  (?=[a-z0-9-]+:$)", workflow.split("\njobs:\n", 1)[1], flags=re.M)
     tag_jobs = [job for job in jobs if "path: tag" in job]
     assert tag_jobs
     for job in tag_jobs:
@@ -570,7 +570,8 @@ def _jobs(text: str) -> dict[str, str]:
 
 
 SIGNING_JOBS = {
-    ("release.yml", job) for job in ("pypi", "registry", "provenance", "image-provenance")
+    ("release.yml", job)
+    for job in ("pypi", "registry", "provenance", "image-provenance", "image-ubi9-provenance")
 }
 
 
@@ -609,7 +610,7 @@ def test_the_tool_versions_live_in_the_dev_lock_only() -> None:
 
 def test_the_release_builds_both_packages_from_the_tag_at_its_version() -> None:
     workflow = (ROOT / ".github/workflows/release.yml").read_text()
-    dist = re.split(r"^  (?=[a-z-]+:$)", workflow.split("\njobs:\n", 1)[1], flags=re.M)
+    dist = re.split(r"^  (?=[a-z0-9-]+:$)", workflow.split("\njobs:\n", 1)[1], flags=re.M)
     job = next(j for j in dist if j.startswith("dist:"))
     assert "ref: ${{ needs.ref.outputs.sha }}" in job
     assert "python -m build --no-isolation\n" in job
@@ -746,3 +747,32 @@ def test_the_wheelhouse_script_reads_the_python_of_the_build_base(tmp_path: Path
         "bash",
         "scripts/wheelhouse.sh",
     ]
+
+
+def test_the_release_publishes_the_ubi9_variant_from_the_tag_with_no_network() -> None:
+    """The UBI 9 image of a release: built from the checked tag by Dockerfile.ubi9, its
+    wheelhouse from the tag's locks, its RUN steps without network, amd64 only, under the -ubi9
+    tags alone (latest, X.Y and X.Y.Z stay the Debian image's), with its signed provenance."""
+    jobs = _jobs((ROOT / ".github/workflows/release.yml").read_text())
+    build, provenance = jobs["image-ubi9"], jobs["image-ubi9-provenance"]
+    assert "needs: ref" in build and "ref: ${{ needs.ref.outputs.sha }}" in build
+    assert "path: tag" in build and "id-token" not in build
+    assert "run: bash tag/scripts/wheelhouse.sh" in build
+    for setting in (
+        "context: tag",
+        "file: tag/Dockerfile.ubi9",
+        "network: none",
+        "platforms: linux/amd64\n",
+    ):
+        assert setting in build, setting
+    tags = re.findall(r"^\s+type=(.*)$", build, re.M)
+    assert tags == [
+        "semver,pattern={{version}},value=${{ needs.ref.outputs.tag }},suffix=-ubi9",
+        "semver,pattern={{major}}.{{minor}},value=${{ needs.ref.outputs.tag }},suffix=-ubi9",
+        "raw,value=ubi9",
+    ]
+    assert "latest=false" in build
+    assert "subject-digest: ${{ needs.image-ubi9.outputs.digest }}" in provenance
+    assert "needs: image-ubi9" in provenance and "path: tag" not in provenance
+    # The Debian image keeps latest, X.Y and X.Y.Z, with no suffix.
+    assert "suffix" not in jobs["image"] and "type=raw,value=latest" in jobs["image"]

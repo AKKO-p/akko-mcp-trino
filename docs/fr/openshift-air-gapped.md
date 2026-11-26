@@ -92,6 +92,13 @@ contre 90 Mo (384 Mo).
 
 ## Transférer l'image dans le registre interne
 
+À partir de la première version qui contient `Dockerfile.ubi9`, chaque version publie aussi cette
+image, pour `linux/amd64`, sous `akkoai/akko-mcp-trino:X.Y.Z-ubi9` (et `X.Y-ubi9`, `ubi9`) et
+`ghcr.io/akko-p/akko-mcp-trino:X.Y.Z-ubi9`, avec son attestation de provenance signée. Au lieu de
+la construire, vous pouvez alors la recopier dans le registre interne par digest, comme les images
+de base plus haut :
+`skopeo copy --all docker://ghcr.io/akko-p/akko-mcp-trino@sha256:<digest> docker://$REGISTRY/akko-mcp-trino:X.Y.Z-ubi9`.
+
 Enregistrez l'image dans une archive sur la machine qui l'a construite :
 
 ```bash
