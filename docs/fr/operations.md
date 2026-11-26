@@ -73,6 +73,7 @@ MCP host. Le cœur avertit dans ces cas, avec ce texte :
 | `TRINO_IDENTITY_MODE=service` | `TRINO_IDENTITY_MODE=service: every query runs as the Trino user '<TRINO_USER>', whoever calls; Trino cannot tell callers apart` |
 | `MCP_AUTH_ENABLED=false` | `MCP_AUTH_ENABLED=false: no caller is verified; anyone who reaches this server queries Trino` |
 | `MCP_AUTH_REQUIRED=false`, avec l'authentification active | `MCP_AUTH_REQUIRED=false: a request without a valid token is served too` |
+| `TRINO_VERIFY=false` (ou `0`, `no`) en https | `TRINO_VERIFY=false: Trino's certificate is not verified, so the server cannot know whom it sends its credentials to; set TRINO_VERIFY=true, or the path of a CA bundle` |
 | `MCP_SEARCH_RESERVE_SECONDS=0` avec un budget d'appel | `MCP_SEARCH_RESERVE_SECONDS=0: a search of search_columns may run to the end of the call's budget, and the call then answers its time_budget error with nothing it found` |
 | `MCP_CALL_TIMEOUT_SECONDS=0` | `MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns refuses to search every catalog and searches a named catalog only` |
 | `MCP_EXTRA_READ_COMMANDS` nomme des commandes | l'avertissement nomme les commandes qu'il ouvre ; [Sécurité](security.md#les-instructions-quun-agent-peut-envoyer) dit ce qu'elles sont |

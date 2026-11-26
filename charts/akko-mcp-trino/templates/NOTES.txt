@@ -12,11 +12,6 @@ Trino {{ .Values.trino.httpScheme }}://{{ .Values.trino.host }}:{{ .Values.trino
 
 WARNING: trino.readOnly=false: execute_query runs writes, within what Trino allows the caller.
 {{- end }}
-{{- if or (not .Values.trino.verify) (and (eq .Values.trino.identityMode "jwt") (not .Values.trino.tokenExchange.verify)) }}
-
-WARNING: TLS verification is off (trino.verify or trino.tokenExchange.verify): tokens and
-credentials go to whoever answers.
-{{- end }}
 {{- if and .Values.ingress.enabled (not .Values.ingress.tls) }}
 
 WARNING: the Ingress has no TLS: terminate it in front, or tokens cross the network in clear.

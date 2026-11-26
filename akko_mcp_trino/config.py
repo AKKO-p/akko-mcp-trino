@@ -640,6 +640,16 @@ class Config:
             )
         elif not self.auth_required:
             found.append("MCP_AUTH_REQUIRED=false: a request without a valid token is served too")
+        if self.trino_http_scheme == "https" and self.trino_verify.strip().lower() in (
+            "false",
+            "0",
+            "no",
+        ):
+            found.append(
+                f"TRINO_VERIFY={self.trino_verify.strip()}: Trino's certificate is not verified, "
+                "so the server cannot know whom it sends its credentials to; set "
+                "TRINO_VERIFY=true, or the path of a CA bundle"
+            )
         if self.call_timeout_seconds > 0 and self.search_reserve_seconds == 0:
             found.append(
                 "MCP_SEARCH_RESERVE_SECONDS=0: a search of search_columns may run to the end of "
