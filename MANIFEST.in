@@ -17,7 +17,7 @@ graft docs/fr
 graft docs/guides
 include requirements/*.in requirements/*.txt scripts/*.sh Dockerfile .github/workflows/*.yml
 include providers/atlas/pyproject.toml providers/atlas/README.md providers/atlas/README.fr.md
-include CHANGELOG.md MIGRATING.md pytest.ini
+include CHANGELOG.md MIGRATING.md pytest.ini server.json
 recursive-include tests *.py
 graft examples
 graft docs/images

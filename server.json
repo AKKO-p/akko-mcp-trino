@@ -5,6 +5,18 @@
   "description": "Read-only MCP server for Trino: queries run as the verified user, and Trino's own policies decide.",
   "version": "0.8.4",
   "websiteUrl": "https://akko-ai.com/docs/akko-mcp-trino/",
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/main/docs/images/logo-icon.png",
+      "mimeType": "image/png",
+      "sizes": ["256x256"]
+    },
+    {
+      "src": "https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/main/docs/images/logo-icon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": ["any"]
+    }
+  ],
   "repository": {
     "url": "https://github.com/AKKO-p/akko-mcp-trino",
     "source": "github"
