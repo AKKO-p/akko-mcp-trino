@@ -272,13 +272,3 @@ def test_only_the_security_page_says_what_extra_reads_can_show(language):
     found = {name: len(_SUBJECT[language].findall(t)) for name, t in flat.items()}
     assert {name: n for name, n in found.items() if n} == {f"docs/{language}/security.md": 1}
     assert _ALLOWED[language] in flat[f"docs/{language}/security.md"]
-
-
-@pytest.mark.parametrize("language", ["en", "fr"])
-def test_the_air_gapped_values_of_the_page_are_the_chart_ci_file(language):
-    """The values the OpenShift page shows are, byte for byte, the file the chart's checks lint,
-    render and validate (charts/akko-mcp-trino/ci/airgapped-values.yaml)."""
-    page = (ROOT / "docs" / language / "openshift-air-gapped.md").read_text(encoding="utf-8")
-    [values] = re.findall(r"```yaml\n(.*?)```", page, re.S)
-    ci = ROOT / "charts" / "akko-mcp-trino" / "ci" / "airgapped-values.yaml"
-    assert values == ci.read_text(encoding="utf-8")

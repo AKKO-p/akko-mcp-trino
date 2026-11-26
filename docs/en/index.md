@@ -20,7 +20,6 @@ These pages describe `main`. The documentation of a release is at its tag.
 | Page | What it covers |
 |---|---|
 | [Deployment](deployment.md) | install and run, the transports, the container, Helm on Kubernetes and OpenShift, Trino Gateway, with or without a data catalog, with or without modules |
-| [Deploy on OpenShift without internet access](openshift-air-gapped.md) | the UBI 9 image built with no network, an internal registry, Trino with LDAP passwords and impersonation, an internal certificate authority, `helm test` |
 | [Identity](identity.md) | the four identity modes, the user claim, token verification, what happens on a request |
 | [Connect an MCP host](hosts.md) | Claude Desktop, Claude Code, Cursor, VS Code, any stdio host, the Python SDK, two agents (one on the Mistral Agents API) |
 | [Context from a data catalog](catalog-context.md) | what a context provider serves, its limits, the `file` provider |
