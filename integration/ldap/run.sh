@@ -6,7 +6,6 @@
 # for scripts/wheelhouse.sh, when wheelhouse/ is absent.
 #
 #   integration/ldap/run.sh
-#   TRINO_IMAGE=trinodb/trino:484 integration/ldap/run.sh   (another Trino release)
 #   COMPOSE_PROJECT_NAME=my-run MCP_IMAGE=akko-mcp-trino:ubi9 integration/ldap/run.sh   (an image
 #                                                     already loaded: compose never pulls it)
 set -uo pipefail
