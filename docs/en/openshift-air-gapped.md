@@ -40,7 +40,7 @@ docker run --rm akko-mcp-trino:ubi9 akko-mcp-trino --version
 
 ```text
 wheelhouse.sh: wheelhouse holds 60 wheels and 2 sdists for x86_64
-akko-mcp-trino 0.8.2
+akko-mcp-trino 0.8.3
 ```
 
 `scripts/wheelhouse.sh` runs in the build stage's base image, so that pip picks the wheels of its

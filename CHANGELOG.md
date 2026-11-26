@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.8.3] - 2026-11-26
+## [Unreleased]
 
 ### Added
 - `Dockerfile.ubi9` builds the image on Red Hat Universal Base Image 9 (`ubi9/python-312` to build, `ubi9/python-312-minimal` to run, both pinned by digest), for platforms that require Red Hat base images. It builds with no network (`--network=none`): every Python package comes, with its hashes, from a wheelhouse that `scripts/wheelhouse.sh` writes from the locks, and no system package is installed (each one the build relies on is checked at its exact version). The image runs as UID 1001 or any UID of group 0 on a read-only root filesystem, from the working directory `/`; nothing of its code is writable by that user, which CI checks in the running image. The base images can be named from an internal registry (`--build-arg BUILD_BASE=... BASE=...`). CI builds it and runs `--version`, the Kerberos `--check` and a read-only start as an arbitrary user.
@@ -12,7 +12,10 @@ All notable changes to this project are documented here. The format follows
 - The page [Deploy on OpenShift without internet access](docs/en/openshift-air-gapped.md), in English and French, and the chart's `ci/airgapped-values.yaml`.
 
 ### Changed
+- The Helm chart is 0.3.4: its templates changed (the NetworkPolicy of the `helm test` pod, `python -I` in that pod).
 - Chart: with `networkPolicy.enabled` and `tests.enabled`, a second NetworkPolicy lets the `helm test` pod reach the cluster DNS and the server's health port only, so that `helm test` passes in a namespace that denies egress by default.
+
+## [0.8.3] - 2026-11-26
 
 ### Security
 - The container image is built with Debian 13's current MIT Kerberos libraries (`1.21.3-5+deb13u2`, a Debian security update) and C library headers (`2.41-12+deb13u5`). The Debian mirrors no longer serve the versions the Dockerfile pinned, so the image no longer built.
