@@ -1,9 +1,8 @@
 # OpenShift without internet access: the UBI 9 image from an internal registry, by digest,
 # with its pull secret; Trino in the same project with password authentication, the server's
 # own account in impersonation mode, its password in an existing Secret; the internal
-# authority from a ConfigMap the cluster fills with its trusted bundle, for Trino and for the
-# JWKS; the NetworkPolicy: the router in, egress to DNS, Trino in the project and the identity
-# provider only.
+# authority from a ConfigMap, for Trino and for the JWKS; the NetworkPolicy: the router in,
+# egress to DNS, Trino in the project and the identity provider only.
 openshift: true
 image:
   repository: registry.example.internal/data/akko-mcp-trino
@@ -26,8 +25,7 @@ auth:
 existingSecret:
   name: mcp-trino-credentials
 ca:
-  # A ConfigMap labelled config.openshift.io/inject-trusted-cabundle=true: the cluster writes
-  # its trusted bundle, the internal authorities included, under ca-bundle.crt.
+  # The internal authorities, Trino's and the identity provider's, in one PEM bundle.
   configMap: trusted-ca
   key: ca-bundle.crt
 route:

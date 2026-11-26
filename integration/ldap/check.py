@@ -55,7 +55,10 @@ def token(user: str, password: str | None = None) -> httpx.Response:
 
 
 def forged(user: str) -> str:
-    """A token with the right issuer, audience and user, signed by a key Keycloak never had."""
+    """A token with the right issuer, audience, user and key id (Keycloak's own signing key, read
+    from its JWKS), signed by a key Keycloak never had: refused for its signature alone."""
+    jwks = httpx.get(f"{ISSUER}/protocol/openid-connect/certs", verify=CA, timeout=20).json()
+    kid = next(k["kid"] for k in jwks["keys"] if k.get("use") == "sig" and k.get("alg") == "RS256")
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     now = int(time.time())
     claims = {
@@ -66,7 +69,7 @@ def forged(user: str) -> str:
         "iat": now,
         "exp": now + 300,
     }
-    return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "forged"})
+    return jwt.encode(claims, key, algorithm="RS256", headers={"kid": kid})
 
 
 async def session(bearer: str, extra: dict | None = None) -> dict:
@@ -133,11 +136,16 @@ def main() -> int:
         (bare.status_code, bare.text),
     )
     for what, bearer in (
-        ("signed by a key the identity provider never had", forged("bob")),
+        ("with the identity provider's key id, signed by another key", forged("bob")),
         ("that is not a token", "not-a-token"),
     ):
         r = door(bearer)
-        check(f"a token {what} is refused with 401", r.status_code == 401, (r.status_code, r.text))
+        check(
+            f"a token {what} is refused with 401",
+            r.status_code == 401 and r.headers.get("x-reason") == "unauthenticated",
+            (r.status_code, r.text),
+            shown=True,
+        )
 
     # 2. The identity provider checks the password against the directory.
     wrong = token("alice", "not-" + PASSWORDS["alice"])
@@ -193,7 +201,8 @@ def main() -> int:
     for name, answer in (("alice", a), ("bob", b)):
         check(
             f"SET SESSION AUTHORIZATION is refused to {name} before Trino",
-            "error" in answer["authorization"] and "rows" not in answer["authorization"],
+            answer["authorization"].get("kind") == "read_only"
+            and answer["authorization"].get("error", "").startswith("Read-only mode"),
             answer["authorization"],
         )
 
@@ -216,14 +225,14 @@ def main() -> int:
     status, rows = trino("mcp-server", "SELECT current_user", as_user="carol")
     check(
         "the server's account may not run a query as a user the rule does not list",
-        status != 200 or isinstance(rows, str),
+        rows == "Access Denied: User mcp-server cannot impersonate user carol",
         (status, rows),
         shown=True,
     )
     status, rows = trino("mcp-server", NATIONS)
     check(
         "the server's account alone reads no data",
-        status == 200 and isinstance(rows, str) and "Access Denied" in rows,
+        rows == "Access Denied: Cannot select from table tpch.tiny.nation",
         (status, rows),
         shown=True,
     )
@@ -232,12 +241,31 @@ def main() -> int:
         check(
             f"{user}, signed in to Trino with a directory password, "
             f"may not run a query as {target}",
-            status != 200 or isinstance(rows, str),
+            rows == f"Access Denied: User {user} cannot impersonate user {target}",
             (status, rows),
             shown=True,
         )
     status, rows = trino("mcp-server", "SELECT 1", password="not-the-password")
     check("Trino refuses the server's account with a wrong password", status == 401, (status, rows))
+
+    # 7. Trino's HTTP port: closed in this scenario (http-server.http.enabled=false). Open, Trino
+    # refuses an unauthenticated statement over HTTP (403) unless allow-insecure-over-http is set.
+    try:
+        r = httpx.post(
+            "http://trino:8080/v1/statement",
+            content="SELECT current_user",
+            headers={"X-Trino-User": "alice"},
+            timeout=10,
+        )
+        outcome, refused = f"{r.status_code} {r.text[:100]}", r.status_code in (401, 403)
+    except httpx.ConnectError as exc:
+        outcome, refused = f"no listener: {exc}", True
+    check(
+        "Trino's HTTP port runs nothing as alice without her password",
+        refused,
+        outcome,
+        shown=True,
+    )
 
     for name, ok, detail in RESULTS:
         print(f"  {'OK  ' if ok else 'FAIL'}  {name}" + (f": {detail}" if detail else ""))

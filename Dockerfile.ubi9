@@ -75,8 +75,11 @@ RUN --mount=type=bind,source=wheelhouse,target=/wheelhouse \
  && find /opt/app-root -path /opt/app-root/src -prune -o ! -type l -exec chmod go-w {} +
 # The image's user, numeric so that runAsNonRoot can check it. OpenShift runs an arbitrary UID in
 # group 0 instead: HOME (/opt/app-root/src) is writable by that group, and the server writes only
-# to /tmp, which the chart mounts (an emptyDir), so the root file system can be read-only.
+# to /tmp, which the chart mounts (an emptyDir), so the root file system can be read-only. The
+# working directory is /, which no one but root may write: python -c and python - put it on
+# sys.path, and the base image's (HOME) would let that user plant a module there.
+WORKDIR /
 USER 1001
 EXPOSE 3000 3001
-HEALTHCHECK --interval=30s --timeout=3s CMD python -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"MCP_HEALTH_PORT\",\"3001\")}/health')"
+HEALTHCHECK --interval=30s --timeout=3s CMD python -I -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"MCP_HEALTH_PORT\",\"3001\")}/health')"
 CMD ["akko-mcp-trino"]

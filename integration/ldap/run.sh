@@ -6,7 +6,8 @@
 # for scripts/wheelhouse.sh, when wheelhouse/ is absent.
 #
 #   integration/ldap/run.sh
-#   COMPOSE_PROJECT_NAME=my-run MCP_IMAGE=registry.example.internal/akko-mcp-trino:ubi9 integration/ldap/run.sh
+#   COMPOSE_PROJECT_NAME=my-run MCP_IMAGE=akko-mcp-trino:ubi9 integration/ldap/run.sh   (an image
+#                                                     already loaded: compose never pulls it)
 set -uo pipefail
 cd "$(dirname "$0")"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-akko-mcp-trino-ldap}"
@@ -42,9 +43,24 @@ fi
 echo "  all services healthy in $(( $(date +%s) - start )) s"
 docker compose logs ldap-seed | sed -n 's/^[^|]*| /  /p'
 mcp=$(docker compose ps -q mcp)
-echo "  the server runs as $(docker exec "$mcp" id -u):$(docker exec "$mcp" id -g)," \
-  "root file system read-only: $(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$mcp")," \
-  "image $(docker inspect -f '{{.Config.Image}}' "$mcp")"
+image=$(docker inspect -f '{{.Config.Image}}' "$mcp")
+echo "  the server runs as $(docker exec "$mcp" id -u):$(docker exec "$mcp" id -g) from $image," \
+  "in $(docker exec "$mcp" pwd)"
+# The root file system is mounted read-only: even the home directory, which group 0 may write,
+# refuses a file.
+if docker exec "$mcp" awk '$2 == "/" {print $4}' /proc/mounts | grep -q '^ro,' \
+    && ! docker exec "$mcp" touch /opt/app-root/src/probe 2>/dev/null; then
+  echo "  OK    the root file system is mounted read-only (/proc/mounts), a write in HOME fails"
+else echo "  FAIL  the server's root file system is writable"; failed=1; fi
+# On a writable root file system, the same user may write its home but not the code, and the
+# working directory, which python -c puts on sys.path, is not writable either.
+if docker run --rm --memory 128m --user 1234567:0 --entrypoint sh "$image" -c '
+    touch "$HOME/probe" && [ "$(pwd)" = / ] && test ! -w / && test ! -w /opt/app-root/bin \
+    && test ! -w /opt/app-root/lib/python3.12/site-packages \
+    && test ! -w /opt/app-root/lib/python3.12/site-packages/akko_mcp_trino \
+    && ! touch /opt/app-root/lib/python3.12/site-packages/probe.pth 2>/dev/null'; then
+  echo "  OK    writable root: UID 1234567 of group 0 writes HOME, not the code nor the working directory"
+else echo "  FAIL  UID 1234567 of group 0 may change the code or the working directory"; failed=1; fi
 
 echo "== 2. Memory at rest"
 docker stats --no-stream --format '  {{.Name}} {{.MemUsage}}' $(docker compose ps -q) | sed "s/$COMPOSE_PROJECT_NAME-//"
@@ -55,12 +71,16 @@ docker compose --profile check run --rm --no-deps check || failed=1
 echo "== 4. The server's log"
 logs=$(docker compose logs mcp)
 if grep -q 'eyJ' <<<"$logs"; then echo "  FAIL  a token is in the server's log"; failed=1; else echo "  OK    no token in the server's log"; fi
+# The passwords reach grep as patterns on its standard input, never as arguments.
 leaked=0
-for password in "$MCP_SERVER_PASSWORD" "$ALICE_PASSWORD" "$BOB_PASSWORD" "$LDAP_ADMIN_PASSWORD"; do
-  grep -qF "$password" <<<"$logs" && leaked=1
-done
+printf '%s\n' "$MCP_SERVER_PASSWORD" "$ALICE_PASSWORD" "$BOB_PASSWORD" "$LDAP_ADMIN_PASSWORD" \
+  | grep -qF -f - <(printf '%s\n' "$logs") && leaked=1
 if [ $leaked -eq 0 ]; then echo "  OK    no password in the server's log"; else echo "  FAIL  a password is in the server's log"; failed=1; fi
-grep -E "WARNING|serving" <<<"$logs" | sed 's/^/  /'
+# The forged token carries the provider's key id: the server refuses it for its signature.
+if grep -q "token refused: InvalidSignatureError" <<<"$logs"; then
+  echo "  OK    the forged token is refused for its signature (InvalidSignatureError)"
+else echo "  FAIL  no refusal of the forged token's signature in the server's log"; failed=1; fi
+grep -E "WARNING|serving|token refused" <<<"$logs" | sed 's/^/  /'
 echo "  the run took $(( $(date +%s) - began )) s"
 
 [ $failed -eq 0 ] && echo "== LDAP SCENARIO OK ==" || { echo "== LDAP SCENARIO FAILED =="; exit 1; }

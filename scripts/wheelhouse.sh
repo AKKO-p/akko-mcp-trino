@@ -8,10 +8,10 @@
 # It runs in the base image of the build stage (BUILD_BASE in Dockerfile.ubi9), so that pip picks
 # the wheels of that Python and of RHEL 9's glibc, and fails on a pin that has none: on any other
 # system it starts that image with docker (CONTAINER_ENGINE=podman for Podman) and runs itself
-# there. PLATFORM=linux/arm64 prepares the wheelhouse of another platform, under emulation;
-# WHEELHOUSE_RUN_OPTIONS adds options to that run (a memory limit, a proxy...).
+# there; WHEELHOUSE_RUN_OPTIONS adds options to that run (a memory limit, a proxy...). The
+# wheelhouse is that of the machine's platform: linux/amd64 is the one built and checked.
 #
-# It writes into wheelhouse/ (or WHEELHOUSE, a path inside the repository):
+# It writes into wheelhouse/, the folder Dockerfile.ubi9 mounts:
 #   - the wheels of requirements/build.txt, the tools of the build stage;
 #   - the wheels of requirements/image.txt, the dependencies of the image;
 #   - the sdists of gssapi and krb5 and the other wheels of requirements/kerberos.txt, the
@@ -21,18 +21,19 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-out=${WHEELHOUSE:-wheelhouse}
+out=wheelhouse
 
-if ! grep -qx 'PLATFORM_ID="platform:el9"' /etc/os-release 2>/dev/null; then
+# The Python of the build stage: the name of its base image says it (python-312 is 3.12).
+minor=$(sed -nE 's/^ARG BUILD_BASE=.*\/python-3([0-9]+)[:@].*/\1/p' Dockerfile.ubi9)
+want="3.$minor"
+# Inside that image, its stack id says so; anywhere else, a RHEL 9 host included, the script
+# starts the image and runs itself there.
+if [ "${CNB_STACK_ID:-}" != "com.redhat.stacks.ubi9-python-3$minor" ]; then
   base=$(sed -nE 's/^ARG BUILD_BASE=//p' Dockerfile.ubi9)
   # shellcheck disable=SC2086
   exec "${CONTAINER_ENGINE:-docker}" run --rm --user "$(id -u):0" -v "$PWD:/src:z" -w /src \
-    -e WHEELHOUSE="$out" ${PLATFORM:+--platform "$PLATFORM"} ${WHEELHOUSE_RUN_OPTIONS:-} \
-    "$base" bash scripts/wheelhouse.sh
+    ${WHEELHOUSE_RUN_OPTIONS:-} "$base" bash scripts/wheelhouse.sh
 fi
-
-# The Python of the build stage: the name of its base image says it (python-312 is 3.12).
-want=$(sed -nE 's/^ARG BUILD_BASE=.*\/python-3([0-9]+)[:@].*/3.\1/p' Dockerfile.ubi9)
 have=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
 if [ "$have" != "$want" ]; then
   echo "wheelhouse.sh: Python $have here, $want in Dockerfile.ubi9" >&2

@@ -47,22 +47,41 @@ akko-mcp-trino 0.8.2
 
 `scripts/wheelhouse.sh` tourne dans l'image de base de l'étape de construction, pour que pip
 choisisse les wheels de son Python et de la bibliothèque C de RHEL 9, et échoue sur une version
-épinglée qui n'en a pas. `PLATFORM=linux/arm64` écrit le dossier de l'autre plateforme.
+épinglée qui n'en a pas. Le dossier de wheels et l'image sont ceux de la plateforme de la machine ;
+`linux/amd64` est celle qui est construite et vérifiée.
 
-Pour construire à l'intérieur, copiez le dépôt avec son dossier `wheelhouse/`, recopiez les deux
-images de base dans le registre interne par digest (avec `oc-mirror` ou `skopeo copy --all`), et
-nommez-les à la construction :
+Pour construire à l'intérieur, copiez le dépôt avec son dossier `wheelhouse/`, et recopiez les deux
+images de base, par digest, dans un registre que la construction atteint. `MIRROR` est ce registre
+et son chemin, par exemple `registry.example.internal/mirror` :
 
 ```bash
+skopeo copy --all docker://registry.access.redhat.com/ubi9/python-312@sha256:5a0471c98fc10017d011c16b7615cd1d7f157d796f89eb4900ca0dc6c87384cf docker://$MIRROR/ubi9/python-312:1-1795522683
+skopeo copy --all docker://registry.access.redhat.com/ubi9/python-312-minimal@sha256:3c3413652c3cf6aab00587926949ca8884f06b7d28dbbe69508e29aade34e2fe docker://$MIRROR/ubi9/python-312-minimal:9.9-1795231781
 docker build --network=none -f Dockerfile.ubi9 \
-  --build-arg BUILD_BASE="$REGISTRY/ubi9/python-312@sha256:5a0471c98fc10017d011c16b7615cd1d7f157d796f89eb4900ca0dc6c87384cf" \
-  --build-arg BASE="$REGISTRY/ubi9/python-312-minimal@sha256:3c3413652c3cf6aab00587926949ca8884f06b7d28dbbe69508e29aade34e2fe" \
+  --build-arg BUILD_BASE="$MIRROR/ubi9/python-312@sha256:5a0471c98fc10017d011c16b7615cd1d7f157d796f89eb4900ca0dc6c87384cf" \
+  --build-arg BASE="$MIRROR/ubi9/python-312-minimal@sha256:3c3413652c3cf6aab00587926949ca8884f06b7d28dbbe69508e29aade34e2fe" \
   -t akko-mcp-trino:ubi9 .
 ```
 
-Dans un projet OpenShift, une BuildConfig en stratégie Docker construit la même image depuis le
-même dossier (`oc start-build --from-dir`), avec ces deux valeurs en `buildArgs` :
-[`integration/helm/openshift-ldap.sh`](../../integration/helm/openshift-ldap.sh) en crée une.
+`skopeo copy --all` garde toutes les plateformes de l'image : les digests restent ceux de
+`Dockerfile.ubi9`.
+
+Dans un projet OpenShift, une BuildConfig en stratégie Docker peut construire la même image, avec
+ces deux valeurs en `buildArgs`. [`integration/helm/openshift-ldap.sh`](../../integration/helm/openshift-ldap.sh)
+en crée une et lui envoie, par `oc start-build --from-dir`, un dossier qui ne contient que les
+fichiers que copie `Dockerfile.ubi9` et le dossier de wheels, pas le clone entier. Ses conditions :
+
+- la construction tire les images de base : nommez le secret de tirage du registre dans
+  `dockerStrategy.pullSecret`, sauf si le cluster redirige `registry.access.redhat.com` (un
+  `ImageDigestMirrorSet`, que pose un administrateur) ;
+- les utilisateurs du projet ont droit à la stratégie Docker (`system:build-strategy-docker`), que
+  les clusters durcis retirent souvent ;
+- le constructeur du cluster accepte `RUN --mount=type=bind` depuis une autre étape et depuis le
+  contexte. La documentation d'OpenShift ne dit pas depuis quelle version ; essayez-le sur le
+  cluster.
+
+Si l'une d'elles manque, construisez l'image ailleurs et poussez-la, comme le fait la section
+suivante.
 
 Par rapport à l'image Debian, l'image UBI 9 embarque la glibc 2.34 et le MIT Kerberos 1.21.1
 (RHEL 9) au lieu de la glibc 2.41 et du MIT Kerberos 1.21.3 (Debian 13), avec le même Python 3.12.16
@@ -120,25 +139,39 @@ utilisateurs pour lesquels le serveur peut agir) qui accorde au compte du serveu
 `impersonate`. Ne donnez au compte du serveur aucun droit sur les données : chaque requête tourne
 alors avec les seuls droits de l'appelant.
 
+Le port HTTP de Trino ne contourne pas les mots de passe : Trino 482 répond à une requête envoyée
+sur ce port avec `X-Trino-User: alice` et sans mot de passe par
+`403 Forbidden: Authentication over HTTP is not enabled`, tant que
+`http-server.authentication.allow-insecure-over-http` reste à `false`, sa valeur par défaut. Si
+d'autres pods partagent le namespace, fermez tout de même ce port (`http-server.http.enabled=false`,
+avec `discovery.uri` en https et `node.internal-address` un nom de son certificat) ou filtrez-le, comme le fait
+[`integration/ldap/trino/config.properties`](../../integration/ldap/trino/config.properties).
+
 ## Installer la chart
 
 Créez le Secret qui contient le mot de passe du serveur, la ConfigMap de l'autorité de
 certification interne et, si le registre l'exige, son secret de tirage :
 
 ```bash
-read -rs TRINO_PASSWORD && export TRINO_PASSWORD
-oc create secret generic mcp-trino-credentials --from-literal=trino-password="$TRINO_PASSWORD"
+read -rs TRINO_PASSWORD
+printf %s "$TRINO_PASSWORD" | oc create secret generic mcp-trino-credentials --from-file=trino-password=/dev/stdin
 oc create configmap trusted-ca --from-file=ca-bundle.crt=internal-ca.pem
-oc create secret docker-registry internal-registry --docker-server=registry.example.internal \
-  --docker-username="$REGISTRY_USER" --docker-password="$REGISTRY_PASSWORD"
+read -rs REGISTRY_PASSWORD
+printf '{"auths":{"registry.example.internal":{"auth":"%s"}}}' "$(printf %s:%s "$REGISTRY_USER" "$REGISTRY_PASSWORD" | base64 | tr -d '\n')" \
+  | oc create secret generic internal-registry --type=kubernetes.io/dockerconfigjson --from-file=.dockerconfigjson=/dev/stdin
 ```
+
+Les mots de passe arrivent à `oc` par son entrée standard, jamais en argument : ni l'historique du
+shell ni la liste des processus ne les montrent.
 
 La chart monte le bundle pour Trino (`TRINO_VERIFY`) et, avec `ca.setSslCertFile` (actif par
 défaut), pour la lecture du JWKS (`SSL_CERT_FILE`). Cette variable remplace le magasin du système :
 le bundle doit contenir toutes les autorités dont le serveur a besoin, celle de Trino et celle du
-fournisseur d'identité. Si le cluster dispose d'un bundle de confiance, posez sur la ConfigMap le
-label `config.openshift.io/inject-trusted-cabundle=true` au lieu de la remplir : OpenShift y écrit
-ce bundle, autorités internes comprises, sous `ca-bundle.crt`.
+fournisseur d'identité. Si un administrateur a donné au cluster un bundle de confiance
+(`spec.trustedCA` de `proxy/cluster`), une ConfigMap vide portant le label
+`config.openshift.io/inject-trusted-cabundle=true` peut remplacer la deuxième commande : OpenShift
+y écrit ce bundle, avec les autorités du système, sous `ca-bundle.crt`. Sans ce réglage, rien n'est
+écrit, et la ConfigMap doit venir du fichier PEM.
 
 Les valeurs, dans `my-values.yaml` (les contrôles de la chart valident et rendent le même fichier,
 [`ci/airgapped-values.yaml`](../../charts/akko-mcp-trino/ci/airgapped-values.yaml)) :
@@ -147,9 +180,8 @@ Les valeurs, dans `my-values.yaml` (les contrôles de la chart valident et rende
 # OpenShift without internet access: the UBI 9 image from an internal registry, by digest,
 # with its pull secret; Trino in the same project with password authentication, the server's
 # own account in impersonation mode, its password in an existing Secret; the internal
-# authority from a ConfigMap the cluster fills with its trusted bundle, for Trino and for the
-# JWKS; the NetworkPolicy: the router in, egress to DNS, Trino in the project and the identity
-# provider only.
+# authority from a ConfigMap, for Trino and for the JWKS; the NetworkPolicy: the router in,
+# egress to DNS, Trino in the project and the identity provider only.
 openshift: true
 image:
   repository: registry.example.internal/data/akko-mcp-trino
@@ -172,8 +204,7 @@ auth:
 existingSecret:
   name: mcp-trino-credentials
 ca:
-  # A ConfigMap labelled config.openshift.io/inject-trusted-cabundle=true: the cluster writes
-  # its trusted bundle, the internal authorities included, under ca-bundle.crt.
+  # The internal authorities, Trino's and the identity provider's, in one PEM bundle.
   configMap: trusted-ca
   key: ca-bundle.crt
 route:
@@ -198,10 +229,16 @@ networkPolicy:
 
 Donnez à `image.digest` le digest affiché par le push, à `userClaim` le claim qui porte l'uid de
 l'annuaire (le nom que Trino connaît), et aux pairs de la NetworkPolicy ceux du cluster. Un
-`podSelector` sans `namespaceSelector` désigne des pods du projet de la release. Avec la
-NetworkPolicy active, le serveur atteint le DNS du cluster, Trino et le fournisseur d'identité, et
-rien d'autre. Le pod de `helm test` a sa propre policy, pour passer dans un projet qui refuse les
-sorties par défaut.
+`podSelector` sans `namespaceSelector` désigne des pods du projet de la release, et le port d'une
+règle est celui du pod, pas celui du Service. Un `ipBlock` correspond à l'adresse vers laquelle
+partent les paquets : si le fournisseur d'identité est atteint par le routeur du cluster ou par un
+proxy de sortie, nommez plutôt ceux-ci. Avec la NetworkPolicy active, le serveur atteint le DNS du
+cluster, Trino et le fournisseur d'identité, et rien d'autre. Le pod de `helm test` a sa propre
+policy, pour passer dans un projet qui refuse les sorties par défaut.
+
+Sur Kubernetes sans OpenShift (`openshift: false`), la chart lance le pod sous l'UID et le groupe
+10001, l'utilisateur de l'image Debian, et non 1001, celui de l'image UBI 9. Le serveur fonctionne
+ainsi, puisqu'il n'écrit que dans `/tmp`.
 
 Rendez-la d'abord : `helm template` échoue sur une valeur que le serveur refuserait au démarrage.
 
@@ -236,24 +273,27 @@ l'appelant, jamais `mcp-server`.
 annuaire de trois comptes, Keycloak fédéré sur cet annuaire, Trino en https avec authentification
 par mot de passe auprès de lui et la règle d'impersonation ci-dessus, et le serveur dans l'image
 UBI 9, construite sans réseau et lancée sous l'UID 1234567 du groupe 0, avec un système de fichiers
-racine en lecture seule. Une exécution réelle :
+racine en lecture seule. Un extrait d'une exécution réelle :
 
 ```text
   OK    without a token, the server answers 401 and says what to send
-  OK    a token signed by a key the identity provider never had is refused with 401
+  OK    a token with the identity provider's key id, signed by another key is refused with 401: (401, '{"error":"unauthenticated","message":"the bearer token is invalid, expired, or not issued for this server: ask the identity provider for a token whose audience is this server"}')
   OK    Trino runs alice's query as alice (SELECT current_user)
   OK    Trino runs bob's query as bob (SELECT current_user)
   OK    bob reads the 5 nations his row filter leaves
   OK    alice's token with X-Trino-User: bob sent to the server: Trino still sees alice
   OK    the server's account alone reads no data: (200, 'Access Denied: Cannot select from table tpch.tiny.nation')
   OK    alice, signed in to Trino with a directory password, may not run a query as bob: (200, 'Access Denied: User alice cannot impersonate user bob')
-  25 of 25 checks passed
+  OK    Trino's HTTP port runs nothing as alice without her password: no listener: [Errno 111] Connection refused
+  26 of 26 checks passed
   OK    no token in the server's log
   OK    no password in the server's log
+  OK    the forged token is refused for its signature (InvalidSignatureError)
 ```
 
 [`integration/helm/openshift-ldap.sh`](../../integration/helm/openshift-ldap.sh) lance les mêmes
 contrôles dans un projet OpenShift avec les droits d'un membre : l'image construite par une
 BuildConfig depuis `Dockerfile.ubi9`, la chart installée avec
 [`values-ldap.yaml`](../../integration/helm/values-ldap.yaml), le pod sous `restricted-v2`, et
-`helm test`.
+`helm test`. Il ne prouve pas un cluster déconnecté : la construction dans le cluster dispose du
+réseau que le cluster donne aux builds, et ses fixtures tirent leurs images de registres publics.

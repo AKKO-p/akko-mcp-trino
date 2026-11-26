@@ -697,6 +697,8 @@ def test_the_ubi9_image_mounts_what_it_installs_and_keeps_none_of_it():
     assert re.search(r'^CMD \["akko-mcp-trino"\]$', final, re.M)
     # A numeric user, and nothing of the code writable by it or by group 0.
     assert re.search(r"^USER 1001$", final, re.M)
+    # A working directory no one but root may write: python -c and python - put it on sys.path.
+    assert re.search(r"^WORKDIR /$", final, re.M) and "CMD python -I -c " in final
     assert "chown -h 0:0" in final and "chmod go-w" in final
 
 
@@ -716,17 +718,31 @@ def test_the_wheelhouse_script_reads_the_python_of_the_build_base(tmp_path: Path
     (tmp_path / "Dockerfile.ubi9").write_text(
         "ARG BUILD_BASE=registry.example.internal/ubi9/python-399@sha256:" + "0" * 64 + "\n"
     )
-    # Inside a RHEL 9 image the script runs there; elsewhere it starts that image. The test
-    # pretends to be inside, so that it reaches the Python check and stops there.
-    fake = tmp_path / "bin"
-    fake.mkdir()
-    (fake / "grep").write_text("#!/bin/sh\nexit 0\n")
-    (fake / "grep").chmod(0o755)
+    # Inside the build stage's image (its stack id), the script runs there: with another Python
+    # than the image's, it stops at the Python check.
     done = subprocess.run(
         ["bash", str(tmp_path / "scripts/wheelhouse.sh")],
         capture_output=True,
         text=True,
-        env=os.environ | {"PATH": f"{fake}:{os.environ['PATH']}"},
+        env=os.environ | {"CNB_STACK_ID": "com.redhat.stacks.ubi9-python-399"},
     )
     assert done.returncode == 1
     assert "3.99 in Dockerfile.ubi9" in done.stderr
+    # Anywhere else it starts the image and runs itself there.
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (fake / "engine").write_text('#!/bin/sh\necho "$@"\n')
+    (fake / "engine").chmod(0o755)
+    environ = {k: v for k, v in os.environ.items() if k != "CNB_STACK_ID"}
+    done = subprocess.run(
+        ["bash", str(tmp_path / "scripts/wheelhouse.sh")],
+        capture_output=True,
+        text=True,
+        env=environ | {"CONTAINER_ENGINE": str(fake / "engine")},
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.split()[-3:] == [
+        "registry.example.internal/ubi9/python-399@sha256:" + "0" * 64,
+        "bash",
+        "scripts/wheelhouse.sh",
+    ]

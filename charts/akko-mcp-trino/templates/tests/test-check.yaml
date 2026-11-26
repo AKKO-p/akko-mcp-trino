@@ -34,7 +34,8 @@ spec:
         - -ec
         - |
           # A NetworkPolicy may take a few seconds to admit a new pod: retry for 60 s.
-          python - "{{ $url }}" /health{{ if .Values.tests.ready }} /ready{{ end }} <<'EOF'
+          # -I: neither the working directory nor PYTHON* variables shape what Python imports.
+          python -I - "{{ $url }}" /health{{ if .Values.tests.ready }} /ready{{ end }} <<'EOF'
           import sys, time, urllib.request
           base, paths = sys.argv[1], sys.argv[2:]
           for path in paths:

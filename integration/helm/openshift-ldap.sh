@@ -15,6 +15,9 @@
 #    integration/ldap/check.py in a pod of the project, through the Service (401 without a
 #    token, each user as Trino sees them, their rights, no usurpation, no write); helm test;
 #    no token and no password in the server's log.
+# What it does not prove: a disconnected cluster. The build in the cluster has whatever network
+# the cluster gives builds (Dockerfile.ubi9 needs none: integration/ldap/run.sh and CI build it
+# with --network=none), and the fixtures pull their images from public registries.
 # Everything it created is removed at the end, even on failure, unless KEEP=1. It refuses to
 # run beside an object of the same name it did not create. About 1 CPU and 3 GiB of memory
 # of requests while the fixtures run, 2 GiB more during the build.
@@ -25,6 +28,7 @@
 #   bash scripts/wheelhouse.sh && bash integration/helm/openshift-ldap.sh
 #   MCP_IMAGE=registry.example.internal/akko-mcp-trino:ubi9 bash integration/helm/openshift-ldap.sh
 #   BUILD_BASE=... BASE=...   the base images of Dockerfile.ubi9 from an internal registry
+#   BUILD_PULL_SECRET=name    the Secret the build pulls them with (dockerStrategy.pullSecret)
 #
 # Needs bash, helm, oc (or kubectl with MCP_IMAGE) and openssl. Nothing secret is printed.
 set -uo pipefail
@@ -119,6 +123,7 @@ spec:
     dockerStrategy:
       dockerfilePath: Dockerfile.ubi9
 $( [ -n "$args" ] && printf '      buildArgs:\n%s' "$args")
+$( [ -n "${BUILD_PULL_SECRET:-}" ] && printf '      pullSecret:\n        name: %s' "$BUILD_PULL_SECRET")
   output:
     to:
       kind: ImageStreamTag
@@ -145,15 +150,16 @@ echo "== 2. The directory, Keycloak and Trino (password authentication against t
 secret() { head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
 mkdir -p "$work/certs"
 CERTS_DIR="$work/certs" sh ../certs.sh >/dev/null 2>&1 || { fail "test certificates"; exit 1; }
-server_password="$(secret)"
-k create secret generic it-ldap-secrets --from-literal=LDAP_ADMIN_PASSWORD="$(secret)" \
-  --from-literal=LDAP_JWT_SECRET="$(secret)" --from-literal=LDAP_KEY_SEED="$(secret)" \
-  --from-literal=MCP_SERVER_PASSWORD="$server_password" --from-literal=ALICE_PASSWORD="$(secret)" \
-  --from-literal=BOB_PASSWORD="$(secret)" --from-literal=TRINO_SHARED_SECRET="$(secret)" \
-  --from-literal=KEYCLOAK_ADMIN_PASSWORD="$(secret)" >/dev/null || exit 1
+# The passwords go to files of the temporary directory, never to a command's arguments.
+( umask 077
+  for key in LDAP_ADMIN_PASSWORD LDAP_JWT_SECRET LDAP_KEY_SEED MCP_SERVER_PASSWORD ALICE_PASSWORD \
+      BOB_PASSWORD TRINO_SHARED_SECRET KEYCLOAK_ADMIN_PASSWORD; do
+    printf '%s=%s\n' "$key" "$(secret)"
+  done >"$work/secrets.env"
+  sed -n 's/^MCP_SERVER_PASSWORD=//p' "$work/secrets.env" | tr -d '\n' >"$work/trino-password" )
+k create secret generic it-ldap-secrets --from-env-file="$work/secrets.env" >/dev/null || exit 1
 # The server's own password, in the Secret the chart reads (existingSecret).
-k create secret generic mcp-credentials --from-literal=trino-password="$server_password" >/dev/null || exit 1
-unset server_password
+k create secret generic mcp-credentials --from-file=trino-password="$work/trino-password" >/dev/null || exit 1
 k create secret generic it-certs --from-file="$work/certs/ca.crt" --from-file="$work/certs/trino.pem" \
   --from-file="$work/certs/keycloak.crt" --from-file="$work/certs/keycloak.key" \
   --from-file="$work/certs/ldap.crt" --from-file="$work/certs/ldap.key" >/dev/null || exit 1
@@ -196,7 +202,14 @@ if $openshift; then
 else
   skip "SCC and UID range: no OpenShift here (UID $uid)"
 fi
-if k exec "$pod" -- sh -c 'touch /probe' 2>/dev/null; then fail "the root filesystem is writable"; else pass "the root filesystem is read-only"; fi
+# Read-only by the mount, not by the rights on /: HOME is writable by group 0, yet refuses a file.
+if k exec "$pod" -- awk '$2 == "/" {print $4}' /proc/mounts | grep -q '^ro,' \
+    && ! k exec "$pod" -- touch /opt/app-root/src/probe 2>/dev/null; then
+  pass "the root filesystem is mounted read-only, a write in HOME fails"
+else fail "the root filesystem is writable"; fi
+if k exec "$pod" -- sh -c 'test ! -w /opt/app-root/bin && test ! -w /opt/app-root/lib/python3.12/site-packages/akko_mcp_trino && [ "$(pwd)" = / ]'; then
+  pass "the code is not writable by UID $uid, and the working directory is /"
+else fail "the code or the working directory is writable by UID $uid"; fi
 os="$(k exec "$pod" -- sh -c '. /etc/os-release && echo "$NAME $VERSION_ID"' 2>/dev/null)"
 case "$os" in "Red Hat Enterprise Linux 9"*) pass "the server runs on $os (UBI 9)" ;; *) fail "the server's system: '$os'" ;; esac
 
@@ -255,12 +268,10 @@ if helm test "$RELEASE" -n "$NS" --logs --timeout 300s >"$work/test" 2>&1; then 
 sed -n '/POD LOGS/,$p' "$work/test" | grep -E 'http|WARNING|trino identity' | sed 's/^/  /'
 logs="$(k logs "deployment/$FULL" 2>&1)"
 if grep -qE 'eyJ[A-Za-z0-9_-]{20,}' <<<"$logs"; then fail "a token in the server's log"; else pass "no token in the server's log"; fi
+# The passwords reach grep as patterns on its standard input, never as arguments.
 leaked=0
-for key in MCP_SERVER_PASSWORD ALICE_PASSWORD BOB_PASSWORD LDAP_ADMIN_PASSWORD; do
-  value="$(k get secret it-ldap-secrets -o jsonpath="{.data.$key}" | openssl base64 -d -A)"
-  grep -qF "$value" <<<"$logs" && leaked=1
-done
-unset value
+grep -E '^(MCP_SERVER|ALICE|BOB|LDAP_ADMIN)_PASSWORD=' "$work/secrets.env" | cut -d= -f2- \
+  | grep -qF -f - <(printf '%s\n' "$logs") && leaked=1
 [ $leaked -eq 0 ] && pass "no password in the server's log" || fail "a password in the server's log"
 k top pod 2>/dev/null | grep -E 'NAME|ldap|keycloak|trino|akko-mcp' | sed 's/^/  /' || true
 
