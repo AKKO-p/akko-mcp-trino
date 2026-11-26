@@ -1,8 +1,8 @@
-# The live proof of the most constrained deployment: Trino authenticates by password against
-# a directory (LDAP), over https with a certificate of an internal authority; the MCP server,
-# from the UBI 9 image, runs in impersonation mode with its own directory account, read-only
-# and as an arbitrary user; callers bring a token from an identity provider federated on the
-# same directory, verified by JWKS over https against the same internal authority.
+# Trino with password authentication against a directory (LDAP), over https with a
+# certificate of the run's own certificate authority; the MCP server, from the UBI 9 image, in
+# impersonation mode with its own directory account, read-only and as an arbitrary user;
+# callers with a token from an identity provider federated on the same directory, verified by
+# JWKS over https against the same certificate authority.
 #
 #   integration/ldap/run.sh   builds the UBI 9 image, starts everything, runs check.py,
 #                             removes everything
@@ -26,7 +26,7 @@ services:
       - certs:/certs
     mem_limit: 32m
 
-  # The directory: three accounts (seed.sh), LDAPS on 6360 with the internal authority's
+  # The directory: three accounts (seed.sh), LDAPS on 6360 with the run's certificate authority's
   # certificate. Its plain LDAP port and its API stay inside the network.
   ldap:
     <<: *defaults
@@ -139,7 +139,7 @@ services:
       TRINO_CATALOG: tpch
       TRINO_USER: mcp-server
       TRINO_PASSWORD: ${MCP_SERVER_PASSWORD}
-      # The JWKS over https, checked against the internal authority: the bundle replaces the
+      # The JWKS over https, checked against the run's certificate authority: the bundle replaces the
       # system's, as the chart's ca.setSslCertFile does.
       SSL_CERT_FILE: /certs/ca.crt
       MCP_JWKS_URL: https://keycloak:8443/realms/ldap/protocol/openid-connect/certs

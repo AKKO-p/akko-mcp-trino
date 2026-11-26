@@ -1,5 +1,5 @@
-# The image on Red Hat Universal Base Image 9, for platforms that require it, and buildable with no
-# network access: the rules of the Dockerfile, with RHEL's Python 3.12 and MIT Kerberos.
+# The image on Red Hat Universal Base Image 9, which builds with no network: the rules of the
+# Dockerfile, with RHEL's Python 3.12 and MIT Kerberos.
 #
 # Every Python package comes from wheelhouse/, which scripts/wheelhouse.sh writes from the locks
 # (requirements/*.txt) on a machine with access to the package index; the build reads no index and
@@ -7,8 +7,8 @@
 #
 #   docker build -f Dockerfile.ubi9 --network=none -t akko-mcp-trino:ubi9 .
 #
-# The base images are pinned by the digest of their multi-platform index. Without access to
-# registry.access.redhat.com, pass the same images from an internal registry, by digest:
+# The base images are pinned by the digest of their multi-platform index. To take them from
+# another registry, pass the same images by digest:
 #
 #   --build-arg BUILD_BASE=registry.example.internal/ubi9/python-312@sha256:<digest>
 #   --build-arg BASE=registry.example.internal/ubi9/python-312-minimal@sha256:<digest>
