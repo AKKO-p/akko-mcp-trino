@@ -78,9 +78,9 @@ fichiers que copie `Dockerfile.ubi9` et le dossier de wheels, pas le clone entie
   les clusters durcis retirent souvent ;
 - le constructeur du cluster accepte `RUN --mount=type=bind` depuis une autre étape et depuis le
   contexte. OpenShift 4.22 l'accepte : la construction d'un contexte de 27 Mo (dont 26 Mo de wheels)
-  y a pris 256 s et a poussé l'image dans le registre du projet, sous une limite de 2 Gio de
-  mémoire. La documentation d'OpenShift ne dit pas depuis quelle version ; sur un cluster plus
-  ancien, essayez-le.
+  y a pris 256 s et a poussé l'image dans le registre du projet ; le pod de construction a
+  utilisé au plus 274 Mio, sous une limite de 2 Gio. La documentation d'OpenShift ne dit pas
+  depuis quelle version ; sur un cluster plus ancien, essayez-le.
 
 Si l'une d'elles manque, construisez l'image ailleurs et poussez-la, comme le fait la section
 suivante.

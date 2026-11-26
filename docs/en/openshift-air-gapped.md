@@ -75,8 +75,8 @@ creates one and sends it, with `oc start-build --from-dir`, a folder that holds 
   clusters often withdraw;
 - the cluster's builder supports `RUN --mount=type=bind` from another stage and from the context.
   OpenShift 4.22 does: there, the build of a 27 MB context (26 MB of wheels) took 256 s and pushed
-  the image to the project's registry, within a 2 GiB memory limit. The OpenShift documentation
-  does not say from which version; on an older cluster, try it.
+  the image to the project's registry; the build pod used at most 274 MiB, under a 2 GiB limit.
+  The OpenShift documentation does not say from which version; on an older cluster, try it.
 
 When one of them does not hold, build the image elsewhere and push it, as the next section does.
 
