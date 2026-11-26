@@ -248,7 +248,8 @@ def main() -> int:
     status, rows = trino("mcp-server", "SELECT 1", password="not-the-password")
     check("Trino refuses the server's account with a wrong password", status == 401, (status, rows))
 
-    # 7. Trino's HTTP port: closed in this scenario (http-server.http.enabled=false). Open, Trino
+    # 7. Trino's HTTP port: closed in this scenario (http-server.http.enabled=false), and its
+    # Service has no such port in a cluster. Open, Trino
     # refuses an unauthenticated statement over HTTP (403) unless allow-insecure-over-http is set.
     try:
         r = httpx.post(
@@ -258,8 +259,9 @@ def main() -> int:
             timeout=10,
         )
         outcome, refused = f"{r.status_code} {r.text[:100]}", r.status_code in (401, 403)
-    except httpx.ConnectError as exc:
-        outcome, refused = f"no listener: {exc}", True
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        # No listener (compose), or no Service port to reach (a cluster).
+        outcome, refused = f"not reachable: {type(exc).__name__}: {exc}", True
     check(
         "Trino's HTTP port runs nothing as alice without her password",
         refused,

@@ -54,7 +54,11 @@ openshift=false
 "$KUBECTL" api-resources --api-group=security.openshift.io -o name 2>/dev/null | grep -q . && openshift=true
 build=false
 "$KUBECTL" api-resources --api-group=build.openshift.io -o name 2>/dev/null | grep -q '^buildconfigs' && build=true
-if [ -z "${MCP_IMAGE:-}" ]; then
+# Whether this run builds the image in the project, and so owns the BuildConfig and the
+# ImageStream: fixed here, before MCP_IMAGE names the built image.
+in_project=false
+[ -z "${MCP_IMAGE:-}" ] && in_project=true
+if $in_project; then
   $build || { echo "no Build API here: set MCP_IMAGE to an image built from Dockerfile.ubi9" >&2; exit 1; }
   command -v oc >/dev/null || { echo "a binary build needs oc" >&2; exit 1; }
   [ -d "$ROOT/wheelhouse" ] || { echo "no wheelhouse: run bash scripts/wheelhouse.sh first" >&2; exit 1; }
@@ -67,7 +71,7 @@ OBJECTS="deployment/ldap deployment/keycloak deployment/trino job/ldap-seed
   secret/it-ldap-secrets secret/it-certs secret/mcp-credentials pod/client-ldap"
 BUILD_OBJECTS="buildconfig/akko-mcp-trino-ubi9 imagestream/akko-mcp-trino"
 if helm status "$RELEASE" -n "$NS" >/dev/null 2>&1; then echo "release $RELEASE exists in $NS: RELEASE=... to choose another" >&2; exit 1; fi
-for object in $OBJECTS $( [ -z "${MCP_IMAGE:-}" ] && echo "$BUILD_OBJECTS"); do
+for object in $OBJECTS $($in_project && echo "$BUILD_OBJECTS"); do
   if k get "$object" >/dev/null 2>&1; then echo "$object exists in $NS: this script only creates its own" >&2; exit 1; fi
 done
 
@@ -76,14 +80,14 @@ cleanup() {
   if [ "${KEEP:-0}" = "1" ]; then echo "KEEP=1: release $RELEASE and fixtures left in $NS"; rm -rf "$work"; return; fi
   helm uninstall "$RELEASE" -n "$NS" --wait >/dev/null 2>&1
   k delete pod "$FULL-test" --ignore-not-found --wait >/dev/null 2>&1  # left by helm uninstall
-  for object in $OBJECTS $( [ -z "${MCP_IMAGE:-}" ] && echo "$BUILD_OBJECTS"); do
+  for object in $OBJECTS $($in_project && echo "$BUILD_OBJECTS"); do
     k delete "$object" --ignore-not-found --wait=false >/dev/null 2>&1
   done
   k delete pod -l job-name=ldap-seed --ignore-not-found --wait=false >/dev/null 2>&1
   rm -rf "$work"
   for _ in $(seq 90); do  # the pods of deleted Deployments terminate in their own time
     left="$(k get all,configmap,secret,networkpolicy,build,buildconfig,imagestream -o name 2>/dev/null \
-      | grep -cE "$FULL|/(ldap|keycloak|trino|ldap-seed|client-ldap|akko-mcp-trino-ubi9|akko-mcp-trino)(-[a-z0-9]{1,10}){0,2}$")"
+      | grep -cE "$FULL|/(ldap|keycloak|trino|ldap-seed|client-ldap|akko-mcp-trino-ubi9|akko-mcp-trino)(-[a-z0-9]{1,10}){0,3}$")"
     [ "$left" -eq 0 ] && break; sleep 2
   done
   echo "== removed: $left of this script's objects left in $NS"
@@ -91,7 +95,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "== 1. The UBI 9 image"
-if [ -z "${MCP_IMAGE:-}" ]; then
+if $in_project; then
   # The build context: what Dockerfile.ubi9 copies, and the wheelhouse; nothing else.
   context="$work/context"
   mkdir -p "$context/providers" "$context/requirements"
@@ -132,10 +136,20 @@ $( [ -n "${BUILD_PULL_SECRET:-}" ] && printf '      pullSecret:\n        name: %
     requests: {cpu: 500m, memory: 1Gi}
     limits: {cpu: "2", memory: 2Gi}
 EOF
+  echo "  build context: $(du -sh "$context" | cut -f1) (the wheelhouse: $(du -sh "$context/wheelhouse" | cut -f1))"
+  # The build pod's memory, sampled while it runs (when the cluster serves pod metrics).
+  ( while :; do k top pod -l openshift.io/build.name --no-headers 2>/dev/null; sleep 10; done ) >"$work/build-top" &
+  sampler=$!
   start=$(date +%s)
   if oc -n "$NS" start-build akko-mcp-trino-ubi9 --from-dir="$context" --wait --follow >"$work/build" 2>&1; then
     pass "BuildConfig (Docker strategy, Dockerfile.ubi9): image built in $(( $(date +%s) - start )) s"
-  else tail -40 "$work/build"; fail "the build of the UBI 9 image"; exit 1; fi
+  else kill "$sampler" 2>/dev/null; tail -40 "$work/build"; fail "the build of the UBI 9 image"; exit 1; fi
+  kill "$sampler" 2>/dev/null; wait "$sampler" 2>/dev/null
+  peak="$(awk '{print $3}' "$work/build-top" | sort -h | tail -1)"
+  echo "  build pod memory at most ${peak:-not measured} (limit 2Gi)"
+  # The mounts the build stages read: the wheelhouse from the context, the wheels of the other
+  # stage. buildah ran them, or the build would have failed.
+  grep -E 'RUN --mount' "$work/build" | sed 's/^/  /' | cut -c1-160
   grep -E 'STEP|Successfully|pushed|Push successful' "$work/build" | tail -5 | sed 's/^/  /'
   reference="$(k get istag akko-mcp-trino:ubi9 -o jsonpath='{.image.dockerImageReference}')"
   repository="${reference%@*}"; digest="${reference#*@}"
