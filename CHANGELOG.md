@@ -18,6 +18,11 @@ All notable changes to this project are documented here. The format follows
 - The Helm chart is 0.3.4: its templates changed (the NetworkPolicy of the `helm test` pod, `python -I` in that pod).
 - Chart: with `networkPolicy.enabled` and `tests.enabled`, a second NetworkPolicy lets the `helm test` pod reach the cluster DNS and the server's health port only, so that `helm test` passes in a namespace that denies egress by default.
 
+### Fixed
+- With `TRINO_VERIFY=false` over https, the server's log no longer repeats urllib3's `InsecureRequestWarning` at every request to Trino, readiness probes included: the server says it once, at start and in `--check`, and the warning is silenced for requests to Trino's host only, never another host, and only when verification is off.
+- When no pod is ready, `helm test` no longer stops at `Connection refused` alone: it says that no pod is ready behind the health Service because its `/ready` probe fails, and where to read the cause (the pod's events, and `/ready` through a port-forward to the Deployment). Its exit code is unchanged.
+- The install's notes give the port-forward of the MCP port and the health port at once, to the Deployment.
+
 ## [0.8.3] - 2026-11-26
 
 ### Security

@@ -1320,3 +1320,103 @@ def test_a_stop_with_no_thread_to_spare_runs_in_the_cancelling_thread(monkeypatc
     monkeypatch.undo()
     stop.wait()
     assert seen == [threading.current_thread().name], "stopped inline, by the caller"
+
+
+def _https_server(tmp_path):
+    """A local HTTPS server with a self-signed certificate: requests to it with verify=False
+    raise urllib3's InsecureRequestWarning, as requests to a Trino unverified do."""
+    import datetime
+    import http.server
+    import ssl
+    import threading
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(1)
+        .not_valid_before(now)
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    pem = tmp_path / "server.pem"
+    pem.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        + cert.public_bytes(serialization.Encoding.PEM)
+    )
+
+    class Ok(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - the name http.server calls
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Ok)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(pem)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.mark.parametrize("verify", ["false", "true"])
+def test_urllib3_repeats_nothing_for_an_unverified_trino_and_stays_as_is_otherwise(
+    tmp_path, recwarn, verify
+):
+    """TRINO_VERIFY=false over https: the server says it once (Config.warnings, at start and
+    in --check); the InsecureRequestWarning urllib3 raises at every request to Trino's host is
+    silenced, for that host only. A request to another host still raises it, and with
+    verification on nothing is silenced."""
+    import requests
+    from urllib3.exceptions import InsecureRequestWarning
+
+    server = _https_server(tmp_path)
+    try:
+        port = server.server_address[1]
+        cfg = _cfg(trino_host="127.0.0.1", trino_http_scheme="https", trino_verify=verify)
+        TrinoClient(cfg, identity=Mock())
+        TrinoClient(cfg, identity=Mock())  # a second client adds no second filter
+        silenced = [f for f in __import__("warnings").filters if f[2] is InsecureRequestWarning]
+        assert len(silenced) == (1 if verify == "false" else 0)
+        for _ in range(3):
+            requests.get(f"https://127.0.0.1:{port}/v1/statement", verify=False, timeout=5)
+        to_trino = [w for w in recwarn if issubclass(w.category, InsecureRequestWarning)]
+        # Verification on: urllib3's warnings reach the log as before (once or more: Python
+        # may show a repeated warning once).
+        assert (len(to_trino) == 0) if verify == "false" else (len(to_trino) >= 1)
+        requests.get(f"https://localhost:{port}/", verify=False, timeout=5)
+        other = [w for w in recwarn if issubclass(w.category, InsecureRequestWarning)]
+        assert len(other) > len(to_trino)  # another host is never silenced
+        said = [w for w in cfg.warnings() if w.startswith("TRINO_VERIFY=")]
+        assert len(said) == (1 if verify == "false" else 0)
+    finally:
+        server.shutdown()
+
+
+def test_nothing_is_silenced_over_http_or_with_a_ca_bundle(recwarn):
+    import warnings
+
+    from urllib3.exceptions import InsecureRequestWarning
+
+    for over in (
+        {"trino_http_scheme": "http", "trino_verify": "false"},
+        {"trino_http_scheme": "https", "trino_verify": "/etc/ca.pem"},
+    ):
+        TrinoClient(_cfg(**over), identity=Mock())
+    assert [f for f in warnings.filters if f[2] is InsecureRequestWarning] == []

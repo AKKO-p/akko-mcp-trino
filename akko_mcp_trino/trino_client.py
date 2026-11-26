@@ -50,14 +50,17 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import logging
+import re
 import threading
 import time
+import warnings
 import webbrowser
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional, Protocol, Sequence, Union
 
 import httpx
 import trino
 import trino.auth
+from urllib3.exceptions import InsecureRequestWarning
 
 from .audit import ToolCall, current_call, time_allowed
 from .config import Config
@@ -157,6 +160,21 @@ def gate_runner(run: Callable[..., dict]) -> Callable[..., dict]:
             return run(*args, **kwargs)
 
     return gated
+
+
+def quiet_unverified_trino(config: Config) -> None:
+    """With ``TRINO_VERIFY=false`` over https, the server says once, at start and in
+    ``--check``, that Trino's certificate is not verified; urllib3 would repeat it on every
+    request to Trino, readiness probes included. Its ``InsecureRequestWarning`` is ignored for
+    requests to Trino's host only, never for another host, and only when verification is off.
+    Adding the same filter again replaces it: one client or many, the list keeps one."""
+    if config.trino_http_scheme != "https" or verify_setting(config) is not False:
+        return
+    warnings.filterwarnings(
+        "ignore",
+        message=re.escape(f"Unverified HTTPS request is being made to host '{config.trino_host}'"),
+        category=InsecureRequestWarning,
+    )
 
 
 def verify_setting(config: Config) -> Union[bool, str]:
@@ -461,6 +479,7 @@ class TrinoClient:
         self._metrics = metrics
         self._identity = identity if identity is not None else resolve_identity(config)
         self._tags = tags
+        quiet_unverified_trino(config)
 
     def ping(self) -> None:
         """Readiness, as the identity mode checks it."""
