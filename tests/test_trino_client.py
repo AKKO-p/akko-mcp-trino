@@ -1368,6 +1368,7 @@ def _https_server(tmp_path):
 
     server = http.server.HTTPServer(("127.0.0.1", 0), Ok)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(pem)
     server.socket = context.wrap_socket(server.socket, server_side=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
