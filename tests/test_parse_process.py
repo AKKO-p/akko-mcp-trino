@@ -72,7 +72,8 @@ def _gone(pid):
         try:
             with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
                 return stat.read().rsplit(")", 1)[1].split()[0] == "Z"
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
+            # Reaped before the open, or between the open and the read (ESRCH from procfs).
             return True
     try:
         os.kill(pid, 0)
