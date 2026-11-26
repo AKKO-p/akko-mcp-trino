@@ -63,13 +63,20 @@ renders "an explicit minAvailable of 0 stays 0" templates/pdb.yaml 'minAvailable
   --set podDisruptionBudget.enabled=true,podDisruptionBudget.minAvailable=0
 renders "maxUnavailable alone" templates/pdb.yaml 'maxUnavailable: 1' -- -f values.yaml --set podDisruptionBudget.enabled=true,podDisruptionBudget.maxUnavailable=1
 # A setting that works but leaves something open renders, and the install's notes say the risk
-# and the safe setting, one line each.
-warns() {  # warns <what> <expected line> <helm arguments...>
+# and the safe setting, one line each. NOTES.txt prints mcp-trino.warnings; helm template does
+# not render NOTES, and helm install --dry-run needs a cluster with Helm 3, so a copy of the
+# chart renders that helper in a template of its own.
+grep -q 'include "mcp-trino.warnings"' "$CHART/templates/NOTES.txt" \
+  && pass "NOTES.txt prints the warnings" || fail "NOTES.txt does not print mcp-trino.warnings"
+probe="$(mktemp -d)"
+cp -R "$CHART" "$probe/chart"
+printf '%s\n' '# {{ include "mcp-trino.warnings" . | trim | replace "\n" "\n# " }}' >"$probe/chart/templates/warnings.yaml"
+warns() {  # warns <what> <expected line> <helm template arguments...>
   local what="$1" expected="$2"; shift 2
-  local out; out="$(helm install t "$CHART" --dry-run=client "$@" 2>&1)" \
+  local out; out="$(helm template t "$probe/chart" -s templates/warnings.yaml "$@" 2>&1)" \
     || { fail "$what: refused: $(grep -m1 Error <<<"$out")"; return; }
-  if grep -q "^WARNING: .*$expected" <<<"$out"; then pass "$what renders, with: $(grep -m1 "^WARNING: .*$expected" <<<"$out" | cut -c1-110)"
-  else fail "$what: no warning '$expected' in the notes"; fi
+  if grep -q "WARNING: .*$expected" <<<"$out"; then pass "$what renders, with: $(grep -m1 -o "WARNING: .*$expected" <<<"$out" | cut -c1-110)"
+  else fail "$what: no warning '$expected'"; fi
 }
 warns "the door off (service mode)" "the door is open" -f values.yaml --set auth.enabled=false,auth.required=false
 warns "a JWKS over http" "the JWKS is fetched over http" -f values.yaml
@@ -81,9 +88,10 @@ warns "extraEnv overriding the door" "extraEnv sets MCP_AUTH_ENABLED" -f values.
 warns "the deprecated acknowledgements" "the door is open" -f values.yaml \
   --set auth.enabled=false,auth.required=false,auth.acknowledgeNoAuth=true,auth.acknowledgeInsecureJwks=true \
   --set service.type=NodePort,service.acknowledgePlainHttp=true
-if out="$(helm install t "$CHART" --dry-run=client -f values-jwt.yaml --set image.tag=x 2>&1)" && ! grep -q '^WARNING:' <<<"$out"; then
+if out="$(helm template t "$probe/chart" -s templates/warnings.yaml -f values-jwt.yaml 2>&1)" && ! grep -q 'WARNING:' <<<"$out"; then
   pass "the safe values of the jwt proof render with no warning"
-else fail "the jwt proof's values: $(grep -m1 -E 'Error|^WARNING' <<<"$out")"; fi
+else fail "the jwt proof's values: $(grep -m1 -E 'Error|WARNING' <<<"$out")"; fi
+rm -rf "$probe"
 if helm lint "$CHART" -f values.yaml >"$lint" 2>&1; then pass "helm lint: $(tail -1 "$lint")"; else cat "$lint"; fail "helm lint"; fi
 
 
