@@ -15,16 +15,20 @@ The defaults are the safe ones:
   user is left to the `restricted-v2` SCC;
 - secrets read from an existing Secret, never written in a ConfigMap or in the values.
 
-`helm template` and `helm install` refuse a setting the server would refuse at start, or
-one that would leave something open, with a message that names the value to change: a
-missing Trino host, the `system` catalog, an identity mode other than `service` over
-`http`, the door turned off without `auth.acknowledgeNoAuth: true`, a JWKS over `http`
-without `auth.acknowledgeInsecureJwks: true`, a NodePort or LoadBalancer Service without
-`service.acknowledgePlainHttp: true`, a resource URL whose path is not the transport's
-endpoint, an `extraEnv` entry that would override a variable the chart manages, and
-others. `values.schema.json` refuses a value the chart does not know. NOTES warns of what
-is left open on purpose: a JWKS over `http`, an empty issuer, TLS verification off,
-`trino.readOnly: false`, an Ingress without TLS.
+`helm template` and `helm install` refuse a setting that cannot work, the ones the server
+would refuse at start included, with a message that names the value to change: a missing
+Trino host, an identity mode other than `service` over `http` or with the door off, a door
+that requires tokens it cannot verify, a missing JWKS URL or issuer, a resource URL whose
+path is not the transport's endpoint, a NetworkPolicy that would cut the server off, and
+others. `values.schema.json` refuses a value the chart does not know.
+
+A setting that works but leaves something open renders, and NOTES says, one line each, the
+risk and the safe setting: the door off (`service` mode), a JWKS over `http`, a NodePort or
+LoadBalancer Service (plain HTTP outside the cluster), the `system` catalog, an `extraEnv`
+entry that overrides a variable the chart manages, a disruption budget that blocks every
+node drain, TLS verification off, `trino.readOnly: false`, an Ingress without TLS. The
+server says its own warnings at start and in `--check`. The `acknowledge*` values of
+earlier versions are still accepted and have no effect.
 
 ## Install
 
@@ -237,8 +241,7 @@ PodDisruptionBudget and the anti-affinity.
 | `trino.maxRows`, `trino.source`, `trino.queryTimeoutSeconds`, `trino.requestTimeoutSeconds` | `TRINO_MAX_ROWS`, `TRINO_SOURCE`, `TRINO_QUERY_TIMEOUT_SECONDS`, `TRINO_REQUEST_TIMEOUT_SECONDS`; `null` keeps the server's default | `null` |
 | `trino.tokenExchange.url`, `clientId`, `audience`, `scope`, `verify` | `jwt`: the token exchange (`TRINO_TOKEN_EXCHANGE_*`) | required, required, required, `""`, `true` |
 | `auth.enabled`, `auth.required` | the door (`MCP_AUTH_ENABLED`, `MCP_AUTH_REQUIRED`) | `true`, `true` |
-| `auth.acknowledgeNoAuth` | render with the door off (`service` mode, local tests) | `false` |
-| `auth.acknowledgeInsecureJwks` | accept a JWKS URL that is not `https` (tests) | `false` |
+| `auth.acknowledgeNoAuth`, `auth.acknowledgeInsecureJwks` | deprecated, without effect | `false` |
 | `auth.jwksUrl`, `auth.issuer`, `auth.audience`, `auth.resourceUrl` | `MCP_JWKS_URL`, `MCP_OIDC_ISSUER`, `MCP_OIDC_AUDIENCE`, `MCP_RESOURCE_URL` | the JWKS URL, the issuer and an audience are required with the door on |
 | `auth.userClaim`, `auth.algorithms`, `auth.leewaySeconds`, `auth.allowedHosts` | `MCP_JWT_USER_CLAIM`, `MCP_JWT_ALGORITHMS`, `MCP_JWT_LEEWAY_SECONDS`, `MCP_ALLOWED_HOSTS` | the server's |
 | `limits.*` | `MCP_CALL_TIMEOUT_SECONDS`, `MCP_MAX_CATALOGS`, `MCP_DESCRIBE_SCHEMA_TABLES`, `MCP_DESCRIBE_SCHEMA_COLUMNS`, `MCP_SEARCH_MIN_LENGTH`, `MCP_SEARCH_MAX_WORDS`, `MCP_SEARCH_MAX_WORD_LENGTH`, `MCP_SEARCH_RESERVE_SECONDS`, `MCP_SEARCH_CONCURRENCY`, `MCP_SEARCH_MAX_THREADS`, `MCP_DESCRIBE_MAX_COLUMNS`, and for `profile_table` `MCP_PROFILE_MODES` (`profileModes`, a list), `MCP_PROFILE_MAX_COLUMNS`, `MCP_PROFILE_SAMPLE_ROWS`, `MCP_PROFILE_VALUE_CHARS`, `MCP_PROFILE_TYPE_CHARS`, `MCP_PROFILE_DESCRIBE_ROWS`, `MCP_PROFILE_CLIENT_TAG`, `MCP_PROFILE_TIMEOUT_SECONDS`, `MCP_PROFILE_MAX_CONCURRENT`; `null` or an empty list keeps the server's default | `null` |
@@ -249,7 +252,7 @@ PodDisruptionBudget and the anti-affinity.
 | `podSecurityContext`, `securityContext` | see [values.yaml](values.yaml) | non-root, read-only, no capability |
 | `resources` | requests and limits | `100m`/`128Mi`, `1`/`384Mi` |
 | `livenessProbe`, `readinessProbe`, `startupProbe` | `/health` (never touches Trino), `/ready` (reaches Trino), `/health` | on the health port |
-| `service.type`, `service.acknowledgePlainHttp` | the MCP Service; a type other than `ClusterIP` needs the acknowledgement | `ClusterIP`, `false` |
+| `service.type`, `service.acknowledgePlainHttp` | the MCP Service, NOTES warns of a type other than `ClusterIP`; the acknowledgement is deprecated, without effect | `ClusterIP`, `false` |
 | `service.exposeHealthPort`, `service.extraPorts` | the health Service (`<fullname>-health`, always `ClusterIP`), more MCP Service ports | `true`, `[]` |
 | `ingress.*` | an Ingress to the MCP port; paths default to the transport's endpoint | off |
 | `route.*` | an OpenShift Route, `edge` or `reencrypt`; `route.tls.externalCertificate` names the certificate's Secret | off, `edge` |

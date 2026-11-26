@@ -4,15 +4,9 @@ akko-mcp-trino {{ .Chart.AppVersion }} is installed as {{ $fullName }} in {{ .Re
 
 Transport {{ .Values.transport }}, endpoint {{ $endpoint }}, identity mode {{ .Values.trino.identityMode }},
 Trino {{ .Values.trino.httpScheme }}://{{ .Values.trino.host }}:{{ .Values.trino.port }} (catalog {{ .Values.trino.catalog }}).
-{{- if not (and .Values.auth.enabled .Values.auth.required) }}
+{{- with (include "mcp-trino.warnings" . | trim) }}
 
-WARNING: the door is open (auth.enabled={{ .Values.auth.enabled }}, auth.required={{ .Values.auth.required }}).
-Every caller reaches Trino as {{ .Values.trino.user }} without a verified token. Local tests only.
-{{- end }}
-{{- if and .Values.auth.enabled (not (hasPrefix "https://" .Values.auth.jwksUrl)) }}
-
-WARNING: the JWKS is fetched over http ({{ .Values.auth.jwksUrl }}): anyone on the path could
-substitute keys and mint accepted tokens. Tests only.
+{{ . }}
 {{- end }}
 {{- if not .Values.trino.readOnly }}
 
@@ -26,11 +20,6 @@ credentials go to whoever answers.
 {{- if and .Values.ingress.enabled (not .Values.ingress.tls) }}
 
 WARNING: the Ingress has no TLS: terminate it in front, or tokens cross the network in clear.
-{{- end }}
-{{- if ne .Values.service.type "ClusterIP" }}
-
-WARNING: service.type={{ .Values.service.type }} serves plain HTTP outside the cluster
-(acknowledged): a TLS-terminating load balancer must be in front.
 {{- end }}
 {{- if eq .Values.trino.identityMode "service" }}
 
