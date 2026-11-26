@@ -128,6 +128,28 @@ def test_service_mode_and_an_open_door_are_warned_of_when_chosen(monkeypatch):
     assert "no caller is verified" in Config.from_env().warnings()[1]
 
 
+@pytest.mark.parametrize("value", ["false", "0", "NO", " False "])
+def test_trino_verification_turned_off_is_warned_of(monkeypatch, value):
+    monkeypatch.setenv("TRINO_HTTP_SCHEME", "https")
+    monkeypatch.setenv("TRINO_VERIFY", value)
+    assert Config.from_env().warnings() == [
+        f"TRINO_VERIFY={value.strip()}: Trino's certificate is not verified, so the server "
+        "cannot know whom it sends its credentials to; set TRINO_VERIFY=true, or the path of "
+        "a CA bundle"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("scheme", "value"), [("https", "true"), ("https", "/etc/ca.pem"), ("http", "false")]
+)
+def test_trino_verification_on_or_without_tls_is_not_warned_of(monkeypatch, scheme, value):
+    """Verified, or a CA bundle; over http there is no certificate to verify (and the identity
+    modes that send a credential refuse http)."""
+    monkeypatch.setenv("TRINO_HTTP_SCHEME", scheme)
+    monkeypatch.setenv("TRINO_VERIFY", value)
+    assert Config.from_env().warnings() == []
+
+
 def test_a_door_that_requires_tokens_it_cannot_verify_is_a_problem(monkeypatch):
     monkeypatch.setenv("MCP_AUTH_ENABLED", "false")
     assert Config.from_env().problems() == [

@@ -157,6 +157,12 @@ WARNING: the JWKS is fetched over http ({{ $v.auth.jwksUrl }}): anyone on the pa
 {{- if ne $v.service.type "ClusterIP" }}
 WARNING: service.type={{ $v.service.type }} serves the MCP port in plain HTTP outside the cluster, bearer tokens in clear. Safe setting: a ClusterIP Service behind an Ingress or a Route with TLS, or a TLS-terminating load balancer in front.
 {{ end }}
+{{- if and (not $v.trino.verify) (eq $v.trino.httpScheme "https") }}
+WARNING: trino.verify=false: Trino's certificate is not verified, so the server cannot know whom it sends its credentials to. Safe setting: trino.verify=true, with ca.configMap or ca.secret for an internal certificate authority.
+{{ end }}
+{{- if and (eq $v.trino.identityMode "jwt") (not $v.trino.tokenExchange.verify) }}
+WARNING: trino.tokenExchange.verify=false: the token endpoint's certificate is not verified, so the server cannot know whom it sends its client secret and the callers' tokens to. Safe setting: trino.tokenExchange.verify=true, with ca.configMap or ca.secret for an internal certificate authority.
+{{ end }}
 {{- if eq (lower $v.trino.catalog) "system" }}
 WARNING: trino.catalog=system: names without a catalog are refused, so every query must name its catalog. Safe setting: a data catalog.
 {{ end }}

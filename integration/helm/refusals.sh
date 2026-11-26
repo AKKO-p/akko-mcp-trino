@@ -83,6 +83,8 @@ warns "a JWKS over http" "the JWKS is fetched over http" -f values.yaml
 warns "a NodePort Service" "serves the MCP port in plain HTTP" -f values.yaml --set service.type=NodePort
 warns "the system catalog" "trino.catalog=system" -f values.yaml --set trino.catalog=system
 warns "a disruption budget that blocks every drain" "blocks every node drain" -f values.yaml --set podDisruptionBudget.enabled=true
+warns "Trino's certificate not verified" "trino.verify=false" -f values.yaml --set trino.httpScheme=https,trino.verify=false
+warns "the token endpoint's certificate not verified" "trino.tokenExchange.verify=false" -f values-jwt.yaml --set trino.tokenExchange.verify=false
 warns "extraEnv overriding the door" "extraEnv sets MCP_AUTH_ENABLED" -f values.yaml --set 'extraEnv[0].name=MCP_AUTH_ENABLED,extraEnv[0].value=false'
 # The acknowledge* values of earlier versions are accepted, without effect: the warning stays.
 warns "the deprecated acknowledgements" "the door is open" -f values.yaml \
