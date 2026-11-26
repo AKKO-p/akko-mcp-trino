@@ -1,3 +1,5 @@
+![akko-mcp-trino](https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/main/docs/images/logo-icon.svg)
+
 # akko-mcp-trino
 
 **Give your AI agents read-only access to Trino, and nothing more.**
