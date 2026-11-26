@@ -36,7 +36,8 @@ cd "$(dirname "$0")"
 ROOT=../..
 RELEASE="${RELEASE:-mcp-ldap}"
 CHART=$ROOT/charts/akko-mcp-trino
-FULL="$RELEASE-akko-mcp-trino"
+# The chart's full name: the release's name alone when it holds the chart's name.
+case "$RELEASE" in *akko-mcp-trino*) FULL="$RELEASE" ;; *) FULL="$RELEASE-akko-mcp-trino" ;; esac
 KUBECTL="$(command -v oc || command -v kubectl)"
 if [ -z "${NS:-}" ] && command -v oc >/dev/null; then NS="$(oc project -q 2>/dev/null)"; fi
 NS="${NS:-$("$KUBECTL" config view --minify -o jsonpath='{..namespace}' 2>/dev/null)}"
