@@ -2,7 +2,7 @@
 # project's own registry (image.repository and image.digest are set by the script), Trino
 # over https with password authentication against the directory, the server in impersonation
 # mode with its own directory account (password from a Secret), the callers' tokens from
-# Keycloak federated on the same directory, the internal authority mounted for Trino and for
+# Keycloak federated on the same directory, the run's certificate authority mounted for Trino and for
 # the JWKS fetch, the NetworkPolicy on: ingress from the test client only, egress to DNS,
 # Trino and Keycloak only.
 trino:

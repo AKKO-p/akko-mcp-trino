@@ -9,15 +9,15 @@
 #    password authentication against it and an impersonation rule for the server's account
 #    only (fixtures-ldap.yaml);
 #  - the chart (values-ldap.yaml): the image from the project's registry by digest, the
-#    server in impersonation mode with its directory password from a Secret, the internal
-#    authority for Trino and for the JWKS, the NetworkPolicy on;
+#    server in impersonation mode with its directory password from a Secret, the run's
+#    certificate authority for Trino and for the JWKS, the NetworkPolicy on;
 #  - the pod under restricted-v2 with a UID from the project's range, read-only, on UBI 9;
 #    integration/ldap/check.py in a pod of the project, through the Service (401 without a
 #    token, each user as Trino sees them, their rights, no usurpation, no write); helm test;
 #    no token and no password in the server's log.
-# What it does not prove: a disconnected cluster. The build in the cluster has whatever network
-# the cluster gives builds (Dockerfile.ubi9 needs none: integration/ldap/run.sh and CI build it
-# with --network=none), and the fixtures pull their images from public registries.
+# The build in the cluster has whatever network the cluster gives builds (Dockerfile.ubi9 needs
+# none: integration/ldap/run.sh and CI build it with --network=none), and the fixtures pull
+# their images from public registries.
 # Everything it created is removed at the end, even on failure, unless KEEP=1. It refuses to
 # run beside an object of the same name it did not create. About 1 CPU and 3 GiB of memory
 # of requests while the fixtures run, 2 GiB more during the build.
@@ -27,7 +27,7 @@
 #
 #   bash scripts/wheelhouse.sh && bash integration/helm/openshift-ldap.sh
 #   MCP_IMAGE=registry.example.internal/akko-mcp-trino:ubi9 bash integration/helm/openshift-ldap.sh
-#   BUILD_BASE=... BASE=...   the base images of Dockerfile.ubi9 from an internal registry
+#   BUILD_BASE=... BASE=...   the base images of Dockerfile.ubi9 from another registry, by digest
 #   BUILD_PULL_SECRET=name    the Secret the build pulls them with (dockerStrategy.pullSecret)
 #
 # Needs bash, helm, oc (or kubectl with MCP_IMAGE) and openssl. Nothing secret is printed.
