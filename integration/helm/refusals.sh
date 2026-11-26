@@ -66,6 +66,15 @@ renders "maxUnavailable alone" templates/pdb.yaml 'maxUnavailable: 1' -- -f valu
 # and the safe setting, one line each. NOTES.txt prints mcp-trino.warnings; helm template does
 # not render NOTES, and helm install --dry-run needs a cluster with Helm 3, so a copy of the
 # chart renders that helper in a template of its own.
+refuses "extraEnv repeating the password the chart puts in env" "two entries of one name" -f values-ldap.yaml --set 'extraEnv[0].name=TRINO_PASSWORD,extraEnv[0].value=x'
+refuses "extraEnv repeating the token exchange secret" "two entries of one name" -f values-jwt.yaml --set 'extraEnv[0].name=TRINO_TOKEN_EXCHANGE_CLIENT_SECRET,extraEnv[0].value=x'
+# The extra peer appears in both policies: the server's and the helm test pod's.
+out="$(helm template t "$CHART" -s templates/networkpolicy.yaml -f values-jwt.yaml \
+  --set 'networkPolicy.egress.extra[0].to[0].ipBlock.cidr=192.0.2.44/32' 2>&1)"
+if [ "$(sed -n '/name: t-akko-mcp-trino-test$/,$p' <<<"$out" | grep -c 'cidr: 192.0.2.44/32')" = 1 ] \
+    && [ "$(grep -c 'cidr: 192.0.2.44/32' <<<"$out")" = 2 ]; then
+  pass "the helm test pod reaches networkPolicy.egress.extra too"
+else fail "the helm test pod's policy has no networkPolicy.egress.extra"; fi
 renders "helm test says why when no pod is ready" templates/tests/test-check.yaml \
   'no pod is ready behind the Service t-akko-mcp-trino-health' 'port-forward deployment/t-akko-mcp-trino 3001:3001' -- -f values.yaml
 grep -q 'port-forward deployment/{{ $fullName }} {{ .Values.ports.mcp }}:{{ .Values.ports.mcp }} {{ .Values.ports.health }}:{{ .Values.ports.health }}' \

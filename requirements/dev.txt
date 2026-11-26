@@ -2036,6 +2036,7 @@ urllib3==2.8.0 \
     # via
     #   -c requirements/image.txt
     #   -c requirements/release.txt
+    #   akko-mcp-trino
     #   id
     #   requests
     #   twine

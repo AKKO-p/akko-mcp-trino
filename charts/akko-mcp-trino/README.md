@@ -27,8 +27,11 @@ risk and the safe setting: the door off (`service` mode), a JWKS over `http`, a 
 LoadBalancer Service (plain HTTP outside the cluster), the `system` catalog, an `extraEnv`
 entry that overrides a variable the chart manages, a disruption budget that blocks every
 node drain, TLS verification off, `trino.readOnly: false`, an Ingress without TLS. The
-server says its own warnings at start and in `--check`. The `acknowledge*` values of
-earlier versions are still accepted and have no effect.
+server says its own warnings at start and in `--check`, the door off and a JWKS over `http`
+included, so that a render by `helm template` (a GitOps tool) or `--hide-notes` does not hide
+them; the warnings about the cluster itself (a Service exposed outside it, a disruption budget)
+are in NOTES only. The `acknowledge*` values of earlier versions are still accepted and have no
+effect.
 
 ## Install
 
@@ -180,16 +183,19 @@ the identity provider (`networkPolicy.egress.identityProvider`) and
 provider's when the door is on, and the ingress controller's with an Ingress. The health
 port admits a pod of the namespace that carries the release's test labels: anyone who
 may create pods in the namespace can do so, so keep the release in a namespace of its own.
-With `tests.enabled`, a second policy lets the `helm test` pod reach the cluster DNS and the
-server's health port only, so that the test passes in a namespace that denies egress by default.
+With `tests.enabled`, a second policy lets the `helm test` pod reach the cluster DNS, the
+server's health port and `networkPolicy.egress.extra` (where a data catalog's peers go, which
+its `--check` asks), so that the test passes in a namespace that denies egress by default.
 
 ## Environment
 
-`extraEnv` adds variables, an extension's own settings for example; one the chart
-manages (`TRINO_HOST`, `MCP_AUTH_ENABLED`...) refuses to render and names the value to set
-instead, so that the render-time checks cannot be bypassed. `extraEnvFrom` comes before
-the chart's ConfigMap, so the chart's settings win on a duplicate; it must not carry
-those variables either.
+`extraEnv` adds variables, an extension's own settings for example. One the chart writes in
+its ConfigMap (`TRINO_HOST`, `MCP_AUTH_ENABLED`...) renders and overrides the chart's value, out
+of reach of the render-time checks: NOTES warns and names the value to set instead, and the
+server still refuses at start what it cannot serve. One the chart puts in the container's `env`
+itself, from `existingSecret` (`TRINO_PASSWORD`, `TRINO_TOKEN_EXCHANGE_CLIENT_SECRET`), is
+refused: two entries of one name, which the API server rejects. `extraEnvFrom` comes before the
+chart's ConfigMap, so the chart's settings win on a duplicate.
 
 ## What is proven live, and what is only rendered
 

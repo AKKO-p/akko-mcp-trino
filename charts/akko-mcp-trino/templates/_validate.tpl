@@ -122,6 +122,19 @@ something open renders, and NOTES.txt says what it leaves open (mcp-trino.warnin
 {{- if and $v.tests.enabled (not $v.service.exposeHealthPort) }}
 {{- fail "tests.enabled=true calls the health Service: keep service.exposeHealthPort=true, or set tests.enabled=false." }}
 {{- end }}
+{{- /* A variable the chart already puts in env: a duplicate key the API server rejects. */}}
+{{- $chartEnv := list }}
+{{- if eq $mode "jwt" }}
+{{- $chartEnv = append $chartEnv "TRINO_TOKEN_EXCHANGE_CLIENT_SECRET" }}
+{{- end }}
+{{- if include "mcp-trino.passwordEnabled" . }}
+{{- $chartEnv = append $chartEnv "TRINO_PASSWORD" }}
+{{- end }}
+{{- range $v.extraEnv }}
+{{- if has (.name | default "") $chartEnv }}
+{{- fail (printf "extraEnv sets %s, which the chart already puts in the container's env from existingSecret: two entries of one name, which the API server rejects (duplicate entries for key). Set existingSecret.name and existingSecret.keys instead." .name) }}
+{{- end }}
+{{- end }}
 {{- if $v.networkPolicy.enabled }}
 {{- if and (or $v.ingress.enabled (and $v.route.enabled (not $v.networkPolicy.ingress.openshiftRouter))) (not $v.networkPolicy.ingress.from) }}
 {{- fail "networkPolicy.enabled=true with an Ingress (or a Route without networkPolicy.ingress.openshiftRouter) requires networkPolicy.ingress.from: the ingress controller's peers; without them the MCP port admits no one." }}

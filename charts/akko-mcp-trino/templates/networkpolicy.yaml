@@ -63,8 +63,9 @@ spec:
 {{- if and .Values.networkPolicy.enabled .Values.tests.enabled }}
 {{- $np := .Values.networkPolicy }}
 ---
-# The helm test pod: egress to the cluster DNS and to the server's health port only, so that the
-# test passes in a namespace that denies egress by default. Its --check reaches nothing else.
+# The helm test pod: egress to the cluster DNS, to the server's health port and to the server's
+# own extra peers (networkPolicy.egress.extra), so that the test passes in a namespace that denies
+# egress by default: its --check asks the context providers configured, such as a data catalog.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -90,4 +91,7 @@ spec:
       ports:
         - port: {{ .Values.ports.health }}
           protocol: TCP
+    {{- with $np.egress.extra }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 {{- end }}
