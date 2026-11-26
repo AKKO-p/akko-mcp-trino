@@ -71,14 +71,14 @@ docker compose up -d --wait
 | `X.Y.Z-ubi9`, `X.Y-ubi9`, `ubi9` | the same, on Red Hat Universal Base Image 9 |
 
 Every tag without a suffix is built for `linux/amd64` and `linux/arm64`, on Debian, runs as a
-non-root user (uid 10001), and carries a health check. The same images are published as
+non-root user (uid 10001), and carries a health check, an SBOM and its signed build provenance. The same images are published as
 `ghcr.io/akko-p/akko-mcp-trino`.
 
 The `-ubi9` tags are built from
 [`Dockerfile.ubi9`](https://github.com/AKKO-p/akko-mcp-trino/blob/main/Dockerfile.ubi9), with no
 network, for `linux/amd64` only (the platform their build is checked on). They run as uid 1001
 or as any uid of group 0 (OpenShift's `restricted-v2`), on a read-only root filesystem, and carry
-an SBOM and their signed build provenance. The first release that carries
+an SBOM and their signed build provenance, as the Debian tags do. The first release that carries
 `Dockerfile.ubi9` is the first to publish them;
 [Deploy on OpenShift without internet access](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/openshift-air-gapped.md)
 says how to use them.

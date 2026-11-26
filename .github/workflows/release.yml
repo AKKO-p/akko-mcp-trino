@@ -193,6 +193,10 @@ jobs:
         with:
           context: tag
           platforms: ${{ steps.lock.outputs.platforms }}
+          # The SBOM of each platform's image, as a BuildKit attestation pushed in the image's
+          # index beside the provenance BuildKit adds by default; the signed provenance of
+          # image-provenance is a separate referrer of the same digest.
+          sbom: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -274,7 +278,7 @@ jobs:
           file: tag/Dockerfile.ubi9
           network: none
           platforms: linux/amd64
-          # The SBOM of the image, as an attestation pushed beside it (BuildKit's scanner).
+          # The SBOM, as for the Debian image.
           sbom: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
