@@ -85,7 +85,9 @@ la même sur les deux. Avec `MCP_TRANSPORT=stdio`, le MCP host lance lui-même l
 
 Un [Dockerfile](../../Dockerfile) est livré avec le dépôt : il tourne sans root, avec un contrôle
 de santé et des étiquettes OCI. L'image est publiée pour `linux/amd64` et `linux/arm64` sous
-`akkoai/akko-mcp-trino` et `ghcr.io/akko-p/akko-mcp-trino`. Elle installe chaque dépendance depuis
+`akkoai/akko-mcp-trino` et `ghcr.io/akko-p/akko-mcp-trino`, avec un SBOM et une attestation de
+provenance signée attachés au digest de chaque version (à partir de la première version après la
+0.8.3 pour le SBOM). Elle installe chaque dépendance depuis
 le verrou `requirements/image.txt`, en version exacte et avec ses empreintes (voir
 [CONTRIBUTING.fr.md](../../CONTRIBUTING.fr.md#dépendances-et-verrous)).
 

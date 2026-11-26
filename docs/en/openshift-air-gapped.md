@@ -88,7 +88,7 @@ locked packages. It is about 110 MB compressed (465 MB unpacked), against 90 MB 
 
 From the first release that carries `Dockerfile.ubi9`, each release also publishes this image,
 for `linux/amd64`, as `akkoai/akko-mcp-trino:X.Y.Z-ubi9` (and `X.Y-ubi9`, `ubi9`) and
-`ghcr.io/akko-p/akko-mcp-trino:X.Y.Z-ubi9`, with its signed build provenance. Instead of building
+`ghcr.io/akko-p/akko-mcp-trino:X.Y.Z-ubi9`, with its SBOM and its signed build provenance. Instead of building
 it, you can then copy it into the internal registry by digest, as the base images above:
 `skopeo copy --all docker://ghcr.io/akko-p/akko-mcp-trino@sha256:<digest> docker://$REGISTRY/akko-mcp-trino:X.Y.Z-ubi9`.
 

@@ -763,6 +763,7 @@ def test_the_release_publishes_the_ubi9_variant_from_the_tag_with_no_network() -
         "file: tag/Dockerfile.ubi9",
         "network: none",
         "platforms: linux/amd64\n",
+        "sbom: true",
     ):
         assert setting in build, setting
     tags = re.findall(r"^\s+type=(.*)$", build, re.M)
@@ -774,5 +775,8 @@ def test_the_release_publishes_the_ubi9_variant_from_the_tag_with_no_network() -
     assert "latest=false" in build
     assert "subject-digest: ${{ needs.image-ubi9.outputs.digest }}" in provenance
     assert "needs: image-ubi9" in provenance and "path: tag" not in provenance
-    # The Debian image keeps latest, X.Y and X.Y.Z, with no suffix.
+    # The Debian image keeps latest, X.Y and X.Y.Z, with no suffix, and carries its SBOM too.
     assert "suffix" not in jobs["image"] and "type=raw,value=latest" in jobs["image"]
+    assert "sbom: true" in jobs["image"]
+    # Neither turns BuildKit's own provenance off: the signed one is added beside it.
+    assert "provenance:" not in jobs["image"] and "provenance:" not in build
