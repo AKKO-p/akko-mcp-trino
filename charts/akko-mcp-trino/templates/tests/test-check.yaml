@@ -1,5 +1,7 @@
 {{- if .Values.tests.enabled }}
 {{- $url := printf "http://%s:%v" (include "mcp-trino.healthName" .) .Values.ports.health }}
+{{- $fullName := include "mcp-trino.fullname" . }}
+{{- $notReady := printf "no pod is ready behind the Service %s: its /ready probe fails. The cause is in the events of the pod (kubectl -n %s describe pod -l app.kubernetes.io/instance=%s,app.kubernetes.io/component=server) and in /ready (kubectl -n %s port-forward deployment/%s %v:%v, then curl -s localhost:%v/ready)" (include "mcp-trino.healthName" .) .Release.Namespace .Release.Name .Release.Namespace $fullName .Values.ports.health .Values.ports.health .Values.ports.health }}
 # helm test: the server answers /health (and /ready) through its Service, and
 # `akko-mcp-trino --check` accepts the release's configuration (exit 0), with the same
 # settings, secrets and mounts as the server.
@@ -35,9 +37,9 @@ spec:
         - |
           # A NetworkPolicy may take a few seconds to admit a new pod: retry for 60 s.
           # -I: neither the working directory nor PYTHON* variables shape what Python imports.
-          python -I - "{{ $url }}" /health{{ if .Values.tests.ready }} /ready{{ end }} <<'EOF'
-          import sys, time, urllib.request
-          base, paths = sys.argv[1], sys.argv[2:]
+          python -I - "{{ $url }}" {{ $notReady | squote }} /health{{ if .Values.tests.ready }} /ready{{ end }} <<'EOF'
+          import sys, time, urllib.error, urllib.request
+          base, not_ready, paths = sys.argv[1], sys.argv[2], sys.argv[3:]
           for path in paths:
               for attempt in range(30):
                   try:
@@ -46,7 +48,9 @@ spec:
                           break
                   except OSError as exc:
                       if attempt == 29:
-                          sys.exit(f"{base + path}: {exc}")
+                          # Refused or unreachable, not an HTTP answer: no pod behind the Service.
+                          hint = "" if isinstance(exc, urllib.error.HTTPError) else f"; {not_ready}"
+                          sys.exit(f"{base + path}: {exc}{hint}")
                       time.sleep(2)
           EOF
           akko-mcp-trino --check

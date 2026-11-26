@@ -66,6 +66,10 @@ renders "maxUnavailable alone" templates/pdb.yaml 'maxUnavailable: 1' -- -f valu
 # and the safe setting, one line each. NOTES.txt prints mcp-trino.warnings; helm template does
 # not render NOTES, and helm install --dry-run needs a cluster with Helm 3, so a copy of the
 # chart renders that helper in a template of its own.
+renders "helm test says why when no pod is ready" templates/tests/test-check.yaml \
+  'no pod is ready behind the Service t-akko-mcp-trino-health' 'port-forward deployment/t-akko-mcp-trino 3001:3001' -- -f values.yaml
+grep -q 'port-forward deployment/{{ $fullName }} {{ .Values.ports.mcp }}:{{ .Values.ports.mcp }} {{ .Values.ports.health }}:{{ .Values.ports.health }}' \
+  "$CHART/templates/NOTES.txt" && pass "NOTES gives the port-forward of both ports" || fail "NOTES gives no port-forward of both ports"
 grep -q 'include "mcp-trino.warnings"' "$CHART/templates/NOTES.txt" \
   && pass "NOTES.txt prints the warnings" || fail "NOTES.txt does not print mcp-trino.warnings"
 probe="$(mktemp -d)"

@@ -25,6 +25,10 @@ WARNING: service mode. Every query runs as {{ .Values.trino.user }}, whoever cal
 
   kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ $fullName }}
 
+   From your workstation, the MCP port and the health port (/health, /ready) at once:
+
+  kubectl -n {{ .Release.Namespace }} port-forward deployment/{{ $fullName }} {{ .Values.ports.mcp }}:{{ .Values.ports.mcp }} {{ .Values.ports.health }}:{{ .Values.ports.health }}
+
 2. Print the effective configuration (never a secret) and any warning; exit 2 means
    the server would refuse to start:
 
