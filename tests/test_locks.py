@@ -763,6 +763,7 @@ def test_the_release_publishes_the_ubi9_variant_from_the_tag_with_no_network() -
         "file: tag/Dockerfile.ubi9",
         "network: none",
         "platforms: linux/amd64\n",
+        "sbom: true",
     ):
         assert setting in build, setting
     tags = re.findall(r"^\s+type=(.*)$", build, re.M)

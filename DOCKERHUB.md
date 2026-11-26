@@ -78,7 +78,7 @@ The `-ubi9` tags are built from
 [`Dockerfile.ubi9`](https://github.com/AKKO-p/akko-mcp-trino/blob/main/Dockerfile.ubi9), with no
 network, for `linux/amd64` only (the platform their build is checked on). They run as uid 1001
 or as any uid of group 0 (OpenShift's `restricted-v2`), on a read-only root filesystem, and carry
-their signed build provenance, as the Debian tags do. The first release that carries
+an SBOM and their signed build provenance. The first release that carries
 `Dockerfile.ubi9` is the first to publish them;
 [Deploy on OpenShift without internet access](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/openshift-air-gapped.md)
 says how to use them.

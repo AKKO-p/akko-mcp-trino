@@ -219,8 +219,8 @@ jobs:
     # The UBI 9 variant (Dockerfile.ubi9), under the same name with the -ubi9 suffix: X.Y.Z-ubi9,
     # X.Y-ubi9 and ubi9; latest, X.Y and X.Y.Z stay the Debian image's. Its wheelhouse comes from
     # the tag's locks (scripts/wheelhouse.sh, hashes checked), then the build runs with no
-    # network. linux/amd64 only: the platform its build and its checks were proven on. A tag
-    # from before Dockerfile.ubi9 has no such variant.
+    # network, with its SBOM. linux/amd64 only: the platform its build and its checks were proven
+    # on. A tag from before Dockerfile.ubi9 has no such variant.
     needs: ref
     runs-on: ubuntu-latest
     permissions:
@@ -274,6 +274,8 @@ jobs:
           file: tag/Dockerfile.ubi9
           network: none
           platforms: linux/amd64
+          # The SBOM of the image, as an attestation pushed beside it (BuildKit's scanner).
+          sbom: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
