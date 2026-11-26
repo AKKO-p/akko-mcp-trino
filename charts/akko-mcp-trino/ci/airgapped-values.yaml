@@ -1,0 +1,48 @@
+# OpenShift without internet access: the UBI 9 image from an internal registry, by digest,
+# with its pull secret; Trino in the same project with password authentication, the server's
+# own account in impersonation mode, its password in an existing Secret; the internal
+# authority from a ConfigMap, for Trino and for the JWKS; the NetworkPolicy: the router in,
+# egress to DNS, Trino in the project and the identity provider only.
+openshift: true
+image:
+  repository: registry.example.internal/data/akko-mcp-trino
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+imagePullSecrets:
+  - name: internal-registry
+trino:
+  host: trino
+  port: 8443
+  catalog: lakehouse
+  identityMode: impersonation
+  user: mcp-server
+  credential: password
+auth:
+  jwksUrl: https://idp.example.internal/realms/data/protocol/openid-connect/certs
+  issuer: https://idp.example.internal/realms/data
+  audience: mcp-trino
+  resourceUrl: https://mcp.apps.example.internal/mcp
+  userClaim: preferred_username
+existingSecret:
+  name: mcp-trino-credentials
+ca:
+  # The internal authorities, Trino's and the identity provider's, in one PEM bundle.
+  configMap: trusted-ca
+  key: ca-bundle.crt
+route:
+  enabled: true
+  host: mcp.apps.example.internal
+networkPolicy:
+  enabled: true
+  egress:
+    trino:
+      - podSelector:
+          matchLabels:
+            app.kubernetes.io/name: trino
+            app.kubernetes.io/component: coordinator
+    identityProvider:
+      to:
+        - ipBlock:
+            cidr: 192.0.2.10/32
+      ports:
+        - port: 443
+          protocol: TCP

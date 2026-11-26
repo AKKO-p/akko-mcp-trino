@@ -119,6 +119,26 @@ the image for `linux/arm64` too, under QEMU, and runs `--version` and the Kerber
 and krb5 compile under emulation, which
 takes over an hour, so it does not run on every pull request.
 
+`Dockerfile.ubi9` builds the same image on Red Hat UBI 9 (`ubi9/python-312` to build,
+`ubi9/python-312-minimal` to run), both pinned by digest in its `ARG` lines, with no network:
+every Python package comes from `wheelhouse/`, which `bash scripts/wheelhouse.sh` writes from
+`build.txt`, `image.txt` and `kerberos.txt` in the build stage's base image, hashes checked. It
+installs no RPM: the base images bring the compiler, the Kerberos headers and libraries, and a
+`rpm -q` in each stage checks each one the build relies on at its exact version, so that a new
+base image that moves one fails the build. `tests/test_locks.py` checks the bases, the versions
+and that no step reads an index. To move the bases, read the new versions and write them in the
+`rpm -q` lines:
+
+```bash
+docker run --rm registry.access.redhat.com/ubi9/python-312@sha256:<digest> rpm -q python3.12 gcc glibc-devel krb5-devel
+docker run --rm registry.access.redhat.com/ubi9/python-312-minimal@sha256:<digest> rpm -q python3.12 glibc krb5-libs keyutils-libs libcom_err openssl-libs
+```
+
+CI builds it with `--network=none` and runs `--version`, the Kerberos `--check` and a start as an
+arbitrary user on a read-only root filesystem. `integration/ldap/run.sh` runs it against Trino with
+password authentication (see
+[Deploy on OpenShift without internet access](docs/en/openshift-air-gapped.md)).
+
 `scripts/lock.sh` is the one place CI and the release read the versions from:
 `LOCK_PYTHON`, the Python versions of the checks and of the Atlas provider
 (`CHECK_PYTHONS`), the platforms of the image (`IMAGE_PLATFORMS`) and the

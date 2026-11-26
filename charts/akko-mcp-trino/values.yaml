@@ -317,7 +317,8 @@ extraContainers: []
 
 # NetworkPolicy: ingress to the MCP port only from the listed peers (and from the OpenShift
 # router when the Route is enabled), to the health port from the helm test and the listed
-# metrics peers; egress only to DNS, Trino and the identity provider.
+# metrics peers; egress only to DNS, Trino and the identity provider. With tests.enabled, a
+# second policy limits the helm test pod to DNS and the server's health port.
 networkPolicy:
   enabled: false
   ingress:

@@ -21,6 +21,7 @@ Ces pages décrivent `main`. La documentation d'une version publiée se trouve �
 | Page | Contenu |
 |---|---|
 | [Déploiement](deployment.md) | installer et lancer, les transports, le conteneur, Helm sur Kubernetes et OpenShift, Trino Gateway, avec ou sans catalogue de données, avec ou sans modules |
+| [Déployer sur OpenShift sans accès à internet](openshift-air-gapped.md) | l'image UBI 9 construite sans réseau, un registre interne, Trino avec mots de passe LDAP et impersonation, une autorité de certification interne, `helm test` |
 | [Identité](identity.md) | les quatre modes d'identité, le claim de l'utilisateur, la vérification du token, le trajet d'une requête |
 | [Brancher un MCP host](hosts.md) | Claude Desktop, Claude Code, Cursor, VS Code, tout MCP host en stdio, le SDK Python, deux agents (dont un sur l'API Agents de Mistral) |
 | [Contexte d'un catalogue de données](catalog-context.md) | ce que sert un fournisseur de contexte, ses limites, le fournisseur `file` |

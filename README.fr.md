@@ -145,6 +145,7 @@ Ces pages décrivent `main`. La documentation d'une version publiée se trouve �
 | [Prérequis](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/prerequisites.md) | ce qu'il faut, et les versions prises en charge et testées |
 | [Démarrage rapide](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/quickstart.md) | le sandbox, le token d'un utilisateur, un MCP host, une première question |
 | [Déploiement](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/deployment.md) | installer et lancer, le conteneur, Helm sur Kubernetes et OpenShift, Trino Gateway, avec ou sans catalogue de données |
+| [Déployer sur OpenShift sans accès à internet](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/openshift-air-gapped.md) | l'image UBI 9 construite sans réseau, Trino avec mots de passe LDAP et impersonation |
 | [Identité](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/identity.md) | les quatre modes d'identité, le claim de l'utilisateur, la vérification du token |
 | [Brancher un MCP host](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/hosts.md) | Claude Desktop, Cursor, tout MCP host en stdio, le SDK Python, un agent |
 | [Contexte d'un catalogue de données](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/catalog-context.md) | ce que sert un fournisseur de contexte, ses limites, le fournisseur `file` |

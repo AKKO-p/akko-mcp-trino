@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `Dockerfile.ubi9` builds the image on Red Hat Universal Base Image 9 (`ubi9/python-312` to build, `ubi9/python-312-minimal` to run, both pinned by digest), for platforms that require Red Hat base images. It builds with no network (`--network=none`): every Python package comes, with its hashes, from a wheelhouse that `scripts/wheelhouse.sh` writes from the locks, and no system package is installed (each one the build relies on is checked at its exact version). The image runs as UID 1001 or any UID of group 0 on a read-only root filesystem, from the working directory `/`; nothing of its code is writable by that user, which CI checks in the running image. The base images can be named from an internal registry (`--build-arg BUILD_BASE=... BASE=...`). CI builds it and runs `--version`, the Kerberos `--check` and a read-only start as an arbitrary user.
+- `integration/ldap/run.sh` proves the most constrained deployment: Trino with password authentication against a directory (LDAP) over https with an internal certificate authority, the server from the UBI 9 image in `impersonation` mode with its own directory account, Keycloak federated on the same directory, Trino's HTTP port closed, 26 checks (401 without a token and with a token signed by another key under the provider's key id, each user as Trino sees them, row filter and refusals by user, no usurpation through the server or directly in Trino, no write, nothing on Trino's HTTP port), the read-only root and the code no user can change checked in the running container, and no token or password in the server's log. `integration/helm/openshift-ldap.sh` is the same case in an OpenShift project, the image built by a BuildConfig (Docker strategy) from `Dockerfile.ubi9`; it passed whole on OpenShift 4.22, in a project without administration rights.
+- Each release publishes the UBI 9 image too, for `linux/amd64`, under the same name with the `-ubi9` suffix: `X.Y.Z-ubi9`, `X.Y-ubi9` and `ubi9`, on Docker Hub and GHCR, with its signed build provenance (`image-ubi9` and `image-ubi9-provenance` of the release workflow). It is built from the checked tag by `Dockerfile.ubi9`, its wheelhouse from the tag's locks, with no network. `latest`, `X.Y` and `X.Y.Z` stay the Debian image's. `DOCKERHUB.md` lists the tags.
+- The page [Deploy on OpenShift without internet access](docs/en/openshift-air-gapped.md), in English and French, and the chart's `ci/airgapped-values.yaml`.
+
+### Changed
+- The Helm chart is 0.3.4: its templates changed (the NetworkPolicy of the `helm test` pod, `python -I` in that pod).
+- Chart: with `networkPolicy.enabled` and `tests.enabled`, a second NetworkPolicy lets the `helm test` pod reach the cluster DNS and the server's health port only, so that `helm test` passes in a namespace that denies egress by default.
+
 ## [0.8.3] - 2026-11-26
 
 ### Security

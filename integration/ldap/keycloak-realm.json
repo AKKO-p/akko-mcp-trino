@@ -1,0 +1,107 @@
+{
+  "realm": "ldap",
+  "enabled": true,
+  "sslRequired": "all",
+  "accessTokenLifespan": 300,
+  "clients": [
+    {
+      "clientId": "mcp-host",
+      "name": "An MCP host, a public client",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "audience-mcp-trino",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "mcp-trino",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.storage.UserStorageProvider": [
+      {
+        "name": "directory",
+        "providerId": "ldap",
+        "config": {
+          "enabled": ["true"],
+          "priority": ["0"],
+          "vendor": ["other"],
+          "editMode": ["READ_ONLY"],
+          "importEnabled": ["true"],
+          "syncRegistrations": ["false"],
+          "connectionUrl": ["ldaps://ldap:6360"],
+          "useTruststoreSpi": ["always"],
+          "authType": ["simple"],
+          "bindDn": ["uid=admin,ou=people,dc=example,dc=org"],
+          "bindCredential": ["${LDAP_ADMIN_PASSWORD}"],
+          "usersDn": ["ou=people,dc=example,dc=org"],
+          "searchScope": ["1"],
+          "userObjectClasses": ["person"],
+          "usernameLDAPAttribute": ["uid"],
+          "rdnLDAPAttribute": ["uid"],
+          "uuidLDAPAttribute": ["entryUUID"],
+          "pagination": ["false"],
+          "connectionPooling": ["false"],
+          "trustEmail": ["true"],
+          "cachePolicy": ["NO_CACHE"]
+        },
+        "subComponents": {
+          "org.keycloak.storage.ldap.mappers.LDAPStorageMapper": [
+            {
+              "name": "username",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute": ["uid"],
+                "user.model.attribute": ["username"],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["false"],
+                "is.mandatory.in.ldap": ["true"]
+              }
+            },
+            {
+              "name": "email",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute": ["mail"],
+                "user.model.attribute": ["email"],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["false"],
+                "is.mandatory.in.ldap": ["false"]
+              }
+            },
+            {
+              "name": "first name",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute": ["givenName"],
+                "user.model.attribute": ["firstName"],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["true"],
+                "is.mandatory.in.ldap": ["false"]
+              }
+            },
+            {
+              "name": "last name",
+              "providerId": "user-attribute-ldap-mapper",
+              "config": {
+                "ldap.attribute": ["sn"],
+                "user.model.attribute": ["lastName"],
+                "read.only": ["true"],
+                "always.read.value.from.ldap": ["true"],
+                "is.mandatory.in.ldap": ["false"]
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -110,6 +110,27 @@ ou `.github/workflows/ci.yml`, et sur un lancement manuel (`workflow_dispatch`) 
 s'y compilent sous émulation, ce qui prend plus d'une heure, d'où son absence sur chaque pull
 request.
 
+`Dockerfile.ubi9` construit la même image sur Red Hat UBI 9 (`ubi9/python-312` pour construire,
+`ubi9/python-312-minimal` pour tourner), les deux figées par digest dans ses lignes `ARG`, sans
+réseau : chaque paquet Python vient de `wheelhouse/`, que `bash scripts/wheelhouse.sh` écrit depuis
+`build.txt`, `image.txt` et `kerberos.txt` dans l'image de base de l'étape de construction,
+empreintes vérifiées. Il n'installe aucun RPM : les images de base apportent le compilateur, les
+en-têtes et les bibliothèques Kerberos, et un `rpm -q` dans chaque étape vérifie chacun de ceux dont
+la construction dépend à sa version exacte, pour qu'une nouvelle image de base qui en change un
+fasse échouer la construction. `tests/test_locks.py` vérifie les bases, les versions et qu'aucune
+étape ne lit d'index. Pour changer de bases, lisez les nouvelles versions et écrivez-les dans les
+lignes `rpm -q` :
+
+```bash
+docker run --rm registry.access.redhat.com/ubi9/python-312@sha256:<digest> rpm -q python3.12 gcc glibc-devel krb5-devel
+docker run --rm registry.access.redhat.com/ubi9/python-312-minimal@sha256:<digest> rpm -q python3.12 glibc krb5-libs keyutils-libs libcom_err openssl-libs
+```
+
+La CI la construit avec `--network=none` et lance `--version`, le `--check` Kerberos et un
+démarrage sous un utilisateur arbitraire avec un système de fichiers racine en lecture seule.
+`integration/ldap/run.sh` la fait tourner face à un Trino à authentification par mot de passe
+(voir [Déployer sur OpenShift sans accès à internet](docs/fr/openshift-air-gapped.md)).
+
 `scripts/lock.sh` est le seul endroit où la CI et la publication lisent les versions : `LOCK_PYTHON`,
 les versions de Python des contrôles et de l'adaptateur Atlas (`CHECK_PYTHONS`), les plateformes de
 l'image (`IMAGE_PLATFORMS`) et la glibc de l'image de base (`IMAGE_GLIBC`, que la CI vérifie sur
