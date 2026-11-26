@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../images/logo-dark.svg">
+    <img src="../images/logo-light.svg" width="240" alt="akko-mcp-trino">
+  </picture>
+</p>
+
 # Documentation d'akko-mcp-trino
 
 [English](../en/index.md) · **Français**

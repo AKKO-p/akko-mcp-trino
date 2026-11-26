@@ -1,4 +1,11 @@
 <p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/main/docs/images/logo-dark.svg">
+    <img src="https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/main/docs/images/logo-light.svg" width="280" alt="akko-mcp-trino">
+  </picture>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/github/actions/workflow/status/AKKO-p/akko-mcp-trino/ci.yml?branch=main&label=ci" alt="CI">
   <img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/version-0.8.3-blue" alt="Version">

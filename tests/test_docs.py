@@ -8,6 +8,7 @@ relative link breaks: they link with absolute URLs only.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 
@@ -137,6 +138,18 @@ def test_the_absolute_links_of_the_readmes_name_files_that_exist():
             if not target.exists() or (anchor and anchor not in anchors(target)):
                 broken.append(f"{name}: {link}")
     assert broken == []
+
+
+def test_the_images_shown_outside_github_name_files_that_exist():
+    """The READMEs, the Docker Hub page and the registry entry show images from `main` by URL."""
+    base = "https://raw.githubusercontent.com/AKKO-p/akko-mcp-trino/main/"
+    server = json.loads((ROOT / "server.json").read_text(encoding="utf-8"))
+    urls = [icon["src"] for icon in server["icons"]]
+    for name in ("README.md", "README.fr.md", "DOCKERHUB.md"):
+        urls += _links((ROOT / name).read_text(encoding="utf-8"))
+    images = [url.removeprefix(base) for url in urls if url.startswith(base)]
+    assert "docs/images/logo-icon.png" in images and "docs/images/logo-light.svg" in images
+    assert [image for image in images if not (ROOT / image).is_file()] == []
 
 
 @pytest.mark.parametrize("language", ["en", "fr"])
