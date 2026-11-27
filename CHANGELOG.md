@@ -4,11 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.5] - 2026-11-27
 
 ### Added
 - The tools exposed can be chosen, by group, one by one and by exclusion: `MCP_TOOLSETS` names groups of built-in tools (`discovery`: `search_columns`, `list_catalogs`, `list_schemas`, `list_tables`, `describe_schema`, `describe_table`; `profile`: `profile_table`; `query`: `explain_query`, `execute_query`), `MCP_TOOLS` adds built-in tools, and `MCP_EXCLUDE_TOOLS` leaves tools out, a plugin's or an extension's included. Unset, the nine tools are exposed, as before. A tool left out is not registered: absent from `tools/list`, its call refused as one to an unknown tool. A name that is no group or no tool refuses to start, and so does a choice that leaves no tool; leaving out every `discovery` tool is warned of. The tools of `MCP_TOOL_PLUGINS` and `MCP_EXTENSIONS` belong to no group and are exposed unless excluded. None of these settings opens a write: the read-only check stays `TRINO_READ_ONLY`'s. `--check` and the start log say the tools exposed, and the instructions sent to MCP hosts list them when they are fewer than nine.
 - Helm chart 0.3.5: `server.toolsets`, `server.tools` and `server.excludeTools`, checked at render time by the server's rules; NOTES says the tools exposed.
+
+### Changed
+- The Helm chart 0.3.5 runs the image 0.8.5 by default (`appVersion`).
+- `akko-mcp-trino-atlas` 0.8.5 is released with the core, with no change of its own.
+- The host pages, `DOCKERHUB.md`, the examples and the Helm checks of `integration/helm/` pin 0.8.5.
 
 ## [0.8.4] - 2026-11-26
 

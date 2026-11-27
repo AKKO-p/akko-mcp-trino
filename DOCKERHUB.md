@@ -67,7 +67,7 @@ docker compose up -d --wait
 
 | Tag | Meaning |
 |---|---|
-| `X.Y.Z` (e.g. `0.8.4`) | one release |
+| `X.Y.Z` (e.g. `0.8.5`) | one release |
 | `X.Y` (e.g. `0.8`) | the latest release of that minor line |
 | `latest` | the latest release |
 | `X.Y.Z-ubi9`, `X.Y-ubi9`, `ubi9` | the same, on Red Hat Universal Base Image 9 |
@@ -80,7 +80,7 @@ The `-ubi9` tags are built from
 [`Dockerfile.ubi9`](https://github.com/AKKO-p/akko-mcp-trino/blob/main/Dockerfile.ubi9), with no
 network, for `linux/amd64` only (the platform their build is checked on). They run as uid 1001
 or as any uid of group 0 (OpenShift's `restricted-v2`), on a read-only root filesystem, and carry
-an SBOM and their signed build provenance, as the Debian tags do. They are published from 0.8.4 on.
+an SBOM and their signed build provenance, as the Debian tags do.
 
 ## Run it
 
