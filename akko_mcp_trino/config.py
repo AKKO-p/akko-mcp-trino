@@ -12,6 +12,7 @@ import math
 import os
 import re
 from dataclasses import dataclass
+from typing import Optional
 
 from .audit import DEFAULT_AUDIT_MAX_NAMES
 from .parse_pool import DEFAULT_PARSE_SECONDS, DEFAULT_PARSE_WORKERS
@@ -19,6 +20,27 @@ from .sql_guard import governed_catalog, parse_extra_reads, validate_identifier
 
 # The token signature algorithms the server may accept: public-key ones only, verified
 # against the issuer's JWKS.
+# The built-in tools by group (MCP_TOOLSETS), in the order the server registers them.
+TOOLSETS: dict[str, tuple[str, ...]] = {
+    "discovery": (
+        "search_columns",
+        "list_catalogs",
+        "list_schemas",
+        "list_tables",
+        "describe_schema",
+        "describe_table",
+    ),
+    "profile": ("profile_table",),
+    "query": ("explain_query", "execute_query"),
+}
+BUILTIN_TOOLS: tuple[str, ...] = tuple(name for group in TOOLSETS.values() for name in group)
+
+
+def names_of(value: str) -> list[str]:
+    """A comma-separated list, each name stripped, the empty ones dropped."""
+    return [name.strip() for name in value.split(",") if name.strip()]
+
+
 JWT_ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512")
 
 
@@ -217,6 +239,14 @@ class Config:
     # Tools another package adds (entry point group `akko_mcp_trino.tools`),
     # by plugin name, comma-separated. Empty serves the generic tools only.
     tool_plugins: str = ""
+    # The built-in tools exposed: the groups of MCP_TOOLSETS (None, the variable unset, is
+    # every group), plus the tools MCP_TOOLS names, minus those MCP_EXCLUDE_TOOLS names, which
+    # may also name a plugin's or an extension's tool. A tool left out is not registered:
+    # absent from tools/list, refused as an unknown tool. None of these settings opens a
+    # write: TRINO_READ_ONLY stays on its own.
+    toolsets: Optional[str] = None
+    tools: str = ""
+    exclude_tools: str = ""
     # Extensions another package adds (entry point group `akko_mcp_trino.extensions`),
     # by name, comma-separated: identity modes, request guards, audit, routes and
     # tools, all at once (see `akko_mcp_trino.extensions`). Empty loads none.
@@ -373,9 +403,46 @@ class Config:
         )
         return min((b for b in budgets if b > 0), default=0.0)
 
+    def exposed_tools(self) -> list[str]:
+        """The built-in tools this server exposes, in the order it registers them: the groups
+        of ``MCP_TOOLSETS`` (every group when it is unset), the tools ``MCP_TOOLS`` adds, less
+        those ``MCP_EXCLUDE_TOOLS`` names. Unknown names are ``problems``, never ignored."""
+        groups = list(TOOLSETS) if self.toolsets is None else names_of(self.toolsets)
+        chosen = {tool for group in groups for tool in TOOLSETS.get(group, ())}
+        chosen |= set(names_of(self.tools))
+        chosen -= set(names_of(self.exclude_tools))
+        return [tool for tool in BUILTIN_TOOLS if tool in chosen]
+
+    def tools_restricted(self) -> bool:
+        """Whether the built-in tools exposed are fewer than the nine."""
+        return len(self.exposed_tools()) < len(BUILTIN_TOOLS)
+
+    def _tool_problems(self) -> list[str]:
+        found = []
+        for group in names_of(self.toolsets or ""):
+            if group not in TOOLSETS:
+                found.append(
+                    f"MCP_TOOLSETS names {group!r}, which is no group of tools; the groups are "
+                    f"{', '.join(TOOLSETS)}"
+                )
+        for tool in names_of(self.tools):
+            if tool not in BUILTIN_TOOLS:
+                found.append(
+                    f"MCP_TOOLS names {tool!r}, which is no tool of this server; the tools are "
+                    f"{', '.join(BUILTIN_TOOLS)} (a plugin's tools are exposed unless "
+                    "MCP_EXCLUDE_TOOLS names them)"
+                )
+        adds_tools = names_of(self.tool_plugins) or names_of(self.extensions)
+        if not self.exposed_tools() and not adds_tools:
+            found.append(
+                "MCP_TOOLSETS, MCP_TOOLS and MCP_EXCLUDE_TOOLS leave no tool exposed: name a "
+                f"group ({', '.join(TOOLSETS)}) or a tool"
+            )
+        return found
+
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
-        found = []
+        found = self._tool_problems()
         if self.auth_required and not self.auth_enabled:
             found.append(
                 "MCP_AUTH_REQUIRED=true but MCP_AUTH_ENABLED=false: no token can be verified "
@@ -628,6 +695,12 @@ class Config:
         """What this configuration leaves open, said at start, in ``--check`` and to every
         MCP host in the initialization's instructions; empty for the default modes."""
         found = []
+        exposed = self.exposed_tools()
+        if exposed and not set(exposed) & set(TOOLSETS["discovery"]):
+            found.append(
+                "MCP_TOOLSETS leaves out every discovery tool: the agent writes its queries "
+                "without listing or describing the tables it may read; add discovery"
+            )
         if self.trino_identity_mode == "service":
             found.append(
                 f"TRINO_IDENTITY_MODE=service: every query runs as the Trino user "
@@ -740,6 +813,9 @@ class Config:
             trino_password=os.environ.get("TRINO_PASSWORD", ""),
             call_timeout_seconds=float(os.environ.get("MCP_CALL_TIMEOUT_SECONDS", "120")),
             tool_plugins=os.environ.get("MCP_TOOL_PLUGINS", ""),
+            toolsets=os.environ.get("MCP_TOOLSETS"),
+            tools=os.environ.get("MCP_TOOLS", ""),
+            exclude_tools=os.environ.get("MCP_EXCLUDE_TOOLS", ""),
             extensions=os.environ.get("MCP_EXTENSIONS", ""),
             jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
             extra_read_commands=os.environ.get("MCP_EXTRA_READ_COMMANDS", ""),

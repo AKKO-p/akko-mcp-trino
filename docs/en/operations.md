@@ -76,6 +76,7 @@ warns in these cases, with this text:
 | `TRINO_VERIFY=false` (or `0`, `no`) over https | `TRINO_VERIFY=false: Trino's certificate is not verified, so the server cannot know whom it sends its credentials to; set TRINO_VERIFY=true, or the path of a CA bundle` |
 | `MCP_JWKS_URL` not https, with token verification on | `MCP_JWKS_URL=<url>: the keys that verify tokens are read over plain http, so anyone on the path could substitute them and mint accepted tokens; set an https MCP_JWKS_URL` |
 | `TRINO_TOKEN_EXCHANGE_VERIFY=false` (or `0`, `no`) in `jwt` mode | `TRINO_TOKEN_EXCHANGE_VERIFY=false: the token endpoint's certificate is not verified, so the server cannot know whom it sends its client secret and the callers' tokens to; set TRINO_TOKEN_EXCHANGE_VERIFY=true, or the path of a CA bundle` |
+| no `discovery` tool exposed | `MCP_TOOLSETS leaves out every discovery tool: the agent writes its queries without listing or describing the tables it may read; add discovery` |
 | `MCP_SEARCH_RESERVE_SECONDS=0` with a call budget | `MCP_SEARCH_RESERVE_SECONDS=0: a search of search_columns may run to the end of the call's budget, and the call then answers its time_budget error with nothing it found` |
 | `MCP_CALL_TIMEOUT_SECONDS=0` | `MCP_CALL_TIMEOUT_SECONDS=0: a tool call has no time budget, so search_columns refuses to search every catalog and searches a named catalog only` |
 | `MCP_EXTRA_READ_COMMANDS` names commands | the warning names the commands it enables; [Security](security.md#the-statements-an-agent-may-send) says what they are |

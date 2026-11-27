@@ -35,6 +35,15 @@ without a control character, a bidirectional control or a line separator (see
 [Security](security.md#the-statements-an-agent-may-send)); any other is refused with `"kind": "invalid_argument"` before Trino
 is asked.
 
+## Choosing the tools exposed
+
+The nine tools fall in three groups: `discovery` (`search_columns`, `list_catalogs`,
+`list_schemas`, `list_tables`, `describe_schema`, `describe_table`), `profile` (`profile_table`)
+and `query` (`explain_query`, `execute_query`). All nine are exposed by default;
+`MCP_TOOLSETS`, `MCP_TOOLS` and `MCP_EXCLUDE_TOOLS` choose fewer (see
+[Configuration](configuration.md#tools-exposed)). A server for browsing the catalog without
+running queries, for example, sets `MCP_TOOLSETS=discovery`.
+
 ## The path an agent follows
 
 Agents are told to call `search_columns` first, to find where the data lives. They then call

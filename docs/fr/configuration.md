@@ -101,6 +101,25 @@ démarrer.
 | `MCP_TOOL_PLUGINS` | noms, séparés par des virgules, des fonctions d'enregistrement installées dans le groupe d'entry points `akko_mcp_trino.tools` | aucun |
 | `MCP_EXTENSIONS` | noms, séparés par des virgules, des extensions installées dans le groupe d'entry points `akko_mcp_trino.extensions`, les [modules](modules.md) compris | aucune |
 
+## Tools exposés
+
+| Variable | Rôle | Défaut |
+|---|---|---|
+| `MCP_TOOLSETS` | groupes de tools intégrés, séparés par des virgules : `discovery` (`search_columns`, `list_catalogs`, `list_schemas`, `list_tables`, `describe_schema`, `describe_table`), `profile` (`profile_table`), `query` (`explain_query`, `execute_query`). Avec une valeur vide, aucun groupe | non définie : tous les groupes, les neuf tools |
+| `MCP_TOOLS` | tools intégrés ajoutés aux groupes, séparés par des virgules | aucun |
+| `MCP_EXCLUDE_TOOLS` | tools retirés, séparés par des virgules, ceux d'un plugin ou d'une extension compris ; il l'emporte sur les deux autres | aucun |
+
+Un tool retiré n'est pas enregistré : il n'apparaît pas dans `tools/list`, et son appel est
+refusé comme celui d'un tool inconnu. Un nom qui n'est ni un groupe ni un tool empêche le
+démarrage, tout comme un choix qui ne laisse aucun tool. Les tools de `MCP_TOOL_PLUGINS` et de
+`MCP_EXTENSIONS` n'appartiennent à aucun groupe : ils sont exposés sauf si `MCP_EXCLUDE_TOOLS`
+les nomme. Aucun de ces réglages n'ouvre une écriture : le contrôle de lecture seule ne dépend
+que de `TRINO_READ_ONLY`. Retirer tous les tools de `discovery` donne un avertissement, car
+l'agent écrirait alors ses requêtes sans lister ni décrire les tables. `--check` et le journal de
+démarrage disent les tools exposés, et quand ils sont moins de neuf, les instructions envoyées
+aux MCP hosts les listent. Une version ultérieure pourra rattacher un groupe à un scope du token
+de l'appelant.
+
 ## Modules
 
 | Variable | Rôle | Défaut |

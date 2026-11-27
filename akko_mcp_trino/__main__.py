@@ -160,6 +160,10 @@ def check_config(config: Config, *, strict: bool = False) -> int:
             else "none"
         ),
         f"audit: up to {config.audit_max_names} names a list, the rest counted",
+        "tools exposed: "
+        + (", ".join(config.exposed_tools()) or "none")
+        + (" (all nine)" if not config.tools_restricted() else "")
+        + (f"; excluded: {config.exclude_tools}" if config.exclude_tools.strip() else ""),
         f"tool plugins: {config.tool_plugins or 'none'}",
         f"extensions: {', '.join(extension_names(config.extensions)) or 'none'}",
         *[line for ext in extensions for line in ext.check_lines()],
@@ -277,6 +281,11 @@ def _serve(  # pragma: no cover - process glue, proven by running it
 ) -> None:
     """Serve on the configured transport until the server stops."""
     log = logging.getLogger(__name__)
+    log.info(
+        "tools exposed: %s%s",
+        ",".join(config.exposed_tools()),
+        f" and the plugins' tools ({config.tool_plugins})" if config.tool_plugins.strip() else "",
+    )
     if config.transport == "stdio":
         log.info(
             "serving transport=stdio auth=%s strict=%s identity=%s",

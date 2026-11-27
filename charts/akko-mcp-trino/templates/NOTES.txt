@@ -1,9 +1,11 @@
 {{- $fullName := include "mcp-trino.fullname" . }}
 {{- $endpoint := include "mcp-trino.endpoint" . }}
+{{- $exposed := include "mcp-trino.exposedTools" . | fromJsonArray }}
 akko-mcp-trino {{ .Chart.AppVersion }} is installed as {{ $fullName }} in {{ .Release.Namespace }}.
 
 Transport {{ .Values.transport }}, endpoint {{ $endpoint }}, identity mode {{ .Values.trino.identityMode }},
 Trino {{ .Values.trino.httpScheme }}://{{ .Values.trino.host }}:{{ .Values.trino.port }} (catalog {{ .Values.trino.catalog }}).
+Tools exposed: {{ join ", " $exposed | default "none of the built-in ones" }}{{ with .Values.server.toolPlugins }}, and those of the plugins {{ join ", " . }}{{ end }}{{ with .Values.server.excludeTools }} (excluded: {{ join ", " . }}){{ end }}.
 {{- with (include "mcp-trino.warnings" . | trim) }}
 
 {{ . }}

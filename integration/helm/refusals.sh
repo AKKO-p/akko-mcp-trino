@@ -75,6 +75,12 @@ if [ "$(sed -n '/name: t-akko-mcp-trino-test$/,$p' <<<"$out" | grep -c 'cidr: 19
     && [ "$(grep -c 'cidr: 192.0.2.44/32' <<<"$out")" = 2 ]; then
   pass "the helm test pod reaches networkPolicy.egress.extra too"
 else fail "the helm test pod's policy has no networkPolicy.egress.extra"; fi
+refuses "a group of tools the server has not" "which is no group of tools" -f values.yaml --set 'server.toolsets={discovery,writes}'
+refuses "a tool the server has not" "which is no tool of the server" -f values.yaml --set 'server.tools={drop_table}'
+refuses "no tool exposed at all" "leave no tool exposed" -f values.yaml --set-json 'server.toolsets=[]'
+renders "the tools chosen reach the server" templates/configmap.yaml \
+  'MCP_TOOLSETS: "discovery,query"' 'MCP_EXCLUDE_TOOLS: "explain_query"' -- -f values.yaml \
+  --set 'server.toolsets={discovery,query},server.excludeTools={explain_query}'
 renders "helm test says why when no pod is ready" templates/tests/test-check.yaml \
   'no pod is ready behind the Service t-akko-mcp-trino-health' 'port-forward deployment/t-akko-mcp-trino 3001:3001' -- -f values.yaml
 grep -q 'port-forward deployment/{{ $fullName }} {{ .Values.ports.mcp }}:{{ .Values.ports.mcp }} {{ .Values.ports.health }}:{{ .Values.ports.health }}' \
@@ -91,6 +97,7 @@ warns() {  # warns <what> <expected line> <helm template arguments...>
   if grep -q "WARNING: .*$expected" <<<"$out"; then pass "$what renders, with: $(grep -m1 -o "WARNING: .*$expected" <<<"$out" | cut -c1-110)"
   else fail "$what: no warning '$expected'"; fi
 }
+warns "no discovery tool exposed" "server.toolsets leaves out every discovery tool" -f values.yaml --set 'server.toolsets={query}'
 warns "the door off (service mode)" "the door is open" -f values.yaml --set auth.enabled=false,auth.required=false
 warns "a JWKS over http" "the JWKS is fetched over http" -f values.yaml
 warns "a NodePort Service" "serves the MCP port in plain HTTP" -f values.yaml --set service.type=NodePort

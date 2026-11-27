@@ -46,6 +46,15 @@ data:
   {{- with $v.server.extensions }}
   MCP_EXTENSIONS: {{ join "," . | quote }}
   {{- end }}
+  {{- if not (kindIs "invalid" $v.server.toolsets) }}
+  MCP_TOOLSETS: {{ join "," $v.server.toolsets | quote }}
+  {{- end }}
+  {{- with $v.server.tools }}
+  MCP_TOOLS: {{ join "," . | quote }}
+  {{- end }}
+  {{- with $v.server.excludeTools }}
+  MCP_EXCLUDE_TOOLS: {{ join "," . | quote }}
+  {{- end }}
   TRINO_HOST: {{ $v.trino.host | quote }}
   TRINO_PORT: {{ $v.trino.port | quote }}
   TRINO_HTTP_SCHEME: {{ $v.trino.httpScheme | quote }}

@@ -22,7 +22,7 @@ import inspect
 from typing import Any, Callable, Iterable, Sequence, Tuple
 
 from . import __version__
-from .config import Config
+from .config import BUILTIN_TOOLS, Config, names_of
 from .context import ContextChain, ContextLoop, ContextProvider, ContextSettings, ContextSetup
 from .extensions import Extension
 from .parse_pool import ParsePool
@@ -47,11 +47,21 @@ def _default_mcp_factory(
 
 def instructions_for(config: Config) -> str:
     """What the server tells every MCP host at initialization: the warnings of its
-    configuration (see ``Config.warnings``), or nothing."""
+    configuration (see ``Config.warnings``), and the built-in tools it exposes when the
+    administrator chose fewer than the nine; nothing otherwise."""
+    parts = []
     warnings = config.warnings()
-    if not warnings:
-        return ""
-    return "WARNING, set by the administrator of this server: " + "; ".join(warnings) + "."
+    if warnings:
+        parts.append(
+            "WARNING, set by the administrator of this server: " + "; ".join(warnings) + "."
+        )
+    if config.tools_restricted():
+        parts.append(
+            "The administrator of this server exposes these tools only: "
+            + ", ".join(config.exposed_tools())
+            + "."
+        )
+    return " ".join(parts)
 
 
 class _AuditedServer:
@@ -63,6 +73,7 @@ class _AuditedServer:
     def __init__(self, mcp: Any, audit: Any, budget_seconds: float, max_names: int) -> None:
         self._mcp, self._audit, self._budget = mcp, audit, budget_seconds
         self._max_names = max_names
+        self.names: list[str] = []  # the tools a plugin or an extension added
 
     def tool(self, *args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
         """The server's ``tool`` decorator, with the audit wrapped around the function."""
@@ -70,6 +81,7 @@ class _AuditedServer:
         name = kwargs.get("name") or (args[0] if args else None)
 
         def deco(fn: Callable) -> Callable:
+            self.names.append(name or fn.__name__)
             return register(
                 audited(
                     self._audit,
@@ -85,6 +97,7 @@ class _AuditedServer:
     def add_tool(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
         """The server's ``add_tool``, with the audit wrapped around the function."""
         name = kwargs.get("name") or (args[0] if args else None)
+        self.names.append(name or fn.__name__)
         wrapped = audited(
             self._audit, fn, name=name, budget_seconds=self._budget, max_names=self._max_names
         )
@@ -101,6 +114,27 @@ def _takes_tools(registrar: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return True
+
+
+def _expose(config: Config, mcp: Any, added: list[str]) -> None:
+    """Remove the tools the configuration leaves out (``Config.exposed_tools``, and the
+    added tools ``MCP_EXCLUDE_TOOLS`` names): a tool left out is absent from tools/list,
+    and a call to it is refused as one to an unknown tool. An excluded name that is no
+    tool of this server, or nothing left to expose, refuses to start."""
+    exposed = set(config.exposed_tools())
+    for name in BUILTIN_TOOLS:
+        if name not in exposed:
+            mcp.remove_tool(name)
+    excluded = set(names_of(config.exclude_tools))
+    for name in sorted(excluded - set(BUILTIN_TOOLS)):
+        if name not in added:
+            raise ValueError(
+                f"MCP_EXCLUDE_TOOLS names {name!r}, which is no tool of this server; the tools "
+                f"are {', '.join([*BUILTIN_TOOLS, *added])}"
+            )
+        mcp.remove_tool(name)
+    if not exposed and not set(added) - excluded:
+        raise ValueError("MCP_TOOLSETS, MCP_TOOLS and MCP_EXCLUDE_TOOLS leave no tool exposed")
 
 
 def build_server(
@@ -203,6 +237,7 @@ def build_server(
             registrar(plugin_view, client, tools)
         else:
             registrar(plugin_view, client)
+    _expose(config, mcp, plugin_view.names)
     if context is not None:
         loop.start()
         if context_started is not None:
