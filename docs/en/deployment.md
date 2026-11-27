@@ -86,7 +86,7 @@ detail being the error the check raised.
 A [Dockerfile](../../Dockerfile) ships with the repository: it runs as a non-root user, with a
 health check and OCI labels. The image is published for `linux/amd64` and `linux/arm64` as
 `akkoai/akko-mcp-trino` and `ghcr.io/akko-p/akko-mcp-trino`, with an SBOM and a signed build
-provenance attached to each release's digest (from the first release after 0.8.3 for the SBOM). It
+provenance attached to each release's digest (from 0.8.4 for the SBOM). It
 installs every dependency from
 the lock `requirements/image.txt`, at exact versions and with their hashes (see
 [CONTRIBUTING.md](../../CONTRIBUTING.md#dependencies-and-locks)).

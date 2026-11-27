@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "uvx",
       "args": [
-        "akko-mcp-trino==0.8.3"
+        "akko-mcp-trino==0.8.4"
       ],
       "env": {
         "MCP_TRANSPORT": "stdio",
