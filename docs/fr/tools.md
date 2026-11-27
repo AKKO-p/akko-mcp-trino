@@ -36,6 +36,15 @@ fait de 1 à 1024 caractères sans caractère de contrôle, contrôle bidirectio
 ligne (voir [Sécurité](security.md#les-instructions-quun-agent-peut-envoyer)) ; tout autre est refusé avec
 `"kind": "invalid_argument"` avant que Trino ne soit interrogé.
 
+## Choisir les tools exposés
+
+Les neuf tools forment trois groupes : `discovery` (`search_columns`, `list_catalogs`,
+`list_schemas`, `list_tables`, `describe_schema`, `describe_table`), `profile` (`profile_table`)
+et `query` (`explain_query`, `execute_query`). Les neuf sont exposés par défaut ;
+`MCP_TOOLSETS`, `MCP_TOOLS` et `MCP_EXCLUDE_TOOLS` en choisissent moins (voir
+[Configuration](configuration.md#tools-exposés)). Un serveur qui sert à parcourir le catalogue
+sans lancer de requête, par exemple, pose `MCP_TOOLSETS=discovery`.
+
 ## Le parcours d'un agent
 
 On indique aux agents d'appeler d'abord `search_columns`, pour trouver où vit la donnée. Ils

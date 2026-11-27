@@ -187,6 +187,15 @@ With `tests.enabled`, a second policy lets the `helm test` pod reach the cluster
 server's health port and `networkPolicy.egress.extra` (where a data catalog's peers go, which
 its `--check` asks), so that the test passes in a namespace that denies egress by default.
 
+## Tools exposed
+
+`server.toolsets` (`MCP_TOOLSETS`), `server.tools` (`MCP_TOOLS`) and `server.excludeTools`
+(`MCP_EXCLUDE_TOOLS`) choose the built-in tools exposed, by group (`discovery`, `profile`,
+`query`), one by one, and by exclusion. `server.toolsets: null`, the default, keeps every group.
+The render refuses a name that is no group or no tool, and a choice that leaves no tool; NOTES
+says the tools exposed and warns when no `discovery` tool is left. A plugin's tools are exposed
+unless `server.excludeTools` names them. None of these opens a write.
+
 ## Environment
 
 `extraEnv` adds variables, an extension's own settings for example. One the chart writes in

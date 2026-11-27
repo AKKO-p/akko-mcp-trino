@@ -100,6 +100,24 @@ says why.
 | `MCP_TOOL_PLUGINS` | comma-separated names of registrars installed under the entry point group `akko_mcp_trino.tools` | none |
 | `MCP_EXTENSIONS` | comma-separated names of extensions installed under the entry point group `akko_mcp_trino.extensions`, the [modules](modules.md) included | none |
 
+## Tools exposed
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `MCP_TOOLSETS` | comma-separated groups of built-in tools: `discovery` (`search_columns`, `list_catalogs`, `list_schemas`, `list_tables`, `describe_schema`, `describe_table`), `profile` (`profile_table`), `query` (`explain_query`, `execute_query`). Set to an empty value, no group | unset: every group, the nine tools |
+| `MCP_TOOLS` | comma-separated built-in tools added to the groups | none |
+| `MCP_EXCLUDE_TOOLS` | comma-separated tools left out, a plugin's or an extension's included; it wins over the two others | none |
+
+A tool left out is not registered: it is absent from `tools/list`, and a call to it is refused
+as one to an unknown tool. A name that is no group or no tool refuses to start, and so does a
+choice that leaves no tool. The tools of `MCP_TOOL_PLUGINS` and `MCP_EXTENSIONS` belong to no
+group: they are exposed unless `MCP_EXCLUDE_TOOLS` names them. None of these settings opens a
+write: the read-only check is `TRINO_READ_ONLY`'s alone. Leaving out every `discovery` tool is
+warned of, as the agent would then write its queries without listing or describing the tables.
+`--check` and the start log say the tools exposed, and when they are fewer than nine the
+instructions sent to MCP hosts list them. A later version may tie a group to a scope of the
+caller's token.
+
 ## Modules
 
 | Variable | Meaning | Default |

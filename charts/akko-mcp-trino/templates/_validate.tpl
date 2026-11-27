@@ -37,6 +37,24 @@ something open renders, and NOTES.txt says what it leaves open (mcp-trino.warnin
 {{- end }}
 {{- end }}
 
+{{- /* The tools exposed: the server's own rules, at render time. */}}
+{{- $sets := include "mcp-trino.toolsets" . | fromJson }}
+{{- range ($v.server.toolsets | default list) }}
+{{- if not (hasKey $sets .) }}
+{{- fail (printf "server.toolsets names %q, which is no group of tools; the groups are discovery, profile, query." .) }}
+{{- end }}
+{{- end }}
+{{- $builtin := list }}
+{{- range (list "discovery" "profile" "query") }}{{- $builtin = concat $builtin (get $sets .) }}{{- end }}
+{{- range $v.server.tools }}
+{{- if not (has . $builtin) }}
+{{- fail (printf "server.tools names %q, which is no tool of the server; the tools are %s (a plugin's tools are exposed unless server.excludeTools names them)." . (join ", " $builtin)) }}
+{{- end }}
+{{- end }}
+{{- if and (not (include "mcp-trino.exposedTools" . | fromJsonArray)) (not $v.server.toolPlugins) (not $v.server.extensions) }}
+{{- fail "server.toolsets, server.tools and server.excludeTools leave no tool exposed: name a group (discovery, profile, query) or a tool." }}
+{{- end }}
+
 {{- /* The door. */}}
 {{- if and $v.auth.required (not $v.auth.enabled) }}
 {{- fail "auth.required=true with auth.enabled=false: a door that requires a token it cannot verify, which the server refuses at start. Enable auth, or turn both off (service mode only)." }}
@@ -166,6 +184,10 @@ WARNING: the door is open (auth.enabled={{ $v.auth.enabled }}, auth.required={{ 
 {{ end }}
 {{- if and $v.auth.enabled (not (hasPrefix "https://" $v.auth.jwksUrl)) }}
 WARNING: the JWKS is fetched over http ({{ $v.auth.jwksUrl }}): anyone on the path could substitute keys and mint accepted tokens. Safe setting: an https auth.jwksUrl.
+{{ end }}
+{{- $exposed := include "mcp-trino.exposedTools" . | fromJsonArray }}
+{{- if and $exposed (not (has "list_tables" $exposed)) (not (has "describe_table" $exposed)) (not (has "search_columns" $exposed)) (not (has "list_catalogs" $exposed)) (not (has "list_schemas" $exposed)) (not (has "describe_schema" $exposed)) }}
+WARNING: server.toolsets leaves out every discovery tool: the agent writes its queries without listing or describing the tables it may read. Safe setting: add discovery.
 {{ end }}
 {{- if ne $v.service.type "ClusterIP" }}
 WARNING: service.type={{ $v.service.type }} serves the MCP port in plain HTTP outside the cluster, bearer tokens in clear. Safe setting: a ClusterIP Service behind an Ingress or a Route with TLS, or a TLS-terminating load balancer in front.

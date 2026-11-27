@@ -66,6 +66,30 @@ app.kubernetes.io/component: server
 {{- if or .Values.openshift (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}true{{- end }}
 {{- end }}
 
+{{/* The built-in tools by group, as the server has them (TOOLSETS of config.py). */}}
+{{- define "mcp-trino.toolsets" -}}
+{{- toJson (dict
+  "discovery" (list "search_columns" "list_catalogs" "list_schemas" "list_tables" "describe_schema" "describe_table")
+  "profile" (list "profile_table")
+  "query" (list "explain_query" "execute_query")) }}
+{{- end }}
+
+{{/* The built-in tools the values expose, in the server's order, as a JSON list. */}}
+{{- define "mcp-trino.exposedTools" -}}
+{{- $sets := include "mcp-trino.toolsets" . | fromJson }}
+{{- $groups := ternary (list "discovery" "profile" "query") (.Values.server.toolsets | default list) (kindIs "invalid" .Values.server.toolsets) }}
+{{- $chosen := list }}
+{{- range $groups }}{{- $chosen = concat $chosen (get $sets . | default list) }}{{- end }}
+{{- $chosen = concat $chosen .Values.server.tools }}
+{{- $exposed := list }}
+{{- range (list "discovery" "profile" "query") }}
+{{- range (get $sets .) }}
+{{- if and (has . $chosen) (not (has . $.Values.server.excludeTools)) }}{{- $exposed = append $exposed . }}{{- end }}
+{{- end }}
+{{- end }}
+{{- toJson $exposed }}
+{{- end }}
+
 {{/* The transport's MCP endpoint. */}}
 {{- define "mcp-trino.endpoint" -}}
 {{- ternary "/sse" "/mcp" (eq .Values.transport "sse") }}
@@ -79,6 +103,7 @@ they would silently override the render-time checks.
 {{- toJson (dict
   "MCP_TRANSPORT" "transport" "MCP_PORT" "ports.mcp" "MCP_HEALTH_PORT" "ports.health"
   "MCP_SERVER_NAME" "server.name" "MCP_TOOL_PLUGINS" "server.toolPlugins" "MCP_EXTENSIONS" "server.extensions"
+  "MCP_TOOLSETS" "server.toolsets" "MCP_TOOLS" "server.tools" "MCP_EXCLUDE_TOOLS" "server.excludeTools"
   "TRINO_HOST" "trino.host" "TRINO_PORT" "trino.port" "TRINO_HTTP_SCHEME" "trino.httpScheme"
   "TRINO_CATALOG" "trino.catalog" "TRINO_IDENTITY_MODE" "trino.identityMode" "TRINO_READ_ONLY" "trino.readOnly"
   "TRINO_VERIFY" "trino.verify and ca" "TRINO_SOURCE" "trino.source" "TRINO_USER" "trino.user"

@@ -78,6 +78,16 @@ server:
   # trino-tags, and no tool plugin.
   toolPlugins: []
   extensions: []
+  # The built-in tools exposed: the groups of `toolsets` (MCP_TOOLSETS; null keeps every
+  # group: discovery, profile, query), plus the tools of `tools` (MCP_TOOLS), minus those of
+  # `excludeTools` (MCP_EXCLUDE_TOOLS), which may also name a plugin's tool. A name that is no
+  # group or no tool refuses to render; so does a choice that leaves no tool. None of these
+  # opens a write: trino.readOnly stays on its own.
+  #   toolsets: [discovery, query]
+  #   excludeTools: [explain_query]
+  toolsets: null
+  tools: []
+  excludeTools: []
 
 trino:
   # The coordinator (TRINO_HOST, TRINO_PORT). Required.
