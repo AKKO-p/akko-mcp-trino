@@ -797,6 +797,14 @@
                 "type": "object"
               }
             },
+            "trinoPort": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 65535
+            },
             "identityProvider": {
               "type": "object",
               "properties": {

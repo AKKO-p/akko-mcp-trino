@@ -48,7 +48,7 @@ spec:
     - to:
         {{- toYaml $np.egress.trino | nindent 8 }}
       ports:
-        - port: {{ .Values.trino.port }}
+        - port: {{ $np.egress.trinoPort | default .Values.trino.port }}
           protocol: TCP
     {{- if $np.egress.identityProvider.to }}
     - to:

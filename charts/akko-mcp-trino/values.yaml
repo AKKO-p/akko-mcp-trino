@@ -368,8 +368,13 @@ networkPolicy:
         - port: 5353
           protocol: TCP
     # Trino's peers (an ipBlock, or a namespace and pod selector). Required when enabled.
-    # The port is trino.port.
+    # The port is trinoPort, or trino.port when it is null.
     trino: []
+    # The port Trino's pods listen on, when trino.host is a Service whose port (trino.port)
+    # forwards to another one (targetPort): for a pod selector, a NetworkPolicy matches the
+    # port of the pod, not the Service's. Null: trino.port, which suits an ipBlock or a Service
+    # whose port and targetPort are the same.
+    trinoPort: null
     # The identity provider's peers (JWKS and token endpoint) and ports. Required when
     # auth is enabled.
     identityProvider:

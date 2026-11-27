@@ -177,7 +177,10 @@ With `networkPolicy.enabled: true`, the server's pods accept:
   the Route is enabled;
 - the health port from the release's `helm test` pod and `networkPolicy.metrics.from`;
 
-and reach only the cluster DNS, Trino (`networkPolicy.egress.trino`, on `trino.port`),
+and reach only the cluster DNS, Trino (`networkPolicy.egress.trino`, on `trino.port`, or on
+`networkPolicy.egress.trinoPort` when Trino's Service forwards `trino.port` to another
+port of its pods: for a pod selector, a NetworkPolicy matches the pod's port, so a Service
+443 to 8443 needs `trinoPort: 8443`),
 the identity provider (`networkPolicy.egress.identityProvider`) and
 `networkPolicy.egress.extra`. Trino's peers are required, and so are the identity
 provider's when the door is on, and the ingress controller's with an Ingress. The health
