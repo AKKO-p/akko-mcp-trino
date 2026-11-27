@@ -10,14 +10,14 @@
 # never touches an existing one. The machine that runs it should have 6 GiB available.
 #
 #   integration/helm/run.sh
-#   NS=my-test MCP_IMAGE=akkoai/akko-mcp-trino:0.8.4 integration/helm/run.sh
+#   NS=my-test MCP_IMAGE=akkoai/akko-mcp-trino:0.8.5 integration/helm/run.sh
 #
 # Needs kubectl, helm 3, openssl and python3 on the machine that runs it.
 set -uo pipefail
 cd "$(dirname "$0")"
 NS="${NS:-mcp-chart-test}"
 RELEASE="${RELEASE:-mcp}"
-MCP_IMAGE="${MCP_IMAGE:-akkoai/akko-mcp-trino:0.8.4}"
+MCP_IMAGE="${MCP_IMAGE:-akkoai/akko-mcp-trino:0.8.5}"
 CHART=../../charts/akko-mcp-trino
 FULL="$RELEASE-akko-mcp-trino"
 ISSUER=https://idp.example.internal/realms/test
