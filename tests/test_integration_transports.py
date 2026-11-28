@@ -469,3 +469,100 @@ def test_the_real_sdk_shows_hosts_the_annotation_the_read_only_setting_implies(
     assert found["execute_query"].read_only_hint is read_only
     assert found["execute_query"].destructive_hint is (not read_only)
     assert found["list_tables"].read_only_hint is True
+
+
+def test_the_real_transport_audits_each_refusal_and_the_call_says_who_and_which_client(
+    monkeypatch,
+):
+    """The real SDK app and client: a valid call, then the refusals of the door and of the
+    transport behind it, each one audit line with its reason, never the token."""
+    import httpx
+
+    import akko_mcp_trino.trino_client as tc
+    from akko_mcp_trino.audit import InMemoryAudit
+    from akko_mcp_trino.metrics import Metrics
+
+    class _NamedCursor(_FakeCursor):
+        query_id = "20261128_091502_00007_abcde"
+
+    monkeypatch.setattr(
+        tc.trino.dbapi,
+        "connect",
+        lambda **kw: type("C", (), {"cursor": lambda self: _NamedCursor(kw.get("user"))})(),
+    )
+    port = _free_port()
+    cfg = Config(
+        **{
+            **_config("streamable-http", port).__dict__,
+            "allowed_hosts": f"127.0.0.1:{port}",
+        }
+    )
+    sink, metrics = InMemoryAudit(), Metrics()
+    mcp, _ = build_server(cfg, audit=sink)
+    provider = auth.JwksJwtAuth(
+        cfg.jwks_url, cfg.oidc_issuer, cfg.oidc_audience, jwks_client=_FakeJwks()
+    )
+    app = build_asgi_app(cfg, mcp, auth_provider=provider, audit=sink, metrics=metrics)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+    threading.Thread(target=server.run, daemon=True).start()
+    for _ in range(100):
+        if server.started:
+            break
+        time.sleep(0.05)
+    url = f"http://127.0.0.1:{port}/mcp"
+    token = _token("alice")
+    try:
+        anyio.run(
+            _call,
+            "streamable-http",
+            url,
+            {"Authorization": f"Bearer {token}"},
+            "execute_query",
+            {"sql": "SELECT 1"},
+        )
+        forged = token[:-4] + "AAAA"
+        mcp_headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+        }
+        ping = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+        with httpx.Client() as http:
+            assert http.post(url, json=ping).status_code == 401
+            assert (
+                http.post(url, json=ping, headers={"Authorization": f"Bearer {forged}"}).status_code
+                == 401
+            )
+            good = {"Authorization": f"Bearer {token}", **mcp_headers}
+            assert (
+                http.post(url, json=ping, headers={**good, "Host": "evil.example"}).status_code
+                == 421
+            )
+            assert (
+                http.post(
+                    url, json=ping, headers={**good, "mcp-session-id": "inventee"}
+                ).status_code
+                == 404
+            )
+    finally:
+        server.should_exit = True
+    calls = [e.as_dict() for e in sink.events if e.as_dict()["event"] == "tool_call"]
+    refused = [e.as_dict() for e in sink.events if e.as_dict()["event"] == "refused"]
+    (call,) = calls
+    assert (call["subject"], call["trino_user"], call["identity_mode"]) == (
+        "alice",
+        "svc",
+        "service",
+    )
+    assert call["query_ids"] == ["20261128_091502_00007_abcde"]
+    assert call["client_ip"] == "127.0.0.1" and call["mcp_client"].startswith("mcp")
+    assert [(r["reason"], r["status"]) for r in refused] == [
+        ("missing_token", 401),
+        ("bad_signature", 401),
+        ("host_not_allowed", 421),
+        ("session_invalid", 404),
+    ]
+    assert all(r["client_ip"] == "127.0.0.1" and r["request_id"] for r in refused)
+    assert [r["subject"] for r in refused] == ["", "", "alice", "alice"]
+    assert token not in json.dumps([e.as_dict() for e in sink.events])
+    body = metrics.render()[0].decode()
+    assert 'mcp_trino_request_refusals_total{reason="host_not_allowed"} 1.0' in body

@@ -18,7 +18,7 @@ and refuses any write before it reaches Trino.
 - **Or one identity, only when named** (`service` mode), announced as a warning at start and
   to every host.
 - **Bounded and audited.** 100 rows, 60 s per query, 120 s per tool call by default, one audit
-  line per call, and no token ever written to the logs.
+  line per call and per refusal, JSON lines on request, and no token ever written to the logs.
 - **Nine tools**, for any MCP host and any model: `search_columns` (where the data lives),
   `describe_schema`, `describe_table`, `list_catalogs`, `list_schemas` and `list_tables` (paged),
   `profile_table` (aggregates of the rows you may read), `explain_query` and `execute_query`. Every error carries a `kind` that says what to do about it.

@@ -71,12 +71,12 @@ Voici les claims, par identity provider :
 
 ## fingerprint-audit
 
-Ce module ajoute à la ligne d'audit ce que l'appel a fait, après les champs du cœur, dans cet
-ordre : `request_id`, `tool`, `subject`, `token_id` (le `jti` du token, jamais le token), `ok`,
-`error`, `sql_sha256`, `tables`, `duration_ms`, `rows`, `truncated`, `metadata_served` (les tables
+Ce module ajoute à la ligne d'audit ce que l'appel a fait, après les champs du cœur (voir
+[Audit et journaux](operations.md#un-appel-de-tool)), dans cet ordre : `token_id` (le `jti` du
+token, jamais le token), `sql_sha256`, `tables`, `rows`, `truncated`, `metadata_served` (les tables
 dont la description de catalogue de données est parvenue à l'appelant). Le texte SQL n'a toujours
 aucun champ. Quand une réponse a été coupée, `truncated_reason` (`rows` ou `bytes`) suit
-`metadata_served` ; il est absent sinon.
+`metadata_served` ; il est absent sinon.
 
 `sql_sha256` est le SHA-256 de l'instruction envoyée à Trino pour l'appelant. Un tool qui en envoie
 plusieurs garde la dernière qu'il a notée, celle qui a répondu à l'agent (l'agrégat de
@@ -91,22 +91,30 @@ autre extension ajoute à la ligne n'écrase jamais l'un de ceux-ci : il est r
 autour de la précédente : nommez donc `fingerprint-audit` avant toute autre extension qui enveloppe
 l'audit.
 
-Voici la ligne d'un appel d'`execute_query` dans la suite d'intégration. Le sujet et les
-identifiants sont remplacés par des valeurs fictives ; l'ordre des champs et l'empreinte sont ceux
-de l'exécution :
+Voici la ligne d'un appel d'`execute_query`, écrite par le serveur lors d'une exécution réelle
+(mode `service` derrière une vérification du token, avec `trino-tags` aussi, `MCP_LOG_FORMAT=json`),
+sans son `level` ni son `logger` et mise sur plusieurs lignes :
 
 ```json
 {
-  "request_id": "req-docs-0001",
+  "ts": "2026-11-28T16:15:18.261Z",
+  "event": "tool_call",
+  "request_id": "preuve-087-appel",
   "tool": "execute_query",
-  "subject": "alice_user",
-  "token_id": "jti-docs-0001",
+  "subject": "alice",
+  "client_id": "agent-essai",
+  "mcp_client": "mcp/0.1.0",
+  "client_ip": "198.51.100.7",
+  "identity_mode": "service",
+  "trino_user": "A12345",
   "ok": true,
   "error": "",
-  "sql_sha256": "595c26467ad8ea2d0a0857b4bf5c094d6f6d6bfc8c88ebc289f03a523ce7faf5",
-  "tables": ["tpch.tiny.region"],
-  "duration_ms": 1675,
-  "rows": 1,
+  "duration_ms": 1278,
+  "query_ids": ["20261128_161517_00302_qyb4k"],
+  "token_id": "jti-essai-1",
+  "sql_sha256": "047c266c14197de8cb2a77b806c37d62a5f3dd8459328cd67a2c8691b79433f2",
+  "tables": ["tpch.tiny.nation"],
+  "rows": 3,
   "truncated": false,
   "metadata_served": []
 }

@@ -62,7 +62,7 @@ import trino
 import trino.auth
 from urllib3.exceptions import InsecureRequestWarning
 
-from .audit import ToolCall, current_call, time_allowed
+from .audit import ToolCall, current_call, note, time_allowed
 from .config import Config
 from .identity import current_bearer
 from .token_exchange import TokenExchange
@@ -73,6 +73,21 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # Until Trino answers the POST of a statement, the query has no name and a cancel stops
 # nothing; past its budget, the cancel is tried again this often until the query has one.
 _RECANCEL_SECONDS = 0.05
+
+
+# True while the readiness probe queries Trino: its queries are not the agents' and stay out
+# of the query metrics (the health app counts the probes on their own).
+_probing: contextvars.ContextVar[bool] = contextvars.ContextVar("mcp_trino_probing", default=False)
+
+
+class TrinoNotReady(RuntimeError):
+    """Trino answered, but is not ready to serve: ``code`` says why, in a word the
+    readiness probe may publish (``trino_starting``, ``trino_unavailable``)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        """Keep the ``code`` and the ``message``, which may name the address of Trino."""
+        super().__init__(message)
+        self.code = code
 
 
 class QueryCancelled(Exception):
@@ -363,9 +378,9 @@ def trino_info(config: Config, verify: Any) -> None:
         timeout=5,
     )
     if r.status_code != 200:
-        raise RuntimeError(f"Trino /v1/info: HTTP {r.status_code}")
+        raise TrinoNotReady("trino_unavailable", f"Trino /v1/info: HTTP {r.status_code}")
     if r.json().get("starting", False):
-        raise RuntimeError("Trino is starting")
+        raise TrinoNotReady("trino_starting", "Trino is starting")
 
 
 class JwtIdentity:
@@ -487,10 +502,19 @@ class TrinoClient:
         quiet_unverified_trino(config)
 
     def ping(self) -> None:
-        """Readiness, as the identity mode checks it."""
-        self._identity.ping(self)
+        """Readiness, as the identity mode checks it; its queries stay out of the query
+        metrics."""
+        token = _probing.set(True)
+        try:
+            self._identity.ping(self)
+        finally:
+            _probing.reset(token)
 
-    def _connect(self, user: Optional[str] = None, connection: Optional[tuple] = None):
+    def _connect(
+        self, user: Optional[str] = None, connection: Optional[tuple] = None
+    ) -> tuple[Any, Optional[str]]:
+        """A connection for one query run for ``user``, and the Trino user it sends (None:
+        Trino names the user it authenticated)."""
         cfg = self._config
         trino_user, auth = connection if connection is not None else self._identity.connection(user)
         tags = (self._tags() if self._tags is not None else []) + list(_query_tags.get())
@@ -505,7 +529,7 @@ class TrinoClient:
             request_timeout=cfg.trino_request_timeout,
             source=cfg.trino_source or cfg.server_name,
             client_tags=tags or None,
-        )
+        ), trino_user
 
     def _time_budget(self, timeout: float = 0.0) -> tuple[float, Optional[ToolCall]]:
         """Seconds the next query may run (0: Trino's own limit), and the tool call whose
@@ -617,9 +641,18 @@ class TrinoClient:
         if cancel is not None and cancel.is_set():
             raise QueryCancelled("the query was cancelled before it started")
         budget, call = self._time_budget(timeout)
-        conn = self._connect(user, connection)
+        conn, sent = self._connect(user, connection)
         cursor = conn.cursor()
-        rows = self._fetch(cursor, sql, params, limit + 1, budget, call, cancel)
+        try:
+            rows = self._fetch(cursor, sql, params, limit + 1, budget, call, cancel)
+        finally:
+            # The call's record keeps the id Trino gave the query, failed or not, and the
+            # user Trino saw: the one sent, or, when none was (oauth2), the one it named.
+            query_id = getattr(cursor, "query_id", None)
+            note(
+                query_id=query_id if isinstance(query_id, str) else None,
+                trino_user=sent or user,
+            )
         truncated = len(rows) > limit
         if truncated:
             # The caller gets `limit` rows; the rest of the query is not left running.
@@ -658,7 +691,7 @@ class TrinoClient:
         """
         cap = row_limit if row_limit > 0 else self._config.max_rows
         limit = min(max_rows, cap) if max_rows > 0 else cap
-        if self._metrics is None:
+        if self._metrics is None or _probing.get():
             return self._run(sql, user, params, limit, timeout, cancel=cancel)
         self._metrics.queries.inc()
         start = time.perf_counter()

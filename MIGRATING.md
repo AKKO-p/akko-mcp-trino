@@ -1,5 +1,33 @@
 # Migrating
 
+## From 0.8.7 to the next release
+
+Nothing is removed. A reader of the audit line of 0.8 reads the same fields, with the same
+names and values; some lines and fields are new, and one answer changes:
+
+- **New audit lines.** A request refused before any tool ran now writes a line on `mcp.audit`,
+  with `"event":"refused"`. A collector that took every `mcp.audit` line for a tool call must
+  read `event`: `tool_call` for a call, `refused` for a refusal.
+- **New fields in a call's line.** `ts`, `event`, `client_id`, `mcp_client`, `client_ip`,
+  `identity_mode`, `trino_user`, `query_ids` (and `query_ids_cut` when ids were cut). A parser
+  that refuses unknown fields must accept them.
+- **`/ready`.** A failed check answers `{"status":"error","reason":"<code>"}`; the `detail`
+  field, which held the text of the exception, is gone. A probe reads the status code and is
+  not affected; a dashboard that showed `detail` shows `reason`, and the server's log has the
+  exception.
+- **Query metrics.** `mcp_trino_queries_total` and its siblings no longer count the readiness
+  probes: on an idle server the rate drops to the agents' queries. The probes are in
+  `mcp_trino_ready_checks_total`.
+- **`fingerprint-audit`.** The fields keep their names; their order is the core's line, then
+  the fingerprint's. A reader by name is not affected.
+- **An extension's audit field** named like a field of the core's line is dropped and counted
+  in `extra_dropped`, where it used to replace the core's value.
+
+To get the lines a log collector reads without a parser, set `MCP_LOG_FORMAT=json` (chart:
+`server.logFormat: json`); behind an ingress or a router, set `MCP_TRUSTED_PROXIES` to its
+addresses (chart: `server.trustedProxies`). A later minor release may make `json` the default
+over HTTP; it will be announced here.
+
 ## From 0.8.6 to 0.8.7
 
 - **Boolean settings are strict.** `TRINO_READ_ONLY`, `MCP_AUTH_ENABLED`, `MCP_AUTH_REQUIRED`,

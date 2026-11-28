@@ -182,9 +182,14 @@ au démarrage, et ne coupe jamais le contrôle.
 
 ## Audit
 
-Chaque appel de tool écrit une ligne d'audit, indexée par `X-Request-Id`. La ligne ne contient
-jamais le token ni le texte SQL : elle dit qui a appelé quel tool, avec quel résultat, et pendant
-combien de temps. [Exploitation](operations.md#audit) en donne les champs.
+Chaque appel de tool écrit une ligne d'audit, indexée par `X-Request-Id`, comme chaque requête
+refusée avant qu'un tool ne tourne : pas de token, un token refusé (avec la raison : expiré, autre
+audience, mauvaise signature…), un client ou un scope qu'une extension refuse, un hôte, un corps
+ou une session que le transport refuse. Chaque ligne dit quand (`ts`, UTC), depuis quelle adresse
+et, pour un appel, qui a appelé, sous quelle identité Trino a exécuté ses requêtes et avec quels
+identifiants de requête. Aucune ligne ne contient le token, un claim d'un token non
+vérifié, ni le texte SQL. Le serveur n'envoie de télémétrie à personne.
+[Exploitation](operations.md#audit-et-journaux) donne chaque champ et chaque raison.
 
 ## Signaler une vulnérabilité
 

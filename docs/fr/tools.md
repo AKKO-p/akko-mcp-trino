@@ -468,4 +468,4 @@ Quand Trino ne trouve pas une colonne (`COLUMN_NOT_FOUND`, avec son nom) dans `e
 
 Le nom de la table vient de l'instruction de l'agent, jamais de Trino : le hint ne montre donc rien
 que l'appelant ne pouvait déjà nommer. La ligne d'audit garde seulement le code de l'erreur (voir
-[Audit](operations.md#audit)).
+[Audit](operations.md#audit-et-journaux)).

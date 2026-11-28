@@ -67,12 +67,14 @@ CORE_MODULES = {
     "extensions",
     "health",
     "identity",
+    "logs",
     "metrics",
     "middleware",
     "modules/__init__",
     "modules/fingerprint_audit",
     "modules/token_policy",
     "modules/trino_tags",
+    "otel",
     "parse_pool",
     "parse_worker",
     "plugins",
@@ -173,9 +175,26 @@ def test_the_core_never_sends_trino_the_callers_own_token():
     assert "return bearer" not in source
 
 
-def test_the_core_audit_line_has_its_six_fields_and_trino_gets_only_its_two_tags():
+def test_the_core_audit_line_has_its_fields_and_trino_gets_only_its_two_tags():
     line = AuditEvent(request_id="r", tool="t", subject="s", ok=True).as_dict()
-    assert set(line) == {"request_id", "tool", "subject", "ok", "error", "duration_ms"}
+    assert set(line) == {
+        # Since 0.7.
+        "request_id",
+        "tool",
+        "subject",
+        "ok",
+        "error",
+        "duration_ms",
+        # Since 0.8.7: when, what, who for Trino, from where, and the join with Trino.
+        "ts",
+        "event",
+        "client_id",
+        "mcp_client",
+        "client_ip",
+        "identity_mode",
+        "trino_user",
+        "query_ids",
+    }
     # Only the trino-tags module, loaded when MCP_EXTENSIONS names it, makes the tags of a call.
     makers = {
         p.relative_to(CORE).as_posix()

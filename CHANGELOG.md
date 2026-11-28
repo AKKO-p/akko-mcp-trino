@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Every request refused before a tool runs leaves an audit line on the `mcp.audit` logger (`"event":"refused"`) with its `request_id`, `ts`, a stable `reason`, the HTTP `status`, the client's address, and the `subject` and `client_id` of a token that was verified, never the token nor a claim of a token that was not. The reasons: `missing_token`, `invalid_token`, `token_expired`, `token_not_yet_valid`, `wrong_audience`, `wrong_issuer`, `bad_signature`, `wrong_algorithm`, `missing_claim`, `no_user_claim`, `unknown_key`, `jwks_unreachable` at the door; an extension's own (`client_not_allowed`, `insufficient_scope`); `host_not_allowed`, `origin_not_allowed`, `payload_too_large`, `session_invalid`, `bad_request`, `method_not_allowed`, `not_acceptable`, `unsupported_media_type`, `conflict`, `not_found` for what the transport refuses behind the door. A refusal over stdio, at start or in `oauth2` mode on a call, is audited too, with `status` 0. The new counter `mcp_trino_request_refusals_total{reason}` counts them; an extension's reason that is not a short lower-case word is counted as `extension_refused`, so that the labels stay few.
+- `MCP_LOG_FORMAT=text|json`: in `json`, every line, the audit's and the technical ones, uvicorn's included, is one JSON object with nothing before it: `ts` (UTC, ISO 8601, milliseconds), `level`, `logger`, then `msg`, or the audit's fields at the top level. `text`, the default, keeps the lines of earlier versions.
+- `MCP_TRUSTED_PROXIES`: the proxies, as CIDR or addresses, whose `X-Forwarded-For` gives the client's address; read from the right, it stops at the first address that is not a trusted proxy. None by default: the address of the peer.
+- The audit line of a tool call gains `ts`, `event` (`tool_call`), `client_id` (the application the token was issued to, a verified claim), `mcp_client` (the name and version the MCP client declared at initialization, bounded, printable ASCII, never verified), `client_ip`, `identity_mode`, `trino_user` (the user Trino saw for the call's queries) and `query_ids` (the ids Trino gave them, failed queries included, up to `MCP_AUDIT_MAX_NAMES`, then `query_ids_cut`).
+- `mcp_trino_ready_checks_total{result}` counts the readiness probes, by `ready` or the code of the reason.
+- Helm chart: `server.logFormat` (`MCP_LOG_FORMAT`) and `server.trustedProxies` (`MCP_TRUSTED_PROXIES`), checked by `values.schema.json`.
+- [Operations](docs/en/operations.md#audit-and-logs) has a reference section on audit and logs: every field, every reason, real lines, what is logged where, sending the lines to a SIEM, a test and a production profile, and what OpenTelemetry may emit.
+
+### Changed
+- `/ready` answers `{"status":"error","reason":"<code>"}` when Trino is not ready, never the exception, whose text named the host and port of Trino and what its driver said: `trino_starting`, `trino_unavailable`, `trino_auth_failed`, `trino_permission_denied`, `trino_query_failed`, `trino_http_error`, `trino_tls_failed`, `trino_timeout`, `trino_unreachable`, `identity_refused` or `trino_error`. The exception goes to the server's log, once each time the reason changes, and so does the return to ready.
+- The readiness probe's queries (`SELECT 1` in `impersonation` and `service`) are no longer counted in `mcp_trino_queries_total`, `mcp_trino_query_errors_total` and `mcp_trino_query_duration_seconds`; they have their own counter.
+- An extension's field (`AuditEvent.extra`) never takes the place of a field of the core's line: it is dropped and counted in `extra_dropped`, as `fingerprint-audit` already did for its own fields.
+- With `fingerprint-audit`, the line is the core's, in the core's order, then the fingerprint's fields: `token_id` no longer sits after `subject`, nor `duration_ms` after `tables`.
+- The JWKS keys' cache raises `PyJWKClientConnectionError` for a key missing after a failed read of the JWKS, so that the audit says `jwks_unreachable` rather than `unknown_key`.
+
+### Fixed
+- `OTEL_PYTHON_TRACER_PROVIDER` naming a tracer provider that no installed package provides (a platform that sets the OpenTelemetry variables on every pod) made the server fail at import, in the MCP SDK. The variable is now dropped before the SDK is imported, the server says so at start and in `--check`, and it emits no span, as without the variable.
+
 ## [0.8.7] - 2026-11-28
 
 ### Security

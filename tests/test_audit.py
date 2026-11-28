@@ -42,16 +42,26 @@ def _event(**over) -> AuditEvent:
 
 
 def test_event_is_frozen_and_serialisable():
-    e = _event()
+    e = _event(ts="2026-11-28T09:15:02.481Z")
     doc = e.as_dict()
     assert doc == {
+        "ts": "2026-11-28T09:15:02.481Z",
+        "event": "tool_call",
         "request_id": "req-1",
         "tool": "execute_query",
         "subject": "alice_admin",
+        "client_id": "",
+        "mcp_client": "",
+        "client_ip": "",
+        "identity_mode": "",
+        "trino_user": "",
         "ok": True,
         "error": "",
         "duration_ms": 0,
+        "query_ids": [],
     }
+    with pytest.raises(AttributeError):
+        e.ok = False  # type: ignore[misc]
 
 
 def test_event_has_no_field_that_could_hold_a_token():
@@ -291,6 +301,13 @@ LINE_0_8_DEV = (
     '{"request_id":"edge-42","tool":"describe_schema","subject":"alice","ok":true,'
     '"error":"","duration_ms":84}'
 )
+# The same call's line in 0.8.7: the fields of 0.8 keep their names and values; the new ones
+# come in addition, and a cut list of names still leaves no trace in the core's line.
+LINE_0_8_7 = (
+    '{"ts":"2026-11-28T09:15:02.481Z","event":"tool_call","request_id":"edge-42",'
+    '"tool":"describe_schema","subject":"alice","client_id":"","mcp_client":"","client_ip":"",'
+    '"identity_mode":"","trino_user":"","ok":true,"error":"","duration_ms":84,"query_ids":[]}'
+)
 
 
 def test_the_core_line_is_the_same_byte_for_byte_when_names_are_cut(caplog):
@@ -308,9 +325,12 @@ def test_the_core_line_is_the_same_byte_for_byte_when_names_are_cut(caplog):
                 ok=True,
                 duration_ms=84,
                 call=call,
+                ts="2026-11-28T09:15:02.481Z",
             )
         )
-    assert [r.getMessage() for r in caplog.records] == [LINE_0_8_DEV]
+    assert [r.getMessage() for r in caplog.records] == [LINE_0_8_7]
+    line = json.loads(LINE_0_8_7)
+    assert json.loads(LINE_0_8_DEV).items() <= line.items(), "a reader of 0.8 reads the same"
     assert call.tables_cut == 1, "the record was cut, the line does not say it"
 
 

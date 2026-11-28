@@ -247,6 +247,8 @@ PodDisruptionBudget and the anti-affinity.
 | `ports.mcp`, `ports.health` | listening ports (`MCP_PORT`, `MCP_HEALTH_PORT`) | `3000`, `3001` |
 | `server.name` | name announced to hosts (`MCP_SERVER_NAME`) | the server's |
 | `server.toolPlugins`, `server.extensions` | plugins and extensions installed in the image (`MCP_TOOL_PLUGINS`, `MCP_EXTENSIONS`) | `[]` |
+| `server.logFormat` | the log lines, `text` or `json` (`MCP_LOG_FORMAT`); `json` is advised in production, see [Audit and logs](../../docs/en/operations.md#audit-and-logs) | `text` |
+| `server.trustedProxies` | the proxies (CIDR or addresses) whose `X-Forwarded-For` gives the client's address in the audit (`MCP_TRUSTED_PROXIES`) | `[]` |
 | `trino.host`, `trino.port` | the coordinator (`TRINO_HOST`, `TRINO_PORT`) | required, `8443` |
 | `trino.httpScheme` | `http` or `https` (`TRINO_HTTP_SCHEME`) | `https` |
 | `trino.catalog` | session catalog, never `system` (`TRINO_CATALOG`) | required |

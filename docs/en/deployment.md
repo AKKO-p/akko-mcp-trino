@@ -71,8 +71,9 @@ curl -s localhost:3001/ready    # {"status":"ready"}    jwt: Trino's /v1/info; i
 curl -s localhost:3001/metrics  # Prometheus exposition
 ```
 
-When Trino does not answer, `/ready` returns `503` with `{"status": "error", "detail": ...}`, the
-detail being the error the check raised.
+When Trino does not answer, `/ready` returns `503` with `{"status": "error", "reason": ...}`, a
+short code such as `trino_unreachable` or `trino_auth_failed`, never the error itself, which goes
+to the server's log ([Health and metrics](operations.md#health-and-metrics) lists the codes).
 
 ## Transports
 

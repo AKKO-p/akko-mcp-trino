@@ -70,11 +70,11 @@ Here are the claims, by identity provider:
 
 ## fingerprint-audit
 
-This module adds to the audit line what the call did, after the core's fields, in this order:
-`request_id`, `tool`, `subject`, `token_id` (the token's `jti`, never the token), `ok`, `error`,
-`sql_sha256`, `tables`, `duration_ms`, `rows`, `truncated`, `metadata_served` (the tables whose
-data catalog description reached the caller). The SQL text still has no field. When an answer
-was cut, `truncated_reason` (`rows` or `bytes`) follows `metadata_served`, and is absent otherwise.
+This module adds to the audit line what the call did, after the core's fields (see
+[Audit and logs](operations.md#a-tool-call)), in this order: `token_id` (the token's `jti`, never
+the token), `sql_sha256`, `tables`, `rows`, `truncated`, `metadata_served` (the tables whose data
+catalog description reached the caller). The SQL text still has no field. When an answer was cut,
+`truncated_reason` (`rows` or `bytes`) follows `metadata_served`, and is absent otherwise.
 
 `sql_sha256` is the SHA-256 of the statement sent to Trino for the caller. A tool that sends
 several keeps the last one it noted, the one that answered the agent (the aggregate of
@@ -87,21 +87,30 @@ extension adds to the line never overwrites one of these: it is dropped and coun
 `extra_dropped`. The server wraps the audit in the order of `MCP_EXTENSIONS`, each wrapper around
 the one before, so name `fingerprint-audit` before any other extension that wraps the audit.
 
-Here is the line of an `execute_query` call in the integration suite. The subject and the ids are
-replaced by fictitious ones; the field order and the digest are those of the run:
+Here is the line of an `execute_query` call, written by the server in a real run (`service`
+mode behind a token check, with `trino-tags` too, `MCP_LOG_FORMAT=json`), without its `level` and
+`logger` and put on several lines:
 
 ```json
 {
-  "request_id": "req-docs-0001",
+  "ts": "2026-11-28T16:15:18.261Z",
+  "event": "tool_call",
+  "request_id": "preuve-087-appel",
   "tool": "execute_query",
-  "subject": "alice_user",
-  "token_id": "jti-docs-0001",
+  "subject": "alice",
+  "client_id": "agent-essai",
+  "mcp_client": "mcp/0.1.0",
+  "client_ip": "198.51.100.7",
+  "identity_mode": "service",
+  "trino_user": "A12345",
   "ok": true,
   "error": "",
-  "sql_sha256": "595c26467ad8ea2d0a0857b4bf5c094d6f6d6bfc8c88ebc289f03a523ce7faf5",
-  "tables": ["tpch.tiny.region"],
-  "duration_ms": 1675,
-  "rows": 1,
+  "duration_ms": 1278,
+  "query_ids": ["20261128_161517_00302_qyb4k"],
+  "token_id": "jti-essai-1",
+  "sql_sha256": "047c266c14197de8cb2a77b806c37d62a5f3dd8459328cd67a2c8691b79433f2",
+  "tables": ["tpch.tiny.nation"],
+  "rows": 3,
   "truncated": false,
   "metadata_served": []
 }

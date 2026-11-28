@@ -22,6 +22,11 @@ import inspect
 from typing import Any, Callable, Iterable, Sequence, Tuple
 
 from . import __version__
+from .audit import (
+    mcp_client_label,
+    reset_current_mcp_client,
+    set_current_mcp_client,
+)
 from .config import BUILTIN_TOOLS, Config, names_of
 from .context import ContextChain, ContextLoop, ContextProvider, ContextSettings, ContextSetup
 from .extensions import Extension
@@ -70,9 +75,16 @@ class _AuditedServer:
     output is kept; a plugin may pass ``structured_output=False`` to send its answers
     once, as text."""
 
-    def __init__(self, mcp: Any, audit: Any, budget_seconds: float, max_names: int) -> None:
+    def __init__(
+        self,
+        mcp: Any,
+        audit: Any,
+        budget_seconds: float,
+        max_names: int,
+        identity_mode: str = "",
+    ) -> None:
         self._mcp, self._audit, self._budget = mcp, audit, budget_seconds
-        self._max_names = max_names
+        self._max_names, self._identity_mode = max_names, identity_mode
         self.names: list[str] = []  # the tools a plugin or an extension added
 
     def tool(self, *args: Any, **kwargs: Any) -> Callable[[Callable], Callable]:
@@ -89,6 +101,7 @@ class _AuditedServer:
                     name=name,
                     budget_seconds=self._budget,
                     max_names=self._max_names,
+                    identity_mode=self._identity_mode,
                 )
             )
 
@@ -99,12 +112,33 @@ class _AuditedServer:
         name = kwargs.get("name") or (args[0] if args else None)
         self.names.append(name or fn.__name__)
         wrapped = audited(
-            self._audit, fn, name=name, budget_seconds=self._budget, max_names=self._max_names
+            self._audit,
+            fn,
+            name=name,
+            budget_seconds=self._budget,
+            max_names=self._max_names,
+            identity_mode=self._identity_mode,
         )
         return self._mcp.add_tool(wrapped, *args, **kwargs)
 
     def __getattr__(self, attr: str) -> Any:
         return getattr(self._mcp, attr)
+
+
+async def bind_mcp_client(ctx: Any, call_next: Callable[[Any], Any]) -> Any:
+    """The SDK middleware that binds, while a message is handled, the MCP client as it
+    declared itself (``clientInfo``: at initialization, or in the request's ``_meta`` from the
+    2026-07-28 revision): its name and version, bounded, for the audit line. Declared, never
+    verified: any client may write any name."""
+    params = getattr(getattr(ctx, "session", None), "client_params", None)
+    info = getattr(params, "client_info", None)
+    token = set_current_mcp_client(
+        mcp_client_label(getattr(info, "name", None), getattr(info, "version", None))
+    )
+    try:
+        return await call_next(ctx)
+    finally:
+        reset_current_mcp_client(token)
 
 
 def _takes_tools(registrar: Any) -> bool:
@@ -183,6 +217,9 @@ def build_server(
     if audit is not None:
         for ext in exts:
             audit = ext.wrap_audit(audit)
+    middleware = getattr(mcp, "middleware", None)
+    if isinstance(middleware, list):
+        middleware.append(bind_mcp_client)
     # The loop is only built here: its thread starts once every tool is registered.
     loop = ContextLoop()
     context = None
@@ -210,6 +247,7 @@ def build_server(
         search_concurrency=config.search_concurrency,
         search_max_threads=config.search_max_threads,
         audit_max_names=config.audit_max_names,
+        identity_mode=config.trino_identity_mode,
         describe_max_columns=config.describe_max_columns,
         extra_reads=parse_extra_reads(config.extra_read_commands),
         context=context,
@@ -230,7 +268,13 @@ def build_server(
         clean_cells=config.clean_cells,
         parser=ParsePool(config.sql_parse_workers, config.sql_parse_seconds, metrics=metrics),
     )
-    plugin_view = _AuditedServer(mcp, audit, config.call_timeout_seconds, config.audit_max_names)
+    plugin_view = _AuditedServer(
+        mcp,
+        audit,
+        config.call_timeout_seconds,
+        config.audit_max_names,
+        config.trino_identity_mode,
+    )
     registrars = [r for ext in exts for r in ext.tool_registrars()]
     for registrar in [*registrars, *extra_tool_registrars]:
         if _takes_tools(registrar):

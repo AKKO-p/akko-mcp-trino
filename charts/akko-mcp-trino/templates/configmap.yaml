@@ -55,6 +55,10 @@ data:
   {{- with $v.server.excludeTools }}
   MCP_EXCLUDE_TOOLS: {{ join "," . | quote }}
   {{- end }}
+  MCP_LOG_FORMAT: {{ $v.server.logFormat | quote }}
+  {{- with $v.server.trustedProxies }}
+  MCP_TRUSTED_PROXIES: {{ join "," . | quote }}
+  {{- end }}
   TRINO_HOST: {{ $v.trino.host | quote }}
   TRINO_PORT: {{ $v.trino.port | quote }}
   TRINO_HTTP_SCHEME: {{ $v.trino.httpScheme | quote }}

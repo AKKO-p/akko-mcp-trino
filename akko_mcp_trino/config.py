@@ -8,6 +8,7 @@ An extension reads its own settings from the environment it is given (see
 
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 import re
@@ -39,6 +40,28 @@ BUILTIN_TOOLS: tuple[str, ...] = tuple(name for group in TOOLSETS.values() for n
 def names_of(value: str) -> list[str]:
     """A comma-separated list, each name stripped, the empty ones dropped."""
     return [name.strip() for name in value.split(",") if name.strip()]
+
+
+# The formats of the server's log lines (MCP_LOG_FORMAT): Python's ``LEVEL:logger:message``,
+# or one JSON object a line.
+LOG_FORMATS = ("text", "json")
+
+
+def trusted_networks(value: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """The networks ``MCP_TRUSTED_PROXIES`` lists, comma-separated (CIDR, or one address);
+    raises ValueError on one that is neither."""
+    networks = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(item, strict=False))
+        except ValueError:
+            raise ValueError(
+                f"MCP_TRUSTED_PROXIES: {item!r} is not an address nor a network (CIDR)"
+            ) from None
+    return tuple(networks)
 
 
 JWT_ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512")
@@ -346,6 +369,13 @@ class Config:
     # The names each list of a call's audit record keeps (its tables, the tables whose
     # description it served); the others are counted, once each, never written.
     audit_max_names: int = DEFAULT_AUDIT_MAX_NAMES
+    # The log lines: `text`, Python's `LEVEL:logger:message` (the default in 0.8), or
+    # `json`, one JSON object a line with `ts`, `level` and `logger`, the audit's fields
+    # at the top level. An audit line says when it was written (`ts`) in both.
+    log_format: str = "text"
+    # The proxies whose X-Forwarded-For the server reads for the client's address in the
+    # audit (comma-separated CIDR or addresses); none by default: the peer's address.
+    trusted_proxies: str = ""
     # A page of `describe_schema`: at most this many tables, and whole tables only while
     # their columns add up to this many at most; the first table of a page comes whole,
     # however wide, and the answer says when a page was shortened.
@@ -540,6 +570,14 @@ class Config:
                 f"MCP_SQL_PARSE_WORKERS={self.sql_parse_workers}: statements are parsed by 1 "
                 "worker process or more"
             )
+        if self.log_format not in LOG_FORMATS:
+            found.append(
+                f"MCP_LOG_FORMAT={self.log_format!r}: expected one of {', '.join(LOG_FORMATS)}"
+            )
+        try:
+            trusted_networks(self.trusted_proxies)
+        except ValueError as exc:
+            found.append(str(exc))
         if not 1 <= self.audit_max_names <= MAX_AUDIT_MAX_NAMES:
             found.append(
                 f"MCP_AUDIT_MAX_NAMES={self.audit_max_names}: an audit line keeps 1 to "
@@ -951,6 +989,8 @@ class Config:
             audit_max_names=int(
                 os.environ.get("MCP_AUDIT_MAX_NAMES", str(DEFAULT_AUDIT_MAX_NAMES))
             ),
+            log_format=os.environ.get("MCP_LOG_FORMAT", "text").strip().lower(),
+            trusted_proxies=os.environ.get("MCP_TRUSTED_PROXIES", ""),
             describe_schema_tables=int(
                 os.environ.get("MCP_DESCRIBE_SCHEMA_TABLES", str(DEFAULT_DESCRIBE_SCHEMA_TABLES))
             ),

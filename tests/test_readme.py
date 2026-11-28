@@ -321,8 +321,10 @@ _MODULE_EXAMPLES = [
     'WWW-Authenticate: Bearer resource_metadata="http://mcp-scoped:3000/.well-known/'
     'oauth-protected-resource/mcp", error="insufficient_scope", scope="data:query"',
     '"scopes_supported": ["data:query"]',
-    '"token_id": "jti-docs-0001",',
-    '"sql_sha256": "595c26467ad8ea2d0a0857b4bf5c094d6f6d6bfc8c88ebc289f03a523ce7faf5",',
+    # The fingerprint of a call of the 0.8.7 proof (service mode, Trino 484), in JSON lines.
+    '"token_id": "jti-essai-1",',
+    '"sql_sha256": "047c266c14197de8cb2a77b806c37d62a5f3dd8459328cd67a2c8691b79433f2",',
+    '"query_ids": ["20261128_161517_00302_qyb4k"],',
     "X-Trino-Client-Tags: request_id=req-docs-0001,tool=execute_query",
     "20261106_173554_00003_ppe7v  [global, agents]     trino-mcp",
     "`integration/compose.yaml`",
