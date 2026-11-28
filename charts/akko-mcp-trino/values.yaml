@@ -88,6 +88,16 @@ server:
   toolsets: null
   tools: []
   excludeTools: []
+  # The server's log lines (MCP_LOG_FORMAT): `text` (`LEVEL:logger:message`, the default in
+  # 0.8) or `json` (one JSON object a line with ts, level and logger, the audit's fields at
+  # the top level: what a cluster's log collector reads without a parser). Every audit line
+  # says when it was written (ts, UTC) in both. `json` is advised in production.
+  logFormat: text
+  # The proxies in front of the pods (the ingress controller, the router), as CIDR or
+  # addresses (MCP_TRUSTED_PROXIES): the audit reads the client's address from their
+  # X-Forwarded-For, and from nobody else's. Empty, the default: the address of the peer.
+  #   trustedProxies: ["10.128.0.0/14"]
+  trustedProxies: []
 
 trino:
   # The coordinator (TRINO_HOST, TRINO_PORT). Required.

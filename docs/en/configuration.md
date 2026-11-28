@@ -99,7 +99,9 @@ accident. A number of seconds is a finite number: `nan` and `inf` are startup er
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `MCP_AUDIT_MAX_NAMES` | the names each list of a call's audit record keeps (its tables, the tables whose description it served), from 1 to 100000. The others are counted, once each, never written | `200` |
+| `MCP_AUDIT_MAX_NAMES` | the names each list of a call's audit record keeps (its tables, the tables whose description it served, the ids of its Trino queries), from 1 to 100000. The others are counted, once each, never written | `200` |
+| `MCP_LOG_FORMAT` | the log lines: `text` (`LEVEL:logger:message`, as in earlier versions) or `json` (one JSON object a line, with `ts`, `level`, `logger`, and the audit's fields at the top level). Every audit line has its `ts` in both. See [Audit and logs](operations.md#audit-and-logs) | `text` |
+| `MCP_TRUSTED_PROXIES` | the proxies in front of the server, comma-separated CIDR or addresses: the audit reads the client's address from their `X-Forwarded-For`, from the right, up to the first address that is not one of them. An address or a network that does not parse refuses to start | none: the address of the peer |
 
 ## Plugins and extensions
 

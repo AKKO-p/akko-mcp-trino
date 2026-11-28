@@ -148,6 +148,21 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "logFormat": {
+          "type": "string",
+          "enum": [
+            "text",
+            "json"
+          ]
+        },
+        "trustedProxies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$"
+          }
         }
       },
       "additionalProperties": false

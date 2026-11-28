@@ -101,7 +101,9 @@ démarrer.
 
 | Variable | Rôle | Défaut |
 |---|---|---|
-| `MCP_AUDIT_MAX_NAMES` | les noms que garde chaque liste de l'enregistrement d'audit d'un appel (ses tables, les tables dont il a servi la description), de 1 à 100 000. Les autres sont comptés, une fois chacun, jamais écrits | `200` |
+| `MCP_AUDIT_MAX_NAMES` | les noms que garde chaque liste de l'enregistrement d'audit d'un appel (ses tables, les tables dont il a servi la description, les identifiants de ses requêtes Trino), de 1 à 100 000. Les autres sont comptés, une fois chacun, jamais écrits | `200` |
+| `MCP_LOG_FORMAT` | les lignes de journal : `text` (`NIVEAU:logger:message`, comme dans les versions précédentes) ou `json` (un objet JSON par ligne, avec `ts`, `level`, `logger`, et les champs de l'audit au premier niveau). Chaque ligne d'audit porte son `ts` dans les deux. Voir [Audit et journaux](operations.md#audit-et-journaux) | `text` |
+| `MCP_TRUSTED_PROXIES` | les proxys placés devant le serveur, CIDR ou adresses séparés par des virgules : l'audit lit l'adresse du client dans leur `X-Forwarded-For`, depuis la droite, jusqu'à la première adresse qui n'est pas l'un d'eux. Une adresse ou un réseau illisible refuse le démarrage | aucun : l'adresse du pair |
 
 ## Plugins et extensions
 

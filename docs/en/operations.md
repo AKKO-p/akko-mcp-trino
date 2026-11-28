@@ -85,32 +85,226 @@ warns in these cases, with this text:
 | a context provider without `MCP_CONTEXT_CANARY` | `MCP_CONTEXT_CANARY is not set: nothing checks that Trino filters its listings, and context follows what Trino lists` |
 | a context provider in `service` mode | `context visibility is the service account's` |
 
-## Audit
+## Audit and logs
 
-Every response of the MCP endpoint carries `X-Request-Id`. It is the one sent by the proxy or
-gateway in front of the server, when it is a plain identifier (letters, digits, `.`, `_`, `:`,
-`-`, at most 128 characters), or one the server generated. A tool call outside an HTTP request
-(stdio) gets its own id. Every tool call, a plugin's included, writes one JSON line to the
-`mcp.audit` logger, keyed by that id:
+The server writes two kinds of line to stderr: the audit, on the `mcp.audit` logger, and the
+technical log of its other loggers. Over stdio, stderr is what the host keeps; in a pod, it is
+what the cluster's collector reads. The server sends no line anywhere itself: shipping, keeping
+and protecting them is the job of the platform (see [Sending the lines to a SIEM](#sending-the-lines-to-a-siem)).
+
+### Log format
+
+`MCP_LOG_FORMAT` chooses the format of every line.
+
+- `text`, the default in 0.8, keeps the lines of earlier versions: `LEVEL:logger:message`. The
+  audit line is the message of `mcp.audit`, so it comes out as `INFO:mcp.audit:{...}`.
+- `json` writes every line as one JSON object, with nothing before it: `ts` (UTC, ISO 8601 with
+  milliseconds), `level`, `logger`, then `msg` for a technical line, or the audit's fields at
+  the top level. uvicorn's own lines take the same format. An exception that goes with a
+  technical line is in `exc`, on the same line.
+
+Every audit line carries its own `ts` in both formats, so that a line kept without its collector
+still says when it was written. A later minor release may make `json` the default over HTTP;
+[MIGRATING.md](../../MIGRATING.md) will say so first.
+
+### A tool call
+
+Every tool call, a plugin's included, writes one line. Here is a real one, in `json`, in
+`service` mode behind a token check, with `fingerprint-audit` and `trino-tags`, put on several
+lines for reading (the server writes it on one); the fields after `query_ids` are the module's:
 
 ```json
-{"request_id":"edge-42","tool":"execute_query","subject":"alice","ok":false,"error":"USER_ERROR:PERMISSION_DENIED","duration_ms":84}
+{
+  "ts": "2026-11-28T16:15:18.261Z",
+  "level": "INFO",
+  "logger": "mcp.audit",
+  "event": "tool_call",
+  "request_id": "preuve-087-appel",
+  "tool": "execute_query",
+  "subject": "alice",
+  "client_id": "agent-essai",
+  "mcp_client": "mcp/0.1.0",
+  "client_ip": "198.51.100.7",
+  "identity_mode": "service",
+  "trino_user": "A12345",
+  "ok": true,
+  "error": "",
+  "duration_ms": 1278,
+  "query_ids": ["20261128_161517_00302_qyb4k"],
+  "token_id": "jti-essai-1",
+  "sql_sha256": "047c266c14197de8cb2a77b806c37d62a5f3dd8459328cd67a2c8691b79433f2",
+  "tables": ["tpch.tiny.nation"],
+  "rows": 3,
+  "truncated": false,
+  "metadata_served": []
+}
 ```
-
-With the default logging configuration, the line comes out prefixed with `INFO:mcp.audit:`. A
-collector that expects plain JSON must strip that prefix.
 
 | Field | Meaning |
 |---|---|
-| `request_id`, `tool`, `subject` | which call, which tool, for whom; the line has no field that could hold the bearer or the SQL text |
+| `ts`, `event` | when the line was written (the end of the call), and `tool_call` |
+| `request_id` | the `X-Request-Id` sent by the proxy or gateway in front of the server, when it is a plain identifier (letters, digits, `.`, `_`, `:`, `-`, at most 128 characters), or one the server generated; every response of the MCP endpoint echoes it. A call over stdio gets its own |
+| `tool` | the tool called |
+| `subject` | the verified caller, from `MCP_JWT_USER_CLAIM`; empty when no token was verified (`MCP_AUTH_ENABLED=false`, stdio without `MCP_USER_TOKEN`) |
+| `client_id` | the application the token was issued to, the first of `MCP_JWT_CLIENT_CLAIMS` the token carries (`azp`, then `client_id`); verified with the token, empty without one |
+| `mcp_client` | `name/version` of the MCP client as it declared itself at initialization (`clientInfo`), cut to 64 and 32 characters, printable ASCII only. Declared, never verified: any client may write any name. Use `client_id` to know which application holds the token |
+| `client_ip` | the address of the client: the peer's, or behind `MCP_TRUSTED_PROXIES`, the one their `X-Forwarded-For` gives (see [The client's address](#the-clients-address)); empty over stdio |
+| `identity_mode` | `TRINO_IDENTITY_MODE`: how the server reaches Trino |
+| `trino_user` | the user Trino saw for the call's queries: `TRINO_USER` in `service`, the caller in `jwt` and `impersonation`, the user Trino named in `oauth2`; empty when the call ran no query |
 | `ok`, `error` | the outcome; `error` is a code, never a message, because a message from Trino may quote a value read from a row (`Cannot cast '<value>' to INT`): Trino's error type and name for a Trino error (`USER_ERROR:INVALID_CAST_ARGUMENT`), the class of any other exception (`TimeoutError`, `CallTimeout` past the call's budget), the code a tool names for its own refusal (`read_only`, `invalid_argument`, `sql_too_long`, `sql_too_nested`, `parse_deadline`, `parse_no_worker`, `parse_busy`, `parse_failed`, `result_columns_too_long`) or a plugin with `note(error=...)`, else `tool_error`. The agent reads the whole message |
 | `duration_ms` | how long the call took |
+| `query_ids` | the ids Trino gave the call's queries, in order, a failed query's included: the key of Trino's query history (`system.runtime.queries`, `/v1/query`, the event listeners). Up to `MCP_AUDIT_MAX_NAMES`; past them, `query_ids_cut` says how many more there were |
 
-What a call did (the SHA-256 of its SQL, the tables, the rows, whether they were cut) is kept in
-its record while it runs (`akko_mcp_trino.audit.note`). The core's line does not write it; an
-extension may (`wrap_audit`), as [`fingerprint-audit`](modules.md#fingerprint-audit) does. Each
-list of the record keeps `MCP_AUDIT_MAX_NAMES` names (200 by default) and counts the others, once
-each, at a constant cost: a search over a thousand catalogs never writes a line without a limit.
+The line has no field that could hold the bearer or the SQL text. What a call did (the SHA-256 of
+its SQL, the tables, the rows, whether they were cut) is kept in its record while it runs
+(`akko_mcp_trino.audit.note`); [`fingerprint-audit`](modules.md#fingerprint-audit) adds it to the
+line, after the core's fields. Each list of the record keeps `MCP_AUDIT_MAX_NAMES` names (200 by
+default) and counts the others, once each, at a constant cost: a search over a thousand catalogs
+never writes a line without a limit. A field an extension adds never takes the place of a field
+of the core: it is dropped and counted in `extra_dropped`.
+
+### A refused request
+
+Every request refused before a tool runs writes one line, with `"event":"refused"`, and counts in
+`mcp_trino_request_refusals_total{reason}`. Real lines, a request without a token and a token
+signed by another key:
+
+```json
+{"ts":"2026-11-28T16:15:18.547Z","level":"INFO","logger":"mcp.audit","event":"refused","request_id":"preuve-087-sans-jeton","reason":"missing_token","status":401,"client_ip":"172.19.0.9","subject":"","client_id":""}
+{"ts":"2026-11-28T16:15:18.552Z","level":"INFO","logger":"mcp.audit","event":"refused","request_id":"preuve-087-forge","reason":"bad_signature","status":401,"client_ip":"172.19.0.9","subject":"","client_id":""}
+```
+
+| Field | Meaning |
+|---|---|
+| `ts`, `event` | when, and `refused` |
+| `request_id` | as for a call; the client received it in `X-Request-Id` |
+| `reason` | why, a stable code from the table below |
+| `status` | the HTTP status of the answer; `0` over stdio |
+| `client_ip` | as for a call |
+| `subject`, `client_id` | those of a token that was verified (a refusal after the token, by an extension or by the transport); empty otherwise. A token the server could not verify names nobody, and none of its claims is written |
+
+| Reason | Status | When |
+|---|---|---|
+| `missing_token` | 401 | no bearer, with `MCP_AUTH_REQUIRED=true` |
+| `invalid_token` | 401 | a bearer that does not parse as a JWT, or any other failure of the check |
+| `bad_signature` | 401 | signed by a key of the JWKS, but the signature does not match |
+| `unknown_key` | 401 | the JWKS was read, and no key of it matches the token's `kid` (or the token names none) |
+| `jwks_unreachable` | 401 | the last read of the JWKS failed, and the server holds no key for the token's `kid` |
+| `wrong_algorithm` | 401 | an algorithm outside `MCP_JWT_ALGORITHMS`, or not the one its key declares |
+| `wrong_audience` | 401 | no audience this server accepts, or the audience of Trino's tokens (`TRINO_TOKEN_EXCHANGE_AUDIENCE`) |
+| `wrong_issuer` | 401 | another issuer than `MCP_OIDC_ISSUER` |
+| `token_expired`, `token_not_yet_valid` | 401 | past `exp`, or before `nbf` or `iat`, beyond `MCP_JWT_LEEWAY_SECONDS` |
+| `missing_claim` | 401 | no `exp`, `iss` or `aud` |
+| `no_user_claim` | 401 | no usable `MCP_JWT_USER_CLAIM` |
+| an extension's reason | its own | `client_not_allowed`, `insufficient_scope` with [`token-policy`](modules.md#token-policy); a reason that is not a short lower-case word is written and counted as `extension_refused` |
+| `host_not_allowed` | 421 | a `Host` outside `MCP_ALLOWED_HOSTS` |
+| `origin_not_allowed` | 403 | an `Origin` header while `MCP_ALLOWED_HOSTS` is set |
+| `payload_too_large` | 413 | a body past the SDK's limit |
+| `session_invalid` | 404 | an MCP session the server does not know (another replica's, or expired) |
+| `not_found` | 404 | a path the server does not serve |
+| `bad_request`, `method_not_allowed`, `not_acceptable`, `unsupported_media_type`, `conflict` | 400, 405, 406, 415, 409 | what the MCP transport refuses: an unreadable body, a method, an `Accept` or a `Content-Type` it does not serve |
+
+The refusals at the door also carry `X-Reason` for the client (`unauthenticated` for the core's,
+the extension's reason otherwise); the audit's `reason` is finer. A tool that refuses a statement
+(`read_only`) or that Trino refuses (`USER_ERROR:PERMISSION_DENIED`) is a tool call with
+`"ok":false`, not a refusal. Over stdio, a missing or invalid `MCP_USER_TOKEN` and an extension's
+refusal at admission are written with `status` 0 before the server stops; in `oauth2` mode, an
+admission refused on a call is written too. Requests to the health port (`/health`, `/ready`,
+`/metrics`) are not audited.
+
+### The client's address
+
+Without `MCP_TRUSTED_PROXIES`, `client_ip` is the address of the peer of the TCP connection,
+whatever `X-Forwarded-For` says: a header a client wrote is never taken for an address. Behind an
+ingress, a router or a gateway, set `MCP_TRUSTED_PROXIES` to their addresses, as CIDR (chart:
+`server.trustedProxies`). The server then reads `X-Forwarded-For` from the right, skips the
+trusted proxies, and keeps the first address that is not one; a malformed entry stops the reading
+at the last trusted hop.
+
+### Joining Trino's history
+
+| Mode | Joined by |
+|---|---|
+| every mode | `query_ids` of the line = `query_id` in Trino's history; `trino_user` = Trino's `user`; `source` = `MCP_SERVER_NAME` or `TRINO_SOURCE` |
+| with `trino-tags` | each query carries `request_id=<id>` and `tool=<tool>` in its client tags: the line's `request_id` is in Trino's `clientTags` |
+| with `fingerprint-audit` | `sql_sha256` = the SHA-256 of the text Trino keeps |
+
+What Trino kept of the call above, and of a second call of the same request that Trino refused
+(`/v1/query`):
+
+```text
+20261128_161517_00302_qyb4k user=A12345 source=trino-mcp clientTags=['request_id=preuve-087-appel', 'tool=execute_query'] FINISHED
+20261128_161518_00303_qyb4k user=A12345 source=trino-mcp clientTags=['request_id=preuve-087-appel', 'tool=execute_query'] FAILED PERMISSION_DENIED
+```
+
+In `service` mode, Trino sees `TRINO_USER` for every caller: the line's `subject` and `client_id`
+are the only record of who called. Keep the audit lines as long as Trino's history.
+
+### Sending the lines to a SIEM
+
+- Set `MCP_LOG_FORMAT=json`: each line is one JSON object, which a collector (Fluent Bit,
+  Vector, the OpenTelemetry Collector, the platform's) reads without a parser. Route the
+  `mcp.audit` logger, or the lines that have an `event` field, to the audit index.
+- `ts` is the server's clock, in UTC. Synchronize the nodes with a documented reference source
+  (NTP): an audit trail is only as good as its clock.
+- The integrity of the lines (write once, signed or hashed storage) and how long they are kept
+  are the platform's, according to the organization's policy: the server writes to stderr and
+  keeps nothing. A collector that loses lines loses them silently; watch its own metrics.
+- Alert on the rate of `mcp_trino_request_refusals_total` by reason: a burst of
+  `bad_signature` or `wrong_audience` is a token forged or used against the wrong server, a
+  burst of `client_not_allowed` an application that should not call.
+- These lines answer what the texts ask of an audit trail: who, when, from where, what, with
+  which outcome, and the failed access attempts. Regulation (EU) 2022/2554 (DORA), through
+  Commission Delegated Regulation (EU) 2024/1774, article 12, asks for logged events, logical
+  access and identities, and a clock synchronized on a documented reference
+  ([EUR-Lex](https://eur-lex.europa.eu/eli/reg_del/2024/1774/oj)); the OWASP
+  [MCP Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/MCP_Security_Cheat_Sheet.html)
+  and the OWASP [MCP Top 10](https://owasp.org/www-project-mcp-top-10/) (MCP08, lack of audit and
+  telemetry) ask to log each tool call with its user and its time. Compliance is the deployment's,
+  not a component's.
+
+### Profiles
+
+| Setting | Test (a workstation, stdio, `service`) | Production (HTTP, the chart) |
+|---|---|---|
+| `MCP_LOG_FORMAT` | `text`, stderr kept by the host | `json`, read by the cluster's collector |
+| `MCP_EXTENSIONS` | `fingerprint-audit,trino-tags` advised | `token-policy,fingerprint-audit,trino-tags` (`token-policy` when the identity provider gives scopes) |
+| `MCP_TRUSTED_PROXIES` | none | the ingress controller or the router; the edge sets `X-Request-Id` |
+| identity | `service`, announced at start | `jwt` or `impersonation`, the door strict; `service` only for a named technical account |
+| health port | none (stdio) | `networkPolicy.enabled: true`, `/metrics` open to Prometheus only |
+| OpenTelemetry | none | none, or an SDK the platform installs on purpose (see below) |
+
+In the chart, the production profile reads:
+
+```yaml
+server:
+  logFormat: json
+  extensions: [token-policy, fingerprint-audit, trino-tags]
+  trustedProxies: ["10.128.0.0/14"]   # the router's or the ingress controller's pods
+networkPolicy:
+  enabled: true
+```
+
+### Telemetry and OpenTelemetry
+
+The server sends nothing to its publisher nor to any third party: it talks to Trino, to the
+identity provider (JWKS, token exchange) and to the context providers it is configured with,
+nothing else.
+
+The MCP SDK it is built on wraps every message it receives in an OpenTelemetry span, through the
+`opentelemetry-api` package alone. Without an OpenTelemetry SDK installed in the environment, the
+API does nothing and no span leaves the process: this is the image as published. When the
+platform installs and configures an SDK (an auto-instrumentation agent and its `OTEL_*`
+variables), these spans go to the exporter it configures. They carry `mcp.method.name`,
+`mcp.protocol.version`, `jsonrpc.request.id`, and for a tool call `gen_ai.operation.name`
+(`execute_tool`) and `gen_ai.tool.name`; no SQL and no token. An exception the SDK does not
+expect puts its message in the span's status, which the audit never does: install an SDK only
+where those messages may go. An instrumentation of the HTTP client libraries, if the platform
+adds one, also traces the requests to Trino.
+
+`OTEL_PYTHON_TRACER_PROVIDER` naming a provider that no installed package provides (a platform
+that sets the OpenTelemetry variables on every pod) would stop the SDK at its first import. The
+server drops that variable before, says so at start and in `--check`, and emits no span.
 
 ## Health and metrics
 
@@ -119,11 +313,25 @@ These endpoints exist over the HTTP transports only, on the health port.
 - `/health` never touches Trino, so a liveness probe cannot kill the server because Trino is slow.
 - What `/ready` checks depends on the identity mode: in `jwt` mode, Trino's public `/v1/info`; in
   `impersonation` and `service` modes, a bounded `SELECT 1` as `TRINO_USER`, impersonating no
-  one. When the check fails, `/ready` returns `503` with `{"status": "error", "detail": ...}`.
+  one. The probe's queries are not counted in `mcp_trino_queries_total`, nor in its siblings.
+  When the check fails, `/ready` returns `503` with `{"status": "error", "reason": "<code>"}`,
+  never the exception, whose text names the address of Trino: `trino_starting`,
+  `trino_unavailable` (an HTTP 502, 503 or 504, or `/v1/info` not answering 200),
+  `trino_auth_failed`, `trino_permission_denied`, `trino_query_failed`, `trino_http_error`,
+  `trino_tls_failed`, `trino_timeout`, `trino_unreachable` (a name that does not resolve, a
+  connection refused), `identity_refused` or `trino_error`. The exception goes to the server's
+  log once each time the reason changes, and so does the return to ready:
+
+  ```json
+  {"ts":"2026-11-28T16:15:19.126Z","level":"WARNING","logger":"akko_mcp_trino.health","msg":"not ready: trino_unreachable (TrinoConnectionError: failed to execute: HTTPConnectionPool(host='trino-absent', port=8080): Max retries exceeded with url: /v1/statement (Caused by NameResolutionError(\"HTTPConnection(host='trino-absent', port=8080): Failed to resolve 'trino-absent' ([Errno -2] Name or service not known)\")))"}
+  ```
 - `/metrics` exposes `mcp_trino_queries_total`, `mcp_trino_query_errors_total`,
   `mcp_trino_query_duration_seconds` and `mcp_trino_sql_refusals_total`, the statements refused
   before Trino by `reason`: `too_long`, `too_nested`, `caller_busy`, `no_worker`, `deadline` (a
-  parse cut by the deadline) or `worker_failed`; never a statement or a name. With context providers loaded, it also exposes, by provider,
+  parse cut by the deadline) or `worker_failed`; never a statement or a name. It also exposes
+  `mcp_trino_request_refusals_total`, the requests refused before any tool ran, by the `reason`
+  of their [audit line](#a-refused-request), and `mcp_trino_ready_checks_total`, the readiness
+  probes, by `result` (`ready` or the code of the reason). With context providers loaded, it also exposes, by provider,
   `mcp_trino_context_calls_total`, `mcp_trino_context_errors_total` (by status),
   `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total` (hit or
   miss), `mcp_trino_context_cache_bytes` and `mcp_trino_context_breaker_open`. A call the tool

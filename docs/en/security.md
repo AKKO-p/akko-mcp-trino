@@ -169,9 +169,13 @@ never turns the check off.
 
 ## Audit
 
-Every tool call writes one audit line, keyed by `X-Request-Id`. The line never holds the token
-or the SQL text: it says who called which tool, with which outcome, and for how long.
-[Operations](operations.md#audit) gives its fields.
+Every tool call writes one audit line, keyed by `X-Request-Id`, and so does every request refused
+before a tool runs: no token, a token refused (with the reason: expired, another audience, a bad
+signature...), a client or a scope an extension refuses, a host, a body or a session the transport
+refuses. Each line says when (`ts`, UTC), from which address, and, for a call, who called, under
+which identity Trino ran its queries and with which query ids. No line holds the token, a claim of
+a token that was not verified, or the SQL text. The server sends no telemetry to anyone.
+[Operations](operations.md#audit-and-logs) gives every field and every reason.
 
 ## Reporting a vulnerability
 

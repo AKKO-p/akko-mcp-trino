@@ -26,16 +26,24 @@ from typing import Any
 
 import uvicorn
 
-from . import __version__
+from . import OTEL_DROPPED, __version__
 from .app import build_asgi_app, run_stdio, transports_supported
 from .audit import LoggingAudit
 from .auth import accepted_audiences, build_auth
-from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config, parse_jwt_algorithms, provider_names
+from .config import (
+    MAX_DESCRIBE_SCHEMA_TABLES,
+    Config,
+    parse_jwt_algorithms,
+    provider_names,
+    proxy_networks,
+)
 from .context import ContextProvider, ContextSetup
 from .context.loading import close_providers, load_providers
 from .extensions import Extension, extension_names, load_extensions
 from .health import build_health_app
+from .logs import configure_logging
 from .metrics import Metrics
+from .otel import DROPPED_NOTICE
 from .parse_pool import close_all as close_parse_pools
 from .plugins import tool_registrars
 from .server import build_server
@@ -72,6 +80,18 @@ def _algorithms(config: Config) -> list[str]:
         return parse_jwt_algorithms(config.jwt_algorithms)
     except ValueError:
         return [config.jwt_algorithms]
+
+
+def _client_address_line(config: Config) -> str:
+    """Where the audit reads the client's address: the networks of ``MCP_TRUSTED_PROXIES``,
+    as parsed (a value that does not parse is a problem of its own), or the peer."""
+    try:
+        networks = proxy_networks(config.trusted_proxies)
+    except ValueError:
+        return "an invalid MCP_TRUSTED_PROXIES"
+    if not networks:
+        return "the peer (no trusted proxy)"
+    return "X-Forwarded-For behind " + ",".join(str(net) for net in networks)
 
 
 def check_config(config: Config, *, strict: bool = False) -> int:
@@ -159,7 +179,11 @@ def check_config(config: Config, *, strict: bool = False) -> int:
             if config.profile_budget_seconds() > 0
             else "none"
         ),
-        f"audit: up to {config.audit_max_names} names a list, the rest counted",
+        f"audit: up to {config.audit_max_names} names a list, the rest counted; refusals "
+        "audited; log lines "
+        + ("JSON (MCP_LOG_FORMAT=json)" if config.log_format == "json" else config.log_format)
+        + "; client address from "
+        + _client_address_line(config),
         "tools exposed: "
         + (", ".join(config.exposed_tools()) or "none")
         + (" (all nine)" if not config.tools_restricted() else "")
@@ -200,7 +224,7 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         problems.append(str(exc))
     close_providers(providers)
     print("\n".join(lines))
-    for warning in config.warnings():
+    for warning in [*config.warnings(), *([DROPPED_NOTICE] if OTEL_DROPPED else [])]:
         print(f"WARNING: {warning}")
     for problem in problems:
         print(f"PROBLEM: {problem}")
@@ -212,14 +236,17 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
     args = parse_args()
     if args.check:
         sys.exit(check_config(Config.from_env(), strict=args.strict))
-    logging.basicConfig(level=logging.INFO)
+    config = Config.from_env()
+    configure_logging("json" if config.log_format == "json" else "text")
     log = logging.getLogger(__name__)
+    if OTEL_DROPPED:
+        log.warning(DROPPED_NOTICE)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines carry request URLs
-    config = Config.from_env()
     extensions = load_extensions(config, os.environ)
     providers = load_providers(config, os.environ)
     metrics = Metrics()
+    audit = LoggingAudit()
 
     started: list[ContextSetup] = []
     closing: list[bool] = []
@@ -242,7 +269,7 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         config,
         extra_tool_registrars=tool_registrars({"MCP_TOOL_PLUGINS": config.tool_plugins}),
         metrics=metrics,
-        audit=LoggingAudit(),
+        audit=audit,
         extensions=extensions,
         context_providers=providers,
         context_started=on_context,
@@ -265,7 +292,7 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
         auth_provider = build_auth(config, _audiences(extensions), metrics.jwks_fetched)
         for warning in config.warnings():
             log.warning(warning)
-        _serve(config, mcp, client, auth_provider, extensions, metrics, close_context)
+        _serve(config, mcp, client, auth_provider, extensions, metrics, audit, close_context)
     finally:
         close_context()
 
@@ -277,10 +304,13 @@ def _serve(  # pragma: no cover - process glue, proven by running it
     auth_provider: Any,
     extensions: list[Extension],
     metrics: Metrics,
+    audit: LoggingAudit,
     on_shutdown: Callable[[], None],
 ) -> None:
     """Serve on the configured transport until the server stops."""
     log = logging.getLogger(__name__)
+    # In JSON, uvicorn's own lines go through the root handler too, in the same format.
+    log_config: Any = None if config.log_format == "json" else uvicorn.config.LOGGING_CONFIG
     log.info(
         "tools exposed: %s%s",
         ",".join(config.exposed_tools()),
@@ -293,7 +323,14 @@ def _serve(  # pragma: no cover - process glue, proven by running it
             config.auth_required,
             config.trino_identity_mode,
         )
-        run_stdio(config, mcp, auth_provider=auth_provider, extensions=extensions, client=client)
+        run_stdio(
+            config,
+            mcp,
+            auth_provider=auth_provider,
+            extensions=extensions,
+            client=client,
+            audit=audit,
+        )
         return
 
     threading.Thread(
@@ -302,12 +339,19 @@ def _serve(  # pragma: no cover - process glue, proven by running it
             host="0.0.0.0",
             port=config.health_port,
             log_level="warning",
+            log_config=log_config,
         ),
         daemon=True,
     ).start()
 
     app = build_asgi_app(
-        config, mcp, auth_provider=auth_provider, extensions=extensions, on_shutdown=on_shutdown
+        config,
+        mcp,
+        auth_provider=auth_provider,
+        extensions=extensions,
+        on_shutdown=on_shutdown,
+        audit=audit,
+        metrics=metrics,
     )
     log.info(
         "serving transport=%s port=%d auth=%s strict=%s identity=%s extensions=%s",
@@ -318,7 +362,9 @@ def _serve(  # pragma: no cover - process glue, proven by running it
         config.trino_identity_mode,
         ",".join(extension_names(config.extensions)) or "none",
     )
-    uvicorn.run(app, host="0.0.0.0", port=config.mcp_port, log_level="warning")
+    uvicorn.run(
+        app, host="0.0.0.0", port=config.mcp_port, log_level="warning", log_config=log_config
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -44,6 +44,42 @@ class Principal:
     scopes: tuple[str, ...] = ()
 
 
+# Why a token was refused, as the audit line and the refusal counter name it: a stable code,
+# by the class of the verification error (the most specific first), never its message.
+INVALID_TOKEN = "invalid_token"
+_REFUSAL_CODES = {
+    "ExpiredSignatureError": "token_expired",
+    "ImmatureSignatureError": "token_not_yet_valid",
+    "InvalidAudienceError": "wrong_audience",
+    "InvalidIssuerError": "wrong_issuer",
+    "InvalidSignatureError": "bad_signature",
+    "MissingRequiredClaimError": "missing_claim",
+    "InvalidAlgorithmError": "wrong_algorithm",
+    "PyJWKClientConnectionError": "jwks_unreachable",
+    "PyJWKClientError": "unknown_key",
+}
+TOKEN_REFUSAL_CODES = (INVALID_TOKEN, "no_user_claim", *sorted(set(_REFUSAL_CODES.values())))
+
+
+def token_refusal_code(exc: BaseException) -> str:
+    """The code of a token refused for ``exc``: that of its class, or of the nearest class it
+    derives from, else ``invalid_token``."""
+    for cls in type(exc).__mro__:
+        code = _REFUSAL_CODES.get(cls.__name__)
+        if code is not None:
+            return code
+    return INVALID_TOKEN
+
+
+@dataclass(frozen=True)
+class TokenVerdict:
+    """What the verification of a request's token found: the verified caller, or None and
+    the code of why (``reason``, empty when the request carried no token)."""
+
+    principal: Optional[Principal]
+    reason: str = ""
+
+
 class AuthProvider(Protocol):
     """The authentication contract: inspect the request headers, return a Principal or None."""
 
@@ -280,6 +316,8 @@ class JwksKeys:
         self._keys: dict[str, Any] = {}
         self._loaded_at: Optional[float] = None
         self._attempted_at: Optional[float] = None
+        # Whether the last read failed: a key missing then is the JWKS's absence, not the token's.
+        self._failed = False
         self._reading = threading.Lock()
 
     @classmethod
@@ -314,6 +352,8 @@ class JwksKeys:
         if self._stale(kid) and not self._attempted_recently():
             self._read()
         key = self._keys.get(kid)
+        if key is None and self._failed:
+            raise _jwt.PyJWKClientConnectionError("the JWKS could not be read")
         if key is None:
             raise _jwt.PyJWKClientError("no signing key matches the token")
         return key
@@ -354,11 +394,13 @@ class JwksKeys:
                     raise ValueError("the JWKS holds no signing key with a kid")
             except Exception as exc:  # noqa: BLE001 — any failure keeps the held keys
                 log.warning("JWKS read failed: %s", type(exc).__name__)
+                self._failed = True
                 if self._on_fetch is not None:
                     self._on_fetch(False)
                 return
             self._keys = keys
             self._loaded_at = self._attempted_at
+            self._failed = False
             if self._on_fetch is not None:
                 self._on_fetch(True)
         finally:
@@ -414,9 +456,14 @@ class JwksJwtAuth:
 
     def verify(self, headers: dict) -> Optional[Principal]:
         """Verify the bearer's signature, issuer, audience and expiry; None if absent or invalid."""
+        return self.check(headers).principal
+
+    def check(self, headers: dict) -> TokenVerdict:
+        """Verify the bearer like ``verify``, and say why when it is refused: a code of
+        ``TOKEN_REFUSAL_CODES``, never the token nor any of its claims."""
         token = extract_bearer_token(headers)
         if not token:
-            return None
+            return TokenVerdict(None)
         try:
             import jwt as _jwt
 
@@ -436,14 +483,15 @@ class JwksJwtAuth:
             )
         except Exception as exc:  # noqa: BLE001 — signature/iss/aud/exp invalid → fail-closed
             log.info("token refused: %s", type(exc).__name__)  # the reason, never the token
-            return None
+            return TokenVerdict(None, token_refusal_code(exc))
         aud = claims.get("aud")
         if self._refused & set([aud] if isinstance(aud, str) else aud or []):
             log.info("token refused: issued for another resource")
-            return None
+            return TokenVerdict(None, "wrong_audience")
         principal = _principal_from_claims(
             claims, self._user_claim, self._client_claims, self._scope_claims
         )
         if principal is None:
             log.info("token refused: no %s claim", self._user_claim)
-        return principal
+            return TokenVerdict(None, "no_user_claim")
+        return TokenVerdict(principal)

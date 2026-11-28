@@ -448,4 +448,4 @@ and suggests calling `describe_table` on it.
 
 The table name comes from the agent's own statement, never from Trino, so the hint shows nothing
 the caller could not already name. The audit line keeps only the error's code (see
-[Audit](operations.md#audit)).
+[Audit](operations.md#audit-and-logs)).

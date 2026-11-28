@@ -16,7 +16,7 @@ import pytest
 
 from akko_mcp_trino import tools as tools_module
 from akko_mcp_trino import trino_client
-from akko_mcp_trino.audit import InMemoryAudit
+from akko_mcp_trino.audit import CORE_FIELDS, InMemoryAudit
 from akko_mcp_trino.context import (
     CLASSIFICATION,
     GLOSSARY,
@@ -441,8 +441,8 @@ def _registered_with_audit(read_only=True, **client_kw):
 
 
 def test_execute_query_records_who_called_which_tool_with_which_outcome():
-    """The core's line: request id, tool, subject, outcome, duration. Nothing else is
-    written: the token id, the SQL digest and the tables are an extension's."""
+    """The core's line: when, request id, tool, who, outcome, duration, the join with Trino.
+    The token id, the SQL digest and the tables are an extension's."""
     mcp, _, audit = _registered_with_audit()
     in_request(lambda: mcp.tools["execute_query"]("SELECT 1"))
     assert len(audit.events) == 1
@@ -453,7 +453,7 @@ def test_execute_query_records_who_called_which_tool_with_which_outcome():
         "alice_admin",
         True,
     )
-    assert set(e.as_dict()) == {"request_id", "tool", "subject", "ok", "error", "duration_ms"}
+    assert set(e.as_dict()) == CORE_FIELDS - {"query_ids_cut", "reason", "status", "extra_dropped"}
 
 
 def test_every_tool_is_audited():

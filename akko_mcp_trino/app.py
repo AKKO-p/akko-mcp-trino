@@ -15,17 +15,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import uuid
 from functools import partial
 from typing import Any, Awaitable, Callable, Sequence
 
 from mcp import MCPError
 from mcp.types import INVALID_REQUEST
 
-from .auth import Principal
-from .config import Config
+from .audit import RefusalEvent
+from .auth import INVALID_TOKEN, Principal
+from .config import Config, proxy_networks
 from .extensions import Admission, Extension
 from .identity import set_current_bearer, set_current_principal
-from .middleware import AuthIdentityMiddleware, protected_resource
+from .middleware import MISSING_TOKEN, AuthIdentityMiddleware, protected_resource, refusal_reason
 from .transport_security import transport_security_for
 
 _HTTP_TRANSPORTS = ("sse", "streamable-http")
@@ -63,6 +65,7 @@ def run_stdio(
     auth_provider: Any,
     extensions: Sequence[Extension] = (),
     client: Any = None,
+    audit: Any = None,
 ) -> None:
     """Serve over stdio for a local host, as one user.
 
@@ -76,11 +79,22 @@ def run_stdio(
     `_oauth2_stdio_middleware`), and the guards run on every such call, never at
     start or for discovery. Nothing here writes to stdout: stdout is the protocol
     channel.
+
+    ``audit``, when given, receives one line per refusal (``status`` 0: there is no HTTP
+    over stdio), at start or, in ``oauth2`` mode, on a call.
     """
     principal = None
+    reason = MISSING_TOKEN
     if auth_provider is not None and config.user_token:
-        principal = auth_provider.verify({"authorization": f"Bearer {config.user_token}"})
+        headers = {"authorization": f"Bearer {config.user_token}"}
+        check = getattr(auth_provider, "check", None)
+        if check is not None:
+            verdict = check(headers)
+            principal, reason = verdict.principal, verdict.reason or INVALID_TOKEN
+        else:
+            principal, reason = auth_provider.verify(headers), INVALID_TOKEN
     if config.auth_required and principal is None:
+        _record_stdio_refusal(audit, reason)
         raise PermissionError(
             "MCP_AUTH_REQUIRED=true and MCP_USER_TOKEN is missing or invalid: "
             "refusing to serve over stdio without a verified identity"
@@ -90,9 +104,11 @@ def run_stdio(
         if client is None:
             raise ValueError("TRINO_IDENTITY_MODE=oauth2 requires the Trino client before serving")
         set_current_principal(None)
-        mcp.middleware.append(_oauth2_stdio_middleware(client, partial(_admit, config, extensions)))
+        mcp.middleware.append(
+            _oauth2_stdio_middleware(client, partial(_admit, config, extensions, audit=audit))
+        )
     else:
-        _admit(config, extensions, principal)
+        _admit(config, extensions, principal, audit=audit)
     set_current_bearer(config.user_token if principal is not None else None)
     mcp.run(transport="stdio")
 
@@ -104,8 +120,14 @@ def build_asgi_app(
     auth_provider: Any,
     extensions: Sequence[Extension] = (),
     on_shutdown: Callable[[], None] | None = None,
+    audit: Any = None,
+    metrics: Any = None,
 ) -> Any:
     """Return the transport app for ``config.transport`` with the guard mounted.
+
+    ``audit``, when given, receives one line per request refused before any tool ran, and
+    ``metrics`` count them; the client's address in that line is read behind
+    ``MCP_TRUSTED_PROXIES``.
 
     ``on_shutdown``, when given, runs once the transport has shut down, in a worker
     thread, whether or not the transport stopped cleanly: uvicorn shuts the app down
@@ -145,6 +167,9 @@ def build_asgi_app(
         extensions=tuple(extensions),
         documents=documents,
         metadata_url=metadata_url,
+        audit=audit,
+        metrics=metrics,
+        trusted_proxies=proxy_networks(config.trusted_proxies),
     )
     return app
 
@@ -164,12 +189,34 @@ def _close_after(app: Any, close: Callable[[], None]) -> None:
     app.router.lifespan_context = lifespan
 
 
-def _admit(config: Config, extensions: Sequence[Extension], user: Principal | None) -> None:
-    """Apply the stdio admission guards and bind the caller and extension context."""
+def _record_stdio_refusal(audit: Any, reason: str, user: Principal | None = None) -> None:
+    """The audit line of a refusal over stdio: a fresh request id, no address, status 0."""
+    if audit is None:
+        return
+    audit.record(
+        RefusalEvent(
+            request_id=uuid.uuid4().hex,
+            reason=reason,
+            status=0,
+            subject=user.subject if user is not None else "",
+            client_id=user.client_id if user is not None else "",
+        )
+    )
+
+
+def _admit(
+    config: Config,
+    extensions: Sequence[Extension],
+    user: Principal | None,
+    audit: Any = None,
+) -> None:
+    """Apply the stdio admission guards and bind the caller and extension context; a
+    refusal is audited, then raised."""
     admission = Admission(headers={}, bearer=config.user_token or None, principal=user, stdio=True)
     for ext in extensions:
         refusal = ext.before_auth(admission) or ext.after_auth(admission)
         if refusal is not None:
+            _record_stdio_refusal(audit, refusal_reason(refusal.reason), user)
             detail = f": {refusal.message}" if refusal.message else ""
             raise PermissionError(f"admission refused: {refusal.reason}{detail}")
     set_current_principal(admission.principal)

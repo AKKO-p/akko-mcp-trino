@@ -25,29 +25,22 @@ and the fingerprint is added last, whatever that one rebuilds.
 from dataclasses import dataclass, field, fields
 from typing import Any, Mapping, Optional
 
-from ..audit import AuditEvent
+from ..audit import CORE_FIELDS, AuditEvent, merged
 from ..config import Config
 from ..extensions import Extension
 
-# The fields of the line an extension's field may never take.
-FINGERPRINT_FIELDS = frozenset(
+# The fields of the line an extension's field may never take: the core's, and the fingerprint's.
+FINGERPRINT_FIELDS = CORE_FIELDS | frozenset(
     {
-        "request_id",
-        "tool",
-        "subject",
         "token_id",
-        "ok",
-        "error",
         "sql_sha256",
         "tables",
         "tables_cut",
-        "duration_ms",
         "rows",
         "truncated",
         "truncated_reason",
         "metadata_served",
         "metadata_served_cut",
-        "extra_dropped",
     }
 )
 
@@ -68,22 +61,15 @@ class FingerprintEvent(AuditEvent):
     metadata_served_cut: int = 0
 
     def as_dict(self) -> dict:
-        """The line in the order of the fields it joins; a ``_cut`` count only when a list
-        was cut, and ``truncated_reason`` only when an answer was cut."""
-        line: dict[str, Any] = {
-            "request_id": self.request_id,
-            "tool": self.tool,
-            "subject": self.subject,
-            "token_id": self.token_id,
-            "ok": self.ok,
-            "error": self.error,
-            "sql_sha256": self.sql_sha256,
-            "tables": list(self.tables),
-        }
+        """The core's line, then the fingerprint: a ``_cut`` count only when a list was cut,
+        and ``truncated_reason`` only when an answer was cut."""
+        line = self.core_dict()
+        line["token_id"] = self.token_id
+        line["sql_sha256"] = self.sql_sha256
+        line["tables"] = list(self.tables)
         if self.tables_cut:
             line["tables_cut"] = self.tables_cut
         line.update(
-            duration_ms=self.duration_ms,
             rows=self.rows,
             truncated=self.truncated,
             metadata_served=list(self.metadata_served),
@@ -92,11 +78,8 @@ class FingerprintEvent(AuditEvent):
             line["metadata_served_cut"] = self.metadata_served_cut
         if self.truncated_reason:
             line["truncated_reason"] = self.truncated_reason
-        # An extension's field never overwrites a field of the fingerprint: dropped, counted.
-        kept = {k: v for k, v in self.extra.items() if k not in FINGERPRINT_FIELDS}
-        if len(kept) < len(self.extra):
-            kept["extra_dropped"] = len(self.extra) - len(kept)
-        return {**line, **kept}
+        # An extension's field never overwrites a field of the line: dropped, counted.
+        return merged(line, self.extra, FINGERPRINT_FIELDS)
 
 
 class FingerprintAudit:

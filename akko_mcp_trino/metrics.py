@@ -1,8 +1,10 @@
 """Prometheus metrics, injectable with an isolated registry so they are testable.
 
-Counts Trino queries, errors and latency, and the reads of the context sources;
-exposed on /metrics by the health app. A context label names a source, a status or
-a cache result, never an object.
+Counts Trino queries, errors and latency, the reads of the context sources, the requests
+refused before any tool ran and the readiness probes; exposed on /metrics by the health app.
+A label names a source, a status, a cache result, a refusal reason or a readiness code from
+a bounded set, never an object, a user or a value. The readiness probe's own queries are not
+counted as queries.
 A dedicated `CollectorRegistry` avoids global state shared across instances and tests.
 """
 
@@ -89,6 +91,20 @@ class Metrics:
         self.jwks_up = Gauge(
             "mcp_trino_jwks_up",
             "1 when the last read of the identity provider's JWKS succeeded, 0 when it failed",
+            registry=self.registry,
+        )
+        self.refusals = Counter(
+            "mcp_trino_request_refusals_total",
+            "Requests refused before any tool ran, by reason (the audit line's reason: "
+            "missing_token, invalid_token, wrong_audience, client_not_allowed, "
+            "insufficient_scope, host_not_allowed, payload_too_large, session_invalid...)",
+            ["reason"],
+            registry=self.registry,
+        )
+        self.ready_checks = Counter(
+            "mcp_trino_ready_checks_total",
+            "Readiness probes (/ready), by result: ready, or the code of the reason",
+            ["result"],
             registry=self.registry,
         )
 

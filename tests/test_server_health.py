@@ -142,11 +142,12 @@ def test_ready_200_when_trino_reachable():
     assert r.status_code == 200 and r.json()["status"] == "ready"
 
 
-def test_ready_503_when_trino_down():
-    app = build_health_app(FakeClient(raises=RuntimeError("connection refused")))
+def test_ready_503_when_trino_down_says_a_code_never_the_exception():
+    app = build_health_app(FakeClient(raises=ConnectionRefusedError("trino.internal:8443 refused")))
     r = TestClient(app).get("/ready")
     assert r.status_code == 503
-    assert r.json()["status"] == "error" and "connection refused" in r.json()["detail"]
+    assert r.json() == {"status": "error", "reason": "trino_unreachable"}
+    assert "trino.internal" not in r.text and "refused" not in r.text
 
 
 def test_the_names_an_audit_line_keeps_reach_the_tools_and_a_plugin(monkeypatch):
