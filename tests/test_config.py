@@ -128,7 +128,7 @@ def test_service_mode_and_an_open_door_are_warned_of_when_chosen(monkeypatch):
     assert "no caller is verified" in Config.from_env().warnings()[1]
 
 
-@pytest.mark.parametrize("value", ["false", "0", "NO", " False "])
+@pytest.mark.parametrize("value", ["false", "FALSE", " False "])
 def test_trino_verification_turned_off_is_warned_of(monkeypatch, value):
     monkeypatch.setenv("TRINO_HTTP_SCHEME", "https")
     monkeypatch.setenv("TRINO_VERIFY", value)
@@ -184,7 +184,7 @@ def test_a_jwks_over_https_or_unused_is_not_warned_of(monkeypatch, over):
     ("mode", "value", "warned"),
     [
         ("jwt", "false", True),
-        ("jwt", " No ", True),
+        ("jwt", " False ", True),
         ("jwt", "true", False),
         ("jwt", "/etc/ca.pem", False),
         ("impersonation", "false", False),
@@ -347,7 +347,7 @@ def test_env_overrides(monkeypatch):
 def test_read_only_flag_parsing(monkeypatch):
     monkeypatch.setenv("TRINO_READ_ONLY", "TRUE")
     assert Config.from_env().read_only is True
-    monkeypatch.setenv("TRINO_READ_ONLY", "no")
+    monkeypatch.setenv("TRINO_READ_ONLY", " False ")
     assert Config.from_env().read_only is False
 
 

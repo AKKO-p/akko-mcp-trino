@@ -139,6 +139,34 @@ provider's error never reaches the agent, only a status. A right withdrawn in Tr
 context of a table visible for up to `MCP_VISIBILITY_TTL_SECONDS`, never its data, which Trino
 refuses at once. [Deployment](deployment.md#with-a-data-catalog) says which allow lists open what.
 
+## Authentication
+
+The server verifies each caller's token against the identity provider's published keys (JWKS),
+with its issuer, audience and expiry ([Identity](identity.md#token-verification)). Reading the
+JWKS is the one network call of that check, and a token's `kid` header chooses which key is
+looked up, so the reads are bounded whatever the tokens say:
+
+- A token is verified in a worker thread: a slow or unreachable identity provider never holds
+  up the other requests, those without a token included.
+- One read of the JWKS lasts `MCP_JWKS_TIMEOUT_SECONDS` at most (5 by default). The keys are
+  kept `MCP_JWKS_CACHE_SECONDS` (300).
+- The JWKS is read again at most once every `MCP_JWKS_MIN_REFRESH_SECONDS` (30), a failed read
+  included. A token naming a key the server does not hold is refused without a read when the
+  last read is more recent than that. One read runs at a time, and nobody waits for it.
+- A failed read keeps the keys already held: tokens signed with a known key are still
+  accepted while the identity provider cannot be reached, and a token signed with a new key is
+  accepted once a read succeeds.
+
+A failed read is logged as a warning, with the kind of error only. `/metrics` counts the reads
+in `mcp_trino_jwks_fetches_total` (by `result`, `ok` or `failed`) and sets `mcp_trino_jwks_up` to
+0 after a failed read. Alert on it. `/ready` does not check the JWKS: the keys held keep
+verifying tokens during an outage of the identity provider, so taking every pod out of service
+would turn that outage into a total one.
+
+A boolean setting is `true` or `false`, nothing else ([Configuration](configuration.md)): a typo
+in `MCP_AUTH_ENABLED`, `MCP_AUTH_REQUIRED` or `TRINO_READ_ONLY` stops the server at start, and
+never turns the check off.
+
 ## Audit
 
 Every tool call writes one audit line, keyed by `X-Request-Id`. The line never holds the token

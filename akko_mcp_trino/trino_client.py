@@ -185,9 +185,9 @@ def quiet_unverified_trino(config: Config) -> None:
 def verify_setting(config: Config) -> Union[bool, str]:
     """``TRINO_VERIFY`` as the Trino client takes it: True, False, or a CA bundle path."""
     v = config.trino_verify.strip()
-    if v.lower() in ("true", "1", "yes"):
+    if v.lower() == "true":
         return True
-    if v.lower() in ("false", "0", "no"):
+    if v.lower() == "false":
         return False
     return v  # a CA bundle path
 

@@ -63,6 +63,34 @@ def parse_jwt_algorithms(text: str) -> list[str]:
     return names
 
 
+# The issuer's JWKS: read within a short timeout, kept for a lifetime, and read again at
+# most once per interval, a failed read included, whatever the tokens name.
+DEFAULT_JWKS_TIMEOUT_SECONDS = 5.0
+DEFAULT_JWKS_CACHE_SECONDS = 300.0
+DEFAULT_JWKS_MIN_REFRESH_SECONDS = 30.0
+
+# The only values a boolean setting takes, case and surrounding spaces aside: anything else
+# is a startup error, never a guess.
+BOOLEAN_VALUES = ("true", "false")
+# Values a true/false/path setting (TRINO_VERIFY) refuses: they look like a boolean but
+# are none of the two words, so reading them as a path or as a boolean would be a guess.
+_BOOLEAN_LOOKALIKES = frozenset({"1", "0", "yes", "no", "y", "n", "on", "off", "t", "f"})
+
+
+def read_flag(name: str, raw: Optional[str], default: bool, invalid: list[str]) -> bool:
+    """The boolean setting ``name`` from its ``raw`` text: ``true`` or ``false``, case and
+    surrounding spaces aside, ``default`` when unset (None). Any other value is added to
+    ``invalid`` as a problem naming the variable, the value and the values allowed, and the
+    setting reads as ``default``; the server then refuses to start."""
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value not in BOOLEAN_VALUES:
+        invalid.append(f"{name}={raw!r} is not a boolean: set true or false (case does not matter)")
+        return default
+    return value == "true"
+
+
 # Defaults shared with the tools' registration, so a page and a bound never drift apart.
 DEFAULT_MAX_ROWS = 100
 DEFAULT_MAX_CATALOGS = 10000
@@ -253,6 +281,11 @@ class Config:
     extensions: str = ""
     # Tolerance on exp/nbf/iat for clock drift between the issuer and this server.
     jwt_leeway_seconds: int = 30
+    # The issuer's JWKS: the timeout of one read, how long the keys are kept, and the
+    # shortest interval between two reads, a failed one included.
+    jwks_timeout_seconds: float = DEFAULT_JWKS_TIMEOUT_SECONDS
+    jwks_cache_seconds: float = DEFAULT_JWKS_CACHE_SECONDS
+    jwks_min_refresh_seconds: float = DEFAULT_JWKS_MIN_REFRESH_SECONDS
     # The signature algorithms a caller's token may use, comma-separated: public-key
     # algorithms only (RS, PS, ES). A shared-secret algorithm (HS*) or `none` refuses to
     # start: the server verifies against the issuer's published public keys.
@@ -379,6 +412,9 @@ class Config:
     # The raw `MCP_VISIBILITY_ENABLED`, kept only to refuse `false`: the filter by Trino's
     # rights cannot be turned off.
     visibility_switch: str = ""
+    # Values from the environment no setting can take (a boolean other than true or false),
+    # each a problem: the server refuses to start.
+    env_problems: tuple[str, ...] = ()
 
     def client_claims(self) -> tuple[str, ...]:
         """The claims that name a token's client, in order (``MCP_JWT_CLIENT_CLAIMS``)."""
@@ -442,7 +478,8 @@ class Config:
 
     def problems(self) -> list[str]:
         """Settings no server can serve: the server refuses to start, ``--check`` says why."""
-        found = self._tool_problems()
+        found = [*self.env_problems, *self._tool_problems()]
+        found.extend(self._security_problems())
         if self.auth_required and not self.auth_enabled:
             found.append(
                 "MCP_AUTH_REQUIRED=true but MCP_AUTH_ENABLED=false: no token can be verified "
@@ -582,6 +619,56 @@ class Config:
         found.extend(self._context_problems())
         return found
 
+    def _security_problems(self) -> list[str]:
+        """The JWKS bounds, every time setting finite, and the TLS settings free of
+        boolean look-alikes."""
+        found = []
+        for name, value in (
+            ("TRINO_REQUEST_TIMEOUT_SECONDS", self.trino_request_timeout),
+            ("TRINO_QUERY_TIMEOUT_SECONDS", self.query_timeout_seconds),
+            ("MCP_CALL_TIMEOUT_SECONDS", self.call_timeout_seconds),
+            ("MCP_SEARCH_RESERVE_SECONDS", self.search_reserve_seconds),
+            ("MCP_CONTEXT_TIMEOUT_SECONDS", self.context_timeout_seconds),
+            ("MCP_CONTEXT_RESERVE_SECONDS", self.context_reserve_seconds),
+            ("MCP_CONTEXT_RETRY_AFTER_SECONDS", self.context_retry_after_seconds),
+            ("MCP_CONTEXT_REFUSED_RETRY_SECONDS", self.context_refused_retry_seconds),
+            ("MCP_CONTEXT_TTL_SECONDS", self.context_ttl_seconds),
+            ("MCP_VISIBILITY_TTL_SECONDS", self.visibility_ttl_seconds),
+            ("MCP_JWKS_TIMEOUT_SECONDS", self.jwks_timeout_seconds),
+            ("MCP_JWKS_CACHE_SECONDS", self.jwks_cache_seconds),
+            ("MCP_JWKS_MIN_REFRESH_SECONDS", self.jwks_min_refresh_seconds),
+        ):
+            # nan passes every comparison as false, so it would escape every bound below.
+            if not math.isfinite(value):
+                found.append(f"{name}={value}: a number of seconds is a finite number")
+        if not self.jwks_timeout_seconds > 0:
+            found.append(
+                f"MCP_JWKS_TIMEOUT_SECONDS={self.jwks_timeout_seconds:g}: "
+                "a read of the JWKS needs more than 0 seconds"
+            )
+        if not self.jwks_min_refresh_seconds >= 1:
+            found.append(
+                f"MCP_JWKS_MIN_REFRESH_SECONDS={self.jwks_min_refresh_seconds:g}: the JWKS is "
+                "read again at most once a second, or every token naming an unknown key "
+                "would cause a read; set 1 or more"
+            )
+        if not self.jwks_cache_seconds >= self.jwks_min_refresh_seconds:
+            found.append(
+                f"MCP_JWKS_CACHE_SECONDS={self.jwks_cache_seconds:g} is below "
+                f"MCP_JWKS_MIN_REFRESH_SECONDS={self.jwks_min_refresh_seconds:g}: the keys "
+                "cannot be read again sooner than that; set it to that or more"
+            )
+        for setting, text in (
+            ("TRINO_VERIFY", self.trino_verify),
+            ("TRINO_TOKEN_EXCHANGE_VERIFY", self.token_exchange_verify),
+        ):
+            if text.strip().lower() in _BOOLEAN_LOOKALIKES:
+                found.append(
+                    f"{setting}={text!r}: set true, false or the path of a CA bundle "
+                    "(case does not matter)"
+                )
+        return found
+
     def _context_problems(self) -> list[str]:
         found = []
         if self.visibility_switch.strip().lower() == "false":
@@ -719,10 +806,8 @@ class Config:
                 "http, so anyone on the path could substitute them and mint accepted tokens; "
                 "set an https MCP_JWKS_URL"
             )
-        if self.trino_identity_mode == "jwt" and self.token_exchange_verify.strip().lower() in (
-            "false",
-            "0",
-            "no",
+        if self.trino_identity_mode == "jwt" and self.token_exchange_verify.strip().lower() == (
+            "false"
         ):
             found.append(
                 f"TRINO_TOKEN_EXCHANGE_VERIFY={self.token_exchange_verify.strip()}: the token "
@@ -730,11 +815,7 @@ class Config:
                 "sends its client secret and the callers' tokens to; set "
                 "TRINO_TOKEN_EXCHANGE_VERIFY=true, or the path of a CA bundle"
             )
-        if self.trino_http_scheme == "https" and self.trino_verify.strip().lower() in (
-            "false",
-            "0",
-            "no",
-        ):
+        if self.trino_http_scheme == "https" and self.trino_verify.strip().lower() == "false":
             found.append(
                 f"TRINO_VERIFY={self.trino_verify.strip()}: Trino's certificate is not verified, "
                 "so the server cannot know whom it sends its credentials to; set "
@@ -786,14 +867,21 @@ class Config:
     def from_env(*, server_name: str = "trino-mcp") -> "Config":
         """Read every setting from the environment."""
         tag = os.environ.get("MCP_PROFILE_CLIENT_TAG", DEFAULT_PROFILE_CLIENT_TAG)
+        invalid: list[str] = []  # filled while the arguments are read, passed last
+        jwks_min_refresh = os.environ.get("MCP_JWKS_MIN_REFRESH_SECONDS", "")
+        jwks_min_refresh = jwks_min_refresh or str(DEFAULT_JWKS_MIN_REFRESH_SECONDS)
         return Config(
             trino_host=os.environ.get("TRINO_HOST", "localhost"),
             trino_port=int(os.environ.get("TRINO_PORT", "8080")),
             trino_user=os.environ.get("TRINO_USER", "trino"),
             trino_catalog=os.environ.get("TRINO_CATALOG", "system"),
             max_rows=int(os.environ.get("TRINO_MAX_ROWS", str(DEFAULT_MAX_ROWS))),
-            read_only=os.environ.get("TRINO_READ_ONLY", "true").lower() == "true",
-            auth_enabled=os.environ.get("MCP_AUTH_ENABLED", "true").lower() == "true",
+            read_only=read_flag(
+                "TRINO_READ_ONLY", os.environ.get("TRINO_READ_ONLY"), True, invalid
+            ),
+            auth_enabled=read_flag(
+                "MCP_AUTH_ENABLED", os.environ.get("MCP_AUTH_ENABLED"), True, invalid
+            ),
             server_name=os.environ.get("MCP_SERVER_NAME", server_name),
             health_port=int(os.environ.get("MCP_HEALTH_PORT", "3001")),
             jwks_url=os.environ.get("MCP_JWKS_URL", ""),
@@ -801,7 +889,9 @@ class Config:
             oidc_audience=os.environ.get("MCP_OIDC_AUDIENCE", ""),
             transport=os.environ.get("MCP_TRANSPORT", "streamable-http"),
             mcp_port=int(os.environ.get("MCP_PORT", "3000")),
-            auth_required=os.environ.get("MCP_AUTH_REQUIRED", "true").lower() == "true",
+            auth_required=read_flag(
+                "MCP_AUTH_REQUIRED", os.environ.get("MCP_AUTH_REQUIRED"), True, invalid
+            ),
             allowed_hosts=os.environ.get("MCP_ALLOWED_HOSTS", ""),
             user_token=os.environ.get("MCP_USER_TOKEN", ""),
             trino_http_scheme=os.environ.get("TRINO_HTTP_SCHEME", "http").lower(),
@@ -818,6 +908,13 @@ class Config:
             exclude_tools=os.environ.get("MCP_EXCLUDE_TOOLS", ""),
             extensions=os.environ.get("MCP_EXTENSIONS", ""),
             jwt_leeway_seconds=int(os.environ.get("MCP_JWT_LEEWAY_SECONDS", "30")),
+            jwks_timeout_seconds=float(
+                os.environ.get("MCP_JWKS_TIMEOUT_SECONDS", str(DEFAULT_JWKS_TIMEOUT_SECONDS))
+            ),
+            jwks_cache_seconds=float(
+                os.environ.get("MCP_JWKS_CACHE_SECONDS", str(DEFAULT_JWKS_CACHE_SECONDS))
+            ),
+            jwks_min_refresh_seconds=float(jwks_min_refresh),
             extra_read_commands=os.environ.get("MCP_EXTRA_READ_COMMANDS", ""),
             jwt_algorithms=os.environ.get("MCP_JWT_ALGORITHMS", "RS256"),
             jwt_user_claim=os.environ.get("MCP_JWT_USER_CLAIM", "sub").strip() or "sub",
@@ -842,7 +939,9 @@ class Config:
             ),
             max_cell_chars=int(os.environ.get("MCP_MAX_CELL_CHARS", str(DEFAULT_MAX_CELL_CHARS))),
             comment_chars=int(os.environ.get("MCP_COMMENT_CHARS", str(DEFAULT_COMMENT_CHARS))),
-            clean_cells=os.environ.get("MCP_CLEAN_CELLS", "false").lower() == "true",
+            clean_cells=read_flag(
+                "MCP_CLEAN_CELLS", os.environ.get("MCP_CLEAN_CELLS"), False, invalid
+            ),
             sql_parse_seconds=float(
                 os.environ.get("MCP_SQL_PARSE_SECONDS", str(DEFAULT_PARSE_SECONDS))
             ),
@@ -898,8 +997,12 @@ class Config:
             visibility_ttl_seconds=float(os.environ.get("MCP_VISIBILITY_TTL_SECONDS", "60")),
             visibility_cache_bytes=int(os.environ.get("MCP_VISIBILITY_CACHE_BYTES", "33554432")),
             visibility_max_names=int(os.environ.get("MCP_VISIBILITY_MAX_NAMES", "10000")),
-            context_require_select=os.environ.get("MCP_CONTEXT_REQUIRE_SELECT", "false").lower()
-            == "true",
+            context_require_select=read_flag(
+                "MCP_CONTEXT_REQUIRE_SELECT",
+                os.environ.get("MCP_CONTEXT_REQUIRE_SELECT"),
+                False,
+                invalid,
+            ),
             context_canary=os.environ.get("MCP_CONTEXT_CANARY", "").strip(),
             context_text_chars=int(os.environ.get("MCP_CONTEXT_TEXT_CHARS", "500")),
             context_response_chars=int(os.environ.get("MCP_CONTEXT_RESPONSE_CHARS", "60000")),
@@ -926,4 +1029,5 @@ class Config:
                 os.environ.get("MCP_PROFILE_MAX_CONCURRENT", str(DEFAULT_PROFILE_MAX_CONCURRENT))
             ),
             visibility_switch=os.environ.get("MCP_VISIBILITY_ENABLED", ""),
+            env_problems=tuple(invalid),
         )

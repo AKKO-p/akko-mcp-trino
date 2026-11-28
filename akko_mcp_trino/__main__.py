@@ -262,7 +262,7 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
 
         signal.signal(signal.SIGTERM, on_term)
     try:
-        auth_provider = build_auth(config, _audiences(extensions))
+        auth_provider = build_auth(config, _audiences(extensions), metrics.jwks_fetched)
         for warning in config.warnings():
             log.warning(warning)
         _serve(config, mcp, client, auth_provider, extensions, metrics, close_context)

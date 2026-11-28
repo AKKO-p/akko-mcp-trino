@@ -1,5 +1,25 @@
 # Migrating
 
+## From 0.8.6 to 0.8.7
+
+- **Boolean settings are strict.** `TRINO_READ_ONLY`, `MCP_AUTH_ENABLED`, `MCP_AUTH_REQUIRED`,
+  `MCP_CLEAN_CELLS` and `MCP_CONTEXT_REQUIRE_SELECT` accept `true` or `false` only, whatever
+  the case. A value tolerated until now, such as `1`, `yes`, `no` or an empty string, made the
+  setting false without a word; it now stops the server at start, and `--check` exits 2 and
+  names it. This is intended. Run `akko-mcp-trino --check` with your environment before
+  upgrading, and write `true` or `false`. The Helm chart renders `true` or `false` and needs no
+  change.
+- **TLS settings refuse boolean look-alikes.** `TRINO_VERIFY` and `TRINO_TOKEN_EXCHANGE_VERIFY`
+  take `true`, `false` or the path of a CA bundle. `0`, `no`, `1`, `yes`, `on` and `off` were
+  read as `false` or `true`, and are now a startup error: write `false` or `true`.
+- **Numbers of seconds are finite.** `nan` and `inf` in a `*_SECONDS` setting are a startup
+  error; `0` keeps its meaning where the setting documents one.
+- **JWKS reads are bounded.** The JWKS is read with a 5 second timeout (it was 30), its keys are
+  kept 300 seconds, and it is read again at most once every 30 seconds, a failed read included.
+  After a key rotation, a token signed with the new key may be refused for up to
+  `MCP_JWKS_MIN_REFRESH_SECONDS` after the last read. Lower it, 1 at least, if your identity
+  provider rotates keys without publishing them in advance. Alert on `mcp_trino_jwks_up`.
+
 ## From 0.8.3 to 0.8.4
 
 The server, its tools and their answers do not change. The Helm chart (0.3.4) and the warnings
