@@ -14,4 +14,4 @@ __version__ = "0.8.7"
 
 # Before anything imports the MCP SDK, whose first import loads the tracer provider that
 # OTEL_PYTHON_TRACER_PROVIDER names, and fails when none is installed (see `otel`).
-OTEL_NOTICE = _drop_missing_tracer_provider(_os.environ)
+OTEL_DROPPED = _drop_missing_tracer_provider(_os.environ)

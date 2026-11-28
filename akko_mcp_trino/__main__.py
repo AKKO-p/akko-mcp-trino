@@ -26,17 +26,24 @@ from typing import Any
 
 import uvicorn
 
-from . import OTEL_NOTICE, __version__
+from . import OTEL_DROPPED, __version__
 from .app import build_asgi_app, run_stdio, transports_supported
 from .audit import LoggingAudit
 from .auth import accepted_audiences, build_auth
-from .config import MAX_DESCRIBE_SCHEMA_TABLES, Config, parse_jwt_algorithms, provider_names
+from .config import (
+    MAX_DESCRIBE_SCHEMA_TABLES,
+    Config,
+    parse_jwt_algorithms,
+    provider_names,
+    trusted_networks,
+)
 from .context import ContextProvider, ContextSetup
 from .context.loading import close_providers, load_providers
 from .extensions import Extension, extension_names, load_extensions
 from .health import build_health_app
 from .logs import configure_logging
 from .metrics import Metrics
+from .otel import DROPPED_NOTICE
 from .parse_pool import close_all as close_parse_pools
 from .plugins import tool_registrars
 from .server import build_server
@@ -73,6 +80,18 @@ def _algorithms(config: Config) -> list[str]:
         return parse_jwt_algorithms(config.jwt_algorithms)
     except ValueError:
         return [config.jwt_algorithms]
+
+
+def _client_address_line(config: Config) -> str:
+    """Where the audit reads the client's address: the networks of ``MCP_TRUSTED_PROXIES``,
+    as parsed (a value that does not parse is a problem of its own), or the peer."""
+    try:
+        networks = trusted_networks(config.trusted_proxies)
+    except ValueError:
+        return "an invalid MCP_TRUSTED_PROXIES"
+    if not networks:
+        return "the peer (no trusted proxy)"
+    return "X-Forwarded-For behind " + ",".join(str(net) for net in networks)
 
 
 def check_config(config: Config, *, strict: bool = False) -> int:
@@ -164,11 +183,7 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         "audited; log lines "
         + ("JSON (MCP_LOG_FORMAT=json)" if config.log_format == "json" else config.log_format)
         + "; client address from "
-        + (
-            f"X-Forwarded-For behind {config.trusted_proxies.strip()}"
-            if config.trusted_proxies.strip()
-            else "the peer (no trusted proxy)"
-        ),
+        + _client_address_line(config),
         "tools exposed: "
         + (", ".join(config.exposed_tools()) or "none")
         + (" (all nine)" if not config.tools_restricted() else "")
@@ -209,7 +224,7 @@ def check_config(config: Config, *, strict: bool = False) -> int:
         problems.append(str(exc))
     close_providers(providers)
     print("\n".join(lines))
-    for warning in [*config.warnings(), *([OTEL_NOTICE] if OTEL_NOTICE else [])]:
+    for warning in [*config.warnings(), *([DROPPED_NOTICE] if OTEL_DROPPED else [])]:
         print(f"WARNING: {warning}")
     for problem in problems:
         print(f"PROBLEM: {problem}")
@@ -224,8 +239,8 @@ def main() -> None:  # pragma: no cover - process glue, proven by running it
     config = Config.from_env()
     configure_logging("json" if config.log_format == "json" else "text")
     log = logging.getLogger(__name__)
-    if OTEL_NOTICE:
-        log.warning(OTEL_NOTICE)
+    if OTEL_DROPPED:
+        log.warning(DROPPED_NOTICE)
 
     logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines carry request URLs
     extensions = load_extensions(config, os.environ)

@@ -923,24 +923,24 @@ def test_the_reason_goes_to_the_log_once_until_it_changes_and_the_probes_count(c
 
 def test_an_unset_tracer_provider_is_left_alone():
     env: dict[str, str] = {}
-    assert otel.drop_missing_tracer_provider(env) == "" and env == {}
+    assert otel.drop_missing_tracer_provider(env) is False and env == {}
 
 
 def test_a_tracer_provider_that_is_installed_is_left_alone(monkeypatch):
     found = SimpleNamespace(name="sdk_tracer_provider")
     monkeypatch.setattr(otel, "entry_points", lambda group: [found])
     env = {"OTEL_PYTHON_TRACER_PROVIDER": "sdk_tracer_provider"}
-    assert otel.drop_missing_tracer_provider(env) == ""
+    assert otel.drop_missing_tracer_provider(env) is False
     assert env == {"OTEL_PYTHON_TRACER_PROVIDER": "sdk_tracer_provider"}
 
 
 def test_a_tracer_provider_that_is_not_installed_is_dropped_with_a_warning(monkeypatch):
     monkeypatch.setattr(otel, "entry_points", lambda group: [])
     env = {"OTEL_PYTHON_TRACER_PROVIDER": "sdk_tracer_provider", "OTHER": "1"}
-    notice = otel.drop_missing_tracer_provider(env)
+    assert otel.drop_missing_tracer_provider(env) is True
     assert env == {"OTHER": "1"}
-    assert "OTEL_PYTHON_TRACER_PROVIDER='sdk_tracer_provider'" in notice
-    assert "emits no span" in notice
+    assert otel.DROPPED_NOTICE.startswith("OTEL_PYTHON_TRACER_PROVIDER names no installed")
+    assert "emits no span" in otel.DROPPED_NOTICE
 
 
 def _python(code: str, **env: str) -> subprocess.CompletedProcess:
@@ -961,7 +961,7 @@ def test_the_server_starts_when_the_environment_names_a_tracer_provider_it_lacks
     variable = {"OTEL_PYTHON_TRACER_PROVIDER": "sdk_tracer_provider"}
     served = _python(
         "import akko_mcp_trino, akko_mcp_trino.server, os;"
-        "print(bool(akko_mcp_trino.OTEL_NOTICE), 'OTEL_PYTHON_TRACER_PROVIDER' in os.environ)",
+        "print(akko_mcp_trino.OTEL_DROPPED, 'OTEL_PYTHON_TRACER_PROVIDER' in os.environ)",
         **variable,
     )
     assert served.returncode == 0, served.stderr
@@ -992,13 +992,15 @@ def test_check_says_how_the_audit_is_written(monkeypatch, capsys):
     from akko_mcp_trino import __main__ as entry
     from tests.tool_doubles import core_config
 
-    monkeypatch.setattr(entry, "OTEL_NOTICE", "OTEL_PYTHON_TRACER_PROVIDER='x' names no ...")
-    entry.check_config(core_config(log_format="json", trusted_proxies="10.0.0.0/8"))
+    monkeypatch.setattr(entry, "OTEL_DROPPED", True)
+    entry.check_config(core_config(log_format="json", trusted_proxies="10.0.0.0/8, 192.0.2.1"))
     out = capsys.readouterr().out
     assert "refusals audited; log lines JSON (MCP_LOG_FORMAT=json); client address from " in out
-    assert "X-Forwarded-For behind 10.0.0.0/8" in out
-    assert "WARNING: OTEL_PYTHON_TRACER_PROVIDER='x'" in out
-    monkeypatch.setattr(entry, "OTEL_NOTICE", "")
+    assert "X-Forwarded-For behind 10.0.0.0/8,192.0.2.1/32" in out
+    assert "WARNING: OTEL_PYTHON_TRACER_PROVIDER names no installed tracer provider" in out
+    entry.check_config(core_config(trusted_proxies="ten"))
+    assert "client address from an invalid MCP_TRUSTED_PROXIES" in capsys.readouterr().out
+    monkeypatch.setattr(entry, "OTEL_DROPPED", False)
     entry.check_config(core_config())
     out = capsys.readouterr().out
     assert "log lines text; client address from the peer (no trusted proxy)" in out

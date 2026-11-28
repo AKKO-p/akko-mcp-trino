@@ -12,8 +12,8 @@ the operations guide for what they carry.
 entry point. When no installed package provides it (a platform that sets the OTel variables
 on every pod, where this image has no SDK), the API raises at the SDK's first import and the
 server would not start. ``drop_missing_tracer_provider`` removes such a variable from the
-process before the SDK is imported, and returns the warning the server prints at start: the
-server starts, and emits no span, which is what it would do without the variable.
+process before the SDK is imported, and the server prints ``DROPPED_NOTICE`` at start: it
+starts, and emits no span, which is what it would do without the variable.
 """
 
 from __future__ import annotations
@@ -23,21 +23,21 @@ from typing import MutableMapping
 
 TRACER_PROVIDER_VARIABLE = "OTEL_PYTHON_TRACER_PROVIDER"
 _GROUP = "opentelemetry_tracer_provider"
-# The longest value of the variable the warning repeats.
-_SHOWN_CHARS = 100
+# What the server says at start and in --check when it dropped the variable.
+DROPPED_NOTICE = (
+    f"{TRACER_PROVIDER_VARIABLE} names no installed tracer provider (no OpenTelemetry SDK "
+    "provides it here): ignored, and the server emits no span"
+)
 
 
-def drop_missing_tracer_provider(environ: MutableMapping[str, str]) -> str:
+def drop_missing_tracer_provider(environ: MutableMapping[str, str]) -> bool:
     """Remove ``OTEL_PYTHON_TRACER_PROVIDER`` from ``environ`` when no installed package
-    provides the tracer provider it names, and return the warning that says so; empty when
-    the variable is unset or names an installed provider, which is then left alone."""
+    provides the tracer provider it names, and say whether it did (``DROPPED_NOTICE`` says
+    why); a variable unset, or naming an installed provider, is left alone."""
     name = environ.get(TRACER_PROVIDER_VARIABLE)
     if name is None:
-        return ""
+        return False
     if any(ep.name == name for ep in entry_points(group=_GROUP)):
-        return ""
+        return False
     del environ[TRACER_PROVIDER_VARIABLE]
-    return (
-        f"{TRACER_PROVIDER_VARIABLE}={name[:_SHOWN_CHARS]!r} names no installed tracer provider "
-        "(no OpenTelemetry SDK provides it here): ignored, and the server emits no span"
-    )
+    return True
