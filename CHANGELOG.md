@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.7] - 2026-11-28
 
 ### Security
 - JWKS verification no longer blocks the event loop. A token is verified in a worker thread, so a slow or unreachable identity provider never holds up the other requests. The keys are read with a short timeout, kept for a lifetime, and read again at most once per interval, a failed read included: a token naming a key the server does not hold causes no read within that interval. A failed read keeps the keys already held.
@@ -13,6 +13,13 @@ All notable changes to this project are documented here. The format follows
 ### Added
 - `MCP_JWKS_TIMEOUT_SECONDS` (5), `MCP_JWKS_CACHE_SECONDS` (300) and `MCP_JWKS_MIN_REFRESH_SECONDS` (30, 1 at least): the timeout of one read of the JWKS, how long its keys are kept, and the shortest interval between two reads.
 - `/metrics` exposes `mcp_trino_jwks_fetches_total` (by `result`, `ok` or `failed`) and `mcp_trino_jwks_up`, 0 after a failed read of the JWKS.
+
+### Changed
+- A value that a boolean setting tolerated until now, such as `1`, `yes` or an empty string, now stops the server at start. [MIGRATING.md](MIGRATING.md#from-086-to-087) says what to check before upgrading.
+- One read of the JWKS lasts 5 seconds at most by default, instead of 30.
+- The Helm chart 0.3.7 runs the image 0.8.7 by default (`appVersion`); the chart has no other change and renders `true` or `false` for its boolean values.
+- `akko-mcp-trino-atlas` 0.8.7 is released with the core, with no change of its own.
+- The host pages, `DOCKERHUB.md`, the examples and the Helm checks of `integration/helm/` pin 0.8.7.
 
 ## [0.8.6] - 2026-11-28
 
