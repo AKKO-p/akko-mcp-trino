@@ -10,6 +10,12 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.service.type }}
+  sessionAffinity: {{ .Values.service.sessionAffinity }}
+  {{- if and (eq .Values.service.sessionAffinity "ClientIP") (not (kindIs "invalid" .Values.service.sessionAffinityTimeoutSeconds)) }}
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: {{ .Values.service.sessionAffinityTimeoutSeconds | int64 }}
+  {{- end }}
   selector:
     {{- include "mcp-trino.serverSelectorLabels" . | nindent 4 }}
   ports:

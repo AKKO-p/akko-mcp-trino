@@ -128,7 +128,61 @@ they would silently override the render-time checks.
   "MCP_PROFILE_DESCRIBE_ROWS" "limits.profileDescribeRows" "MCP_PROFILE_CLIENT_TAG" "limits.profileClientTag"
   "MCP_PROFILE_TIMEOUT_SECONDS" "limits.profileTimeoutSeconds" "MCP_PROFILE_MAX_CONCURRENT" "limits.profileMaxConcurrent"
   "MCP_USER_TOKEN" "nothing: stdio only" "SSL_CERT_FILE" "ca and ca.setSslCertFile" "PYTHONDONTWRITEBYTECODE" "nothing: always set"
+  "MCP_STATELESS_HTTP" "server.statelessHttp" "MCP_SHUTDOWN_DELAY_SECONDS" "shutdown.delaySeconds"
+  "MCP_SHUTDOWN_TIMEOUT_SECONDS" "shutdown.timeoutSeconds"
 ) }}
+{{- end }}
+
+{{/*
+The server's defaults the chart computes with when the values leave a setting null. They must
+stay those of akko_mcp_trino/config.py: tests/test_instances.py compares them.
+*/}}
+{{- define "mcp-trino.serverDefaults" -}}
+{{- toJson (dict "callTimeoutSeconds" 120 "queryTimeoutSeconds" 60 "requestTimeoutSeconds" 30 "shutdownTimeoutSeconds" 120) }}
+{{- end }}
+
+{{/*
+The seconds the calls in flight have after SIGTERM (MCP_SHUTDOWN_TIMEOUT_SECONDS), by the
+server's rule: shutdown.timeoutSeconds, else the call budget, else the query budget, else 120.
+*/}}
+{{- define "mcp-trino.shutdownTimeout" -}}
+{{- $v := .Values }}
+{{- $d := include "mcp-trino.serverDefaults" . | fromJson }}
+{{- if not (kindIs "invalid" $v.shutdown.timeoutSeconds) }}
+{{- $v.shutdown.timeoutSeconds }}
+{{- else }}
+{{- $call := ternary $d.callTimeoutSeconds $v.limits.callTimeoutSeconds (kindIs "invalid" $v.limits.callTimeoutSeconds) }}
+{{- $query := ternary $d.queryTimeoutSeconds $v.trino.queryTimeoutSeconds (kindIs "invalid" $v.trino.queryTimeoutSeconds) }}
+{{- if gt (float64 $call) 0.0 }}{{ $call }}{{ else if gt (float64 $query) 0.0 }}{{ $query }}{{ else }}{{ $d.shutdownTimeoutSeconds }}{{ end }}
+{{- end }}
+{{- end }}
+
+{{/*
+The grace period a clean stop needs: the delay, the shutdown timeout, one request to Trino for
+the cancels, and the margin, in whole seconds rounded up.
+*/}}
+{{- define "mcp-trino.neededGrace" -}}
+{{- $v := .Values }}
+{{- $d := include "mcp-trino.serverDefaults" . | fromJson }}
+{{- $request := ternary $d.requestTimeoutSeconds $v.trino.requestTimeoutSeconds (kindIs "invalid" $v.trino.requestTimeoutSeconds) }}
+{{- $total := addf $v.shutdown.delaySeconds (include "mcp-trino.shutdownTimeout" . | float64) $request $v.shutdown.marginSeconds }}
+{{- ceil $total | int64 }}
+{{- end }}
+
+{{/* The pod's terminationGracePeriodSeconds: the value set, else the one a clean stop needs. */}}
+{{- define "mcp-trino.gracePeriod" -}}
+{{- if kindIs "invalid" .Values.terminationGracePeriodSeconds }}
+{{- include "mcp-trino.neededGrace" . }}
+{{- else }}
+{{- .Values.terminationGracePeriodSeconds | int64 }}
+{{- end }}
+{{- end }}
+
+{{/* Whether more than one replica may serve: replicaCount, or the HPA's maximum. */}}
+{{- define "mcp-trino.multiReplica" -}}
+{{- if .Values.autoscaling.enabled }}
+{{- if gt (int .Values.autoscaling.maxReplicas) 1 }}true{{ end }}
+{{- else if gt (int .Values.replicaCount) 1 }}true{{ end }}
 {{- end }}
 
 {{/* The paths an Ingress host routes by default. */}}

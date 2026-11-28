@@ -236,7 +236,8 @@ class _FakeMCP:
     def sse_app(self, *, transport_security=None):
         return Starlette()
 
-    streamable_http_app = sse_app
+    def streamable_http_app(self, *, transport_security=None, stateless_http=False):
+        return Starlette()
 
 
 class _Routed(Extension):

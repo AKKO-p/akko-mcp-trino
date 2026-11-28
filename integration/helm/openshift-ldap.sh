@@ -19,7 +19,7 @@
 # none: integration/ldap/run.sh and CI build it with --network=none), and the fixtures pull
 # their images from public registries.
 # Everything it created is removed at the end, even on failure, unless KEEP=1. It refuses to
-# run beside an object of the same name it did not create. About 1 CPU and 3 GiB of memory
+# run beside an object of the same name it did not create. About 1 CPU and 3.75 GiB of memory
 # of requests while the fixtures run, 2 GiB more during the build.
 #
 # Where the Build API is absent (plain Kubernetes), MCP_IMAGE names an image built from

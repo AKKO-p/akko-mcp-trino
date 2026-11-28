@@ -87,6 +87,9 @@ démarrer.
 | `MCP_PORT`, `MCP_HEALTH_PORT` | ports d'écoute, transports HTTP seulement | `3000`, `3001` |
 | `MCP_SERVER_NAME` | nom annoncé aux MCP hosts | `trino-mcp` |
 | `MCP_USER_TOKEN` | stdio seulement : le token d'accès de l'utilisateur, vérifié comme un en-tête bearer | aucun (obligatoire quand `MCP_AUTH_REQUIRED=true`) |
+| `MCP_STATELESS_HTTP` | `streamable-http` seulement : `true` sert chaque requête seule, sans session, si bien que n'importe quel réplica répond à n'importe quel client, quelle que soit sa révision du protocole ; `false` garde une session par client dans le processus, et un client d'une révision 2025 a alors besoin d'une affinité vers un réplica. Voir [Plusieurs instances](scaling.md) | `true` |
+| `MCP_SHUTDOWN_DELAY_SECONDS` | transports HTTP : à SIGTERM, secondes pendant lesquelles le serveur sert encore, chaque réponse fermant sa connexion, pour que le répartiteur et les clients passent aux autres réplicas | `0` (la chart Helm pose `5`) |
+| `MCP_SHUTDOWN_TIMEOUT_SECONDS` | transports HTTP : ensuite, secondes laissées aux appels en cours pour finir, avant que le serveur annule leurs requêtes Trino et s'arrête | `MCP_CALL_TIMEOUT_SECONDS`, sinon `TRINO_QUERY_TIMEOUT_SECONDS`, sinon `120` |
 
 ## Audit
 

@@ -128,10 +128,12 @@ class Cancellation:
                 continue
             self._threads.append(thread)
 
-    def wait(self) -> None:
-        """Return once every stop ``cancel`` started has ended."""
+    def wait(self, timeout: Optional[float] = None) -> None:
+        """Return once every stop ``cancel`` started has ended, or ``timeout`` seconds in
+        all have passed when it is given."""
+        end = None if timeout is None else time.monotonic() + timeout
         for thread in self._threads:
-            thread.join()
+            thread.join(None if end is None else max(0.0, end - time.monotonic()))
 
 
 # The client tag of the statements the filter by Trino's rights runs for a caller.
@@ -484,7 +486,16 @@ class TrinoClient:
         self._metrics = metrics
         self._identity = identity if identity is not None else resolve_identity(config)
         self._tags = tags
+        # Given to every query: `stop_queries` cancels them all when the server stops.
+        self._stopping = Cancellation()
         quiet_unverified_trino(config)
+
+    def stop_queries(self) -> None:
+        """Cancel in Trino every query running now, and refuse every later one: the
+        server is stopping and no answer will reach its caller. Returns once the cancels
+        are sent, or after ``TRINO_REQUEST_TIMEOUT_SECONDS`` at most."""
+        self._stopping.cancel()
+        self._stopping.wait(self._config.trino_request_timeout)
 
     def ping(self) -> None:
         """Readiness, as the identity mode checks it."""
@@ -536,10 +547,8 @@ class TrinoClient:
         has nothing to stop, so it is tried again until Trino names the query, which the
         Trino client's ``execute`` waits on until the first rows), or its last page read
         just as the budget ran out. ``cancel``, when given, stops it the same way, at once,
-        and it then raises `QueryCancelled`, never the call's error."""
-        if budget <= 0 and cancel is None:
-            cursor.execute(sql, params)
-            return cursor.fetchmany(limit)
+        and it then raises `QueryCancelled`, never the call's error. So does the stop of the
+        server (`stop_queries`)."""
         expired, done, cancelled = threading.Event(), threading.Event(), threading.Event()
         executing = threading.Event()
 
@@ -576,7 +585,12 @@ class TrinoClient:
         if timer is not None:
             timer.daemon = True
             timer.start()
-        forget = cancel.watch(stop) if cancel is not None else (lambda: None)
+        forgets = [c.watch(stop) for c in (cancel, self._stopping) if c is not None]
+
+        def forget() -> None:
+            for one in forgets:
+                one()
+
         executing.set()
         if cancelled.is_set():
             # Cancelled before its statement: by the time the signal was watched, or as it

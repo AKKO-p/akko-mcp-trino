@@ -1,0 +1,41 @@
+# Production: several replicas that any client can reach (streamable HTTP without a session,
+# the default), scaled on CPU between 2 and 6, spread over nodes and zones, a disruption budget,
+# the memory measured for wide answers, and a clean stop (the grace period is computed).
+trino:
+  host: trino.example.internal
+  catalog: lakehouse
+  tokenExchange:
+    url: https://idp.example.internal/realms/data/protocol/openid-connect/token
+    clientId: mcp-trino
+    audience: trino
+auth:
+  jwksUrl: https://idp.example.internal/realms/data/protocol/openid-connect/certs
+  issuer: https://idp.example.internal/realms/data
+  audience: mcp-trino
+existingSecret:
+  name: mcp-trino-credentials
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+resources:
+  requests:
+    cpu: 250m
+    memory: 384Mi
+  limits:
+    cpu: "1"
+    memory: 768Mi
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+podAntiAffinity: soft
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: akko-mcp-trino
+        app.kubernetes.io/component: server
+        app.kubernetes.io/instance: mcp   # the release name

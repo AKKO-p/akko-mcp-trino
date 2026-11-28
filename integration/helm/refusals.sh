@@ -62,6 +62,31 @@ renders "a 63-character name keeps the health Service within 63" templates/servi
 renders "an explicit minAvailable of 0 stays 0" templates/pdb.yaml 'minAvailable: 0' -- -f values.yaml \
   --set podDisruptionBudget.enabled=true,podDisruptionBudget.minAvailable=0
 renders "maxUnavailable alone" templates/pdb.yaml 'maxUnavailable: 1' -- -f values.yaml --set podDisruptionBudget.enabled=true,podDisruptionBudget.maxUnavailable=1
+# Several instances and a clean stop.
+renders "streamable HTTP without a session by default, and the clean stop" templates/configmap.yaml \
+  'MCP_STATELESS_HTTP: "true"' 'MCP_SHUTDOWN_DELAY_SECONDS: "5"' 'MCP_SHUTDOWN_TIMEOUT_SECONDS: "120"' -- -f values.yaml
+renders "sessions when asked" templates/configmap.yaml 'MCP_STATELESS_HTTP: "false"' -- -f values.yaml --set server.statelessHttp=false
+renders "an upgrade waits for a ready pod, and the grace covers the delay, the calls, the cancels" templates/deployment.yaml \
+  'maxUnavailable: 0' 'maxSurge: 1' 'terminationGracePeriodSeconds: 165' -- -f values.yaml
+renders "the grace follows the call budget" templates/deployment.yaml 'terminationGracePeriodSeconds: 345' -- -f values.yaml --set limits.callTimeoutSeconds=300
+renders "the grace follows the query budget when calls have none" templates/deployment.yaml 'terminationGracePeriodSeconds: 105' \
+  'MCP_SHUTDOWN_TIMEOUT_SECONDS: "60"' -- -f values.yaml --set limits.callTimeoutSeconds=0 -s templates/configmap.yaml
+renders "the grace follows the shutdown timeout and the request timeout" templates/deployment.yaml 'terminationGracePeriodSeconds: 37' -- -f values.yaml \
+  --set shutdown.timeoutSeconds=10,trino.requestTimeoutSeconds=12
+renders "a grace set by hand is kept" templates/deployment.yaml 'terminationGracePeriodSeconds: 400' -- -f values.yaml --set terminationGracePeriodSeconds=400
+renders "an affinity by client address in the Service" templates/service.yaml 'sessionAffinity: ClientIP' 'timeoutSeconds: 3600' -- -f values.yaml \
+  --set service.sessionAffinity=ClientIP,service.sessionAffinityTimeoutSeconds=3600
+renders "one replica per node when hard" templates/deployment.yaml 'requiredDuringSchedulingIgnoredDuringExecution' -- -f values.yaml --set podAntiAffinity=hard
+renders "the autoscaler on CPU and memory" templates/hpa.yaml 'kind: HorizontalPodAutoscaler' 'minReplicas: 2' 'maxReplicas: 6' \
+  'averageUtilization: 70' 'averageUtilization: 80' -- -f values.yaml --set autoscaling.enabled=true,autoscaling.targetMemoryUtilizationPercentage=80
+out="$(helm template t "$CHART" -s templates/deployment.yaml -f values.yaml --set autoscaling.enabled=true 2>&1)"
+if ! grep -q '^  replicas:' <<<"$out" && grep -q 'kind: Deployment' <<<"$out"; then pass "the autoscaler owns the count of replicas"
+else fail "the Deployment sets replicas under an autoscaler"; fi
+refuses "an autoscaler without a CPU request" "a share of resources.requests.cpu, which is not set" -f values.yaml --set autoscaling.enabled=true,resources.requests.cpu=null
+refuses "an autoscaler on memory without a memory request" "a share of resources.requests.memory, which is not set" -f values.yaml \
+  --set autoscaling.enabled=true,autoscaling.targetMemoryUtilizationPercentage=80,resources.requests.memory=null
+refuses "an autoscaler without a target" "needs a target" -f values.yaml --set autoscaling.enabled=true,autoscaling.targetCPUUtilizationPercentage=null
+refuses "an autoscaler whose minimum is above its maximum" "is above autoscaling.maxReplicas" -f values.yaml --set autoscaling.enabled=true,autoscaling.minReplicas=4,autoscaling.maxReplicas=2
 # A setting that works but leaves something open renders, and the install's notes say the risk
 # and the safe setting, one line each. NOTES.txt prints mcp-trino.warnings; helm template does
 # not render NOTES, and helm install --dry-run needs a cluster with Helm 3, so a copy of the
@@ -106,6 +131,19 @@ warns "a disruption budget that blocks every drain" "blocks every node drain" -f
 warns "Trino's certificate not verified" "trino.verify=false" -f values.yaml --set trino.httpScheme=https,trino.verify=false
 warns "the token endpoint's certificate not verified" "trino.tokenExchange.verify=false" -f values-jwt.yaml --set trino.tokenExchange.verify=false
 warns "extraEnv overriding the door" "extraEnv sets MCP_AUTH_ENABLED" -f values.yaml --set 'extraEnv[0].name=MCP_AUTH_ENABLED,extraEnv[0].value=false'
+warns "two replicas with sessions and no affinity" "server.statelessHttp=false and no affinity" -f values.yaml \
+  --set replicaCount=2,server.statelessHttp=false,podDisruptionBudget.enabled=true
+warns "an autoscaler with sessions and no affinity" "up to 6 replicas (autoscaling) with server.statelessHttp=false" -f values.yaml \
+  --set autoscaling.enabled=true,server.statelessHttp=false
+warns "two replicas of sse and no affinity" "transport=sse and no affinity" -f values.yaml --set replicaCount=2,transport=sse
+warns "two replicas without a disruption budget" "without a disruption budget" -f values.yaml --set replicaCount=2
+warns "a grace too short for a clean stop" "terminationGracePeriodSeconds=30 is below the 165 s" -f values.yaml --set terminationGracePeriodSeconds=30
+for safe in "replicaCount=2,podDisruptionBudget.enabled=true" \
+            "replicaCount=2,podDisruptionBudget.enabled=true,server.statelessHttp=false,service.sessionAffinity=ClientIP" \
+            "replicaCount=1,server.statelessHttp=false"; do
+  out="$(helm template t "$probe/chart" -s templates/warnings.yaml -f values-jwt.yaml --set "$safe" 2>&1)"
+  if grep -qE 'WARNING: .*(replica|grace)' <<<"$out"; then fail "$safe: $(grep -m1 WARNING <<<"$out")"; else pass "no warning of instances: $safe"; fi
+done
 # The acknowledge* values of earlier versions are accepted, without effect: the warning stays.
 warns "the deprecated acknowledgements" "the door is open" -f values.yaml \
   --set auth.enabled=false,auth.required=false,auth.acknowledgeNoAuth=true,auth.acknowledgeInsecureJwks=true \

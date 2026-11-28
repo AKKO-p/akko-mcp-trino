@@ -39,6 +39,7 @@ Chaque fichier de `akko_mcp_trino/` a une seule responsabilité et ses tests, da
 | `middleware.py` | le middleware : vérification du token, identifiant de requête, gardes et documents des extensions |
 | `extensions.py` | les points d'extension et leur chargement |
 | `transport_security.py` | le filtre de l'en-tête Host (`MCP_ALLOWED_HOSTS`) |
+| `shutdown.py` | l'arrêt propre en HTTP : des réponses qui ferment leur connexion, puis les appels en cours, puis l'annulation de leurs requêtes Trino |
 | `audit.py` | la ligne d'audit, l'identifiant de requête, l'enregistrement et le budget de temps d'un appel |
 | `sql_guard.py` | la validation des identifiants, le contrôle de lecture seule sur l'arbre |
 | `tools.py`, `plugins.py` | les neuf tools et le `ToolContext`, le chargement des plugins de tools |

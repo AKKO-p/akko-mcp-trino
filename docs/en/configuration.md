@@ -86,6 +86,9 @@ says why.
 | `MCP_PORT`, `MCP_HEALTH_PORT` | listening ports, HTTP transports only | `3000`, `3001` |
 | `MCP_SERVER_NAME` | name announced to hosts | `trino-mcp` |
 | `MCP_USER_TOKEN` | stdio only: the user's access token, verified like a bearer header | none (required when `MCP_AUTH_REQUIRED=true`) |
+| `MCP_STATELESS_HTTP` | `streamable-http` only: `true` serves each request on its own, without a session, so any replica answers any client, whatever its protocol revision; `false` keeps a session per client in the process, and a client of a 2025 revision then needs an affinity to one replica. See [Several instances](scaling.md) | `true` |
+| `MCP_SHUTDOWN_DELAY_SECONDS` | HTTP transports: on SIGTERM, seconds the server keeps serving, each answer closing its connection, so that the load balancer and the clients move to the other replicas | `0` (the Helm chart sets `5`) |
+| `MCP_SHUTDOWN_TIMEOUT_SECONDS` | HTTP transports: then, seconds the calls in flight have to end before the server cancels their Trino queries and exits | `MCP_CALL_TIMEOUT_SECONDS`, else `TRINO_QUERY_TIMEOUT_SECONDS`, else `120` |
 
 ## Audit
 

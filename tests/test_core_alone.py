@@ -78,6 +78,7 @@ CORE_MODULES = {
     "plugins",
     "search",
     "server",
+    "shutdown",
     "sql_guard",
     "testing/__init__",
     "testing/context_contract",
@@ -200,7 +201,7 @@ def test_without_an_extension_no_public_document_is_served_and_no_challenge_is_s
     from akko_mcp_trino.app import build_asgi_app
 
     class _MCP:
-        def streamable_http_app(self, *, transport_security=None):
+        def streamable_http_app(self, *, transport_security=None, stateless_http=False):
             return Starlette()
 
     app = build_asgi_app(

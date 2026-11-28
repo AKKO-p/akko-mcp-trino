@@ -39,6 +39,7 @@ from .metrics import Metrics
 from .parse_pool import close_all as close_parse_pools
 from .plugins import tool_registrars
 from .server import build_server
+from .shutdown import Drain, serve
 from .trino_client import resolve_identity
 
 
@@ -124,6 +125,16 @@ def check_config(config: Config, *, strict: bool = False) -> int:
             if config.call_timeout_seconds > 0
             else "none"
         ),
+        "instances: "
+        + (
+            "streamable HTTP without a session (MCP_STATELESS_HTTP): any replica answers"
+            if config.stateless_http()
+            else "streamable HTTP with sessions kept in this process: clients of a 2025 "
+            "revision need an affinity to one replica"
+        )
+        + f"; on SIGTERM {config.shutdown_delay_seconds:g} s of answers that close their "
+        f"connection, then {config.shutdown_timeout():g} s for the calls in flight, then their "
+        "Trino queries are cancelled",
         f"agent SQL: up to {config.max_sql_chars} characters, brackets nested "
         f"{config.max_sql_nesting} deep at most, refused past either before it is parsed; "
         f"parsed by {config.sql_parse_workers} worker processes within "
@@ -307,7 +318,12 @@ def _serve(  # pragma: no cover - process glue, proven by running it
     ).start()
 
     app = build_asgi_app(
-        config, mcp, auth_provider=auth_provider, extensions=extensions, on_shutdown=on_shutdown
+        config,
+        mcp,
+        auth_provider=auth_provider,
+        extensions=extensions,
+        on_shutdown=on_shutdown,
+        on_stop=client.stop_queries,
     )
     log.info(
         "serving transport=%s port=%d auth=%s strict=%s identity=%s extensions=%s",
@@ -318,7 +334,14 @@ def _serve(  # pragma: no cover - process glue, proven by running it
         config.trino_identity_mode,
         ",".join(extension_names(config.extensions)) or "none",
     )
-    uvicorn.run(app, host="0.0.0.0", port=config.mcp_port, log_level="warning")
+    serve(
+        app,
+        host="0.0.0.0",
+        port=config.mcp_port,
+        drain=Drain(),
+        delay=config.shutdown_delay_seconds,
+        timeout=config.shutdown_timeout(),
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

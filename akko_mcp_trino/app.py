@@ -104,12 +104,20 @@ def build_asgi_app(
     auth_provider: Any,
     extensions: Sequence[Extension] = (),
     on_shutdown: Callable[[], None] | None = None,
+    on_stop: Callable[[], None] | None = None,
 ) -> Any:
     """Return the transport app for ``config.transport`` with the guard mounted.
 
     ``on_shutdown``, when given, runs once the transport has shut down, in a worker
     thread, whether or not the transport stopped cleanly: uvicorn shuts the app down
-    on SIGTERM and SIGINT before the process ends.
+    on SIGTERM and SIGINT before the process ends. ``on_stop``, when given, runs as the
+    shutdown starts, before the transport stops, in a worker thread: it cancels the Trino
+    queries of the calls still running (`TrinoClient.stop_queries`), whose threads the
+    transport waits for as it stops.
+
+    Over streamable HTTP, ``MCP_STATELESS_HTTP`` (true by default) serves each request on
+    its own, without a session: any replica answers any request, whatever the revision of
+    the client. The 2026-07-28 revision has no session in any case.
 
     ``mcp`` is anything exposing ``sse_app(transport_security=)`` and
     ``streamable_http_app(transport_security=)`` —
@@ -125,14 +133,16 @@ def build_asgi_app(
     if config.transport == "sse":
         app = mcp.sse_app(transport_security=security)
     elif config.transport == "streamable-http":
-        app = mcp.streamable_http_app(transport_security=security)
+        app = mcp.streamable_http_app(
+            transport_security=security, stateless_http=config.stateless_http()
+        )
     else:
         raise ValueError(
             f"no ASGI app for MCP_TRANSPORT {config.transport!r}; "
             f"expected one of {_HTTP_TRANSPORTS} (stdio uses run_stdio)"
         )
-    if on_shutdown is not None:
-        _close_after(app, on_shutdown)
+    if on_shutdown is not None or on_stop is not None:
+        _close_after(app, on_shutdown, on_stop)
     for ext in extensions:
         routes = ext.routes()
         if routes:
@@ -149,17 +159,24 @@ def build_asgi_app(
     return app
 
 
-def _close_after(app: Any, close: Callable[[], None]) -> None:
-    """Run ``close`` once the app's own lifespan has ended."""
+def _close_after(
+    app: Any, close: Callable[[], None] | None, stop: Callable[[], None] | None = None
+) -> None:
+    """Run ``stop`` as the app's own lifespan starts to end, and ``close`` once it has."""
     inner = app.router.lifespan_context
 
     @contextlib.asynccontextmanager
     async def lifespan(target: Any) -> Any:
         try:
             async with inner(target) as state:
-                yield state
+                try:
+                    yield state
+                finally:
+                    if stop is not None:
+                        await asyncio.to_thread(stop)
         finally:
-            await asyncio.to_thread(close)
+            if close is not None:
+                await asyncio.to_thread(close)
 
     app.router.lifespan_context = lifespan
 

@@ -20,7 +20,31 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+# Two or more keep the server up through a node drain and an upgrade. Any replica answers any
+# client while server.statelessHttp is true (the default); see docs/en/scaling.md. Ignored when
+# autoscaling.enabled is true: the HorizontalPodAutoscaler owns the count.
 replicaCount: 1
+
+# An upgrade starts a new pod and waits for it to be ready before it stops an old one, so the
+# server keeps its capacity throughout; each old pod then stops cleanly (see `shutdown`).
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+# HorizontalPodAutoscaler (autoscaling/v2), off by default. The server is rarely the bottleneck
+# (Trino is): scale for availability and for concurrent calls first. CPU and memory targets are
+# a percentage of resources.requests, which must then be set. Memory is off by default: a Python
+# process gives little memory back, so memory alone would scale up and never down.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: null
+  # The HPA's spec.behavior (scale-up and scale-down policies), as is.
+  behavior: {}
 
 # Leaves the user and group to the platform: on OpenShift the restricted-v2 SCC assigns an
 # arbitrary UID from the project's range, so the chart sets no runAsUser, runAsGroup or
@@ -88,6 +112,11 @@ server:
   toolsets: null
   tools: []
   excludeTools: []
+  # Streamable HTTP without a session (MCP_STATELESS_HTTP): each request stands alone, so any
+  # replica answers any client, of the 2025 revisions too, with no affinity. false keeps a
+  # session per client in its pod: with more than one replica, clients of a 2025 revision then
+  # need service.sessionAffinity (or a Route's or an Ingress's affinity), and NOTES warns.
+  statelessHttp: true
 
 trino:
   # The coordinator (TRINO_HOST, TRINO_PORT). Required.
@@ -234,13 +263,16 @@ extraEnvFrom: []
 extraVolumes: []
 extraVolumeMounts: []
 
+# Measured on 0.8.6: about 135Mi at rest and under load, 320Mi with four answers of very wide
+# cells at once; one CPU serves about 375 calls/s that never reach Trino. 512Mi leaves room for
+# such answers. For production, 250m/384Mi requested and 768Mi at most (ci/production-values.yaml).
 resources:
   requests:
     cpu: 100m
-    memory: 128Mi
+    memory: 192Mi
   limits:
     cpu: "1"
-    memory: 384Mi
+    memory: 512Mi
 
 # /health never touches Trino, so a slow Trino cannot get the server restarted.
 livenessProbe:
@@ -266,7 +298,24 @@ startupProbe:
   periodSeconds: 2
   failureThreshold: 30
 
-terminationGracePeriodSeconds: 30
+# A clean stop (see docs/en/scaling.md). On SIGTERM the server keeps serving `delaySeconds`,
+# each answer closing its connection, while the pod leaves the Service's endpoints and the load
+# balancers; then it stops accepting connections and gives the calls in flight `timeoutSeconds`
+# to end; past that, it cancels their Trino queries in Trino and exits.
+shutdown:
+  delaySeconds: 5              # MCP_SHUTDOWN_DELAY_SECONDS
+  # MCP_SHUTDOWN_TIMEOUT_SECONDS. null: the longest a call may run, limits.callTimeoutSeconds,
+  # or trino.queryTimeoutSeconds when that is 0, or 120 when both are 0 (the server's rule,
+  # with its defaults of 120 and 60 when they are null).
+  timeoutSeconds: null
+  # Added to the grace period for the process to end after the cancels.
+  marginSeconds: 10
+
+# null: delaySeconds + the shutdown timeout + trino.requestTimeoutSeconds (30 when null: the
+# cancels of the queries take one request to Trino) + marginSeconds, 165 s with the defaults.
+# A value below that is warned of in NOTES: a call still running when the pod is killed leaves
+# its query in Trino.
+terminationGracePeriodSeconds: null
 
 # The MCP Service. NodePort or LoadBalancer publish the server in plain HTTP outside the
 # cluster (bearer tokens in clear): NOTES warns; put a TLS-terminating load balancer in front.
@@ -281,6 +330,13 @@ service:
   exposeHealthPort: true
   # More ports, for a sidecar (see route.tls.termination), as Service port entries.
   extraPorts: []
+  # `ClientIP` sends every connection of one client address to the same pod, for clients of a
+  # 2025 revision when server.statelessHttp is false, or with transport sse. Clients behind one
+  # NAT or proxy then all reach the same pod. A Route or an Ingress balances on its own and
+  # ignores it: see route.annotations and ingress.annotations.
+  sessionAffinity: None
+  # How long the affinity lasts without traffic; null keeps Kubernetes' 10800 s.
+  sessionAffinityTimeoutSeconds: null
 
 ingress:
   enabled: false
@@ -289,6 +345,8 @@ ingress:
   # Example (ingress-nginx; its 60 s default read timeout would cut a long tool call):
   #   annotations:
   #     nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+  #     # Only for clients of a 2025 revision with server.statelessHttp=false, or sse:
+  #     nginx.ingress.kubernetes.io/upstream-hash-by: "$remote_addr"
   #   hosts:
   #     - host: mcp.example.com
   # Without `paths`, a host routes the transport's endpoint (/mcp or /sse), the protected
@@ -308,6 +366,10 @@ route:
   annotations:
     # Long tool calls: above MCP_CALL_TIMEOUT_SECONDS (120 by default).
     haproxy.router.openshift.io/timeout: 180s
+    # The router keeps a client on one pod by a cookie, for clients that send cookies back.
+    # For clients of a 2025 revision that do not, with server.statelessHttp=false or sse:
+    #   haproxy.router.openshift.io/balance: source
+    #   haproxy.router.openshift.io/disable_cookies: "true"
   tls:
     # `edge`: the router terminates TLS and reaches the pod in plain HTTP. `reencrypt`
     # needs a TLS listener in front of the server (a sidecar in `extraContainers` whose
@@ -385,15 +447,18 @@ networkPolicy:
     # Any other egress rule, as NetworkPolicy egress entries.
     extra: []
 
+# With more than one replica, NOTES warns while it is off: a node drain could evict every
+# replica at once. maxUnavailable: 1 suits any number of replicas.
 podDisruptionBudget:
   enabled: false
   # One of the two; with both null, minAvailable is 1.
   minAvailable: null
   maxUnavailable: null
 
-# `soft` spreads the replicas over nodes when it can (preferred anti-affinity); `""` sets
-# none. Ignored when `affinity` is set.
-podAntiAffinity: ""
+# `soft` spreads the replicas over nodes when it can (preferred anti-affinity), `hard` requires
+# one replica per node (more replicas than nodes stay pending); `""` sets none. Ignored when
+# `affinity` is set. For zones, add topologySpreadConstraints.
+podAntiAffinity: soft
 affinity: {}
 nodeSelector: {}
 tolerations: []

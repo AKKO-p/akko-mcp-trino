@@ -37,6 +37,7 @@ Every file in `akko_mcp_trino/` has one responsibility and its tests, in `tests/
 | `middleware.py` | the middleware: token verification, request id, the extensions' guards and documents |
 | `extensions.py` | the extension points and their loading |
 | `transport_security.py` | the Host header filter (`MCP_ALLOWED_HOSTS`) |
+| `shutdown.py` | the clean stop over HTTP: answers that close their connection, then the calls in flight, then their Trino queries cancelled |
 | `audit.py` | the audit line, the request id, the record and the time budget of a call |
 | `sql_guard.py` | identifier validation, the read-only check on the AST |
 | `tools.py`, `plugins.py` | the nine tools and the `ToolContext`, loading tool plugins |

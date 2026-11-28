@@ -25,6 +25,8 @@
   "MCP_PROFILE_DESCRIBE_ROWS" $v.limits.profileDescribeRows
   "MCP_PROFILE_TIMEOUT_SECONDS" $v.limits.profileTimeoutSeconds
   "MCP_PROFILE_MAX_CONCURRENT" $v.limits.profileMaxConcurrent
+  "MCP_SHUTDOWN_DELAY_SECONDS" $v.shutdown.delaySeconds
+  "MCP_SHUTDOWN_TIMEOUT_SECONDS" (include "mcp-trino.shutdownTimeout" . | float64)
 }}
 # Settings only: the secrets are read by secretKeyRef, never written here.
 apiVersion: v1
@@ -36,6 +38,7 @@ metadata:
 data:
   MCP_TRANSPORT: {{ $v.transport | quote }}
   MCP_PORT: {{ $v.ports.mcp | quote }}
+  MCP_STATELESS_HTTP: {{ $v.server.statelessHttp | toString | quote }}
   MCP_HEALTH_PORT: {{ $v.ports.health | quote }}
   {{- with $v.server.name }}
   MCP_SERVER_NAME: {{ . | quote }}

@@ -67,9 +67,10 @@ class _FakeMCP:
         self.security = transport_security
         return Starlette()
 
-    def streamable_http_app(self, *, transport_security=None):
+    def streamable_http_app(self, *, transport_security=None, stateless_http=False):
         self.served = "streamable-http"
         self.security = transport_security
+        self.stateless = stateless_http
         return Starlette()
 
 
@@ -758,7 +759,7 @@ def test_the_shutdown_of_the_app_runs_the_given_close_once_after_the_transport()
         seen.append("transport down")
 
     class _Lived(_FakeMCP):
-        def streamable_http_app(self, *, transport_security=None):
+        def streamable_http_app(self, *, transport_security=None, stateless_http=False):
             return Starlette(lifespan=transport)
 
     app = build_asgi_app(

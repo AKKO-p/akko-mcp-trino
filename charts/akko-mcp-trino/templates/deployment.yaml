@@ -7,7 +7,13 @@ metadata:
     {{- include "mcp-trino.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "mcp-trino.serverSelectorLabels" . | nindent 6 }}
@@ -37,7 +43,8 @@ spec:
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . | quote }}
       {{- end }}
-      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      # The delay, the calls in flight, the cancels of their queries (see `shutdown`).
+      terminationGracePeriodSeconds: {{ include "mcp-trino.gracePeriod" . }}
       containers:
         - name: server
           image: {{ include "mcp-trino.image" . | quote }}
@@ -93,6 +100,14 @@ spec:
                 labelSelector:
                   matchLabels:
                     {{- include "mcp-trino.serverSelectorLabels" . | nindent 20 }}
+      {{- else if eq .Values.podAntiAffinity "hard" }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  {{- include "mcp-trino.serverSelectorLabels" . | nindent 18 }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

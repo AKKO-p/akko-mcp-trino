@@ -47,6 +47,44 @@
       "type": "integer",
       "minimum": 0
     },
+    "strategy": {
+      "type": "object",
+      "description": "The Deployment's spec.strategy, as is."
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "targetCPUUtilizationPercentage": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "targetMemoryUtilizationPercentage": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "behavior": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
     "openshift": {
       "type": "boolean"
     },
@@ -148,6 +186,10 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "statelessHttp": {
+          "type": "boolean",
+          "description": "MCP_STATELESS_HTTP: streamable HTTP without a session, so any replica answers any client."
         }
       },
       "additionalProperties": false
@@ -595,9 +637,34 @@
     "startupProbe": {
       "type": "object"
     },
+    "shutdown": {
+      "type": "object",
+      "properties": {
+        "delaySeconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "timeoutSeconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "marginSeconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
     "terminationGracePeriodSeconds": {
-      "type": "integer",
-      "minimum": 0
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "null: computed from shutdown and the Trino request timeout."
     },
     "service": {
       "type": "object",
@@ -625,6 +692,21 @@
         "acknowledgePlainHttp": {
           "type": "boolean",
           "description": "Deprecated, without effect: accepted so that values of earlier versions still render."
+        },
+        "sessionAffinity": {
+          "type": "string",
+          "enum": [
+            "None",
+            "ClientIP"
+          ]
+        },
+        "sessionAffinityTimeoutSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 86400
         }
       },
       "additionalProperties": false
@@ -862,7 +944,8 @@
       "type": "string",
       "enum": [
         "",
-        "soft"
+        "soft",
+        "hard"
       ]
     },
     "affinity": {

@@ -1445,3 +1445,41 @@ def test_the_silenced_host_is_the_one_urllib3_names(recwarn, configured, named):
             stacklevel=1,
         )
     assert [str(w.message).split("'")[1] for w in recwarn] == ["other.example"]
+
+
+# ---- the stop of the server: every query running is cancelled in Trino, no later one starts
+
+
+def test_the_stop_of_the_server_cancels_a_running_query_in_trino(monkeypatch):
+    import threading
+    import time
+
+    cur = _Slow()
+    _patch_cursor(monkeypatch, cur)
+    client = _client(_CFG)
+    out = {}
+
+    def ask():
+        try:
+            client.query("SELECT 1")  # no cancellation of its own, no time budget
+        except Exception as e:  # noqa: BLE001 - what the query raised, read below
+            out["error"] = e
+
+    worker = threading.Thread(target=ask)
+    worker.start()
+    time.sleep(0.1)
+    started = time.monotonic()
+    client.stop_queries()
+    worker.join(5)
+    assert not worker.is_alive() and time.monotonic() - started < 2
+    assert isinstance(out["error"], tc.QueryCancelled) and cur.cancelled >= 1
+
+
+def test_no_query_starts_once_the_server_stops(monkeypatch):
+    cur = _Slow()
+    _patch_cursor(monkeypatch, cur)
+    client = _client(_CFG)
+    client.stop_queries()
+    with pytest.raises(tc.QueryCancelled):
+        client.query("SELECT 1")
+    assert cur.executed is None, "no statement sent"

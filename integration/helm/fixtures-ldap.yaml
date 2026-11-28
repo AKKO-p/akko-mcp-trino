@@ -183,9 +183,12 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
+          # -Xmx768M (integration/trino/jvm.config) plus what a JVM needs besides its heap:
+          # code cache, metaspace, threads and direct buffers (the heap size by default).
+          # 1280Mi was OOM-killed under a moderate load.
           resources:
-            requests: {cpu: 250m, memory: 1280Mi}
-            limits: {cpu: "1", memory: 1280Mi}
+            requests: {cpu: 250m, memory: 2Gi}
+            limits: {cpu: "1", memory: 2Gi}
           volumeMounts:
             - {name: etc, mountPath: /etc/trino, readOnly: true}
             - {name: certs, mountPath: /certs, readOnly: true}

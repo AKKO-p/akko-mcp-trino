@@ -170,6 +170,22 @@ something open renders, and NOTES.txt says what it leaves open (mcp-trino.warnin
 {{- fail "podDisruptionBudget: set minAvailable or maxUnavailable, not both." }}
 {{- end }}
 {{- end }}
+{{- if $v.autoscaling.enabled }}
+{{- $a := $v.autoscaling }}
+{{- if gt (int $a.minReplicas) (int $a.maxReplicas) }}
+{{- fail (printf "autoscaling.minReplicas=%v is above autoscaling.maxReplicas=%v." $a.minReplicas $a.maxReplicas) }}
+{{- end }}
+{{- if and (kindIs "invalid" $a.targetCPUUtilizationPercentage) (kindIs "invalid" $a.targetMemoryUtilizationPercentage) }}
+{{- fail "autoscaling.enabled=true needs a target: autoscaling.targetCPUUtilizationPercentage or autoscaling.targetMemoryUtilizationPercentage." }}
+{{- end }}
+{{- $requests := (($v.resources | default dict).requests | default dict) }}
+{{- if and (not (kindIs "invalid" $a.targetCPUUtilizationPercentage)) (not $requests.cpu) }}
+{{- fail "autoscaling.targetCPUUtilizationPercentage is a share of resources.requests.cpu, which is not set: set it, or the HorizontalPodAutoscaler has nothing to measure against." }}
+{{- end }}
+{{- if and (not (kindIs "invalid" $a.targetMemoryUtilizationPercentage)) (not $requests.memory) }}
+{{- fail "autoscaling.targetMemoryUtilizationPercentage is a share of resources.requests.memory, which is not set: set it, or the HorizontalPodAutoscaler has nothing to measure against." }}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{/*
@@ -207,6 +223,23 @@ WARNING: trino.catalog=system: names without a catalog are refused, so every que
 WARNING: extraEnv sets {{ .name }}, which the chart manages: it overrides the chart's value, out of reach of its render-time checks. Safe setting: {{ get $managed .name }}.
 {{ end }}
 {{- end }}
+{{- if include "mcp-trino.multiReplica" . }}
+{{- $replicas := ternary (printf "up to %v replicas (autoscaling)" $v.autoscaling.maxReplicas) (printf "replicaCount=%v" $v.replicaCount) $v.autoscaling.enabled }}
+{{- $affinity := eq $v.service.sessionAffinity "ClientIP" }}
+{{- if and (eq $v.transport "streamable-http") (not $v.server.statelessHttp) (not $affinity) }}
+WARNING: {{ $replicas }} with server.statelessHttp=false and no affinity: a client of a 2025 protocol revision whose next request reaches another replica gets 404 "Session not found", and the official client does not open a new session. Safe setting: server.statelessHttp=true; or service.sessionAffinity=ClientIP, with a Route also route.annotations haproxy.router.openshift.io/balance=source (its cookie holds only for hosts that send it back).
+{{ end }}
+{{- if and (eq $v.transport "sse") (not $affinity) }}
+WARNING: {{ $replicas }} with transport=sse and no affinity: an SSE session lives in one replica, and a message posted to another one is refused. Safe setting: transport=streamable-http (any replica answers); or service.sessionAffinity=ClientIP, with a Route also route.annotations haproxy.router.openshift.io/balance=source.
+{{ end }}
+{{- if not $v.podDisruptionBudget.enabled }}
+WARNING: {{ $replicas }} without a disruption budget: a node drain may evict every replica at once. Safe setting: podDisruptionBudget.enabled=true with podDisruptionBudget.maxUnavailable=1.
+{{ end }}
+{{- end }}
+{{- $needed := include "mcp-trino.neededGrace" . | int64 }}
+{{- if lt (include "mcp-trino.gracePeriod" . | int64) $needed }}
+WARNING: terminationGracePeriodSeconds={{ $v.terminationGracePeriodSeconds }} is below the {{ $needed }} s a clean stop needs (shutdown.delaySeconds, the shutdown timeout of {{ include "mcp-trino.shutdownTimeout" . }} s, one request to Trino, shutdown.marginSeconds): a call still running when the pod is killed leaves its query running in Trino. Safe setting: terminationGracePeriodSeconds=null (computed), or a lower shutdown.timeoutSeconds.
+{{ end }}
 {{- if $v.podDisruptionBudget.enabled }}
 {{- $pdb := $v.podDisruptionBudget }}
 {{- $min := ternary 1 $pdb.minAvailable (and (kindIs "invalid" $pdb.minAvailable) (kindIs "invalid" $pdb.maxUnavailable)) }}

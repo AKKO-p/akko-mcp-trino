@@ -114,6 +114,16 @@ DEFAULT_PROFILE_CLIENT_TAG = "mcp-profile"
 # The calls of `profile_table` one process runs at once, and the most it may be set to: a
 # call waiting in Trino holds one of the threads every tool shares.
 DEFAULT_PROFILE_MAX_CONCURRENT = 4
+
+# Several instances and a clean stop. Streamable HTTP without a session (MCP_STATELESS_HTTP):
+# any replica answers any request, whatever the protocol revision of the client. On SIGTERM,
+# the server keeps serving for MCP_SHUTDOWN_DELAY_SECONDS, each answer closing its connection,
+# so the load balancer and the clients move to the other replicas; then it stops accepting
+# connections and gives the calls in flight MCP_SHUTDOWN_TIMEOUT_SECONDS to end (the call budget
+# when unset, this when there is none) before it cancels their Trino queries and exits.
+DEFAULT_STATELESS_HTTP = True
+DEFAULT_SHUTDOWN_DELAY_SECONDS = 0.0
+DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 120.0
 MAX_PROFILE_MAX_CONCURRENT = 64
 # What a client tag may hold: Trino splits the tags on commas.
 _CLIENT_TAG_RE = re.compile(r"[A-Za-z0-9_.:=/-]{1,100}")
@@ -178,6 +188,11 @@ def _is_table_name(text: str) -> bool:
     return True
 
 
+def _seconds_or_none(text: Optional[str]) -> Optional[float]:
+    """A number of seconds from the environment; None when unset or empty."""
+    return float(text) if text is not None and text.strip() else None
+
+
 @dataclass(frozen=True)
 class Config:
     """Every setting the server reads, with neutral defaults; built from the environment by
@@ -236,6 +251,14 @@ class Config:
     # it no query starts, the one running is cancelled, and the agent gets an
     # error, never a partial answer. 0 sets none.
     call_timeout_seconds: float = 120.0
+    # Streamable HTTP without a session (MCP_STATELESS_HTTP, true or false; empty: true): each
+    # request stands alone, so any replica answers it. The raw text, read by `stateless_http`.
+    stateless_http_setting: str = ""
+    # SIGTERM: seconds served as before, each answer closing its connection, then the seconds
+    # the calls in flight have to end before their Trino queries are cancelled (None: the
+    # call budget, see `shutdown_timeout`).
+    shutdown_delay_seconds: float = DEFAULT_SHUTDOWN_DELAY_SECONDS
+    shutdown_timeout_seconds: Optional[float] = None
     # Tools another package adds (entry point group `akko_mcp_trino.tools`),
     # by plugin name, comma-separated. Empty serves the generic tools only.
     tool_plugins: str = ""
@@ -402,6 +425,41 @@ class Config:
             self.call_timeout_seconds,
         )
         return min((b for b in budgets if b > 0), default=0.0)
+
+    def stateless_http(self) -> bool:
+        """Whether streamable HTTP serves each request on its own, without a session
+        (``MCP_STATELESS_HTTP``, true unless set to false). Any replica then answers any
+        request: a client of a 2025 revision needs no affinity. The server sends no request
+        to the client (no sampling, no elicitation), so a session would carry nothing."""
+        text = self.stateless_http_setting.strip().lower()
+        return DEFAULT_STATELESS_HTTP if not text else text == "true"
+
+    def shutdown_timeout(self) -> float:
+        """The seconds the calls in flight have to end after SIGTERM, before their Trino
+        queries are cancelled: ``MCP_SHUTDOWN_TIMEOUT_SECONDS``, or else the longest a call
+        may run (``MCP_CALL_TIMEOUT_SECONDS``, else ``TRINO_QUERY_TIMEOUT_SECONDS``, else
+        ``DEFAULT_SHUTDOWN_TIMEOUT_SECONDS`` when neither sets a budget)."""
+        if self.shutdown_timeout_seconds is not None:
+            return self.shutdown_timeout_seconds
+        for budget in (self.call_timeout_seconds, self.query_timeout_seconds):
+            if budget > 0:
+                return budget
+        return DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+
+    def _instance_problems(self) -> list[str]:
+        found = []
+        if self.stateless_http_setting.strip().lower() not in ("", "true", "false"):
+            found.append(
+                f"MCP_STATELESS_HTTP={self.stateless_http_setting!r} is not a boolean: "
+                "set true or false (case does not matter)"
+            )
+        for name, value in (
+            ("MCP_SHUTDOWN_DELAY_SECONDS", self.shutdown_delay_seconds),
+            ("MCP_SHUTDOWN_TIMEOUT_SECONDS", self.shutdown_timeout()),
+        ):
+            if not (math.isfinite(value) and value >= 0):
+                found.append(f"{name}={value:g}: a number of seconds, 0 or more")
+        return found
 
     def exposed_tools(self) -> list[str]:
         """The built-in tools this server exposes, in the order it registers them: the groups
@@ -580,6 +638,7 @@ class Config:
             if value < 0:
                 found.append(f"{name}={value:g}: a time budget is 0 (none) or more")
         found.extend(self._context_problems())
+        found.extend(self._instance_problems())
         return found
 
     def _context_problems(self) -> list[str]:
@@ -812,6 +871,13 @@ class Config:
             trino_identity_mode=os.environ.get("TRINO_IDENTITY_MODE", "jwt").lower(),
             trino_password=os.environ.get("TRINO_PASSWORD", ""),
             call_timeout_seconds=float(os.environ.get("MCP_CALL_TIMEOUT_SECONDS", "120")),
+            stateless_http_setting=os.environ.get("MCP_STATELESS_HTTP", ""),
+            shutdown_delay_seconds=float(
+                os.environ.get("MCP_SHUTDOWN_DELAY_SECONDS", str(DEFAULT_SHUTDOWN_DELAY_SECONDS))
+            ),
+            shutdown_timeout_seconds=_seconds_or_none(
+                os.environ.get("MCP_SHUTDOWN_TIMEOUT_SECONDS")
+            ),
             tool_plugins=os.environ.get("MCP_TOOL_PLUGINS", ""),
             toolsets=os.environ.get("MCP_TOOLSETS"),
             tools=os.environ.get("MCP_TOOLS", ""),
