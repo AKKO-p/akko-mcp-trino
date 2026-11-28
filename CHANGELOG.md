@@ -4,10 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.8.6] - 2026-11-28
 
 ### Added
 - Helm chart 0.3.6: `networkPolicy.egress.trinoPort`, the port of Trino's pods when `trino.host` is a Service that forwards `trino.port` to another port (a Service 443 to 8443, for instance). For a pod selector, a NetworkPolicy matches the pod's port, not the Service's: the egress rule to Trino used `trino.port` only, so it blocked such a Trino. Null by default: `trino.port`, as before.
+
+### Changed
+- The Helm chart 0.3.6 runs the image 0.8.6 by default (`appVersion`).
+- `akko-mcp-trino` 0.8.6 has no change of its own besides its version: the image and the packages are rebuilt from this release's tag.
+- `akko-mcp-trino-atlas` 0.8.6 is released with the core, with no change of its own.
+- The host pages, `DOCKERHUB.md`, the examples and the Helm checks of `integration/helm/` pin 0.8.6.
 
 ## [0.8.5] - 2026-11-27
 
