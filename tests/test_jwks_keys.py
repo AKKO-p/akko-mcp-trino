@@ -2,9 +2,9 @@
 read again at most once per interval whatever the tokens name, and never read on the event
 loop.
 
-The last test reproduces the denial of service of 0.8.6: an identity provider that accepts
-the connection and never answers, tokens naming unknown keys, and a request without a token
-that must still be answered at once."""
+The last test serves the guard with an identity provider that accepts the connection and
+never answers, sends tokens naming unknown keys, and checks that a request without a token is
+still answered at once."""
 
 import socket
 import threading
@@ -266,10 +266,9 @@ def silent_issuer():
 
 
 def test_forged_tokens_never_stall_a_request_without_a_token(silent_issuer):
-    """0.8.6 verified on the event loop: with a JWKS that never answers, each token naming an
-    unknown key held the whole server for the read's timeout, and a request without a token
-    waited behind them. Now verification runs in a worker thread, one read at most runs per
-    interval, and the request without a token is answered at once."""
+    """Verification runs in a worker thread and one read at most runs per interval, so with a
+    JWKS that never answers, a request without a token is answered at once while tokens
+    naming unknown keys are being verified."""
     seen: list[bool] = []
     keys = auth.JwksKeys.from_url(
         silent_issuer,
