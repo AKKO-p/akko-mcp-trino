@@ -24,7 +24,7 @@ from mcp.types import INVALID_REQUEST
 
 from .audit import RefusalEvent
 from .auth import INVALID_TOKEN, Principal
-from .config import Config, trusted_networks
+from .config import Config, proxy_networks
 from .extensions import Admission, Extension
 from .identity import set_current_bearer, set_current_principal
 from .middleware import MISSING_TOKEN, AuthIdentityMiddleware, protected_resource, refusal_reason
@@ -169,7 +169,7 @@ def build_asgi_app(
         metadata_url=metadata_url,
         audit=audit,
         metrics=metrics,
-        trusted_proxies=trusted_networks(config.trusted_proxies),
+        trusted_proxies=proxy_networks(config.trusted_proxies),
     )
     return app
 

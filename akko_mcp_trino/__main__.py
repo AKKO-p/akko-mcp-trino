@@ -35,7 +35,7 @@ from .config import (
     Config,
     parse_jwt_algorithms,
     provider_names,
-    trusted_networks,
+    proxy_networks,
 )
 from .context import ContextProvider, ContextSetup
 from .context.loading import close_providers, load_providers
@@ -86,7 +86,7 @@ def _client_address_line(config: Config) -> str:
     """Where the audit reads the client's address: the networks of ``MCP_TRUSTED_PROXIES``,
     as parsed (a value that does not parse is a problem of its own), or the peer."""
     try:
-        networks = trusted_networks(config.trusted_proxies)
+        networks = proxy_networks(config.trusted_proxies)
     except ValueError:
         return "an invalid MCP_TRUSTED_PROXIES"
     if not networks:

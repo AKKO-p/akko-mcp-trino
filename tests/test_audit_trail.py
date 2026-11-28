@@ -254,9 +254,9 @@ def _scope(peer, *forwarded):
 
 
 def _nets(*cidrs):
-    from akko_mcp_trino.config import trusted_networks
+    from akko_mcp_trino.config import proxy_networks
 
-    return trusted_networks(",".join(cidrs))
+    return proxy_networks(",".join(cidrs))
 
 
 def test_without_trusted_proxies_the_address_is_the_peers_whatever_the_header_says():
@@ -291,14 +291,14 @@ def test_a_malformed_hop_stops_at_the_last_trusted_one():
 
 
 def test_trusted_proxies_are_validated():
-    from akko_mcp_trino.config import trusted_networks
+    from akko_mcp_trino.config import proxy_networks
 
-    assert [str(n) for n in trusted_networks(" 10.0.0.0/8 , 192.0.2.1,, ")] == [
+    assert [str(n) for n in proxy_networks(" 10.0.0.0/8 , 192.0.2.1,, ")] == [
         "10.0.0.0/8",
         "192.0.2.1/32",
     ]
     with pytest.raises(ValueError, match="MCP_TRUSTED_PROXIES: 'ten' is not"):
-        trusted_networks("10.0.0.0/8,ten")
+        proxy_networks("10.0.0.0/8,ten")
 
 
 # ---- refusals at the door

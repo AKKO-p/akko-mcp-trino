@@ -47,7 +47,7 @@ def names_of(value: str) -> list[str]:
 LOG_FORMATS = ("text", "json")
 
 
-def trusted_networks(value: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+def proxy_networks(value: str) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
     """The networks ``MCP_TRUSTED_PROXIES`` lists, comma-separated (CIDR, or one address);
     raises ValueError on one that is neither."""
     networks = []
@@ -575,7 +575,7 @@ class Config:
                 f"MCP_LOG_FORMAT={self.log_format!r}: expected one of {', '.join(LOG_FORMATS)}"
             )
         try:
-            trusted_networks(self.trusted_proxies)
+            proxy_networks(self.trusted_proxies)
         except ValueError as exc:
             found.append(str(exc))
         if not 1 <= self.audit_max_names <= MAX_AUDIT_MAX_NAMES:
