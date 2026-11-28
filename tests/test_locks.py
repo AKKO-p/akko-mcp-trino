@@ -571,8 +571,15 @@ def _jobs(text: str) -> dict[str, str]:
 
 SIGNING_JOBS = {
     ("release.yml", job)
-    for job in ("pypi", "registry", "provenance", "image-provenance", "image-ubi9-provenance",
-                "image-sign", "chart-publish")
+    for job in (
+        "pypi",
+        "registry",
+        "provenance",
+        "image-provenance",
+        "image-ubi9-provenance",
+        "image-sign",
+        "chart-publish",
+    )
 } | {("scorecard.yml", "analysis")}
 
 
