@@ -41,6 +41,7 @@ These pages describe `main`. The documentation of a release is at its tag.
 | [Configuration](configuration.md) | every variable, by theme, with its default and its limits |
 | [Security](security.md) | what read-only covers, Trino first, the statements an agent may send |
 | [Operations](operations.md) | resource groups, refusals, warnings, audit, health, metrics, upgrades |
+| [Versioning policy](versioning.md) | version numbers, what may break, how long a version is supported |
 
 ## Understand
 

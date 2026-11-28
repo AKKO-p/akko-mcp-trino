@@ -69,6 +69,16 @@ helm install mcp-trino ./charts/akko-mcp-trino -f my-values.yaml
 kubectl rollout status deployment/mcp-trino-akko-mcp-trino
 ```
 
+Each release also publishes the chart as an OCI artifact on GHCR, signed by cosign without a key
+(the release workflow at the release's tag), and attaches the `.tgz` to the release with its SHA-256
+and its Sigstore bundle. From a release, in one line:
+
+```bash
+helm install mcp-trino oci://ghcr.io/akko-p/charts/akko-mcp-trino --version <chart version> -f my-values.yaml
+```
+
+The verification commands are in [docs/en/security.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/security.md#verifying-a-release).
+
 Check what the server reads, without any secret (exit `2` means it would refuse to start):
 
 ```bash

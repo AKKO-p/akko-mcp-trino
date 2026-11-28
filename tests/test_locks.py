@@ -571,8 +571,9 @@ def _jobs(text: str) -> dict[str, str]:
 
 SIGNING_JOBS = {
     ("release.yml", job)
-    for job in ("pypi", "registry", "provenance", "image-provenance", "image-ubi9-provenance")
-}
+    for job in ("pypi", "registry", "provenance", "image-provenance", "image-ubi9-provenance",
+                "image-sign", "chart-publish")
+} | {("scorecard.yml", "analysis")}
 
 
 def test_every_workflow_is_read_only_unless_a_job_says_otherwise() -> None:
@@ -774,9 +775,30 @@ def test_the_release_publishes_the_ubi9_variant_from_the_tag_with_no_network() -
     ]
     assert "latest=false" in build
     assert "subject-digest: ${{ needs.image-ubi9.outputs.digest }}" in provenance
-    assert "needs: image-ubi9" in provenance and "path: tag" not in provenance
+    assert "needs: [ref, image-ubi9]" in provenance and "path: tag" not in provenance
+    assert "subject-name: ${{ needs.ref.outputs.ghcr }}" in provenance
+    # Both images are signed by digest, with an SBOM attestation, in a job that checks out nothing.
+    sign = jobs["image-sign"]
+    assert "needs: [ref, image, image-ubi9]" in sign and "actions/checkout" not in sign
+    assert 'cosign sign --yes "$name@$DIGEST"' in sign
+    assert "cosign attest --yes --type spdxjson" in sign
     # The Debian image keeps latest, X.Y and X.Y.Z, with no suffix, and carries its SBOM too.
     assert "suffix" not in jobs["image"] and "type=raw,value=latest" in jobs["image"]
     assert "sbom: true" in jobs["image"]
     # Neither turns BuildKit's own provenance off: the signed one is added beside it.
     assert "provenance:" not in jobs["image"] and "provenance:" not in build
+
+
+def test_the_release_publishes_the_chart_signed_with_its_checksum() -> None:
+    """The chart of the tag is packaged once, its appVersion checked against the tag, then pushed
+    to GHCR as an OCI artifact, signed there by cosign, and attached to the release with its
+    SHA-256 and its Sigstore bundle, by a job that checks out nothing."""
+    jobs = _jobs((ROOT / ".github/workflows/release.yml").read_text())
+    build, publish = jobs["chart"], jobs["chart-publish"]
+    assert "ref: ${{ needs.ref.outputs.sha }}" in build and "id-token" not in build
+    assert 'test "$app" = "${TAG#v}"' in build and "helm package charts/akko-mcp-trino" in build
+    assert 'sha256sum "$f" > "$f.sha256"' in build
+    assert "actions/checkout" not in publish and "id-token: write" in publish
+    assert 'helm push ./*.tgz "$CHARTS"' in publish and "cosign sign --yes" in publish
+    assert "cosign sign-blob --yes --bundle" in publish
+    assert "./*.tgz ./*.sha256 ./*.sigstore.json" in publish

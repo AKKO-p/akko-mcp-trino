@@ -82,6 +82,26 @@ network, for `linux/amd64` only (the platform their build is checked on). They r
 or as any uid of group 0 (OpenShift's `restricted-v2`), on a read-only root filesystem, and carry
 an SBOM and their signed build provenance, as the Debian tags do.
 
+## Verify an image
+
+From the releases after 0.8.6, each image is signed by cosign without a key, by the release
+workflow of the repository at the release's tag, and carries a signed SBOM. Pin the image by
+digest, then check it:
+
+```bash
+VERSION=X.Y.Z
+IDENTITY=https://github.com/AKKO-p/akko-mcp-trino/.github/workflows/release.yml@refs/tags/v$VERSION
+ISSUER=https://token.actions.githubusercontent.com
+cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" \
+  docker.io/akkoai/akko-mcp-trino@sha256:...
+cosign verify-attestation --type spdxjson --certificate-identity "$IDENTITY" \
+  --certificate-oidc-issuer "$ISSUER" docker.io/akkoai/akko-mcp-trino@sha256:... > /dev/null
+```
+
+The signed build provenance is on `ghcr.io/akko-p/akko-mcp-trino`, under the same digest
+(`cosign verify-attestation --type slsaprovenance1`). The full procedure, the chart included, is in
+[docs/en/security.md](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/security.md#verifying-a-release).
+
 ## Run it
 
 Each user with their own rights (`jwt`, the default), Trino trusting the same identity

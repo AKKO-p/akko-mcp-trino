@@ -42,6 +42,7 @@ Ces pages décrivent `main`. La documentation d'une version publiée se trouve �
 | [Configuration](configuration.md) | chaque variable, par thème, avec sa valeur par défaut et ses limites |
 | [Sécurité](security.md) | ce que couvre la lecture seule, Trino d'abord, les instructions qu'un agent peut envoyer |
 | [Exploitation](operations.md) | groupes de ressources, refus, avertissements, audit, santé, métriques, montées de version |
+| [Politique de versions](versioning.md) | numéros de version, ce qui peut casser, durée de prise en charge |
 
 ## Comprendre
 

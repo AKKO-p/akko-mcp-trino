@@ -8,17 +8,53 @@ Ce serveur se place entre des agents IA et des données. Signalez toute faibless
 
 | Version | Prise en charge |
 |---|---|
-| 0.7.x | oui |
-| 0.6.x | oui |
-| 0.5.x et avant | non : le mode `jwt` transmettait le token de l'appelant à Trino, et les valeurs par défaut servaient des requêtes sans token. Mettez à jour avec [MIGRATING.md](MIGRATING.md) (en anglais). |
+| 0.8.x | oui : tous les correctifs, dans la dernière release 0.8 |
+| 0.7.x | correctifs de sécurité jusqu'au 28 février 2027, puis non |
+| 0.6.x et avant | non. Mettez à jour avec [MIGRATING.md](MIGRATING.md) (en anglais) ; jusqu'à la 0.5.x, le mode `jwt` transmettait le token de l'appelant à Trino, et les valeurs par défaut servaient des requêtes sans token. |
+
+La durée de prise en charge d'une version mineure, et ce qu'une release peut changer, sont dans la
+[politique de versions](docs/fr/versioning.md).
 
 ## Signaler une vulnérabilité
 
-Écrivez à **security@akko-ai.com** avec une description, la version et un moyen de reproduire.
-N'ouvrez pas d'issue publique. Vous recevrez un accusé de réception sous trois jours ouvrés, et un
-correctif ou un plan d'atténuation sous trente jours.
+Signalez en privé, par l'un ou l'autre canal :
 
-Merci de ne mettre dans un signalement ni vrais tokens, ni vraies données, ni vrais noms de machines.
+- un signalement privé sur GitHub : **Security**, puis **Report a vulnerability**
+  ([security advisories](https://github.com/AKKO-p/akko-mcp-trino/security/advisories/new)) ;
+- un courriel à **security@akko-ai.com**.
+
+Donnez une description, la version et un moyen de reproduire. N'ouvrez pas d'issue publique, et
+n'y mettez ni vrais tokens, ni vraies données, ni vrais noms de machines.
+
+| Étape | Délai |
+|---|---|
+| Accusé de réception | 48 heures |
+| Première évaluation (confirmé ou non, gravité) | 7 jours |
+| Correctif publié, gravité critique ou haute | 30 jours |
+| Correctif publié, autres gravités | 90 jours |
+
+La divulgation est coordonnée : le correctif est publié d'abord, puis un avis de sécurité GitHub
+décrit la faiblesse, les versions touchées et la version corrigée, avec un CVE s'il y a lieu, et
+remercie l'auteur du signalement sauf s'il demande le contraire. Un signalement non corrigé sous
+90 jours peut être divulgué par son auteur, après nous en avoir prévenus.
+
+## Télémétrie
+
+Le serveur n'envoie aucune télémétrie, ni à ses auteurs ni à personne. Il ne se connecte qu'à
+Trino, au fournisseur d'identité configuré (ses clés, et le point de jeton pour le token exchange)
+et aux fournisseurs de contexte configurés ; `/health`, `/ready` et `/metrics` sont servis
+localement, sur le port de santé, à qui le joint. Une nuance : le SDK MCP sur lequel il repose
+porte une instrumentation OpenTelemetry qui ne fait rien tant que l'environnement n'installe pas de
+SDK OpenTelemetry (un opérateur qui en injecte un dans chaque pod, par exemple). Les spans du SDK
+pour chaque message MCP partent alors vers l'exportateur que fixe l'environnement (`OTEL_*`) ; ils
+ne portent aucun SQL.
+
+## Vérifier une release
+
+Chaque image et la chart Helm sont signées par cosign sans clé, par le workflow de release de ce
+dépôt au tag de la release ; chaque image porte un SBOM signé et une provenance de construction
+signée, et les paquets Python un bundle Sigstore chacun. Les commandes sont dans
+[docs/fr/security.md](docs/fr/security.md#vérifier-une-release).
 
 ## Modèle de sécurité
 

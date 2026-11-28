@@ -1,6 +1,8 @@
 name: release
 # Tag v* → both packages of the repository on PyPI (trusted publishing), the core and the Atlas
-# provider, at the tag's version; provenance, and the image.
+# provider, at the tag's version; provenance, the images and the Helm chart. Each image and the
+# chart are signed by cosign without a key (the identity of this workflow at the tag, recorded in
+# the public transparency log), and each image carries a signed SBOM attestation.
 # Run by hand (workflow_dispatch) with an existing release tag, it only builds and
 # pushes the image of that tag again, with the current workflow.
 # The tag is checked first (scripts/release-tag.sh, from this workflow's commit): a version
@@ -25,6 +27,8 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       sha: ${{ steps.tag.outputs.sha }}
+      ghcr: ${{ steps.names.outputs.ghcr }}
+      charts: ${{ steps.names.outputs.charts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -33,6 +37,12 @@ jobs:
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: bash scripts/release-tag.sh "$TAG" origin/main >> "$GITHUB_OUTPUT"
+      # The GHCR names of this repository, in lower case as registries require: the image, and
+      # the OCI repository of the chart (ghcr.io/<owner>/charts/<chart>).
+      - id: names
+        run: |
+          echo "ghcr=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "charts=oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts" >> "$GITHUB_OUTPUT"
   dist:
     # The sdists and the wheels of both packages, the core and the Atlas provider, built once
     # from the same tag by the locked tools and handed to the jobs that publish and sign them.
@@ -142,6 +152,12 @@ jobs:
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
           subject-path: dist/*
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532  # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      # A Sigstore bundle beside each package: cosign verify-blob checks it offline.
+      - name: sign each package (cosign, keyless)
+        run: for f in dist/*; do cosign sign-blob --yes --bundle "$f.sigstore.json" "$f" > /dev/null; done
       - run: gh release upload "$TAG" dist/* sbom.spdx.json --clobber
         env:
           GH_TOKEN: ${{ github.token }}
@@ -182,7 +198,7 @@ jobs:
         id: meta
         with:
           images: |
-            ghcr.io/akko-p/akko-mcp-trino
+            ${{ needs.ref.outputs.ghcr }}
             name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/akko-mcp-trino,enable=${{ vars.DOCKERHUB_USERNAME != '' }}
           tags: |
             type=semver,pattern={{version}},value=${{ needs.ref.outputs.tag }}
@@ -202,7 +218,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
   image-provenance:
     # The image's signed build provenance, in a job that runs nothing from the tag.
-    needs: image
+    needs: [ref, image]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -216,7 +232,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
-          subject-name: ghcr.io/akko-p/akko-mcp-trino
+          subject-name: ${{ needs.ref.outputs.ghcr }}
           subject-digest: ${{ needs.image.outputs.digest }}
           push-to-registry: true
   image-ubi9:
@@ -262,7 +278,7 @@ jobs:
         id: meta
         with:
           images: |
-            ghcr.io/akko-p/akko-mcp-trino
+            ${{ needs.ref.outputs.ghcr }}
             name=docker.io/${{ vars.DOCKERHUB_USERNAME }}/akko-mcp-trino,enable=${{ vars.DOCKERHUB_USERNAME != '' }}
           flavor: |
             latest=false
@@ -285,7 +301,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
   image-ubi9-provenance:
     # The UBI 9 image's signed build provenance, in a job that runs nothing from the tag.
-    needs: image-ubi9
+    needs: [ref, image-ubi9]
     if: needs.image-ubi9.outputs.digest != ''
     runs-on: ubuntu-latest
     permissions:
@@ -300,9 +316,150 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
         with:
-          subject-name: ghcr.io/akko-p/akko-mcp-trino
+          subject-name: ${{ needs.ref.outputs.ghcr }}
           subject-digest: ${{ needs.image-ubi9.outputs.digest }}
           push-to-registry: true
+  image-sign:
+    # Both images, by digest, signed by cosign without a key, on GHCR and on Docker Hub, with an
+    # SBOM attestation each (SPDX, made from the pushed image), in a job that runs nothing from
+    # the tag. Verify with cosign verify and cosign verify-attestation (docs/en/security.md).
+    needs: [ref, image, image-ubi9]
+    if: ${{ !cancelled() && needs.image.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write
+    strategy:
+      matrix:
+        variant: [debian, ubi9]
+    steps:
+      - id: digest
+        env:
+          VARIANT: ${{ matrix.variant }}
+          DEBIAN: ${{ needs.image.outputs.digest }}
+          UBI9: ${{ needs.image-ubi9.outputs.digest }}
+        run: |
+          if [ "$VARIANT" = debian ]; then d=$DEBIAN; else d=$UBI9; fi
+          echo "digest=$d" >> "$GITHUB_OUTPUT"
+      - if: steps.digest.outputs.digest != ''
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532  # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      - if: steps.digest.outputs.digest != ''
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.digest.outputs.digest != '' && vars.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4.8.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - if: steps.digest.outputs.digest != ''
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c  # v0.24.3
+        with:
+          image: ${{ needs.ref.outputs.ghcr }}@${{ steps.digest.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+      - if: steps.digest.outputs.digest != ''
+        name: sign and attest the image on each registry
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+          GHCR: ${{ needs.ref.outputs.ghcr }}
+          DOCKERHUB: ${{ vars.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/akko-mcp-trino', vars.DOCKERHUB_USERNAME) || '' }}
+        run: |
+          for name in "$GHCR" $DOCKERHUB; do
+            cosign sign --yes "$name@$DIGEST"
+            cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$name@$DIGEST"
+          done
+  chart:
+    # The Helm chart of the tag, packaged once; the job that publishes and signs it runs nothing
+    # from the tag. The chart's appVersion must be the tag's version.
+    if: github.event_name == 'push'
+    needs: ref
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      HELM_VERSION: v3.20.2
+      HELM_SHA256: 258e830a9e613c8a7a302d6059b4bb3b9758f2f3e1bb8ea0d707ce10a9a72fea
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ needs.ref.outputs.sha }}
+      - name: Install helm (exact version, checksum verified)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum -c -
+          tar -xzf helm.tgz -C "$RUNNER_TEMP/bin" --strip-components 1 linux-amd64/helm
+          rm helm.tgz
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: package the chart, its appVersion checked against the tag
+        env:
+          TAG: ${{ needs.ref.outputs.tag }}
+        run: |
+          app=$(helm show chart charts/akko-mcp-trino | sed -n 's/^appVersion: "\{0,1\}\([^"]*\)"\{0,1\}$/\1/p')
+          test "$app" = "${TAG#v}" || { echo "the chart's appVersion is $app, the tag is $TAG"; exit 1; }
+          helm package charts/akko-mcp-trino -d chart/
+          cd chart && for f in *.tgz; do sha256sum "$f" > "$f.sha256"; cat "$f.sha256"; done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: chart
+          path: chart/
+  chart-publish:
+    # The chart on GHCR as an OCI artifact, signed by cosign without a key, and attached to the
+    # release with its SHA-256 and its Sigstore bundle.
+    needs: [ref, chart]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    env:
+      HELM_VERSION: v3.20.2
+      HELM_SHA256: 258e830a9e613c8a7a302d6059b4bb3b9758f2f3e1bb8ea0d707ce10a9a72fea
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: chart
+          path: chart/
+      - name: Install helm (exact version, checksum verified)
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -fsSLo helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum -c -
+          tar -xzf helm.tgz -C "$RUNNER_TEMP/bin" --strip-components 1 linux-amd64/helm
+          rm helm.tgz
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532  # v4.1.3
+        with:
+          cosign-release: v3.1.4
+      - name: push the chart to GHCR and sign it there
+        env:
+          CHARTS: ${{ needs.ref.outputs.charts }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd chart
+          sha256sum -c ./*.tgz.sha256
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm push ./*.tgz "$CHARTS" 2>&1 | tee push.txt
+          digest=$(sed -n 's/^Digest: //p' push.txt)
+          name=$(helm show chart ./*.tgz | sed -n 's/^name: //p')
+          test -n "$digest"
+          printf '%s' "$GH_TOKEN" | cosign login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          cosign sign --yes "${CHARTS#oci://}/$name@$digest"
+          rm push.txt
+      - name: attach the chart to the release, with its SHA-256 and its Sigstore bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.ref.outputs.tag }}
+        run: |
+          cd chart
+          for f in ./*.tgz; do cosign sign-blob --yes --bundle "$f.sigstore.json" "$f" > /dev/null; done
+          gh release upload "$TAG" ./*.tgz ./*.sha256 ./*.sigstore.json --clobber --repo "$GITHUB_REPOSITORY"
   dockerhub-page:
     # The Docker Hub page (overview and short description) follows DOCKERHUB.md,
     # read from the tag pushed, or from the default branch when run by hand.

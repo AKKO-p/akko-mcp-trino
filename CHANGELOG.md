@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Each release signs both images, the Debian one and the UBI 9 one, by digest, with cosign and no key: the certificate names the release workflow at the release's tag, and the signature is recorded in Sigstore's public transparency log. Each image gets a signed SBOM attestation (SPDX, made from the pushed image), on GHCR and on Docker Hub, beside the signed build provenance it already had.
+- Each release publishes the Helm chart as an OCI artifact, `oci://ghcr.io/<owner>/charts/akko-mcp-trino`, signed the same way, and attaches the chart's `.tgz` to the release with its SHA-256 and its Sigstore bundle. The chart's `appVersion` must be the tag's version, or the release stops.
+- Each Python package attached to a release comes with its Sigstore bundle (`.sigstore.json`), checked by `cosign verify-blob`.
+- `docs/en/security.md` and `docs/fr/security.md`: verifying a release (the images, their SBOM and provenance, the chart, the packages), with the exact certificate identity and issuer; the same for an image in `DOCKERHUB.md`.
+- `docs/en/versioning.md` and `docs/fr/versioning.md`: the versioning policy (what a patch and a minor release may change, what counts as a break, how long a minor version is supported, the release rhythm), linked from the READMEs and the indexes.
+- An OpenSSF Scorecard workflow (`scorecard.yml`): weekly and on each change of `main`, results published and sent to code scanning; its badge in the READMEs.
+
+### Changed
+- `SECURITY.md` and `SECURITY.fr.md`: 0.8.x supported, 0.7.x security fixes until 28 February 2027, 0.6.x and earlier no longer; private reports through GitHub security advisories as well as by email; acknowledgement within 48 hours, first assessment within 7 days, a fix within 30 days for critical and high severities and 90 days for others; coordinated disclosure; a section on telemetry (none is sent; the MCP SDK's OpenTelemetry instrumentation emits only when the environment installs an OpenTelemetry SDK); how to verify a release.
+- The release workflow names the GHCR repositories after the repository that runs it, in lower case, instead of a fixed owner.
+
 ## [0.8.6] - 2026-11-28
 
 ### Added
