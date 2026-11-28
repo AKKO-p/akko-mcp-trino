@@ -7,6 +7,12 @@ ses propres variables dans le même environnement. `akko-mcp-trino --check` affi
 configuration effective, jamais un secret. Une « erreur de démarrage » ci-dessous veut dire que le
 serveur refuse de démarrer et dit pourquoi.
 
+Un réglage booléen ne prend que `true` ou `false`, quelle que soit la casse et sans compter les
+espaces autour. Toute autre valeur (`1`, `yes`, une faute de frappe) est une erreur de démarrage,
+et `--check` nomme la variable, la valeur reçue et les valeurs permises : un réglage qui protège
+le serveur n'est jamais lu comme désactivé par accident. Un nombre de secondes est un nombre
+fini : `nan` et `inf` sont des erreurs de démarrage.
+
 ## Trino
 
 | Variable | Rôle | Défaut |
@@ -20,7 +26,7 @@ serveur refuse de démarrer et dit pourquoi.
 | `MCP_EXTRA_READ_COMMANDS` | commandes de lecture refusées par défaut, ouvertes une à une, séparées par des virgules : `EXPLAIN` (ouvre aussi le plan dans `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES` (avec `SHOW CURRENT ROLES` et `SHOW ROLE GRANTS`), `SHOW SESSION`. Lisez [Sécurité](security.md#les-instructions-quun-agent-peut-envoyer) avant d'en ouvrir une. Annoncé à chaque démarrage et à chaque MCP host ; un nom inconnu est une erreur de démarrage | aucune |
 | `TRINO_SOURCE` | la source que Trino enregistre pour chaque requête (`X-Trino-Source`) | le nom du serveur |
 | `TRINO_HTTP_SCHEME` | `http` ou `https` ; un mot de passe ne circule jamais en `http` | `http` |
-| `TRINO_VERIFY` | vérification TLS : `true`, `false`, ou le chemin d'un paquet d'autorités avec lequel la chaîne TLS de Trino est vérifiée | `true` |
+| `TRINO_VERIFY` | vérification TLS : `true`, `false`, ou le chemin d'un paquet d'autorités avec lequel la chaîne TLS de Trino est vérifiée. Une valeur comme `1`, `0`, `yes` ou `no` est une erreur de démarrage, de même pour `TRINO_TOKEN_EXCHANGE_VERIFY` | `true` |
 | `TRINO_REQUEST_TIMEOUT_SECONDS` | délai d'une requête HTTP du client Trino | `30` |
 | `TRINO_IDENTITY_MODE` | qui est le serveur pour Trino : `jwt`, `impersonation`, `oauth2` ou `service` (voir [Identité](identity.md)). Une extension peut en ajouter d'autres ; un mode inconnu est une erreur de démarrage | `jwt` |
 | `TRINO_TOKEN_EXCHANGE_URL` | `jwt` : l'endpoint de token de l'identity provider (https seulement) | aucune (obligatoire en `jwt`) |
@@ -71,6 +77,9 @@ serveur refuse de démarrer et dit pourquoi.
 | `MCP_OIDC_AUDIENCE` | l'audience qu'un token doit porter : celle que l'identity provider donne aux tokens émis pour ce serveur (RFC 8707) ; jamais celle de Trino | aucune (celle-ci ou `MCP_RESOURCE_URL` est obligatoire quand l'authentification est active) |
 | `MCP_RESOURCE_URL` | l'URL canonique de ce serveur, comme `https://mcp.example.com/mcp`. Elle est acceptée comme audience, et nommée dans les métadonnées de ressource protégée que le serveur publie alors (RFC 9728) et dans le challenge d'un `401` | aucune |
 | `MCP_JWT_LEEWAY_SECONDS` | tolérance sur `exp`, `nbf` et `iat` pour le décalage d'horloge entre l'issuer et ce serveur | `30` |
+| `MCP_JWKS_TIMEOUT_SECONDS` | durée maximale d'une lecture du JWKS, en secondes, au-dessus de 0 | `5` |
+| `MCP_JWKS_CACHE_SECONDS` | durée pendant laquelle les clés lues dans le JWKS sont gardées avant d'être relues, au moins `MCP_JWKS_MIN_REFRESH_SECONDS` | `300` |
+| `MCP_JWKS_MIN_REFRESH_SECONDS` | intervalle minimal entre deux lectures du JWKS, une lecture en échec comprise, 1 ou plus : un token qui nomme une clé que le serveur ne détient pas ne provoque une lecture qu'une fois cet intervalle écoulé (voir [Sécurité](security.md#authentification)) | `30` |
 | `MCP_JWT_USER_CLAIM` | le claim qui nomme l'utilisateur, tel que vos règles d'accès le connaissent. Keycloak, Entra ID, Okta et Dex mettent un identifiant opaque dans `sub` : nommez un autre claim, comme `preferred_username`, `upn` ou `uid`. Un token sans ce claim est refusé ; aucun autre claim n'est essayé | `sub` |
 | `MCP_JWT_ALGORITHMS` | les algorithmes de signature que peut utiliser le token d'un appelant, séparés par des virgules, parmi `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384` et `ES512` (par exemple `RS256,RS512` pour un identity provider qui signe avec l'un ou l'autre). Un algorithme à secret partagé (comme `HS256`) ou `none` est une erreur de démarrage | `RS256` |
 | `MCP_JWT_CLIENT_CLAIMS`, `MCP_JWT_SCOPE_CLAIMS` | les claims qui nomment l'application qui a demandé le token, et ceux qui portent ses portées, séparés par des virgules, dans l'ordre : le premier que porte le token l'emporte. Un claim de portées est une chaîne séparée par des espaces ou une liste de chaînes ; toute autre valeur ne donne aucune portée. Keycloak : les défauts ; Entra ID : `azp` ou `appid` selon la version du token, et `scp` ; Okta : `cid` et `scp` (voir [Modules](modules.md)) | `azp,client_id`, `scope` |

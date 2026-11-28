@@ -80,6 +80,23 @@ class Metrics:
             registry=self.registry,
         )
 
+        self.jwks_fetches = Counter(
+            "mcp_trino_jwks_fetches_total",
+            "Reads of the identity provider's JWKS, by result (ok or failed)",
+            ["result"],
+            registry=self.registry,
+        )
+        self.jwks_up = Gauge(
+            "mcp_trino_jwks_up",
+            "1 when the last read of the identity provider's JWKS succeeded, 0 when it failed",
+            registry=self.registry,
+        )
+
+    def jwks_fetched(self, ok: bool) -> None:
+        """Count one read of the JWKS and record whether it succeeded."""
+        self.jwks_fetches.labels(result="ok" if ok else "failed").inc()
+        self.jwks_up.set(1 if ok else 0)
+
     def render(self) -> tuple[bytes, str]:
         """Return (Prometheus exposition body, content-type)."""
         return generate_latest(self.registry), CONTENT_TYPE_LATEST

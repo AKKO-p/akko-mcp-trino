@@ -7,6 +7,11 @@ own variables from the same environment. `akko-mcp-trino --check` prints the eff
 configuration, never a secret. A "startup error" below means the server refuses to start and
 says why.
 
+A boolean setting takes `true` or `false` only, whatever the case and surrounding spaces. Any
+other value (`1`, `yes`, a typo) is a startup error, and `--check` names the variable, the value
+received and the values allowed: a setting that protects the server is never read as off by
+accident. A number of seconds is a finite number: `nan` and `inf` are startup errors.
+
 ## Trino
 
 | Variable | Meaning | Default |
@@ -20,7 +25,7 @@ says why.
 | `MCP_EXTRA_READ_COMMANDS` | read commands refused by default, enabled one by one, comma-separated: `EXPLAIN` (also enables the plan in `explain_query`), `SHOW STATS`, `SHOW CREATE`, `SHOW GRANTS`, `SHOW ROLES` (with `SHOW CURRENT ROLES` and `SHOW ROLE GRANTS`), `SHOW SESSION`. Read [Security](security.md#the-statements-an-agent-may-send) before enabling one. Announced at every start and to every host; an unknown name is a startup error | none |
 | `TRINO_SOURCE` | the source Trino records for every query (`X-Trino-Source`) | the server name |
 | `TRINO_HTTP_SCHEME` | `http` or `https`; a password is never sent over `http` | `http` |
-| `TRINO_VERIFY` | TLS verification: `true`, `false`, or the path of a CA bundle to check Trino's TLS chain against | `true` |
+| `TRINO_VERIFY` | TLS verification: `true`, `false`, or the path of a CA bundle to check Trino's TLS chain against. A value such as `1`, `0`, `yes` or `no` is a startup error, and so it is for `TRINO_TOKEN_EXCHANGE_VERIFY` | `true` |
 | `TRINO_REQUEST_TIMEOUT_SECONDS` | timeout of one HTTP request of the Trino client | `30` |
 | `TRINO_IDENTITY_MODE` | who the server is for Trino: `jwt`, `impersonation`, `oauth2` or `service` (see [Identity](identity.md)). An extension may add others; an unknown mode is a startup error | `jwt` |
 | `TRINO_TOKEN_EXCHANGE_URL` | `jwt`: the identity provider's token endpoint (https only) | none (required in `jwt`) |
@@ -71,6 +76,9 @@ says why.
 | `MCP_OIDC_AUDIENCE` | the audience a token must carry: the one the identity provider gives tokens issued for this server (RFC 8707); never Trino's | none (this or `MCP_RESOURCE_URL` is required when authentication is enabled) |
 | `MCP_RESOURCE_URL` | this server's canonical URL, such as `https://mcp.example.com/mcp`. It is accepted as an audience, and named in the protected resource metadata the server then publishes (RFC 9728) and in the challenge of a `401` | none |
 | `MCP_JWT_LEEWAY_SECONDS` | tolerance on `exp`, `nbf` and `iat` for clock drift between the issuer and this server | `30` |
+| `MCP_JWKS_TIMEOUT_SECONDS` | the most seconds one read of the JWKS may take, above 0 | `5` |
+| `MCP_JWKS_CACHE_SECONDS` | how long the keys read from the JWKS are kept before they are read again, at least `MCP_JWKS_MIN_REFRESH_SECONDS` | `300` |
+| `MCP_JWKS_MIN_REFRESH_SECONDS` | the shortest interval between two reads of the JWKS, a failed read included, 1 or more: a token naming a key the server does not hold causes a read only once this interval has passed (see [Security](security.md#authentication)) | `30` |
 | `MCP_JWT_USER_CLAIM` | the claim that names the user, as your access rules know it. Keycloak, Entra ID, Okta and Dex put an opaque id in `sub`: name another claim, such as `preferred_username`, `upn` or `uid`. A token without the claim is refused; no other claim is tried | `sub` |
 | `MCP_JWT_ALGORITHMS` | the signature algorithms a caller's token may use, comma-separated, among `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384` and `ES512` (for example `RS256,RS512` for an identity provider that signs with either). A shared-secret algorithm (such as `HS256`) or `none` is a startup error | `RS256` |
 | `MCP_JWT_CLIENT_CLAIMS`, `MCP_JWT_SCOPE_CLAIMS` | the claims that name the application that asked for a token, and those that hold its scopes, comma-separated, in order: the first one the token carries wins. A scope claim is a space-delimited string or a list of strings; any other value means no scope. Keycloak: the defaults; Entra ID: `azp` or `appid` depending on the token version, and `scp`; Okta: `cid` and `scp` (see [Modules](modules.md)) | `azp,client_id`, `scope` |

@@ -11,10 +11,17 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import threading
+import time
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, Sequence, Union
+from typing import Any, Callable, Optional, Protocol, Sequence, Union
 
-from .config import parse_jwt_algorithms
+from .config import (
+    DEFAULT_JWKS_CACHE_SECONDS,
+    DEFAULT_JWKS_MIN_REFRESH_SECONDS,
+    DEFAULT_JWKS_TIMEOUT_SECONDS,
+    parse_jwt_algorithms,
+)
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +90,9 @@ def extract_bearer_token(headers: dict) -> Optional[str]:
     return None
 
 
-def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
+def build_auth(
+    config, audiences: Sequence[str] = (), on_fetch: Optional[Callable[[bool], None]] = None
+) -> Optional[AuthProvider]:
     """Pick the auth provider from configuration, with nothing hardcoded; ``audiences``
     are accepted besides ``MCP_OIDC_AUDIENCE`` (an extension's, see ``accepted_audiences``).
 
@@ -99,7 +108,11 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
     ``MCP_OIDC_AUDIENCE``, ``MCP_RESOURCE_URL`` or an extension's, and never the audience
     of the token the server obtains for Trino (``TRINO_TOKEN_EXCHANGE_AUDIENCE``). A
     token Trino would accept is refused here, even when it names this server too, and a
-    configuration that would accept one refuses to start."""
+    configuration that would accept one refuses to start.
+
+    The issuer's keys are read by a ``JwksKeys`` within ``MCP_JWKS_TIMEOUT_SECONDS``, kept
+    ``MCP_JWKS_CACHE_SECONDS`` and read again at most once every
+    ``MCP_JWKS_MIN_REFRESH_SECONDS``; ``on_fetch`` hears whether each read succeeded."""
     if not config.auth_enabled:
         return None
     if not config.jwks_url:
@@ -131,10 +144,18 @@ def build_auth(config, audiences: Sequence[str] = ()) -> Optional[AuthProvider]:
             f"(TRINO_TOKEN_EXCHANGE_AUDIENCE): a token issued for Trino must not open this "
             f"server; give this server an audience of its own"
         )
+    keys = JwksKeys.from_url(
+        config.jwks_url,
+        timeout_seconds=config.jwks_timeout_seconds,
+        cache_seconds=config.jwks_cache_seconds,
+        min_refresh_seconds=config.jwks_min_refresh_seconds,
+        on_fetch=on_fetch,
+    )
     return JwksJwtAuth(
         config.jwks_url,
         config.oidc_issuer,
         accepted,
+        jwks_client=keys,
         leeway_seconds=config.jwt_leeway_seconds,
         refused_audiences=refused,
         algorithms=parse_jwt_algorithms(config.jwt_algorithms),
@@ -226,12 +247,131 @@ class UnverifiedJwtAuth:
         return _principal_from_claims(claims)
 
 
+class JwksKeys:
+    """The issuer's signing keys, by ``kid``, read from its JWKS and kept in memory.
+
+    Reading the JWKS is the only network call of token verification, and a caller chooses
+    what the token's ``kid`` says. So the keys are read again only when they are older than
+    ``cache_seconds`` or a token names a ``kid`` they do not hold, and in either case at most
+    once every ``min_refresh_seconds``, a failed read included: a stream of tokens naming
+    unknown keys causes one read per interval, never one per token. One read runs at a time,
+    and nobody waits for it: a caller that finds a read under way is answered from the keys
+    already held. A failed read keeps the keys held, so an identity provider that cannot be
+    reached does not refuse tokens signed with a key already known. ``fetch`` returns the
+    JWKS document (a dict) and raises on failure; ``on_fetch`` hears ``True`` or ``False``
+    after each read; ``clock`` is injectable for tests.
+    """
+
+    def __init__(
+        self,
+        fetch: Callable[[], Any],
+        *,
+        cache_seconds: float,
+        min_refresh_seconds: float,
+        on_fetch: Optional[Callable[[bool], None]] = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        """Hold no key yet: the first token read causes the first read of the JWKS."""
+        self._fetch = fetch
+        self._cache = cache_seconds
+        self._min_refresh = min_refresh_seconds
+        self._on_fetch = on_fetch
+        self._clock = clock
+        self._keys: dict[str, Any] = {}
+        self._loaded_at: Optional[float] = None
+        self._attempted_at: Optional[float] = None
+        self._reading = threading.Lock()
+
+    @classmethod
+    def from_url(
+        cls,
+        url: str,
+        *,
+        timeout_seconds: float,
+        cache_seconds: float,
+        min_refresh_seconds: float,
+        on_fetch: Optional[Callable[[bool], None]] = None,
+    ) -> "JwksKeys":
+        """Keys read from ``url`` by PyJWT's client (http and https only, no redirect),
+        within ``timeout_seconds``; PyJWT's own cache is off, this class is the cache."""
+        from jwt import PyJWKClient
+
+        client = PyJWKClient(url, cache_jwk_set=False, timeout=timeout_seconds)
+        return cls(
+            client.fetch_data,
+            cache_seconds=cache_seconds,
+            min_refresh_seconds=min_refresh_seconds,
+            on_fetch=on_fetch,
+        )
+
+    def get_signing_key_from_jwt(self, token: str) -> Any:
+        """The key the token's ``kid`` names; raises ``PyJWKClientError`` when none is held."""
+        import jwt as _jwt
+
+        kid = _jwt.get_unverified_header(token).get("kid")
+        if not isinstance(kid, str):
+            raise _jwt.PyJWKClientError("the token names no key")
+        if self._stale(kid) and not self._attempted_recently():
+            self._read()
+        key = self._keys.get(kid)
+        if key is None:
+            raise _jwt.PyJWKClientError("no signing key matches the token")
+        return key
+
+    def _stale(self, kid: str) -> bool:
+        """True when the held keys miss ``kid`` or are past their lifetime."""
+        return (
+            kid not in self._keys
+            or self._loaded_at is None
+            or self._clock() - self._loaded_at >= self._cache
+        )
+
+    def _attempted_recently(self) -> bool:
+        """True when a read was attempted, successful or not, in the last interval."""
+        return (
+            self._attempted_at is not None
+            and self._clock() - self._attempted_at < self._min_refresh
+        )
+
+    def _read(self) -> None:
+        """Read the JWKS once, unless another read is under way; keep the held keys on failure."""
+        if not self._reading.acquire(blocking=False):
+            return
+        try:
+            if self._attempted_recently():  # another thread read them in the meantime
+                return
+            self._attempted_at = self._clock()
+            try:
+                from jwt import PyJWKSet
+
+                jwk_set = PyJWKSet.from_dict(self._fetch())
+                keys = {
+                    k.key_id: k
+                    for k in jwk_set.keys
+                    if k.key_id and k.public_key_use in ("sig", None)
+                }
+                if not keys:
+                    raise ValueError("the JWKS holds no signing key with a kid")
+            except Exception as exc:  # noqa: BLE001 — any failure keeps the held keys
+                log.warning("JWKS read failed: %s", type(exc).__name__)
+                if self._on_fetch is not None:
+                    self._on_fetch(False)
+                return
+            self._keys = keys
+            self._loaded_at = self._attempted_at
+            if self._on_fetch is not None:
+                self._on_fetch(True)
+        finally:
+            self._reading.release()
+
+
 class JwksJwtAuth:
     """Verifies the SIGNATURE against the issuer's JWKS, plus issuer, audience and expiry.
 
-    `jwks_client` (a PyJWKClient) is injectable, so the class is testable with a
-    local RSA key and no network. Any failure — signature, iss, aud, exp, missing
-    token, an audience in ``refused_audiences`` — yields None. Fail closed."""
+    `jwks_client` (a `JwksKeys` by default, any object with `get_signing_key_from_jwt`) is
+    injectable, so the class is testable with a local RSA key and no network. Any failure
+    (signature, iss, aud, exp, missing token, an audience in ``refused_audiences``) yields
+    None. Fail closed."""
 
     def __init__(
         self,
@@ -264,10 +404,13 @@ class JwksJwtAuth:
         self._algorithms = parse_jwt_algorithms(",".join(algorithms or ["RS256"]))
         if jwks_client is not None:
             self._client = jwks_client
-        else:  # pragma: no cover - network construction (PyJWKClient), proven by running it
-            from jwt import PyJWKClient
-
-            self._client = PyJWKClient(jwks_url)
+        else:
+            self._client = JwksKeys.from_url(
+                jwks_url,
+                timeout_seconds=DEFAULT_JWKS_TIMEOUT_SECONDS,
+                cache_seconds=DEFAULT_JWKS_CACHE_SECONDS,
+                min_refresh_seconds=DEFAULT_JWKS_MIN_REFRESH_SECONDS,
+            )
 
     def verify(self, headers: dict) -> Optional[Principal]:
         """Verify the bearer's signature, issuer, audience and expiry; None if absent or invalid."""

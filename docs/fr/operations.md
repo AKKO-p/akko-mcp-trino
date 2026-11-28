@@ -131,7 +131,10 @@ Ces endpoints n'existent que sur les transports HTTP, sur le port de santé.
   `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total` (trouvé ou
   non), `mcp_trino_context_cache_bytes` et `mcp_trino_context_breaker_open`. Un appel que
   l'outil cesse d'attendre est compté comme s'il avait fini, chaque source lue étant `partial` ou
-  `unavailable` ; un arrêt du serveur pendant une lecture en compte ainsi quelques-uns.
+  `unavailable` ; un arrêt du serveur pendant une lecture en compte ainsi quelques-uns. Avec la
+  vérification des tokens, il expose `mcp_trino_jwks_fetches_total` (par `result`, `ok` ou
+  `failed`) et `mcp_trino_jwks_up`, à 0 après une lecture du JWKS en échec
+  ([Sécurité](security.md#authentification)).
 
 ## Montée de version
 

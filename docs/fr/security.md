@@ -150,6 +150,36 @@ seulement un statut. Un droit retiré dans Trino peut laisser voir le contexte d
 `MCP_VISIBILITY_TTL_SECONDS`, jamais ses données, que Trino refuse aussitôt.
 [Déploiement](deployment.md#avec-un-catalogue-de-données) dit quelles listes blanches ouvrent quoi.
 
+## Authentification
+
+Le serveur vérifie le token de chaque appelant avec les clés publiées par l'identity provider
+(JWKS), ainsi que son issuer, son audience et son expiration
+([Identité](identity.md#la-vérification-du-token)). La lecture du JWKS est le seul appel réseau de ce
+contrôle, et l'en-tête `kid` d'un token choisit la clé cherchée ; les lectures sont donc bornées,
+quoi que disent les tokens :
+
+- Un token est vérifié dans un thread de travail : un identity provider lent ou injoignable ne
+  retient jamais les autres requêtes, y compris celles qui n'ont pas de token.
+- Une lecture du JWKS dure au plus `MCP_JWKS_TIMEOUT_SECONDS` (5 par défaut). Les clés sont
+  gardées `MCP_JWKS_CACHE_SECONDS` (300).
+- Le JWKS est relu au plus une fois toutes les `MCP_JWKS_MIN_REFRESH_SECONDS` (30), lecture en
+  échec comprise. Un token qui nomme une clé que le serveur ne détient pas est refusé sans
+  lecture quand la dernière lecture est plus récente. Une seule lecture tourne à la fois, et
+  personne ne l'attend.
+- Une lecture en échec garde les clés déjà détenues : les tokens signés par une clé connue restent
+  acceptés tant que l'identity provider est injoignable, et un token signé par une nouvelle clé
+  l'est dès qu'une lecture réussit.
+
+Une lecture en échec est journalisée en avertissement, avec le seul type de l'erreur. `/metrics`
+compte les lectures dans `mcp_trino_jwks_fetches_total` (par `result`, `ok` ou `failed`) et met
+`mcp_trino_jwks_up` à 0 après une lecture en échec. Placez une alerte dessus. `/ready` ne vérifie
+pas le JWKS : les clés détenues continuent de vérifier les tokens pendant une panne de l'identity
+provider, et retirer tous les pods du service transformerait cette panne en panne totale.
+
+Un réglage booléen vaut `true` ou `false`, rien d'autre ([Configuration](configuration.md)) : une
+faute de frappe dans `MCP_AUTH_ENABLED`, `MCP_AUTH_REQUIRED` ou `TRINO_READ_ONLY` arrête le serveur
+au démarrage, et ne coupe jamais le contrôle.
+
 ## Audit
 
 Chaque appel de tool écrit une ligne d'audit, indexée par `X-Request-Id`. La ligne ne contient

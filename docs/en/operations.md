@@ -128,7 +128,10 @@ These endpoints exist over the HTTP transports only, on the health port.
   `mcp_trino_context_call_duration_seconds`, `mcp_trino_context_cache_lookups_total` (hit or
   miss), `mcp_trino_context_cache_bytes` and `mcp_trino_context_breaker_open`. A call the tool
   stops waiting for is counted as one that ended, each source read as `partial` or
-  `unavailable`; a server stopping during a read counts a few such calls.
+  `unavailable`; a server stopping during a read counts a few such calls. With token
+  verification on, it exposes `mcp_trino_jwks_fetches_total` (by `result`, `ok` or `failed`) and
+  `mcp_trino_jwks_up`, 0 after a failed read of the JWKS
+  ([Security](security.md#authentication)).
 
 ## Upgrading
 

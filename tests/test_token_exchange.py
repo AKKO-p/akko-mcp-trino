@@ -200,5 +200,5 @@ def test_missing_settings_and_plain_http_refuse_to_start():
 
 
 def test_tls_verification_setting():
-    assert tls_verify("true") is True and tls_verify("NO") is False
+    assert tls_verify("true") is True and tls_verify(" FALSE ") is False
     assert tls_verify(" /ca.pem ") == "/ca.pem"

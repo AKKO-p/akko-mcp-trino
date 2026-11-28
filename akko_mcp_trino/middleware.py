@@ -32,6 +32,7 @@ the tools — the verified caller would never reach them.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from typing import Any, Mapping, Sequence
@@ -139,7 +140,11 @@ class AuthIdentityMiddleware:
                 await self._refuse(refusal, scope, receive, send)
                 return
 
-        principal = self._auth.verify(headers) if self._auth is not None else None
+        # Verification may read the issuer's JWKS over the network: it runs in a worker
+        # thread, so a slow or unreachable identity provider never stalls the event loop.
+        principal = (
+            await asyncio.to_thread(self._auth.verify, headers) if self._auth is not None else None
+        )
         if self._require and principal is None:
             # RFC 6750 §3.1: no error code when no token was sent at all.
             refusal = (

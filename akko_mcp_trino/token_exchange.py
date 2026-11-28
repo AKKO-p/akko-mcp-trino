@@ -37,9 +37,9 @@ _CACHE_SIZE = 1024
 def tls_verify(value: str) -> Union[bool, str]:
     """A verification setting as httpx takes it: True, False, or a CA bundle path."""
     v = value.strip()
-    if v.lower() in ("true", "1", "yes"):
+    if v.lower() == "true":
         return True
-    if v.lower() in ("false", "0", "no"):
+    if v.lower() == "false":
         return False
     return v
 

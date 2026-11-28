@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- JWKS verification no longer blocks the event loop. A token is verified in a worker thread, so a slow or unreachable identity provider never holds up the other requests. The keys are read with a short timeout, kept for a lifetime, and read again at most once per interval, a failed read included: a token naming a key the server does not hold causes no read within that interval. A failed read keeps the keys already held.
+- Boolean settings accept only `true` or `false` (case and surrounding spaces aside). Any other value, `1`, `yes` or a typo, is a startup error and a `PROBLEM` of `--check` that names the variable, the value received and the values allowed. This covers `TRINO_READ_ONLY`, `MCP_AUTH_ENABLED`, `MCP_AUTH_REQUIRED`, `MCP_CLEAN_CELLS` and `MCP_CONTEXT_REQUIRE_SELECT`. `TRINO_VERIFY` and `TRINO_TOKEN_EXCHANGE_VERIFY` take `true`, `false` or a CA bundle path, and refuse `1`, `0`, `yes`, `no`, `on` and `off`. A number of seconds must be finite: `nan` and `inf` are startup errors.
+
+### Added
+- `MCP_JWKS_TIMEOUT_SECONDS` (5), `MCP_JWKS_CACHE_SECONDS` (300) and `MCP_JWKS_MIN_REFRESH_SECONDS` (30, 1 at least): the timeout of one read of the JWKS, how long its keys are kept, and the shortest interval between two reads.
+- `/metrics` exposes `mcp_trino_jwks_fetches_total` (by `result`, `ok` or `failed`) and `mcp_trino_jwks_up`, 0 after a failed read of the JWKS.
+
 ## [0.8.6] - 2026-11-28
 
 ### Added
