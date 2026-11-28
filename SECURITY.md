@@ -8,17 +8,52 @@ This server sits between AI agents and data. Please report any weakness you find
 
 | Version | Supported |
 |---|---|
-| 0.7.x | yes |
-| 0.6.x | yes |
-| 0.5.x and earlier | no: `jwt` mode passed the caller's token on to Trino, and the defaults served requests without a token. Upgrade with [MIGRATING.md](MIGRATING.md). |
+| 0.8.x | yes: every fix, in the latest 0.8 release |
+| 0.7.x | security fixes until 28 February 2027, then no |
+| 0.6.x and earlier | no. Upgrade with [MIGRATING.md](MIGRATING.md); 0.5.x and earlier passed the caller's token on to Trino in `jwt` mode and served requests without a token by default. |
+
+How long a minor version is supported, and what a release may change, is set out in the
+[versioning policy](docs/en/versioning.md).
 
 ## Reporting a vulnerability
 
-Email **security@akko-ai.com** with a description, the version, and a way to
-reproduce. Do not open a public issue. You will get an acknowledgement within
-three working days and a fix or a mitigation plan within thirty.
+Report privately, by either channel:
 
-Please do not include real tokens, real data or real hostnames in a report.
+- a private report on GitHub: **Security**, then **Report a vulnerability**
+  ([security advisories](https://github.com/AKKO-p/akko-mcp-trino/security/advisories/new));
+- an email to **security@akko-ai.com**.
+
+Give a description, the version, and a way to reproduce. Do not open a public issue, and do not
+include real tokens, real data or real hostnames.
+
+| Step | Within |
+|---|---|
+| Acknowledgement | 48 hours |
+| First assessment (confirmed or not, severity) | 7 days |
+| Fix released, critical or high severity | 30 days |
+| Fix released, other severities | 90 days |
+
+Disclosure is coordinated: the fix is released first, then a GitHub security advisory describes
+the weakness, the versions affected and the fixed version, with a CVE when one applies, and
+credits the reporter unless they ask otherwise. A report that is not fixed within 90 days may be
+disclosed by its author, after telling us.
+
+## Telemetry
+
+The server sends no telemetry, to its authors or to anyone else. It connects only to Trino, to
+the identity provider configured (its keys, and the token endpoint for token exchange) and to the
+context providers configured; `/health`, `/ready` and `/metrics` are served locally, on the
+health port, to whoever reaches it. One nuance: the MCP SDK it is built on carries an
+OpenTelemetry instrumentation that does nothing unless the environment installs an OpenTelemetry
+SDK (an operator that injects one into every pod, for instance). Then the SDK's spans for each
+MCP message go to the exporter that the environment sets (`OTEL_*`); they carry no SQL.
+
+## Verifying a release
+
+Each image and the Helm chart are signed by cosign without a key, by the release workflow of this
+repository at the release's tag; each image carries a signed SBOM and a signed build provenance,
+and the Python packages a Sigstore bundle each. The commands are in
+[docs/en/security.md](docs/en/security.md#verifying-a-release).
 
 ## Security model
 

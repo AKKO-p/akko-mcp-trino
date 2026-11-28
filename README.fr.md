@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
   <img src="https://img.shields.io/badge/code%20style-ruff-000000" alt="Ruff">
   <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
+  <a href="https://scorecard.dev/viewer/?uri=github.com/AKKO-p/akko-mcp-trino"><img src="https://api.scorecard.dev/projects/github.com/AKKO-p/akko-mcp-trino/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://glama.ai/mcp/servers/AKKO-p/akko-mcp-trino"><img src="https://glama.ai/mcp/servers/AKKO-p/akko-mcp-trino/badges/score.svg" alt="AKKO-p/akko-mcp-trino MCP server" height="20"></a>
 </p>
 
@@ -120,6 +121,13 @@ docker compose up -d --wait
 Le [démarrage rapide](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/quickstart.md) continue avec le token d'un utilisateur, un MCP host et une
 première question.
 
+Sur Kubernetes ou OpenShift, chaque release publie la chart Helm comme artefact OCI signé ; elle
+s'installe en une ligne, avec vos valeurs ([Déploiement](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/deployment.md) dit lesquelles) :
+
+```bash
+helm install mcp-trino oci://ghcr.io/akko-p/charts/akko-mcp-trino --version <chart version> -f my-values.yaml
+```
+
 ## Pourquoi
 
 Un agent qui lit un lakehouse a besoin d'une surface petite et prévisible : quelques tools dont un
@@ -161,6 +169,7 @@ Ces pages décrivent `main`. La documentation d'une version publiée se trouve �
 | [Configuration](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/configuration.md) | chaque variable, par thème, avec sa valeur par défaut et ses limites |
 | [Sécurité](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/security.md) | ce que couvre la lecture seule, Trino d'abord, les instructions qu'un agent peut envoyer |
 | [Exploitation](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/operations.md) | groupes de ressources, refus, avertissements, audit, santé, métriques, montées de version |
+| [Politique de versions](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/versioning.md) | numéros de version, ce qui peut casser, durée de prise en charge |
 | [Notes de conception](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/design-notes.md) | pourquoi le serveur est construit ainsi, et quelques questions |
 
 La documentation existe aussi [en anglais](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/index.md). Les fichiers de référence restent

@@ -156,7 +156,48 @@ Chaque appel de tool écrit une ligne d'audit, indexée par `X-Request-Id`. La l
 jamais le token ni le texte SQL : elle dit qui a appelé quel tool, avec quel résultat, et pendant
 combien de temps. [Exploitation](operations.md#audit) en donne les champs.
 
+## Vérifier une release
+
+Chaque release signe ses images et sa chart Helm avec cosign, sans clé : la signature certifie que
+le workflow de release de ce dépôt, au tag de la release, a produit cette empreinte, et elle est
+inscrite au journal de transparence public de Sigstore. Chaque image porte aussi un SBOM signé
+(SPDX) et une provenance de construction signée (SLSA) ; la provenance est sur GHCR, sous la même
+empreinte que sur Docker Hub. Les paquets Python et l'archive de la chart ont chacun un bundle
+Sigstore, joint à la release. Les releases jusqu'à la 0.8.6 portent la provenance et le SBOM, pas
+les signatures cosign.
+
+L'image, son SBOM et sa provenance (chaque commande sort en erreur si la vérification échoue) :
+
+```bash
+VERSION=X.Y.Z            # the release to check
+IDENTITY=https://github.com/AKKO-p/akko-mcp-trino/.github/workflows/release.yml@refs/tags/v$VERSION
+ISSUER=https://token.actions.githubusercontent.com
+IMAGE=docker.io/akkoai/akko-mcp-trino@sha256:...   # the digest of $VERSION or $VERSION-ubi9
+cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$IMAGE"
+cosign verify-attestation --type spdxjson --certificate-identity "$IDENTITY" \
+  --certificate-oidc-issuer "$ISSUER" "$IMAGE" > /dev/null
+cosign verify-attestation --type slsaprovenance1 --certificate-identity "$IDENTITY" \
+  --certificate-oidc-issuer "$ISSUER" "ghcr.io/akko-p/akko-mcp-trino@${IMAGE#*@}" > /dev/null
+```
+
+La chart, depuis son dépôt OCI et depuis la release :
+
+```bash
+CHART=A.B.C              # the chart version of that release (its appVersion is $VERSION)
+helm pull oci://ghcr.io/akko-p/charts/akko-mcp-trino --version "$CHART"
+cosign verify --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" \
+  "ghcr.io/akko-p/charts/akko-mcp-trino:$CHART"
+gh release download "v$VERSION" --repo AKKO-p/akko-mcp-trino --pattern "akko-mcp-trino-$CHART.tgz*"
+sha256sum -c "akko-mcp-trino-$CHART.tgz.sha256"
+cosign verify-blob --bundle "akko-mcp-trino-$CHART.tgz.sigstore.json" \
+  --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "akko-mcp-trino-$CHART.tgz"
+```
+
+Un paquet Python, depuis la release : `cosign verify-blob --bundle <fichier>.sigstore.json` avec la
+même identité et le même émetteur. Sans cosign, `gh attestation verify oci://<image> --repo
+AKKO-p/akko-mcp-trino` vérifie la provenance avec un compte GitHub.
+
 ## Signaler une vulnérabilité
 
-Écrivez à **security@akko-ai.com**, comme le dit [SECURITY.fr.md](../../SECURITY.fr.md). N'ouvrez
-pas d'issue publique.
+Signalez en privé, par un avis de sécurité GitHub ou par courriel à **security@akko-ai.com**, comme
+le dit [SECURITY.fr.md](../../SECURITY.fr.md), avec ses délais. N'ouvrez pas d'issue publique.

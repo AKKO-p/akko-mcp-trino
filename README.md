@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License">
   <img src="https://img.shields.io/badge/code%20style-ruff-000000" alt="Ruff">
   <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
+  <a href="https://scorecard.dev/viewer/?uri=github.com/AKKO-p/akko-mcp-trino"><img src="https://api.scorecard.dev/projects/github.com/AKKO-p/akko-mcp-trino/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://glama.ai/mcp/servers/AKKO-p/akko-mcp-trino"><img src="https://glama.ai/mcp/servers/AKKO-p/akko-mcp-trino/badges/score.svg" alt="AKKO-p/akko-mcp-trino MCP server" height="20"></a>
 </p>
 
@@ -116,6 +117,13 @@ docker compose up -d --wait
 
 The [quickstart](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/quickstart.md) goes on with a user's token, an MCP host and a first question.
 
+On Kubernetes or OpenShift, each release publishes the Helm chart as a signed OCI artifact; it installs
+in one line, with your values ([Deployment](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/deployment.md) says which):
+
+```bash
+helm install mcp-trino oci://ghcr.io/akko-p/charts/akko-mcp-trino --version <chart version> -f my-values.yaml
+```
+
 ## Why
 
 An agent that reads a lakehouse needs a small, predictable surface: a few tools whose descriptions
@@ -157,6 +165,7 @@ These pages describe `main`. The documentation of a release is at its tag.
 | [Configuration](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/configuration.md) | every variable, by theme, with its default and its limits |
 | [Security](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/security.md) | what read-only covers, Trino first, the statements an agent may send |
 | [Operations](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/operations.md) | resource groups, refusals, warnings, audit, health, metrics, upgrades |
+| [Versioning policy](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/versioning.md) | version numbers, what may break, how long a version is supported |
 | [Design notes](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/en/design-notes.md) | why the server is built this way, and a few questions |
 
 The documentation also exists [in French](https://github.com/AKKO-p/akko-mcp-trino/blob/main/docs/fr/index.md). The reference files stay at the
